@@ -4,8 +4,8 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  ASSISTANT_TRIGGER,
   CONTAINER_IMAGE,
-  CONTAINER_RUNTIME,
   DATA_DIR,
   GROUPS_DIR,
   HEAP_LIMIT_MB,
@@ -16,11 +16,15 @@ import {
   MATRIX_PASSWORD,
   MATRIX_RECONNECT_INTERVAL,
   MATRIX_USERNAME,
+  LOCAL_CHANNEL_ENABLED,
+  LOCAL_CHAT_JID,
+  LOCAL_MIRROR_MATRIX_JID,
   MEMORY_CHECK_INTERVAL,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
 import { MatrixChannel } from './channels/matrix.js';
+import { LocalCliChannel } from './channels/local-cli.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -72,8 +76,10 @@ const STATUS_NUDGE_COOLDOWN_MS = 90_000;
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
 const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
+const AUTO_BRAIN_SWITCH_COOLDOWN_MS = 10 * 60 * 1000;
 const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');
 const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
+let lastAutoBrainSwitchAt = 0;
 
 interface ChatActivity {
   runStartedAt?: number;
@@ -287,6 +293,78 @@ function normalizeMainLlm(model: string | undefined): string | undefined {
 
   return undefined;
 }
+
+function upsertEnvLine(envFile: string, key: string, value: string): void {
+  const lines = fs.existsSync(envFile)
+    ? fs.readFileSync(envFile, 'utf-8').split('\n')
+    : [];
+  const next = `${key}=${value}`;
+  let replaced = false;
+  const updated = lines.map((line) => {
+    if (line.startsWith(`${key}=`)) {
+      replaced = true;
+      return next;
+    }
+    return line;
+  });
+  if (!replaced) updated.push(next);
+  fs.writeFileSync(envFile, `${updated.join('\n').replace(/\n*$/, '\n')}`);
+}
+
+function applyOllamaFallbackToProfile(envFile: string): void {
+  upsertEnvLine(envFile, 'BRAIN_MODEL', 'devstral-small-2-fast:latest');
+  upsertEnvLine(
+    envFile,
+    'BRAIN_BASE_URL',
+    'http://host.containers.internal:11434',
+  );
+  upsertEnvLine(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
+  upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
+  upsertEnvLine(envFile, 'BRAIN_OAUTH_TOKEN', '');
+}
+
+function isAnthropicQuotaError(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes('insufficient_quota') ||
+    lower.includes('insufficient quota') ||
+    lower.includes('credit balance') ||
+    lower.includes('credits') ||
+    (lower.includes('anthropic') && lower.includes('rate limit'))
+  );
+}
+
+async function maybeAutoSwitchBrainsOnQuotaError(
+  rawError: string,
+  chatJid: string,
+): Promise<void> {
+  if (!['cid', 'cid-bot'].includes(ASSISTANT_NAME.trim().toLowerCase())) return;
+  if (!isAnthropicQuotaError(rawError)) return;
+  if (Date.now() - lastAutoBrainSwitchAt < AUTO_BRAIN_SWITCH_COOLDOWN_MS) return;
+
+  const root = process.env.INFINICLAW_ROOT?.trim() || path.resolve(process.cwd(), '..', '..', '..');
+  const cidEnv = path.join(root, 'profiles', 'cid-bot', 'env');
+  const johnnyEnv = path.join(root, 'profiles', 'johnny5-bot', 'env');
+  if (!fs.existsSync(cidEnv) || !fs.existsSync(johnnyEnv)) return;
+
+  try {
+    applyOllamaFallbackToProfile(cidEnv);
+    applyOllamaFallbackToProfile(johnnyEnv);
+    lastAutoBrainSwitchAt = Date.now();
+    const ch = findChannel(channels, chatJid);
+    if (ch) {
+      await ch.sendMessage(
+        chatJid,
+        formatMainMessage(
+          'Anthropic credits/quotas look exhausted. I switched cid-bot and johnny5-bot brain profiles to ollama fallback. Restart both bots to apply.',
+        ),
+      );
+    }
+    logger.warn('Auto-switched bot brain profiles to ollama fallback due to quota error');
+  } catch (err) {
+    logger.error({ err }, 'Failed automatic ollama fallback switch');
+  }
+}
 function resolveMainLlm(): string {
   const configuredModel = normalizeMainLlm(resolveConfiguredMainModel());
   if (configuredModel) return configuredModel;
@@ -323,6 +401,69 @@ function defaultSenderForGroup(sourceGroup: string): string {
     (g) => g.folder === sourceGroup,
   )?.name;
   return groupName?.trim() || sourceGroup;
+}
+
+function deriveFolderFromChatJid(chatJid: string): string {
+  const base = chatJid
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const short = base.slice(0, 48) || 'chat';
+  return `chat-${short}`;
+}
+
+function ensureGroupForIncomingChat(
+  chatJid: string,
+  chatName?: string,
+): void {
+  if (registeredGroups[chatJid]) {
+    if (
+      LOCAL_CHANNEL_ENABLED &&
+      chatJid === LOCAL_CHAT_JID &&
+      registeredGroups[chatJid].requiresTrigger !== false
+    ) {
+      const updated: RegisteredGroup = {
+        ...registeredGroups[chatJid],
+        requiresTrigger: false,
+      };
+      registerGroup(chatJid, updated);
+      logger.info(
+        { chatJid },
+        'Terminal local-chat group set to direct mode (requiresTrigger=false)',
+      );
+    }
+    return;
+  }
+
+  const hasMain = Object.values(registeredGroups).some(
+    (g) => g.folder === MAIN_GROUP_FOLDER,
+  );
+
+  const name = (chatName || chatJid).trim() || chatJid;
+  const addedAt = new Date().toISOString();
+  const defaultTrigger = `@${ASSISTANT_TRIGGER}`;
+  const localDirectMode = LOCAL_CHANNEL_ENABLED && chatJid === LOCAL_CHAT_JID;
+  const group: RegisteredGroup = hasMain
+    ? {
+        name,
+        folder: deriveFolderFromChatJid(chatJid),
+        trigger: defaultTrigger,
+        added_at: addedAt,
+        requiresTrigger: localDirectMode ? false : true,
+      }
+    : {
+        name,
+        folder: MAIN_GROUP_FOLDER,
+        trigger: defaultTrigger,
+        added_at: addedAt,
+        requiresTrigger: false,
+      };
+
+  registerGroup(chatJid, group);
+  logger.info(
+    { chatJid, folder: group.folder, requiresTrigger: group.requiresTrigger },
+    'Auto-registered group for incoming chat',
+  );
 }
 
 function getMainChatJid(): string | undefined {
@@ -600,16 +741,7 @@ function buildMainMissionContext(chatJid: string): string | undefined {
 }
 
 function runtimeHealthy(): boolean {
-  if (CONTAINER_RUNTIME === 'podman') {
-    return canReachPodmanApi();
-  }
-
-  try {
-    execSync('container system status', { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
+  return canReachPodmanApi();
 }
 
 function hasRuntimeActiveGroupRun(chatJid: string): boolean {
@@ -619,32 +751,8 @@ function hasRuntimeActiveGroupRun(chatJid: string): boolean {
   const safeFolder = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const prefix = `nanoclaw-${safeFolder}-`;
 
-  if (CONTAINER_RUNTIME === 'podman') {
-    try {
-      const output = execSync('podman ps --format json', {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        encoding: 'utf-8',
-      });
-      const parsed: unknown = JSON.parse(output || '[]');
-      if (!Array.isArray(parsed)) return false;
-      return parsed.some((entry) => {
-        if (!entry || typeof entry !== 'object') return false;
-        const record = entry as Record<string, unknown>;
-        const namesRaw = record.Names ?? record.Name;
-        const names = Array.isArray(namesRaw)
-          ? namesRaw.filter((n): n is string => typeof n === 'string')
-          : typeof namesRaw === 'string'
-            ? [namesRaw]
-            : [];
-        return names.some((n) => n.startsWith(prefix));
-      });
-    } catch {
-      return false;
-    }
-  }
-
   try {
-    const output = execSync('container ls --format json', {
+    const output = execSync('podman ps --format json', {
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
@@ -652,15 +760,14 @@ function hasRuntimeActiveGroupRun(chatJid: string): boolean {
     if (!Array.isArray(parsed)) return false;
     return parsed.some((entry) => {
       if (!entry || typeof entry !== 'object') return false;
-      const record = entry as {
-        status?: string;
-        configuration?: { id?: string };
-      };
-      return (
-        record.status === 'running' &&
-        typeof record.configuration?.id === 'string' &&
-        record.configuration.id.startsWith(prefix)
-      );
+      const record = entry as Record<string, unknown>;
+      const namesRaw = record.Names ?? record.Name;
+      const names = Array.isArray(namesRaw)
+        ? namesRaw.filter((n): n is string => typeof n === 'string')
+        : typeof namesRaw === 'string'
+          ? [namesRaw]
+          : [];
+      return names.some((n) => n.startsWith(prefix));
     });
   } catch {
     return false;
@@ -952,6 +1059,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const rawError =
       runResult.error ||
       (hadError ? 'agent returned an error status' : 'unknown error');
+    await maybeAutoSwitchBrainsOnQuotaError(rawError, chatJid);
     const compactError = rawError.replace(/\s+/g, ' ').slice(0, 220);
     markError(chatJid, compactError);
 
@@ -1089,7 +1197,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
+  logger.info(`NanoClaw running (trigger: @${ASSISTANT_TRIGGER})`);
 
   while (true) {
     try {
@@ -1459,94 +1567,31 @@ function cleanupOrphanedPodmanContainers(): void {
 }
 
 async function ensureContainerSystemRunning(): Promise<void> {
-  if (CONTAINER_RUNTIME === 'podman') {
-    try {
-      await ensurePodmanRuntimeAvailable();
-      cleanupOrphanedPodmanContainers();
-      ensurePodmanImageAvailable();
-    } catch (err) {
-      logger.error({ err }, 'Podman runtime/image setup failed');
-      console.error(
-        '\n╔════════════════════════════════════════════════════════════════╗',
-      );
-      console.error(
-        '║  FATAL: Podman setup failed                                     ║',
-      );
-      console.error(
-        '║                                                                ║',
-      );
-      console.error(
-        '║  Could not start Podman runtime or prepare container image.    ║',
-      );
-      console.error(
-        '║  Check: podman machine list / podman machine start             ║',
-      );
-      console.error(
-        '╚════════════════════════════════════════════════════════════════╝\n',
-      );
-      throw new Error('Podman is required but not available');
-    }
-    return;
-  }
-
   try {
-    execSync('container system status', { stdio: 'pipe' });
-    logger.debug('Apple Container system already running');
-  } catch {
-    logger.info('Starting Apple Container system...');
-    try {
-      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
-      logger.info('Apple Container system started');
-    } catch (err) {
-      logger.error({ err }, 'Failed to start Apple Container system');
-      console.error(
-        '\n╔════════════════════════════════════════════════════════════════╗',
-      );
-      console.error(
-        '║  FATAL: Apple Container system failed to start                 ║',
-      );
-      console.error(
-        '║                                                                ║',
-      );
-      console.error(
-        '║  Agents cannot run without Apple Container system.             ║',
-      );
-      console.error(
-        '║  Install from: https://github.com/apple/container              ║',
-      );
-      console.error(
-        '║  Then run: container system start                              ║',
-      );
-      console.error(
-        '║  Then restart NanoClaw                                         ║',
-      );
-      console.error(
-        '╚════════════════════════════════════════════════════════════════╝\n',
-      );
-      throw new Error('Apple Container system is required but not running');
-    }
-  }
-
-  // Kill and clean up orphaned NanoClaw containers from previous runs
-  try {
-    const output = execSync('container ls --format json', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
-    const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
-      .map((c) => c.configuration.id);
-    for (const name of orphans) {
-      try {
-        execSync(`container stop ${name}`, { stdio: 'pipe' });
-      } catch { /* already stopped */ }
-    }
-    if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
-    }
+    await ensurePodmanRuntimeAvailable();
+    cleanupOrphanedPodmanContainers();
+    ensurePodmanImageAvailable();
   } catch (err) {
-    logger.warn({ err }, 'Failed to clean up orphaned containers');
+    logger.error({ err }, 'Podman runtime/image setup failed');
+    console.error(
+      '\n╔════════════════════════════════════════════════════════════════╗',
+    );
+    console.error(
+      '║  FATAL: Podman setup failed                                     ║',
+    );
+    console.error(
+      '║                                                                ║',
+    );
+    console.error(
+      '║  Could not start Podman runtime or prepare container image.    ║',
+    );
+    console.error(
+      '║  Check: podman machine list / podman machine start             ║',
+    );
+    console.error(
+      '╚════════════════════════════════════════════════════════════════╝\n',
+    );
+    throw new Error('Podman is required but not available');
   }
 }
 
@@ -1573,26 +1618,55 @@ async function main(): Promise<void> {
     (MATRIX_ACCESS_TOKEN || (MATRIX_USERNAME && MATRIX_PASSWORD))
   ) {
     matrix = new MatrixChannel({
-      onMessage: (_chatJid, msg) => storeMessage(msg),
+      onMessage: (_chatJid, msg) => {
+        ensureGroupForIncomingChat(msg.chat_jid, msg.chat_name);
+        storeMessage(msg);
+      },
       onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
       registeredGroups: () => registeredGroups,
     });
   }
 
+  let localCli: LocalCliChannel | null = null;
+  if (LOCAL_CHANNEL_ENABLED) {
+    localCli = new LocalCliChannel({
+      onMessage: (_chatJid, msg) => {
+        ensureGroupForIncomingChat(msg.chat_jid, msg.chat_name);
+        storeMessage(msg);
+      },
+      onChatMetadata: (chatJid, timestamp, name) =>
+        storeChatMetadata(chatJid, timestamp, name),
+      mirrorToMatrix: LOCAL_MIRROR_MATRIX_JID
+        ? async (text: string) => {
+            if (!matrix || !matrix.isConnected()) return;
+            await matrix.sendMessage(LOCAL_MIRROR_MATRIX_JID, text);
+          }
+        : undefined,
+    });
+  }
+
   // Build channels array (only include connected channels)
-  const allChannels: (Channel | null)[] = [matrix];
+  const allChannels: (Channel | null)[] = [localCli, matrix];
   const refreshConnectedChannels = () => {
     channels = allChannels.filter((ch): ch is Channel => ch != null && ch.isConnected());
   };
   refreshConnectedChannels();
 
+  if (localCli) {
+    try {
+      await localCli.connect();
+    } catch (err) {
+      logger.error({ err }, 'Local CLI channel connect failed');
+    }
+    refreshConnectedChannels();
+  }
+
   // Connect channels
   if (matrix) {
-    try {
-      await matrix.connect();
-    } catch (err) {
+    // Do not block local terminal startup on Matrix/network connectivity.
+    void matrix.connect().catch((err) => {
       logger.error({ err }, 'Initial Matrix connection failed; continuing in degraded mode');
-    }
+    });
     refreshConnectedChannels();
 
     let matrixReconnectInProgress = false;

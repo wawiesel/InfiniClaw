@@ -12,7 +12,6 @@ import {
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_CPUS,
   CONTAINER_MEMORY_MB,
-  CONTAINER_RUNTIME,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
@@ -61,6 +60,7 @@ interface VolumeMount {
 }
 
 const ALLOWED_ENV_VARS = [
+  'ASSISTANT_NAME',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
@@ -69,6 +69,8 @@ const ALLOWED_ENV_VARS = [
   'OLLAMA_HOST',
   'OPENAI_API_KEY',
   'OPENAI_BASE_URL',
+  'INFINICLAW_ROOT',
+  'CID_JOHNNY5_CHAT_JID',
   // Network/TLS passthrough for environments with corporate proxies/certs.
   'HTTP_PROXY',
   'HTTPS_PROXY',
@@ -88,14 +90,6 @@ const CERT_PATH_ENV_VARS = [
   'CURL_CA_BUNDLE',
   'GIT_SSL_CAINFO',
 ] as const;
-
-function isPodmanRuntime(): boolean {
-  return CONTAINER_RUNTIME === 'podman';
-}
-
-function containerCli(): 'container' | 'podman' {
-  return isPodmanRuntime() ? 'podman' : 'container';
-}
 
 function parseEnvLine(line: string): [string, string] | null {
   const trimmed = line.trim();
@@ -421,33 +415,19 @@ function buildVolumeMounts(
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  if (isPodmanRuntime()) {
-    // Prefer local image for podman: don't pull from remote registries.
-    args.push('--pull=never');
-    if (CONTAINER_MEMORY_MB > 0) {
-      args.push('--memory', `${CONTAINER_MEMORY_MB}m`);
-    }
-    if (CONTAINER_CPUS > 0) {
-      args.push('--cpus', String(CONTAINER_CPUS));
-    }
-    for (const mount of mounts) {
-      args.push(
-        '-v',
-        `${mount.hostPath}:${mount.containerPath}${mount.readonly ? ':ro' : ''}`,
-      );
-    }
-  } else {
-    // Apple Container: --mount for readonly, -v for read-write
-    for (const mount of mounts) {
-      if (mount.readonly) {
-        args.push(
-          '--mount',
-          `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`,
-        );
-      } else {
-        args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
-      }
-    }
+  // Podman-only runtime.
+  args.push('--pull=never');
+  if (CONTAINER_MEMORY_MB > 0) {
+    args.push('--memory', `${CONTAINER_MEMORY_MB}m`);
+  }
+  if (CONTAINER_CPUS > 0) {
+    args.push('--cpus', String(CONTAINER_CPUS));
+  }
+  for (const mount of mounts) {
+    args.push(
+      '-v',
+      `${mount.hostPath}:${mount.containerPath}${mount.readonly ? ':ro' : ''}`,
+    );
   }
 
   args.push(CONTAINER_IMAGE);
@@ -498,7 +478,7 @@ export async function runContainerAgent(
     {
       group: group.name,
       containerName,
-      runtime: CONTAINER_RUNTIME,
+      runtime: 'podman',
       mountCount: mounts.length,
       isMain: input.isMain,
     },
@@ -509,8 +489,7 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const runtimeCmd = containerCli();
-    const container = spawn(runtimeCmd, containerArgs, {
+    const container = spawn('podman', containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -614,7 +593,7 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      exec(`${runtimeCmd} stop ${containerName}`, { timeout: 15000 }, (err) => {
+      exec(`podman stop ${containerName}`, { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');

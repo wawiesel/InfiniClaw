@@ -2,7 +2,7 @@
 
 ## 1) Purpose (General)
 
-`cid-bot` should be the maintainer/orchestrator for `johnny5-bot`.
+`cid-bot` is the infrastructure brain and maintainer/orchestrator for `johnny5-bot`.
 
 Primary goals:
 - Keep johnny5-bot continuously responsive in chat.
@@ -19,8 +19,8 @@ Success criteria:
 ## 2) Current Product Intent
 
 johnny5-bot currently operates as:
-- A main thread (`MAIN(provider,llm)`) for conversation + orchestration.
-- Optional delegated workers (codex/gemini/ollama) for parallel/background execution.
+- A main brain thread (`MAIN(provider,llm)`) for conversation + orchestration.
+- Optional delegated lobes (codex/gemini/ollama) for parallel/background execution.
 - A Matrix interface layer for user IO.
 - A containerized execution runtime (podman) for isolation.
 
@@ -29,6 +29,7 @@ The latest direction is: one assistant identity multitasking, not many "differen
 ## 3) Core Design Principles
 
 - One identity in user-facing chat.
+- Delegation means lobe cloning under main-brain control, not autonomous handoff.
 - Event-based updates over synthetic chatter.
 - No fake progress text when nothing happened.
 - Main thread remains responsive while work continues in active runs/workers.

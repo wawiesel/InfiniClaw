@@ -58,16 +58,20 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-const DOCLING_VENV_BIN = '/workspace/cache/venvs/docling_venv/bin';
+const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
+const CAPABILITY_STATE_FILE = '/workspace/cache/capability-budget-state.json';
 const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
 const TOOL_PROGRESS_EMIT_MS = 15_000;
 const GENERAL_PROGRESS_DEDUPE_MS = 5_000;
 const SDK_PROCESS_ENV_KEYS = [
+  'ASSISTANT_NAME',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_MODEL',
+  'INFINICLAW_ROOT',
+  'CID_JOHNNY5_CHAT_JID',
   'HTTP_PROXY',
   'HTTPS_PROXY',
   'ALL_PROXY',
@@ -79,17 +83,63 @@ const SDK_PROCESS_ENV_KEYS = [
   'GIT_SSL_CAINFO',
   'NODE_TLS_REJECT_UNAUTHORIZED',
 ] as const;
-const MAIN_DELEGATE_POLICY = `Main thread policy:
-- You are one identity (johnny5-bot) operating in dispatcher/worker mode.
-- MAIN must stay chat-responsive while work runs in background workers.
-- Use MAIN for short trailblazing only: quick preflight checks, prove commands/paths on a small slice, define acceptance criteria.
-- For multi-step or long-running execution, launch workers via mcp__nanoclaw__delegate_codex, mcp__nanoclaw__delegate_gemini, or mcp__nanoclaw__delegate_ollama.
-- Treat worker output as your own multitasking output; do not present workers as separate assistants.
-- Own final quality: verify completed work, correct drift, and take responsibility for final results.
-- Track model performance by task type and choose worker model/provider intentionally.
-- Do not over-delegate: only delegate once the task is well-specified and verifiable.
-- Keep worker control explicit: use delegate_list/delegate_status/delegate_cancel/delegate_amend to monitor and correct active runs.
-- If user asks "what are you doing" during active work, provide concrete current state (completed, running, next) immediately.`;
+const MAIN_DELEGATE_POLICY = `Main brain / lobe policy:
+- You are one brain identity operating multiple lobes.
+- Delegation means lobe cloning, not autonomous handoff.
+- Each lobe gets a tightly-scoped objective with acceptance criteria and reports back for integration.
+- MAIN brain stays user-responsive while lobes execute.
+- For multi-step or long-running execution, launch lobes via mcp__nanoclaw__delegate_codex, mcp__nanoclaw__delegate_gemini, or mcp__nanoclaw__delegate_ollama.
+- Lobe outputs are intermediate cognition. Collapse and integrate results back into one coherent MAIN response.
+- Own final quality: verify lobe outputs, correct drift, and take responsibility for final results.
+- Keep lobe control explicit: use delegate_list/delegate_status/delegate_cancel/delegate_amend to monitor and correct active runs.
+- If user asks "what are you doing" during active work, provide concrete state (completed, running, next) immediately.`;
+
+type CapabilityState = {
+  budgets: Record<string, number>;
+  used: Record<string, number>;
+};
+
+function capabilityKey(provider: string, model: string): string {
+  return `${provider.trim().toLowerCase()}:${model.trim()}`;
+}
+
+function estimateTokens(text: string): number {
+  const normalized = (text || '').trim();
+  if (!normalized) return 0;
+  return Math.max(1, Math.ceil(normalized.length / 4));
+}
+
+function loadCapabilityState(): CapabilityState {
+  try {
+    if (!fs.existsSync(CAPABILITY_STATE_FILE)) {
+      return { budgets: {}, used: {} };
+    }
+    const parsed = JSON.parse(
+      fs.readFileSync(CAPABILITY_STATE_FILE, 'utf-8'),
+    ) as Partial<CapabilityState>;
+    return {
+      budgets: parsed.budgets || {},
+      used: parsed.used || {},
+    };
+  } catch {
+    return { budgets: {}, used: {} };
+  }
+}
+
+function saveCapabilityState(state: CapabilityState): void {
+  fs.mkdirSync(path.dirname(CAPABILITY_STATE_FILE), { recursive: true });
+  const tmp = `${CAPABILITY_STATE_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, CAPABILITY_STATE_FILE);
+}
+
+function recordCapabilityUsage(provider: string, model: string, tokens: number): void {
+  if (!model || tokens <= 0) return;
+  const key = capabilityKey(provider, model);
+  const state = loadCapabilityState();
+  state.used[key] = (state.used[key] || 0) + tokens;
+  saveCapabilityState(state);
+}
 
 const DEFAULT_ALLOWED_TOOLS = [
   'Bash',
@@ -664,6 +714,9 @@ async function runQuery(
               NANOCLAW_CHAT_JID: containerInput.chatJid,
               NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
               NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+              ...(sdkEnv.ASSISTANT_NAME
+                ? { NANOCLAW_ASSISTANT_NAME: sdkEnv.ASSISTANT_NAME }
+                : {}),
               ...(sdkEnv.HTTP_PROXY
                 ? { HTTP_PROXY: sdkEnv.HTTP_PROXY }
                 : {}),
@@ -686,6 +739,12 @@ async function runQuery(
                 : {}),
               ...(sdkEnv.GIT_SSL_CAINFO
                 ? { GIT_SSL_CAINFO: sdkEnv.GIT_SSL_CAINFO }
+                : {}),
+              ...(sdkEnv.INFINICLAW_ROOT
+                ? { INFINICLAW_ROOT: sdkEnv.INFINICLAW_ROOT }
+                : {}),
+              ...(sdkEnv.CID_JOHNNY5_CHAT_JID
+                ? { CID_JOHNNY5_CHAT_JID: sdkEnv.CID_JOHNNY5_CHAT_JID }
                 : {}),
               ...(sdkEnv.NODE_TLS_REJECT_UNAUTHORIZED
                 ? {
@@ -838,7 +897,9 @@ async function main(): Promise<void> {
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
   }
-  sdkEnv.PATH = prependToPath(sdkEnv.PATH, DOCLING_VENV_BIN);
+  if (EXTRA_PATH_PREPEND.trim().length > 0) {
+    sdkEnv.PATH = prependToPath(sdkEnv.PATH, EXTRA_PATH_PREPEND);
+  }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');

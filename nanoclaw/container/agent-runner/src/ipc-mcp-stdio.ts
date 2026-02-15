@@ -24,9 +24,14 @@ const DEFAULT_DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_DELEGATE_TIMEOUT_MS = 60 * 60 * 1000;
 const DELEGATE_CWD_ROOTS = ['/workspace/group', '/workspace/extra'];
 const DELEGATE_CACHE_ROOT = '/workspace/cache';
-const DOCLING_VENV_BIN = '/workspace/cache/venvs/docling_venv/bin';
+const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
 const HOST_CERT_FALLBACK = '/workspace/host-certs/node_extra_ca_certs-corporate-certs.pem';
+const CAPABILITY_STATE_FILE = '/workspace/cache/capability-budget-state.json';
 type DelegateEnv = Record<string, string | undefined>;
+type CapabilityState = {
+  budgets: Record<string, number>;
+  used: Record<string, number>;
+};
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -42,10 +47,81 @@ function writeIpcFile(dir: string, data: object): string {
   return filename;
 }
 
+function capabilityKey(provider: string, model: string): string {
+  return `${provider.trim().toLowerCase()}:${model.trim()}`;
+}
+
+function estimateTokens(text: string): number {
+  const normalized = (text || '').trim();
+  if (!normalized) return 0;
+  return Math.max(1, Math.ceil(normalized.length / 4));
+}
+
+function loadCapabilityState(): CapabilityState {
+  try {
+    if (!fs.existsSync(CAPABILITY_STATE_FILE)) {
+      return { budgets: {}, used: {} };
+    }
+    const parsed = JSON.parse(fs.readFileSync(CAPABILITY_STATE_FILE, 'utf-8')) as Partial<CapabilityState>;
+    return {
+      budgets: parsed.budgets || {},
+      used: parsed.used || {},
+    };
+  } catch {
+    return { budgets: {}, used: {} };
+  }
+}
+
+function saveCapabilityState(state: CapabilityState): void {
+  fs.mkdirSync(path.dirname(CAPABILITY_STATE_FILE), { recursive: true });
+  const tmp = `${CAPABILITY_STATE_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, CAPABILITY_STATE_FILE);
+}
+
+function recordCapabilityUsage(provider: string, model: string, tokens: number): void {
+  if (tokens <= 0) return;
+  const key = capabilityKey(provider, model);
+  const state = loadCapabilityState();
+  state.used[key] = (state.used[key] || 0) + tokens;
+  saveCapabilityState(state);
+}
+
+function listCapabilityUsageLines(): string[] {
+  const state = loadCapabilityState();
+  const keys = Array.from(
+    new Set([...Object.keys(state.budgets), ...Object.keys(state.used)]),
+  ).sort();
+  if (keys.length === 0) {
+    return ['No capability budgets configured yet.'];
+  }
+  return keys.map((key) => {
+    const [provider, ...modelParts] = key.split(':');
+    const model = modelParts.join(':');
+    const used = state.used[key] || 0;
+    const total = state.budgets[key];
+    const remaining =
+      typeof total === 'number' && total >= 0 ? Math.max(0, total - used) : null;
+    return `${provider}/${model}: used=${used} tokens, remaining=${remaining === null ? 'unknown' : `${remaining} tokens`}`;
+  });
+}
+
 function emitChatMessage(text: string, sender?: string): void {
   const data: Record<string, string | undefined> = {
     type: 'message',
     chatJid,
+    text,
+    sender: sender || undefined,
+    groupFolder,
+    timestamp: new Date().toISOString(),
+  };
+  writeIpcFile(MESSAGES_DIR, data);
+}
+
+function emitChatMessageTo(chatJidTarget: string, text: string, sender?: string): void {
+  const data: Record<string, string | undefined> = {
+    type: 'message',
+    chatJid: chatJidTarget,
     text,
     sender: sender || undefined,
     groupFolder,
@@ -174,7 +250,9 @@ function buildDelegateEnv(): DelegateEnv {
       process.env.VIRTUALENV_OVERRIDE_APP_DATA ||
       `${DELEGATE_CACHE_ROOT}/virtualenv`,
   };
-  delegateEnv.PATH = prependToPath(delegateEnv.PATH, DOCLING_VENV_BIN);
+  if (EXTRA_PATH_PREPEND.trim().length > 0) {
+    delegateEnv.PATH = prependToPath(delegateEnv.PATH, EXTRA_PATH_PREPEND);
+  }
 
   if (fs.existsSync(HOST_CERT_FALLBACK)) {
     if (!delegateEnv.NODE_EXTRA_CA_CERTS) {
@@ -233,6 +311,53 @@ server.tool(
     emitChatMessage(args.text, args.sender);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
+
+server.tool(
+  'delegate_johnny5',
+  `Delegate an objective to johnny5-bot by sending a task message to johnny5's chat.
+
+Use this when acting as cid-bot infrastructure orchestrator.
+Behavior:
+- Sends a message to johnny5 chat JID
+- By default prefixes objective with "@johnny5-bot " so johnny5 trigger rules fire
+- Returns an error if target chat JID is missing`,
+  {
+    objective: z.string().describe('Task/objective to hand off to johnny5-bot'),
+    target_chat_jid: z.string().optional().describe('Target chat JID for johnny5 (defaults to CID_JOHNNY5_CHAT_JID env if set)'),
+    include_trigger: z.boolean().default(true).describe('If true, prefixes objective with "@johnny5-bot "'),
+    sender: z.string().default('cid-bot').describe('Sender label for the handoff message'),
+  },
+  async (args) => {
+    const defaultTarget = process.env.CID_JOHNNY5_CHAT_JID?.trim();
+    const targetChatJid = (args.target_chat_jid || defaultTarget || '').trim();
+    if (!targetChatJid) {
+      return {
+        content: [{ type: 'text' as const, text: 'Missing target chat JID. Set target_chat_jid or CID_JOHNNY5_CHAT_JID.' }],
+        isError: true,
+      };
+    }
+
+    if (!isMain && targetChatJid !== chatJid) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only MAIN can delegate to other chats. Run from main context.' }],
+        isError: true,
+      };
+    }
+
+    const body = args.include_trigger
+      ? `@johnny5-bot ${args.objective}`
+      : args.objective;
+
+    emitChatMessageTo(targetChatJid, body, args.sender);
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Delegated to johnny5 (${targetChatJid}).`,
+      }],
+    };
   },
 );
 
@@ -517,19 +642,117 @@ Use available_groups.json to find the JID for a group. The folder name should be
 );
 
 server.tool(
-  'delegate_codex',
-  `Delegate a coding objective to Codex CLI in the same mounted workspace.
+  'set_brain_mode',
+  `Set InfiniClaw brain mode for a bot profile.
 
-Use this when you want Codex to directly read/write files and run commands (including Python) inside the container.
+This updates profiles/<bot>/env in the InfiniClaw root and is intended for
+operator use from cid-bot main context.
+
+Modes:
+- anthropic: clears base URL/auth token fields and sets model
+- ollama: sets host Ollama base URL + auth token, and sets model
+
+Note: bot restart is required for changes to take effect.`,
+  {
+    bot: z.enum(['cid-bot', 'johnny5-bot']).describe('Bot profile to update'),
+    mode: z.enum(['anthropic', 'ollama']).describe('Brain provider mode'),
+    model: z.string().optional().describe('Optional model override for the selected mode'),
+  },
+  async (args) => {
+    const callerAssistant = (process.env.NANOCLAW_ASSISTANT_NAME || '').trim();
+    if (callerAssistant !== 'cid-bot') {
+      return {
+        content: [{ type: 'text' as const, text: 'Only cid-bot can change brain modes.' }],
+        isError: true,
+      };
+    }
+
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only MAIN can change brain mode.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'set_brain_mode',
+      bot: args.bot,
+      mode: args.mode,
+      model: args.model,
+      chatJid,
+      groupFolder,
+      isMain,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Brain mode update queued for ${args.bot} (${args.mode}). Restart required.`,
+      }],
+    };
+  },
+);
+
+server.tool(
+  'set_capability_budget',
+  `Set approximate token budget for a provider/model capability.
+
+These are local estimates for routing decisions, not provider-authoritative accounting.
+`,
+  {
+    provider: z.string().describe('Capability provider name (e.g. anthropic, codex, gemini, ollama)'),
+    model: z.string().describe('Model identifier'),
+    total_tokens: z.number().int().positive().describe('Approximate total token budget'),
+    reset_used: z.boolean().default(false).describe('Reset used token counter for this capability'),
+  },
+  async (args) => {
+    const key = capabilityKey(args.provider, args.model);
+    const state = loadCapabilityState();
+    state.budgets[key] = args.total_tokens;
+    if (args.reset_used) {
+      state.used[key] = 0;
+    }
+    saveCapabilityState(state);
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Budget set for ${args.provider}/${args.model}: total=${args.total_tokens} tokens.`,
+      }],
+    };
+  },
+);
+
+server.tool(
+  'list_capability_budgets',
+  `List approximate used and remaining tokens by provider/model capability.
+
+Use this before delegation to choose the best provider/model given remaining budget.
+`,
+  {},
+  async () => {
+    const lines = listCapabilityUsageLines();
+    return {
+      content: [{ type: 'text' as const, text: lines.join('\n') }],
+    };
+  },
+);
+
+server.tool(
+  'delegate_codex',
+  `Spawn a Codex lobe clone in the same mounted workspace.
+
+Use this when the main brain wants a tightly scoped clone to directly read/write files and run commands (including Python) inside the container.
 
 Behavior:
-- Streams Codex assistant text back to chat prefixed as "codex: ..."
-- Returns the exact same prefixed text to the main agent
+- Streams lobe output back to chat prefixed as "codex: ..."
+- Returns the same prefixed text to the main brain for collapse/integration
 - If Codex cannot run (auth/quota/rate-limit/provider errors), it fails immediately and emits:
   "codex: unavailable: ..."
 `,
   {
-    name: z.string().min(1).describe('Display name for this delegate instance (provided by johnny5-bot, e.g. "Renamer").'),
+    name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Renamer").'),
     objective: z.string().describe('Task for Codex to execute'),
     cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
     model: z.string().optional().describe('Optional Codex model override (e.g. "o3").'),
@@ -601,6 +824,10 @@ Behavior:
         payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean },
       ) => {
         if (finalized) return;
+        const estimatedTokens =
+          estimateTokens(args.objective) +
+          estimateTokens(prefixedMessages.join('\n\n'));
+        recordCapabilityUsage('codex', effectiveModel, estimatedTokens);
         finalized = true;
         resolve(payload);
       };
@@ -772,18 +999,18 @@ Behavior:
 
 server.tool(
   'delegate_gemini',
-  `Delegate a coding objective to Gemini CLI in the same mounted workspace.
+  `Spawn a Gemini lobe clone in the same mounted workspace.
 
-Use this when you want Gemini CLI to directly read/write files and run commands (including Python) inside the container.
+Use this when the main brain wants a tightly scoped clone to directly read/write files and run commands (including Python) inside the container.
 
 Behavior:
-- Streams Gemini assistant text back to chat prefixed as "gemini: ..."
-- Returns the exact same prefixed text to the main agent
+- Streams lobe output back to chat prefixed as "gemini: ..."
+- Returns the same prefixed text to the main brain for collapse/integration
 - If Gemini cannot run (auth/quota/rate-limit/provider errors), it fails immediately and emits:
   "gemini: unavailable: ..."
 `,
   {
-    name: z.string().min(1).describe('Display name for this delegate instance (provided by johnny5-bot, e.g. "Reviewer").'),
+    name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Reviewer").'),
     objective: z.string().describe('Task for Gemini to execute'),
     cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
     model: z.string().optional().describe('Optional Gemini model override (e.g. "gemini-2.5-pro").'),
@@ -853,6 +1080,10 @@ Behavior:
         payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean },
       ) => {
         if (finalized) return;
+        const estimatedTokens =
+          estimateTokens(args.objective) +
+          estimateTokens(prefixedMessages.join('\n\n'));
+        recordCapabilityUsage('gemini', effectiveModel, estimatedTokens);
         finalized = true;
         resolve(payload);
       };
@@ -1001,16 +1232,16 @@ const ollamaHost = process.env.OLLAMA_HOST || (process.env.NANOCLAW_IPC_DIR ? 'h
 
 server.tool(
   'delegate_ollama',
-  `Delegate an objective to a local Ollama model on the host machine.
+  `Spawn an Ollama lobe clone on the host machine.
 
 Behavior:
-- Sends the objective to Ollama and returns output prefixed as "ollama: ..."
+- Sends the objective to Ollama as a tightly scoped lobe and returns output prefixed as "ollama: ..."
 - Emits the same prefixed text to chat immediately
 - On connection/auth/runtime errors, returns:
   "ollama: unavailable: ..."
 `,
   {
-    name: z.string().min(1).describe('Display name for this delegate instance (provided by johnny5-bot, e.g. "Summarizer").'),
+    name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Summarizer").'),
     objective: z.string().describe('Task/objective for Ollama to execute'),
     model: z.string().default('llama3.2').describe('Ollama model name'),
     system: z.string().optional().describe('Optional system prompt'),
@@ -1062,6 +1293,11 @@ Behavior:
 
       const data = await res.json() as { response?: string };
       const responseText = (data.response || '').trim();
+      recordCapabilityUsage(
+        'ollama',
+        args.model,
+        estimateTokens(args.objective) + estimateTokens(responseText),
+      );
       if (!responseText) {
         const doneText = 'completed with no textual output.';
         emitChatMessage(doneText, delegateSender);

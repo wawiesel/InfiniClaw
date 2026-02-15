@@ -6,6 +6,8 @@
 
 Multi-bot orchestration built on a maintained NanoClaw fork.
 
+Runtime: Podman only.
+
 ## Current bot names
 
 - `cid-bot` (infra/operator role)
@@ -56,6 +58,13 @@ Helper:
 ./scripts/set-brain.sh <cid-bot|johnny5-bot> <model> [base_url]
 ```
 
+Provider-mode switch (recommended):
+
+```bash
+./scripts/set-brain-mode.sh <cid-bot|johnny5-bot> anthropic [model]
+./scripts/set-brain-mode.sh <cid-bot|johnny5-bot> ollama [model]
+```
+
 Show status:
 
 ```bash
@@ -78,6 +87,26 @@ Tmux layout:
 - `cid` window: live cid host log + latest cid container log + status panel
 - `johnny5` window: johnny5 host log
 - `controls` window: quick command reminders
+
+Local bot session:
+
+```bash
+./profiles/cid-bot/run.sh
+./profiles/johnny5-bot/run.sh
+```
+
+`run.sh` launches a real interactive `claude` TTY inside the bot container
+with the bot profile env + mounts applied.
+
+Pipeline-identical terminal chat (recommended for testing without Matrix UI):
+
+```bash
+./profiles/cid-bot/chat.sh
+./profiles/johnny5-bot/chat.sh
+```
+
+`chat.sh` runs NanoClaw with a local terminal channel through the same
+router/queue/container/MCP pipeline used by Matrix.
 
 ## Design
 

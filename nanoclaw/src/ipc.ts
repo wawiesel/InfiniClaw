@@ -33,6 +33,65 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
+function resolveInfiniClawRoot(): string {
+  const explicit = process.env.INFINICLAW_ROOT?.trim();
+  if (explicit) return explicit;
+  // Fallback from instances/<bot>/nanoclaw -> repo root
+  return path.resolve(process.cwd(), '..', '..', '..');
+}
+
+function upsertEnvValue(envFile: string, key: string, value: string): void {
+  const lines = fs.existsSync(envFile)
+    ? fs.readFileSync(envFile, 'utf-8').split('\n')
+    : [];
+  const next = `${key}=${value}`;
+  let updated = false;
+  const out = lines.map((line) => {
+    if (line.startsWith(`${key}=`)) {
+      updated = true;
+      return next;
+    }
+    return line;
+  });
+  if (!updated) out.push(next);
+  fs.writeFileSync(envFile, `${out.join('\n').replace(/\n*$/, '\n')}`);
+}
+
+function applyBrainMode(
+  bot: string,
+  mode: 'anthropic' | 'ollama',
+  model?: string,
+): string {
+  const root = resolveInfiniClawRoot();
+  const envFile = path.join(root, 'profiles', bot, 'env');
+  if (!fs.existsSync(envFile)) {
+    throw new Error(`Missing profile env: ${envFile}`);
+  }
+
+  if (mode === 'anthropic') {
+    upsertEnvValue(envFile, 'BRAIN_MODEL', model || 'claude-sonnet-4-5');
+    upsertEnvValue(envFile, 'BRAIN_BASE_URL', '');
+    upsertEnvValue(envFile, 'BRAIN_AUTH_TOKEN', '');
+    upsertEnvValue(envFile, 'BRAIN_API_KEY', '');
+    return `Updated ${bot} to anthropic mode. Restart required.`;
+  }
+
+  upsertEnvValue(
+    envFile,
+    'BRAIN_MODEL',
+    model || 'devstral-small-2-fast:latest',
+  );
+  upsertEnvValue(
+    envFile,
+    'BRAIN_BASE_URL',
+    'http://host.containers.internal:11434',
+  );
+  upsertEnvValue(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
+  upsertEnvValue(envFile, 'BRAIN_API_KEY', '');
+  upsertEnvValue(envFile, 'BRAIN_OAUTH_TOKEN', '');
+  return `Updated ${bot} to ollama mode. Restart required.`;
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -211,6 +270,10 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For brain mode control
+    bot?: string;
+    mode?: string;
+    model?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -419,6 +482,38 @@ export async function processTaskIpc(
           { data },
           'Invalid register_group request - missing required fields',
         );
+      }
+      break;
+
+    case 'set_brain_mode':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized set_brain_mode attempt blocked',
+        );
+        break;
+      }
+      if (
+        data.bot &&
+        (data.bot === 'cid-bot' || data.bot === 'johnny5-bot') &&
+        data.mode &&
+        (data.mode === 'anthropic' || data.mode === 'ollama')
+      ) {
+        try {
+          const summary = applyBrainMode(
+            data.bot,
+            data.mode,
+            typeof data.model === 'string' ? data.model : undefined,
+          );
+          logger.info({ bot: data.bot, mode: data.mode }, 'Brain mode updated via IPC');
+          if (typeof data.chatJid === 'string' && data.chatJid.trim().length > 0) {
+            await deps.sendMessage(data.chatJid, `cid-bot:\n\n${summary}`);
+          }
+        } catch (err) {
+          logger.error({ err, data }, 'Failed to apply set_brain_mode');
+        }
+      } else {
+        logger.warn({ data }, 'Invalid set_brain_mode request');
       }
       break;
 

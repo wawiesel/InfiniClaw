@@ -74,6 +74,34 @@ apply_brain_env() {
   if [[ -n "${BRAIN_OAUTH_TOKEN:-}" ]]; then
     export CLAUDE_CODE_OAUTH_TOKEN="${BRAIN_OAUTH_TOKEN}"
   fi
+
+  # Local fallback: if no explicit profile OAuth token is set, reuse
+  # the operator's local NanoClaw token from nearby .env files.
+  if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    local candidate_envs=(
+      "${ROOT_DIR}/nanoclaw/.env"
+      "${ROOT_DIR}/../nanoclaw/.env"
+    )
+    local env_file
+    for env_file in "${candidate_envs[@]}"; do
+      if [[ -f "${env_file}" ]]; then
+        local token_line
+        token_line="$(rg -n '^CLAUDE_CODE_OAUTH_TOKEN=' "${env_file}" -N -S | head -n1 || true)"
+        if [[ -n "${token_line}" ]]; then
+          local token_value
+          token_value="${token_line#CLAUDE_CODE_OAUTH_TOKEN=}"
+          token_value="${token_value%\"}"
+          token_value="${token_value#\"}"
+          token_value="${token_value%\'}"
+          token_value="${token_value#\'}"
+          if [[ -n "${token_value}" ]]; then
+            export CLAUDE_CODE_OAUTH_TOKEN="${token_value}"
+            break
+          fi
+        fi
+      fi
+    done
+  fi
 }
 
 ensure_podman_ready() {
@@ -100,4 +128,23 @@ ensure_podman_ready() {
   echo "Podman API unavailable after recovery attempt." >&2
   echo "Try: podman machine stop podman-machine-default && podman machine start podman-machine-default" >&2
   return 1
+}
+
+validate_brain_env() {
+  if [[ -n "${ANTHROPIC_BASE_URL:-}" ]]; then
+    if [[ -z "${ANTHROPIC_AUTH_TOKEN:-}" && -z "${ANTHROPIC_API_KEY:-}" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+      echo "BRAIN_BASE_URL is set but no auth token is configured." >&2
+      echo "Set BRAIN_AUTH_TOKEN, BRAIN_API_KEY, or BRAIN_OAUTH_TOKEN in profile env." >&2
+      return 1
+    fi
+  fi
+}
+
+write_env_if_set() {
+  local file="$1"
+  local key="$2"
+  local val="${!key:-}"
+  if [[ -n "${val}" ]]; then
+    printf '%s=%s\n' "${key}" "${val}" >> "${file}"
+  fi
 }

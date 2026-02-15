@@ -1,6 +1,8 @@
 import {
   MatrixClient,
   MatrixAuth,
+  LogService,
+  LogLevel,
   SimpleFsStorageProvider,
 } from 'matrix-bot-sdk';
 
@@ -44,6 +46,54 @@ const MATRIX_SEND_TIMEOUT_MS = 4_000;
 const MATRIX_TYPING_TIMEOUT_MS = 1_500;
 const MATRIX_META_TIMEOUT_MS = 2_500;
 const MATRIX_HEALTH_TIMEOUT_MS = 5_000;
+let matrixSdkLoggerConfigured = false;
+
+function isExpectedAccountDataMissing(args: unknown[]): boolean {
+  return args.some((arg) => {
+    if (!arg || typeof arg !== 'object') return false;
+    const record = arg as Record<string, unknown>;
+    const errcode =
+      typeof record.errcode === 'string'
+        ? record.errcode
+        : typeof (record.body as Record<string, unknown> | undefined)?.errcode ===
+            'string'
+          ? ((record.body as Record<string, unknown>).errcode as string)
+          : undefined;
+    const message =
+      typeof record.error === 'string'
+        ? record.error
+        : typeof (record.body as Record<string, unknown> | undefined)?.error ===
+            'string'
+          ? ((record.body as Record<string, unknown>).error as string)
+          : '';
+    return errcode === 'M_NOT_FOUND' && message === 'Account data not found';
+  });
+}
+
+function configureMatrixSdkLogger(): void {
+  if (matrixSdkLoggerConfigured) return;
+  matrixSdkLoggerConfigured = true;
+  LogService.setLevel(LogLevel.INFO);
+  LogService.setLogger({
+    info: (module, ...args) => logger.debug({ module, args }, 'matrix-sdk info'),
+    debug: (module, ...args) => logger.trace({ module, args }, 'matrix-sdk debug'),
+    trace: (module, ...args) => logger.trace({ module, args }, 'matrix-sdk trace'),
+    warn: (module, ...args) => {
+      if (isExpectedAccountDataMissing(args)) {
+        logger.debug('Matrix account-data not found (expected on fresh sessions)');
+        return;
+      }
+      logger.warn({ module, args }, 'matrix-sdk warn');
+    },
+    error: (module, ...args) => {
+      if (isExpectedAccountDataMissing(args)) {
+        logger.debug('Matrix account-data not found (expected on fresh sessions)');
+        return;
+      }
+      logger.warn({ module, args }, 'matrix-sdk error');
+    },
+  });
+}
 
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -327,6 +377,7 @@ export class MatrixChannel implements Channel {
 
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
+    configureMatrixSdkLogger();
   }
 
   private readStored(

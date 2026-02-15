@@ -38,11 +38,10 @@ fi
 
 load_profile_env "${BOT}"
 apply_brain_env
+export INFINICLAW_ROOT="${ROOT_DIR}"
 
-if [[ "${CONTAINER_RUNTIME:-container}" == "podman" ]]; then
-  echo "Ensuring Podman machine is ready..."
-  ensure_podman_ready
-fi
+echo "Ensuring Podman machine is ready..."
+ensure_podman_ready
 
 mkdir -p "${LOG_DIR}" "${RUN_DIR}"
 touch "${LOG_FILE}"
