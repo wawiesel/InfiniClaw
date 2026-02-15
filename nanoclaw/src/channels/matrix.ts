@@ -5,6 +5,7 @@ import {
   LogLevel,
   SimpleFsStorageProvider,
 } from 'matrix-bot-sdk';
+import { marked } from 'marked';
 
 import {
   MATRIX_ACCESS_TOKEN,
@@ -246,33 +247,18 @@ export function toFormattedBodyWithMarkdownAndMath(text: string): {
   }
 
   working = out;
+
+  // Only process inline code - keep markdown syntax for everything else
   working = working.replace(/`([^`\n]+)`/g, (_m, code) => {
     hasRichFormatting = true;
     return placeholder(`<code>${escapeHtml(code)}</code>`);
   });
 
+  // Escape HTML in remaining text but preserve newlines
   working = escapeHtml(working);
-
-  working = working.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (_m, label, href) => {
-    const safeHref = sanitizeHref(href);
-    if (!safeHref) return _m;
-    hasRichFormatting = true;
-    return `<a href="${safeHref}">${label}</a>`;
-  });
-  working = working.replace(/\*\*([^*\n]+)\*\*/g, (_m, textPart) => {
-    hasRichFormatting = true;
-    return `<strong>${textPart}</strong>`;
-  });
-  working = working.replace(/~~([^~\n]+)~~/g, (_m, textPart) => {
-    hasRichFormatting = true;
-    return `<del>${textPart}</del>`;
-  });
-  working = working.replace(/\*([^*\n]+)\*/g, (_m, textPart) => {
-    hasRichFormatting = true;
-    return `<em>${textPart}</em>`;
-  });
   working = working.replace(/\n/g, '<br/>');
 
+  // Restore placeholders (math and code blocks)
   const formattedBody = working.replace(
     /@@MATRIX_TOKEN_(\d+)@@/g,
     (_m, idxText) => tokens[Number(idxText)] ?? '',
@@ -374,6 +360,7 @@ export class MatrixChannel implements Channel {
   private _connected = false;
   private botUserId = MATRIX_USER_ID;
   private opts: MatrixChannelOpts;
+  private lastMessageEventId = new Map<string, string>();
 
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
@@ -654,6 +641,9 @@ export class MatrixChannel implements Channel {
 
     // Listen for messages
     client.on('room.message', async (roomId: string, event: Record<string, unknown>) => {
+      if (event.event_id && typeof event.event_id === 'string') {
+        this.lastMessageEventId.set(roomId, event.event_id);
+      }
       logger.debug({ roomId, sender: event.sender }, 'Matrix room.message event');
       if (!event.content) return;
       const content = event.content as Record<string, unknown>;
@@ -704,32 +694,55 @@ export class MatrixChannel implements Channel {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);
     const normalizedText = normalizeSenderPrefixForMarkdown(text);
-    const { formattedBody, hasRichFormatting } =
-      toFormattedBodyWithMarkdownAndMath(normalizedText);
     try {
-      if (hasRichFormatting) {
-        await withTimeout(
-          this.client.sendMessage(roomId, {
-            msgtype: 'm.text',
-            body: normalizedText,
-            format: 'org.matrix.custom.html',
-            formatted_body: formattedBody,
-          }),
-          MATRIX_SEND_TIMEOUT_MS,
-          'sendMessage',
-        );
-      } else {
-        await withTimeout(
-          this.client.sendText(roomId, normalizedText),
-          MATRIX_SEND_TIMEOUT_MS,
-          'sendText',
-        );
-      }
+      // Convert markdown to HTML using marked library
+      let html = await marked(normalizedText, {
+        async: false,
+        breaks: true,
+        gfm: true
+      });
+
+      html = html.trim();
+
+      await withTimeout(
+        this.client.sendMessage(roomId, {
+          msgtype: 'm.text',
+          body: normalizedText,
+          format: 'org.matrix.custom.html',
+          formatted_body: html,
+        }),
+        MATRIX_SEND_TIMEOUT_MS,
+        'sendMessage',
+      );
     } catch (err) {
       if (this.isAuthFailure(err)) {
         this.markDisconnected('Matrix auth failed while sending message', err);
       }
       logger.warn({ jid, err }, 'Failed to send Matrix message');
+    }
+  }
+
+  async sendReaction(jid: string, eventId: string, emoji: string): Promise<void> {
+    if (!this.client || !this._connected) return;
+    const roomId = toRoomId(jid);
+    try {
+      const content = {
+        'm.relates_to': {
+          rel_type: 'm.annotation',
+          event_id: eventId,
+          key: emoji,
+        },
+      };
+      await withTimeout(
+        this.client.sendEvent(roomId, 'm.reaction', content),
+        MATRIX_SEND_TIMEOUT_MS,
+        'sendReaction',
+      );
+    } catch (err) {
+      if (this.isAuthFailure(err)) {
+        this.markDisconnected('Matrix auth failed while sending reaction', err);
+      }
+      logger.warn({ jid, eventId, err }, 'Failed to send Matrix reaction');
     }
   }
 
