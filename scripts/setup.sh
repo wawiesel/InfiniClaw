@@ -5,9 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/common.sh"
 
-required_cmd git
 required_cmd node
 required_cmd npm
+required_cmd rsync
 
 mkdir -p "${DATA_DIR}" "${INSTANCES_DIR}" "${RUN_DIR}" "${LOG_DIR}"
 
@@ -19,14 +19,15 @@ for bot in cid-bot johnny5-bot; do
   fi
 
   bot_instance_dir="$(instance_dir "${bot}")"
-  if [[ ! -d "${bot_instance_dir}/.git" ]]; then
-    mkdir -p "${INSTANCES_DIR}/${bot}"
-    git clone --local "${BASE_NANOCLAW_DIR}" "${bot_instance_dir}" >/dev/null
-    echo "Cloned instance for ${bot}"
-  fi
-
-  git -C "${bot_instance_dir}" checkout main >/dev/null 2>&1 || true
-  git -C "${bot_instance_dir}" pull --ff-only origin main >/dev/null
+  mkdir -p "${bot_instance_dir}"
+  rsync -a --delete \
+    --exclude node_modules \
+    --exclude data \
+    --exclude store \
+    --exclude groups \
+    --exclude logs \
+    "${BASE_NANOCLAW_DIR}/" "${bot_instance_dir}/"
+  echo "Synced vendored NanoClaw for ${bot}"
 
   if [[ ! -d "${bot_instance_dir}/node_modules" ]]; then
     echo "Installing dependencies for ${bot}..."
@@ -35,4 +36,3 @@ for bot in cid-bot johnny5-bot; do
 done
 
 echo "Setup complete."
-
