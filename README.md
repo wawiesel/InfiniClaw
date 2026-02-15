@@ -50,6 +50,12 @@ Set:
 `scripts/start-bot.sh` maps these to NanoClaw runtime env (`ANTHROPIC_*` / `CLAUDE_CODE_OAUTH_TOKEN`).
 This keeps model/backend switching to one place per bot.
 
+Helper:
+
+```bash
+./scripts/set-brain.sh <cid-bot|johnny5-bot> <model> [base_url]
+```
+
 Show status:
 
 ```bash
