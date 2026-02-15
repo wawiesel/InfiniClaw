@@ -217,9 +217,11 @@ function formatDelegateSender(
   provider: 'codex' | 'gemini' | 'ollama',
   llm: string,
 ): string {
-  const base = name.trim();
+  const lobeName = name.trim();
   const model = llm.trim();
-  return `${base}(${provider},${model})`;
+  // Format: 💭 LobeName (Provider/model) in light grey
+  const providerName = provider.charAt(0).toUpperCase() + provider.slice(1);
+  return `<font color="#888888">💭 ${lobeName} <em>(${providerName}/${model})</em></font>`;
 }
 
 function firstSet(...values: Array<string | undefined>): string | undefined {
@@ -760,15 +762,21 @@ Behavior:
     const effectiveModel =
       firstSet(args.model, process.env.CODEX_MODEL, process.env.OPENAI_MODEL) ||
       'gpt-5-codex';
-    const delegateSender = formatDelegateSender(
+    const delegateHeader = formatDelegateSender(
       args.name,
       'codex',
       effectiveModel,
     );
+
+    // Emit the lobe header and objective in one message
+    const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+    emitChatMessage(headerAndObjective);
+
     const cwdResult = resolveDelegateCwd(args.cwd);
     if (!cwdResult.ok) {
       const unavailable = `unavailable: ${cwdResult.error}`;
-      emitChatMessage(unavailable, delegateSender);
+      const redText = `<font color="#cc0000">${unavailable}</font>`;
+      emitChatMessage(redText);
       return {
         content: [{ type: 'text' as const, text: `codex: ${unavailable}` }],
         isError: true,
@@ -829,7 +837,9 @@ Behavior:
         const normalized = text.replace(/\r/g, '').trim();
         if (!normalized) return;
         prefixedMessages.push(`codex: ${normalized}`);
-        emitChatMessage(normalized, delegateSender);
+        // Wrap lobe output in light grey
+        const greyText = `<font color="#888888">${normalized}</font>`;
+        emitChatMessage(greyText);
       };
 
       const failUnavailable = (reason: string) => {
@@ -894,7 +904,8 @@ Behavior:
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         const unavailable = `unavailable: ${reason}`;
-        emitChatMessage(unavailable, delegateSender);
+        const redText = `<font color="#cc0000">${unavailable}</font>`;
+        emitChatMessage(redText);
         finalize({
           content: [{ type: 'text', text: `codex: ${unavailable}` }],
           isError: true,
@@ -1018,15 +1029,21 @@ Behavior:
   async (args) => {
     const effectiveModel =
       firstSet(args.model, process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
-    const delegateSender = formatDelegateSender(
+    const delegateHeader = formatDelegateSender(
       args.name,
       'gemini',
       effectiveModel,
     );
+
+    // Emit the lobe header and objective in one message
+    const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+    emitChatMessage(headerAndObjective);
+
     const cwdResult = resolveDelegateCwd(args.cwd);
     if (!cwdResult.ok) {
       const unavailable = `unavailable: ${cwdResult.error}`;
-      emitChatMessage(unavailable, delegateSender);
+      const redText = `<font color="#cc0000">${unavailable}</font>`;
+      emitChatMessage(redText);
       return {
         content: [{ type: 'text' as const, text: `gemini: ${unavailable}` }],
         isError: true,
@@ -1085,7 +1102,9 @@ Behavior:
         const normalized = text.replace(/\r/g, '').trim();
         if (!normalized) return;
         prefixedMessages.push(`gemini: ${normalized}`);
-        emitChatMessage(normalized, delegateSender);
+        // Wrap lobe output in light grey
+        const greyText = `<font color="#888888">${normalized}</font>`;
+        emitChatMessage(greyText);
       };
 
       const failUnavailable = (reason: string) => {
@@ -1125,7 +1144,8 @@ Behavior:
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         const unavailable = `unavailable: ${reason}`;
-        emitChatMessage(unavailable, delegateSender);
+        const redText = `<font color="#cc0000">${unavailable}</font>`;
+        emitChatMessage(redText);
         finalize({
           content: [{ type: 'text', text: `gemini: ${unavailable}` }],
           isError: true,
@@ -1247,11 +1267,16 @@ Behavior:
       .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
   },
   async (args) => {
-    const delegateSender = formatDelegateSender(
+    const delegateHeader = formatDelegateSender(
       args.name,
       'ollama',
       args.model,
     );
+
+    // Emit the lobe header and objective in one message
+    const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+    emitChatMessage(headerAndObjective);
+
     const timeoutMs = Math.max(
       1000,
       Math.min(args.timeout_ms ?? DEFAULT_DELEGATE_TIMEOUT_MS, MAX_DELEGATE_TIMEOUT_MS),
@@ -1277,7 +1302,8 @@ Behavior:
       if (!res.ok) {
         const text = await res.text();
         const unavailable = `unavailable: Ollama error (${res.status}): ${text}`;
-        emitChatMessage(unavailable, delegateSender);
+        const redText = `<font color="#cc0000">${unavailable}</font>`;
+        emitChatMessage(redText);
         return {
           content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
           isError: true,
@@ -1293,20 +1319,23 @@ Behavior:
       );
       if (!responseText) {
         const doneText = 'completed with no textual output.';
-        emitChatMessage(doneText, delegateSender);
+        const greyText = `<font color="#888888">${doneText}</font>`;
+        emitChatMessage(greyText);
         return {
           content: [{ type: 'text' as const, text: `ollama: ${doneText}` }],
         };
       }
 
-      emitChatMessage(responseText, delegateSender);
+      // Wrap lobe output in light grey
+      const greyText = `<font color="#888888">${responseText}</font>`;
+      emitChatMessage(greyText);
       return {
         content: [{ type: 'text' as const, text: `ollama: ${responseText}` }],
       };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       const unavailable = `unavailable: ${reason}`;
-      emitChatMessage(unavailable, delegateSender);
+      emitChatMessage(unavailable);
       return {
         content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
         isError: true,
@@ -1364,10 +1393,9 @@ server.tool(
   `Request a graceful restart of the current bot process.
 
 The host daemon will:
-1. Send a "restarting..." message to the channel
-2. Launch the restart script in a detached process
-3. Shut down gracefully
-4. The restart script starts the bot fresh
+1. Stage your code changes and run \`tsc --noEmit\` to validate
+2. If validation fails: stay running and report errors to chat — fix them and retry
+3. If validation passes: send "restarting..." and exit for supervisor restart
 
 Use this after making code changes that require a process restart.`,
   {

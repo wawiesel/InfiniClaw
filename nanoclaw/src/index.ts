@@ -389,7 +389,10 @@ function updateMainLlm(model?: string): void {
 }
 
 function mainSender(): string {
-  return `Brain(${MAIN_PROVIDER},${mainLlm})`;
+  // Format: 🧠 Engineer (Provider/model) in light grey
+  const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
+  const role = "Engineer"; // TODO: Could make this configurable via env var
+  return `<font color="#888888">🧠 ${role} <em>(${providerName}/${mainLlm})</em></font>`;
 }
 
 function defaultSenderForGroup(sourceGroup: string): string {
@@ -1005,7 +1008,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Send working indicator to channel
   if (channel) {
     try {
-      await channel.sendMessage(chatJid, '`working...`');
+      await channel.sendMessage(chatJid, '🔧 `working...`');
     } catch (err) {
       logger.warn({ err, chatJid }, 'Failed to send working indicator');
     }
@@ -1427,6 +1430,29 @@ function recoverPendingMessages(): void {
   }
 }
 
+/**
+ * After any restart, inject a synthetic message into the main chat
+ * so the agent re-enters the conversation instead of sitting idle.
+ */
+function injectResumeMessage(): void {
+  const mainJid = Object.entries(registeredGroups).find(
+    ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+  )?.[0];
+  if (!mainJid) return;
+
+  storeMessage({
+    id: `resume-${Date.now()}`,
+    chat_jid: mainJid,
+    chat_name: registeredGroups[mainJid].name,
+    sender: 'system',
+    sender_name: 'System',
+    content: 'You just restarted. Check the conversation above for context and resume where you left off.',
+    timestamp: new Date().toISOString(),
+  });
+  queue.enqueueMessageCheck(mainJid);
+  logger.info({ mainJid }, 'Injected resume message after restart');
+}
+
 type PodmanMachineListEntry = {
   Name: string;
   Default?: boolean;
@@ -1778,6 +1804,7 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+  injectResumeMessage();
   startMessageLoop();
 
   // Send boot announcement once main channel is available
@@ -1788,7 +1815,14 @@ async function main(): Promise<void> {
     if (!ch) return;
     clearInterval(bootAnnounceTimer);
     try {
-      await ch.sendMessage(mainJid, `\`${ASSISTANT_NAME} online. ${mainSender()}\``);
+      await ch.sendMessage(mainJid, `✅ <font color="#00cc00">online.</font>\n\n${mainSender()}`);
+
+      // Check for pending messages and resume processing immediately
+      const snapshot = queue.getGroupStatus(mainJid);
+      if (snapshot.pendingTasks > 0) {
+        logger.info({ pendingTasks: snapshot.pendingTasks }, 'Resuming with pending tasks after boot');
+        // The main processing loop will pick these up automatically
+      }
     } catch (err) {
       logger.warn({ err }, 'Failed to send boot announcement');
     }

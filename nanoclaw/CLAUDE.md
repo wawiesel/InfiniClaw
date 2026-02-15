@@ -45,6 +45,22 @@ launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
 ```
 
+## Status Messages
+
+Status messages use the format: `<emoji> <text>` where text color matches the emoji's main color.
+
+| Status | Format |
+|--------|--------|
+| Online | `✅ online.` (green) |
+| Restarting | `⭕️ restarting...` |
+| Working | `🔧 working...` |
+
+Don't use send_message for your final answer — it is delivered automatically. Use send_message only for progress updates during long tasks.
+
+## Deploy Validation
+
+When `restart_self` is called, the host stages your code to `staging/{bot}/` and runs `tsc --noEmit` before restarting. If compilation fails, the bot stays running and errors are sent to chat. Fix the errors and call `restart_self` again.
+
 ## Container Build Cache
 
 Apple Container's buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild:

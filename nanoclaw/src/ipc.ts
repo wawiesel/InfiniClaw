@@ -1,3 +1,4 @@
+import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -38,6 +39,20 @@ function resolveInfiniClawRoot(): string {
   if (explicit) return explicit;
   // Fallback from instances/<bot>/nanoclaw -> repo root
   return path.resolve(process.cwd(), '..', '..', '..');
+}
+
+function validateDeploy(bot: string): Promise<{ ok: boolean; errors: string }> {
+  return new Promise((resolve) => {
+    const root = resolveInfiniClawRoot();
+    const script = path.join(root, 'scripts', 'validate-deploy.sh');
+    execFile(script, [bot], { timeout: 60_000 }, (err, _stdout, stderr) => {
+      if (err) {
+        resolve({ ok: false, errors: stderr || err.message });
+      } else {
+        resolve({ ok: true, errors: '' });
+      }
+    });
+  });
 }
 
 function upsertEnvValue(envFile: string, key: string, value: string): void {
@@ -525,11 +540,25 @@ export async function processTaskIpc(
       const bot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
         ? data.bot
         : 'engineer';
-      logger.info({ bot }, 'Restart requested via IPC — exiting for supervisor restart');
-      // Notify channel before exiting
-      if (typeof data.chatJid === 'string' && data.chatJid.trim().length > 0) {
+      logger.info({ bot }, 'Restart requested via IPC — validating deploy');
+      const chatJid = typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
+        ? data.chatJid
+        : null;
+      const { ok, errors } = await validateDeploy(bot);
+      if (!ok) {
+        logger.error({ bot, errors }, 'Deploy validation failed — aborting restart');
+        if (chatJid) {
+          try {
+            const trimmed = errors.length > 3000 ? errors.slice(-3000) : errors;
+            await deps.sendMessage(chatJid, `⛔ deploy validation failed — not restarting:\n\n\`\`\`\n${trimmed}\n\`\`\``);
+          } catch {}
+        }
+        break;
+      }
+      logger.info({ bot }, 'Deploy validation passed — restarting');
+      if (chatJid) {
         try {
-          await deps.sendMessage(data.chatJid, `\`${bot} restarting...\``);
+          await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
         } catch {}
       }
       // Exit gracefully — the supervisor loop in ./start will restart us
