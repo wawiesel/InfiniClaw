@@ -693,23 +693,15 @@ export class MatrixChannel implements Channel {
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);
-    const normalizedText = normalizeSenderPrefixForMarkdown(text);
     try {
-      // Convert markdown to HTML using marked library
-      let html = await marked(normalizedText, {
-        async: false,
-        breaks: true,
-        gfm: true
-      });
-
-      html = html.trim();
+      const html = await marked(text, { breaks: true, gfm: true });
 
       await withTimeout(
         this.client.sendMessage(roomId, {
           msgtype: 'm.text',
-          body: normalizedText,
+          body: text,
           format: 'org.matrix.custom.html',
-          formatted_body: html,
+          formatted_body: html.trim(),
         }),
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage',
