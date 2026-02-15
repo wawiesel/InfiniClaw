@@ -27,6 +27,13 @@ rsync -a --delete \
   --exclude logs \
   "${BASE_NANOCLAW_DIR}/" "${INSTANCE}/"
 
+# Build TypeScript if needed
+if [[ ! -f "${INSTANCE}/dist/index.js" ]] || \
+   [[ -n "$(find "${INSTANCE}/src" -name '*.ts' -newer "${INSTANCE}/dist/index.js" 2>/dev/null | head -1)" ]]; then
+  echo "Building TypeScript..."
+  (cd "${INSTANCE}" && npm run build)
+fi
+
 load_profile_env "$BOT"
 apply_brain_env
 export INFINICLAW_ROOT="${ROOT_DIR}"
@@ -37,4 +44,4 @@ export LOCAL_CHAT_NAME="Bridge (Terminal)"
 ensure_podman_ready
 
 cd "$INSTANCE"
-exec npm run dev
+exec npm start

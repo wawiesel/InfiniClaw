@@ -870,7 +870,7 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
   const registeredJids = new Set(Object.keys(registeredGroups));
 
   return chats
-    .filter((c) => c.jid !== '__group_sync__' && c.jid.startsWith('matrix:'))
+    .filter((c) => c.jid !== '__group_sync__' && (c.jid.startsWith('matrix:') || c.jid.endsWith('@g.us')))
     .map((c) => ({
       jid: c.jid,
       name: c.name,
@@ -1338,19 +1338,23 @@ async function startMessageLoop(): Promise<void> {
               now - lastActivePipeAckAt[chatJid] >= ACTIVE_PIPE_ACK_COOLDOWN_MS
             ) {
               const ch = findChannel(channels, chatJid);
-              const objective = compactMessage(
-                nonProbeMessages[nonProbeMessages.length - 1]?.content || '',
-                120,
-              );
               if (ch) {
-                void ch.sendMessage(
-                  chatJid,
-                  formatMainMessage(
-                    `received and injected into active run.${objective ? ` request: ${objective}.` : ''}`,
-                  ),
-                ).catch((err) => {
-                  logger.warn({ chatJid, err }, 'Failed to send active-run acknowledgement');
-                });
+                const lastMessage = nonProbeMessages[nonProbeMessages.length - 1];
+                if (ch.sendReaction && lastMessage?.id) {
+                  void ch.sendReaction(chatJid, lastMessage.id, '👍').catch((err) => {
+                    logger.warn({ chatJid, err }, 'Failed to send active-run reaction acknowledgement');
+                  });
+                } else {
+                  const objective = compactMessage(lastMessage?.content || '', 120);
+                  void ch.sendMessage(
+                    chatJid,
+                    formatMainMessage(
+                      `received and injected into active run.${objective ? ` request: ${objective}.` : ''}`,
+                    ),
+                  ).catch((err) => {
+                    logger.warn({ chatJid, err }, 'Failed to send active-run acknowledgement');
+                  });
+                }
               }
               lastActivePipeAckAt[chatJid] = now;
             }
@@ -1371,16 +1375,21 @@ async function startMessageLoop(): Promise<void> {
               const ch = findChannel(channels, chatJid);
               if (ch) {
                 try {
-                  const objective = compactMessage(
-                    nonProbeMessages[nonProbeMessages.length - 1]?.content || '',
-                    160,
-                  );
-                  await ch.sendMessage(
-                    chatJid,
-                    formatMainMessage(
-                      `queued and starting run now.${objective ? ` objective: ${objective}.` : ''}`,
-                    ),
-                  );
+                  const lastMessage = nonProbeMessages[nonProbeMessages.length - 1];
+                  if (ch.sendReaction && lastMessage?.id) {
+                    await ch.sendReaction(chatJid, lastMessage.id, '👍');
+                  } else {
+                    const objective = compactMessage(
+                      lastMessage?.content || '',
+                      160,
+                    );
+                    await ch.sendMessage(
+                      chatJid,
+                      formatMainMessage(
+                        `queued and starting run now.${objective ? ` objective: ${objective}.` : ''}`,
+                      ),
+                    );
+                  }
                   lastQueuedAckAt[chatJid] = now;
                 } catch (err) {
                   logger.warn(
@@ -1578,7 +1587,7 @@ function cleanupOrphanedPodmanContainers(): void {
     const orphans = names.filter((n) => n.startsWith('nanoclaw-'));
     for (const name of orphans) {
       try {
-        execSync(`podman stop ${name}`, { stdio: 'pipe' });
+        execSync(`podman stop -t 1 ${name}`, { stdio: 'pipe' });
       } catch {
         // Best-effort cleanup
       }
