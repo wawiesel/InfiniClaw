@@ -70,7 +70,7 @@ const STATUS_REQUEST_PATTERN = /\b(progress|status|report)\b/i;
 const ACTIVITY_STATUS_PATTERN =
   /\b(what are you doing|what are you working on|what's happening|whats happening|where are you at|how's it going|hows it going)\b/i;
 const HEARTBEAT_ONLY_PATTERN = /^(?:@[^\s]+\s+)?(?:ping|heartbeat|hello|hi|hey|are you there|check[-\s]?in)\b[\s!?.,:;]*$/i;
-const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+const HEARTBEAT_INTERVAL_MS = 15 * 60 * 1000;
 const STATUS_NUDGE_STALE_MS = 45_000;
 const STATUS_NUDGE_COOLDOWN_MS = 90_000;
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
@@ -338,25 +338,25 @@ async function maybeAutoSwitchBrainsOnQuotaError(
   rawError: string,
   chatJid: string,
 ): Promise<void> {
-  if (!['cid', 'cid-bot'].includes(ASSISTANT_NAME.trim().toLowerCase())) return;
+  if (!['engineer'].includes(ASSISTANT_NAME.trim().toLowerCase())) return;
   if (!isAnthropicQuotaError(rawError)) return;
   if (Date.now() - lastAutoBrainSwitchAt < AUTO_BRAIN_SWITCH_COOLDOWN_MS) return;
 
   const root = process.env.INFINICLAW_ROOT?.trim() || path.resolve(process.cwd(), '..', '..', '..');
-  const cidEnv = path.join(root, 'profiles', 'cid-bot', 'env');
-  const johnnyEnv = path.join(root, 'profiles', 'johnny5-bot', 'env');
-  if (!fs.existsSync(cidEnv) || !fs.existsSync(johnnyEnv)) return;
+  const engineerEnv = path.join(root, 'profiles', 'engineer', 'env');
+  const commanderEnv = path.join(root, 'profiles', 'commander', 'env');
+  if (!fs.existsSync(engineerEnv) || !fs.existsSync(commanderEnv)) return;
 
   try {
-    applyOllamaFallbackToProfile(cidEnv);
-    applyOllamaFallbackToProfile(johnnyEnv);
+    applyOllamaFallbackToProfile(engineerEnv);
+    applyOllamaFallbackToProfile(commanderEnv);
     lastAutoBrainSwitchAt = Date.now();
     const ch = findChannel(channels, chatJid);
     if (ch) {
       await ch.sendMessage(
         chatJid,
         formatMainMessage(
-          'Anthropic credits/quotas look exhausted. I switched cid-bot and johnny5-bot brain profiles to ollama fallback. Restart both bots to apply.',
+          'Anthropic credits/quotas look exhausted. I switched engineer and commander brain profiles to ollama fallback. Restart both bots to apply.',
         ),
       );
     }
@@ -474,7 +474,7 @@ function getMainChatJid(): string | undefined {
 }
 
 function formatMainMessage(body: string): string {
-  return `${mainSender()}:\n\n${body.trim()}`;
+  return body.trim();
 }
 
 function chatActivityStateKey(chatJid: string): string {
@@ -1041,9 +1041,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         markProgress(chatJid, text);
         lastResponseBody = text;
         lastRunOutputAt = Date.now();
-        const ch = findChannel(channels, chatJid);
-        if (ch) {
-          await ch.sendMessage(chatJid, formatMainMessage(text));
+        // Main group: agent sends messages explicitly via IPC send_message.
+        // Only relay streaming output for non-main groups.
+        if (!isMainGroup) {
+          const ch = findChannel(channels, chatJid);
+          if (ch) {
+            await ch.sendMessage(chatJid, formatMainMessage(text));
+          }
         }
         outputSentToUser = true;
         agentResponses.push(formatMainMessage(text));
@@ -1789,12 +1793,11 @@ async function main(): Promise<void> {
     const mainChatJid = getMainChatJid();
     if (!mainChatJid) return;
     const snapshot = queue.getGroupStatus(mainChatJid);
+    // Only send periodic heartbeats when queued/waiting, not during active runs.
+    // Active runs send their own progress via IPC send_message.
     const shouldHeartbeat =
-      snapshot.active ||
-      snapshot.pendingMessages ||
-      snapshot.pendingTasks > 0 ||
-      snapshot.waitingForSlot ||
-      hasRuntimeActiveGroupRun(mainChatJid);
+      (!snapshot.active && !hasRuntimeActiveGroupRun(mainChatJid)) &&
+      (snapshot.pendingMessages || snapshot.pendingTasks > 0 || snapshot.waitingForSlot);
     if (!shouldHeartbeat) return;
     await sendHeartbeat(mainChatJid, false);
   }, HEARTBEAT_INTERVAL_MS);

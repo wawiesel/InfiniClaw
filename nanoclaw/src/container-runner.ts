@@ -70,7 +70,7 @@ const ALLOWED_ENV_VARS = [
   'OPENAI_API_KEY',
   'OPENAI_BASE_URL',
   'INFINICLAW_ROOT',
-  'CID_JOHNNY5_CHAT_JID',
+  'ENGINEER_COMMANDER_CHAT_JID',
   // Network/TLS passthrough for environments with corporate proxies/certs.
   'HTTP_PROXY',
   'HTTPS_PROXY',

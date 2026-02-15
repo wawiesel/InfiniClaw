@@ -71,7 +71,7 @@ const SDK_PROCESS_ENV_KEYS = [
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_MODEL',
   'INFINICLAW_ROOT',
-  'CID_JOHNNY5_CHAT_JID',
+  'ENGINEER_COMMANDER_CHAT_JID',
   'HTTP_PROXY',
   'HTTPS_PROXY',
   'ALL_PROXY',
@@ -743,8 +743,8 @@ async function runQuery(
               ...(sdkEnv.INFINICLAW_ROOT
                 ? { INFINICLAW_ROOT: sdkEnv.INFINICLAW_ROOT }
                 : {}),
-              ...(sdkEnv.CID_JOHNNY5_CHAT_JID
-                ? { CID_JOHNNY5_CHAT_JID: sdkEnv.CID_JOHNNY5_CHAT_JID }
+              ...(sdkEnv.ENGINEER_COMMANDER_CHAT_JID
+                ? { ENGINEER_COMMANDER_CHAT_JID: sdkEnv.ENGINEER_COMMANDER_CHAT_JID }
                 : {}),
               ...(sdkEnv.NODE_TLS_REJECT_UNAUTHORIZED
                 ? {

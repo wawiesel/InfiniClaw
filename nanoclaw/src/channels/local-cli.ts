@@ -107,7 +107,7 @@ export class LocalCliChannel implements Channel {
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.ownsJid(jid)) return;
     if (isTyping) {
-      process.stdout.write('\n[cid typing...]\n');
+      process.stdout.write('\n[typing...]\n');
       this.prompt();
     }
   }

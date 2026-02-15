@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Start InfiniClaw with auto-restart supervisor.
+# Bots that exit are automatically restarted (profile env re-read each time).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/scripts/common.sh"
+
+required_cmd npm
+required_cmd rsync
+
+echo "=== Starting InfiniClaw ==="
+
+ensure_podman_ready
+mkdir -p "$LOG_DIR" "$RUN_DIR"
+
+start_bot() {
+  local bot="$1"
+  local instance spid_file
+
+  instance="$(instance_dir "$bot")"
+  [[ -d "$instance" ]] || return 0
+
+  spid_file="${RUN_DIR}/${bot}.supervisor.pid"
+
+  # Already running?
+  if [[ -f "$spid_file" ]] && kill -0 "$(cat "$spid_file")" 2>/dev/null; then
+    echo "${bot}: already running (supervisor pid $(cat "$spid_file"))"
+    return 0
+  fi
+
+  rm -f "${RUN_DIR}/${bot}.stop" "${RUN_DIR}/${bot}.pid" "$spid_file"
+
+  # Launch supervisor in background
+  _supervisor "$bot" &
+  local pid=$!
+  echo "$pid" > "$spid_file"
+  disown "$pid"
+
+  echo "${bot}: started (supervisor pid ${pid}, log: $(log_path "$bot"))"
+}
+
+_supervisor() {
+  local bot="$1"
+  local log_file instance_dir
+
+  log_file="$(log_path "$bot")"
+  instance_dir="$(instance_dir "$bot")"
+
+  while true; do
+    # Sync vendored code to instance before each restart
+    rsync -a --delete \
+      --exclude node_modules \
+      --exclude data \
+      --exclude store \
+      --exclude groups \
+      --exclude logs \
+      "${BASE_NANOCLAW_DIR}/" "${instance_dir}/"
+
+    # Re-read profile on every restart (bot may have changed its config)
+    load_profile_env "$bot"
+    apply_brain_env
+    export INFINICLAW_ROOT="${ROOT_DIR}"
+
+    echo "--- ${bot} starting at $(date) | model=${ANTHROPIC_MODEL:-unset} ---" >> "$log_file"
+
+    cd "$instance_dir"
+    npm run dev >> "$log_file" 2>&1 &
+    local child=$!
+    echo "$child" > "${RUN_DIR}/${bot}.pid"
+
+    wait "$child" || true
+    rm -f "${RUN_DIR}/${bot}.pid"
+
+    echo "--- ${bot} exited at $(date) ---" >> "$log_file"
+
+    # Stop sentinel = don't restart
+    if [[ -f "${RUN_DIR}/${bot}.stop" ]]; then
+      rm -f "${RUN_DIR}/${bot}.stop" "${RUN_DIR}/${bot}.supervisor.pid"
+      echo "--- ${bot} supervisor stopped ---" >> "$log_file"
+      exit 0
+    fi
+
+    sleep 2
+  done
+}
+
+for bot in engineer commander; do
+  start_bot "$bot"
+done
+
+echo "=== InfiniClaw running ==="

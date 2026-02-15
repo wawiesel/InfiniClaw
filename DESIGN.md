@@ -139,13 +139,13 @@ Container ownership split:
 
 1. Update NanoClaw baseline container only for generic/core requirements.
 2. Update InfiniClaw derived containers per bot role:
-   - `cid-bot`
-   - `johnny5-bot`
+   - `engineer`
+   - `commander`
 3. Build versioned images (no production rollout from floating `latest`).
 4. Update InfiniClaw runtime config to the new image tags.
 5. Roll out in order:
-   - `cid-bot` first
-   - `johnny5-bot` second
+   - `engineer` first
+   - `commander` second
 6. Verify health/logs in tmux and Matrix.
 7. Roll back by restoring prior image tags + restart scripts.
 

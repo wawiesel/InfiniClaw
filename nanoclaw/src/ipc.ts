@@ -1,4 +1,3 @@
-import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -496,7 +495,7 @@ export async function processTaskIpc(
       }
       if (
         data.bot &&
-        (data.bot === 'cid-bot' || data.bot === 'johnny5-bot') &&
+        (data.bot === 'engineer' || data.bot === 'commander') &&
         data.mode &&
         (data.mode === 'anthropic' || data.mode === 'ollama')
       ) {
@@ -508,7 +507,7 @@ export async function processTaskIpc(
           );
           logger.info({ bot: data.bot, mode: data.mode }, 'Brain mode updated via IPC');
           if (typeof data.chatJid === 'string' && data.chatJid.trim().length > 0) {
-            await deps.sendMessage(data.chatJid, `cid-bot:\n\n${summary}`);
+            await deps.sendMessage(data.chatJid, `engineer:\n\n${summary}`);
           }
         } catch (err) {
           logger.error({ err, data }, 'Failed to apply set_brain_mode');
@@ -523,34 +522,20 @@ export async function processTaskIpc(
         logger.warn({ sourceGroup }, 'Unauthorized restart_bot attempt blocked');
         break;
       }
-      const root = resolveInfiniClawRoot();
-      const restartScript = path.join(root, 'scripts', 'restart-bot.sh');
-      const bot = typeof data.bot === 'string' && ['cid-bot', 'johnny5-bot'].includes(data.bot)
+      const bot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
         ? data.bot
-        : 'cid-bot';
-      if (!fs.existsSync(restartScript)) {
-        logger.error({ restartScript }, 'restart-bot.sh not found');
-        break;
-      }
-      logger.info({ bot }, 'Restart requested via IPC, launching detached restart script');
-      // Notify channel before restarting
+        : 'engineer';
+      logger.info({ bot }, 'Restart requested via IPC — exiting for supervisor restart');
+      // Notify channel before exiting
       if (typeof data.chatJid === 'string' && data.chatJid.trim().length > 0) {
         try {
           await deps.sendMessage(data.chatJid, `\`${bot} restarting...\``);
         } catch {}
       }
-      // Spawn restart script fully detached from this process tree
-      const child = spawn('bash', [restartScript, bot], {
-        detached: true,
-        stdio: 'ignore',
-        cwd: root,
-      });
-      child.unref();
-      // Give the restart script a moment to start, then exit gracefully
+      // Exit gracefully — the supervisor loop in ./start will restart us
       setTimeout(() => {
-        logger.info({ bot }, 'Exiting for restart');
         process.exit(0);
-      }, 1500);
+      }, 500);
       break;
     }
 

@@ -315,26 +315,26 @@ server.tool(
 );
 
 server.tool(
-  'delegate_johnny5',
-  `Delegate an objective to johnny5-bot by sending a task message to johnny5's chat.
+  'delegate_commander',
+  `Delegate an objective to the commander bot by sending a task message to the commander's chat.
 
-Use this when acting as cid-bot infrastructure orchestrator.
+Use this when acting as engineer infrastructure orchestrator.
 Behavior:
-- Sends a message to johnny5 chat JID
-- By default prefixes objective with "@johnny5-bot " so johnny5 trigger rules fire
+- Sends a message to commander chat JID
+- By default prefixes objective with "@commander " so commander trigger rules fire
 - Returns an error if target chat JID is missing`,
   {
-    objective: z.string().describe('Task/objective to hand off to johnny5-bot'),
-    target_chat_jid: z.string().optional().describe('Target chat JID for johnny5 (defaults to CID_JOHNNY5_CHAT_JID env if set)'),
-    include_trigger: z.boolean().default(true).describe('If true, prefixes objective with "@johnny5-bot "'),
-    sender: z.string().default('cid-bot').describe('Sender label for the handoff message'),
+    objective: z.string().describe('Task/objective to hand off to commander'),
+    target_chat_jid: z.string().optional().describe('Target chat JID for commander (defaults to ENGINEER_COMMANDER_CHAT_JID env if set)'),
+    include_trigger: z.boolean().default(true).describe('If true, prefixes objective with "@commander "'),
+    sender: z.string().default('engineer').describe('Sender label for the handoff message'),
   },
   async (args) => {
-    const defaultTarget = process.env.CID_JOHNNY5_CHAT_JID?.trim();
+    const defaultTarget = process.env.ENGINEER_COMMANDER_CHAT_JID?.trim();
     const targetChatJid = (args.target_chat_jid || defaultTarget || '').trim();
     if (!targetChatJid) {
       return {
-        content: [{ type: 'text' as const, text: 'Missing target chat JID. Set target_chat_jid or CID_JOHNNY5_CHAT_JID.' }],
+        content: [{ type: 'text' as const, text: 'Missing target chat JID. Set target_chat_jid or ENGINEER_COMMANDER_CHAT_JID.' }],
         isError: true,
       };
     }
@@ -347,7 +347,7 @@ Behavior:
     }
 
     const body = args.include_trigger
-      ? `@johnny5-bot ${args.objective}`
+      ? `@commander ${args.objective}`
       : args.objective;
 
     emitChatMessageTo(targetChatJid, body, args.sender);
@@ -355,7 +355,7 @@ Behavior:
     return {
       content: [{
         type: 'text' as const,
-        text: `Delegated to johnny5 (${targetChatJid}).`,
+        text: `Delegated to commander (${targetChatJid}).`,
       }],
     };
   },
@@ -646,7 +646,7 @@ server.tool(
   `Set InfiniClaw brain mode for a bot profile.
 
 This updates profiles/<bot>/env in the InfiniClaw root and is intended for
-operator use from cid-bot main context.
+operator use from engineer main context.
 
 Modes:
 - anthropic: clears base URL/auth token fields and sets model
@@ -654,19 +654,11 @@ Modes:
 
 Note: bot restart is required for changes to take effect.`,
   {
-    bot: z.enum(['cid-bot', 'johnny5-bot']).describe('Bot profile to update'),
+    bot: z.enum(['engineer', 'commander']).describe('Bot profile to update'),
     mode: z.enum(['anthropic', 'ollama']).describe('Brain provider mode'),
     model: z.string().optional().describe('Optional model override for the selected mode'),
   },
   async (args) => {
-    const callerAssistant = (process.env.NANOCLAW_ASSISTANT_NAME || '').trim();
-    if (callerAssistant !== 'cid-bot') {
-      return {
-        content: [{ type: 'text' as const, text: 'Only cid-bot can change brain modes.' }],
-        isError: true,
-      };
-    }
-
     if (!isMain) {
       return {
         content: [{ type: 'text' as const, text: 'Only MAIN can change brain mode.' }],
@@ -797,6 +789,7 @@ Behavior:
       cwdResult.cwd,
     ];
     codexArgs.push('--model', effectiveModel);
+    codexArgs.push('--reasoning-effort', 'high');
     const delegatedObjective = [
       'Execution constraints:',
       '- Do NOT create Python virtual environments inside /workspace/group or /workspace/extra.',
@@ -1378,7 +1371,7 @@ The host daemon will:
 
 Use this after making code changes that require a process restart.`,
   {
-    bot: z.enum(['cid-bot', 'johnny5-bot']).default('cid-bot').describe('Which bot to restart'),
+    bot: z.enum(['engineer', 'commander']).default('engineer').describe('Which bot to restart'),
   },
   async (args) => {
     if (!isMain) {
