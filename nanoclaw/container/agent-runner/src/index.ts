@@ -92,7 +92,8 @@ const MAIN_DELEGATE_POLICY = `Main brain / lobe policy:
 - Lobe outputs are intermediate cognition. Collapse and integrate results back into one coherent MAIN response.
 - Own final quality: verify lobe outputs, correct drift, and take responsibility for final results.
 - Keep lobe control explicit: use delegate_list/delegate_status/delegate_cancel/delegate_amend to monitor and correct active runs.
-- If user asks "what are you doing" during active work, provide concrete state (completed, running, next) immediately.`;
+- If user asks "what are you doing" during active work, provide concrete state (completed, running, next) immediately.
+- Your final response text is delivered to the user automatically. Do NOT use send_message for your final answer. Use send_message only for progress updates during long tasks.`;
 
 type CapabilityState = {
   budgets: Record<string, number>;

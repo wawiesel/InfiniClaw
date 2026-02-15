@@ -1041,13 +1041,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         markProgress(chatJid, text);
         lastResponseBody = text;
         lastRunOutputAt = Date.now();
-        // Main group: agent sends messages explicitly via IPC send_message.
-        // Only relay streaming output for non-main groups.
-        if (!isMainGroup) {
-          const ch = findChannel(channels, chatJid);
-          if (ch) {
-            await ch.sendMessage(chatJid, formatMainMessage(text));
-          }
+        const ch = findChannel(channels, chatJid);
+        if (ch) {
+          await ch.sendMessage(chatJid, formatMainMessage(text));
         }
         outputSentToUser = true;
         agentResponses.push(formatMainMessage(text));
