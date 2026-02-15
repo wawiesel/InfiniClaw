@@ -39,6 +39,11 @@ fi
 load_profile_env "${BOT}"
 apply_brain_env
 
+if [[ "${CONTAINER_RUNTIME:-container}" == "podman" ]]; then
+  echo "Ensuring Podman machine is ready..."
+  ensure_podman_ready
+fi
+
 mkdir -p "${LOG_DIR}" "${RUN_DIR}"
 touch "${LOG_FILE}"
 

@@ -75,3 +75,29 @@ apply_brain_env() {
     export CLAUDE_CODE_OAUTH_TOKEN="${BRAIN_OAUTH_TOKEN}"
   fi
 }
+
+ensure_podman_ready() {
+  if ! command -v podman >/dev/null 2>&1; then
+    echo "podman not found in PATH" >&2
+    return 1
+  fi
+
+  if podman info >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Best effort: recover default machine if podman API is unavailable.
+  podman machine stop podman-machine-default >/dev/null 2>&1 || true
+  podman machine start podman-machine-default >/dev/null 2>&1 || true
+
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if podman info >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Podman API unavailable after recovery attempt." >&2
+  echo "Try: podman machine stop podman-machine-default && podman machine start podman-machine-default" >&2
+  return 1
+}
