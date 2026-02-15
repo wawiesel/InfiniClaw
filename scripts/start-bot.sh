@@ -37,6 +37,7 @@ if [[ -f "${PID_FILE}" ]]; then
 fi
 
 load_profile_env "${BOT}"
+apply_brain_env
 
 mkdir -p "${LOG_DIR}" "${RUN_DIR}"
 touch "${LOG_FILE}"
@@ -49,4 +50,5 @@ touch "${LOG_FILE}"
 
 echo "Started ${BOT} (pid $(cat "${PID_FILE}"))"
 echo "Log: ${LOG_FILE}"
-
+echo "Brain model: ${ANTHROPIC_MODEL:-<unset>}"
+echo "Brain base URL: ${ANTHROPIC_BASE_URL:-<default>}"

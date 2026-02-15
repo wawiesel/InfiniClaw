@@ -34,6 +34,22 @@ Start bots:
 ./scripts/start-all.sh
 ```
 
+## Brain LLM per bot
+
+Each bot has a single brain config section in its profile env:
+
+- `profiles/cid-bot/env`
+- `profiles/johnny5-bot/env`
+
+Set:
+
+- `BRAIN_MODEL` (required model id)
+- `BRAIN_BASE_URL` (optional backend endpoint)
+- `BRAIN_AUTH_TOKEN` / `BRAIN_API_KEY` / `BRAIN_OAUTH_TOKEN` as needed
+
+`scripts/start-bot.sh` maps these to NanoClaw runtime env (`ANTHROPIC_*` / `CLAUDE_CODE_OAUTH_TOKEN`).
+This keeps model/backend switching to one place per bot.
+
 Show status:
 
 ```bash

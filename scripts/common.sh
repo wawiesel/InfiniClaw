@@ -56,3 +56,22 @@ load_profile_env() {
   set +a
 }
 
+apply_brain_env() {
+  # Unified "brain" knobs for each bot profile.
+  # If BRAIN_* values are set, map them onto NanoClaw runtime env.
+  if [[ -n "${BRAIN_MODEL:-}" ]]; then
+    export ANTHROPIC_MODEL="${BRAIN_MODEL}"
+  fi
+  if [[ -n "${BRAIN_BASE_URL:-}" ]]; then
+    export ANTHROPIC_BASE_URL="${BRAIN_BASE_URL}"
+  fi
+  if [[ -n "${BRAIN_AUTH_TOKEN:-}" ]]; then
+    export ANTHROPIC_AUTH_TOKEN="${BRAIN_AUTH_TOKEN}"
+  fi
+  if [[ -n "${BRAIN_API_KEY:-}" ]]; then
+    export ANTHROPIC_API_KEY="${BRAIN_API_KEY}"
+  fi
+  if [[ -n "${BRAIN_OAUTH_TOKEN:-}" ]]; then
+    export CLAUDE_CODE_OAUTH_TOKEN="${BRAIN_OAUTH_TOKEN}"
+  fi
+}
