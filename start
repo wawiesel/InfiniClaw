@@ -58,6 +58,14 @@ _supervisor() {
       --exclude logs \
       "${BASE_NANOCLAW_DIR}/" "${instance_dir}/"
 
+    # Install deps if package.json changed or node_modules missing
+    if [[ ! -d "${instance_dir}/node_modules" ]] || \
+       ! diff -q "${BASE_NANOCLAW_DIR}/package-lock.json" "${instance_dir}/node_modules/.package-lock.json" >/dev/null 2>&1; then
+      echo "--- ${bot} installing dependencies ---" >> "$log_file"
+      (cd "${instance_dir}" && npm ci >> "$log_file" 2>&1)
+      cp "${instance_dir}/package-lock.json" "${instance_dir}/node_modules/.package-lock.json" 2>/dev/null || true
+    fi
+
     # Re-read profile on every restart (bot may have changed its config)
     load_profile_env "$bot"
     apply_brain_env
