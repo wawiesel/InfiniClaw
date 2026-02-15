@@ -3,3 +3,4 @@
 /run/
 /logs/
 /tmp/
+profiles/*/env

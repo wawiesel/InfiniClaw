@@ -1,3 +1,4 @@
+import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -516,6 +517,42 @@ export async function processTaskIpc(
         logger.warn({ data }, 'Invalid set_brain_mode request');
       }
       break;
+
+    case 'restart_bot': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized restart_bot attempt blocked');
+        break;
+      }
+      const root = resolveInfiniClawRoot();
+      const restartScript = path.join(root, 'scripts', 'restart-bot.sh');
+      const bot = typeof data.bot === 'string' && ['cid-bot', 'johnny5-bot'].includes(data.bot)
+        ? data.bot
+        : 'cid-bot';
+      if (!fs.existsSync(restartScript)) {
+        logger.error({ restartScript }, 'restart-bot.sh not found');
+        break;
+      }
+      logger.info({ bot }, 'Restart requested via IPC, launching detached restart script');
+      // Notify channel before restarting
+      if (typeof data.chatJid === 'string' && data.chatJid.trim().length > 0) {
+        try {
+          await deps.sendMessage(data.chatJid, `\`${bot} restarting...\``);
+        } catch {}
+      }
+      // Spawn restart script fully detached from this process tree
+      const child = spawn('bash', [restartScript, bot], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: root,
+      });
+      child.unref();
+      // Give the restart script a moment to start, then exit gracefully
+      setTimeout(() => {
+        logger.info({ bot }, 'Exiting for restart');
+        process.exit(0);
+      }, 1500);
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

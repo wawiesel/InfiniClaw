@@ -1366,6 +1366,43 @@ server.tool(
   },
 );
 
+server.tool(
+  'restart_self',
+  `Request a graceful restart of the current bot process.
+
+The host daemon will:
+1. Send a "restarting..." message to the channel
+2. Launch the restart script in a detached process
+3. Shut down gracefully
+4. The restart script starts the bot fresh
+
+Use this after making code changes that require a process restart.`,
+  {
+    bot: z.enum(['cid-bot', 'johnny5-bot']).default('cid-bot').describe('Which bot to restart'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only MAIN can trigger restarts.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'restart_bot',
+      bot: args.bot,
+      chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Restart requested for ${args.bot}. The host daemon will handle the restart.` }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

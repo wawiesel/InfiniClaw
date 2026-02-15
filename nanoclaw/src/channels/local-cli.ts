@@ -27,6 +27,14 @@ export class LocalCliChannel implements Channel {
 
   constructor(private readonly opts: LocalCliChannelOpts) {}
 
+  private formatMirrorInbound(text: string): string {
+    return `\`\`\`\n${this.senderName}: ${text}\n\`\`\``;
+  }
+
+  private formatMirrorOutbound(text: string): string {
+    return text;
+  }
+
   async connect(): Promise<void> {
     if (this.connected) return;
     if (!this.senderName || !this.senderId) {
@@ -71,7 +79,9 @@ export class LocalCliChannel implements Channel {
       };
       this.opts.onMessage(LOCAL_CHAT_JID, msg);
       if (this.opts.mirrorToMatrix) {
-        this.opts.mirrorToMatrix(`${this.senderName}: ${text}`).catch((err) => {
+        this.opts
+          .mirrorToMatrix(this.formatMirrorInbound(text))
+          .catch((err) => {
           logger.warn({ err }, 'Failed mirroring local inbound message to Matrix');
         });
       }
@@ -85,7 +95,9 @@ export class LocalCliChannel implements Channel {
     if (!this.ownsJid(jid)) return;
     process.stdout.write(`\n${text}\n\n`);
     if (this.opts.mirrorToMatrix) {
-      this.opts.mirrorToMatrix(`Terminal(Bot): ${text}`).catch((err) => {
+      this.opts
+        .mirrorToMatrix(this.formatMirrorOutbound(text))
+        .catch((err) => {
         logger.warn({ err }, 'Failed mirroring local outbound message to Matrix');
       });
     }

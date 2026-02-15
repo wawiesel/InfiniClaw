@@ -389,7 +389,7 @@ function updateMainLlm(model?: string): void {
 }
 
 function mainSender(): string {
-  return `MAIN(${MAIN_PROVIDER},${mainLlm})`;
+  return `Brain(${MAIN_PROVIDER},${mainLlm})`;
 }
 
 function defaultSenderForGroup(sourceGroup: string): string {
@@ -1002,6 +1002,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   markRunStarted(chatJid);
 
+  // Send working indicator to channel
+  if (channel) {
+    try {
+      await channel.sendMessage(chatJid, '`working...`');
+    } catch (err) {
+      logger.warn({ err, chatJid }, 'Failed to send working indicator');
+    }
+  }
+
   if (isMainGroup) {
     runProgressNudgeTimer = setInterval(() => {
       const now = Date.now();
@@ -1086,6 +1095,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
       appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
       markRunEnded(chatJid);
+      if (channel) {
+        try { await channel.sendMessage(chatJid, '`idle`'); } catch {}
+      }
       return true;
     }
     // Roll back cursor so retries can re-process these messages
@@ -1093,6 +1105,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
     markRunEnded(chatJid);
+    if (channel) {
+      try { await channel.sendMessage(chatJid, '`idle`'); } catch {}
+    }
     return false;
   }
 
@@ -1100,6 +1115,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     markCompletion(chatJid, lastResponseBody);
   }
   markRunEnded(chatJid);
+
+  // Send idle indicator to channel
+  if (channel) {
+    try {
+      await channel.sendMessage(chatJid, '`idle`');
+    } catch (err) {
+      logger.warn({ err, chatJid }, 'Failed to send idle indicator');
+    }
+  }
+
   appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
   return true;
 }
@@ -1745,6 +1770,20 @@ async function main(): Promise<void> {
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop();
+
+  // Send boot announcement once main channel is available
+  const bootAnnounceTimer = setInterval(async () => {
+    const mainJid = getMainChatJid();
+    if (!mainJid) return;
+    const ch = findChannel(channels, mainJid);
+    if (!ch) return;
+    clearInterval(bootAnnounceTimer);
+    try {
+      await ch.sendMessage(mainJid, `\`${ASSISTANT_NAME} online. ${mainSender()}\``);
+    } catch (err) {
+      logger.warn({ err }, 'Failed to send boot announcement');
+    }
+  }, 2000);
 
   setInterval(async () => {
     const mainChatJid = getMainChatJid();
