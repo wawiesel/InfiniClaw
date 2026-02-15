@@ -58,6 +58,4 @@ See [`DESIGN.md`](DESIGN.md) for architecture, boundaries, and operating model.
 
 ## Notes
 
-- Banner image path is `assets/infiniclaw-banner.png`.
-- Place the provided InfiniClaw artwork at that path.
 - `nanoclaw/` is currently a normal clone on `main` (not submodule yet).
