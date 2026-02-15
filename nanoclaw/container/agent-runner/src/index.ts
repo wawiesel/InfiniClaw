@@ -630,20 +630,22 @@ async function runQuery(
   let lastAssistantText = '';
 
   const emitProgress = (text: string): void => {
-    const normalized = text.replace(/\r/g, '').replace(/\s+/g, ' ').trim();
-    if (!normalized) return;
+    const cleaned = text.replace(/\r/g, '').trim();
+    if (!cleaned) return;
+    // Normalize whitespace only for dedup comparison
+    const dedup = cleaned.replace(/\s+/g, ' ');
     const now = Date.now();
     if (
-      normalized === lastProgressText &&
+      dedup === lastProgressText &&
       now - lastProgressAt < GENERAL_PROGRESS_DEDUPE_MS
     ) {
       return;
     }
-    lastProgressText = normalized;
+    lastProgressText = dedup;
     lastProgressAt = now;
     writeOutput({
       status: 'success',
-      result: normalized,
+      result: cleaned,
       newSessionId,
       model: activeModel,
     });
