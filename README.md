@@ -74,6 +74,11 @@ Run in tmux:
 ./scripts/tmux.sh
 ```
 
+Tmux layout:
+- `cid` window: live cid host log + latest cid container log + status panel
+- `johnny5` window: johnny5 host log
+- `controls` window: quick command reminders
+
 ## Design
 
 See [`DESIGN.md`](DESIGN.md) for architecture, boundaries, and operating model.
