@@ -55,6 +55,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
+import { readBrainMode } from './ipc.js';
 import { findChannel, formatMessages, stripInternalTags } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -695,6 +696,27 @@ function syncPersonas(): void {
 let channels: Channel[] = [];
 const queue = new GroupQueue();
 
+/**
+ * Check if outbound bot text matches the cross-bot pattern and forward it.
+ * This enables bot-to-bot communication: when a bot says "@OtherBot <msg>",
+ * the host forwards it to the other bot's room.
+ */
+async function maybeCrossBotForward(chatJid: string, text: string): Promise<void> {
+  if (!CROSS_BOT_PATTERN || !CROSS_BOT_ROOM_JID) return;
+  if (!CROSS_BOT_PATTERN.test(text.trim())) return;
+  const ch = findChannel(channels, CROSS_BOT_ROOM_JID);
+  if (!ch) return;
+  const group = registeredGroups[chatJid];
+  const sourceName = group?.name || chatJid;
+  const forwarded = `[From ${sourceName}] ${ASSISTANT_NAME}: ${text}`;
+  try {
+    await ch.sendMessage(CROSS_BOT_ROOM_JID, forwarded);
+    logger.info({ chatJid, target: CROSS_BOT_ROOM_JID }, 'Forwarded cross-bot outbound message');
+  } catch (err) {
+    logger.warn({ chatJid, err }, 'Failed to forward cross-bot outbound message');
+  }
+}
+
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
@@ -961,6 +983,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           if (ch) {
             await ch.sendMessage(chatJid, formatMainMessage(text));
           }
+          await maybeCrossBotForward(chatJid, text);
           outputSentToUser = true;
           agentResponses.push(formatMainMessage(text));
         }
@@ -1701,6 +1724,10 @@ async function main(): Promise<void> {
         role: ASSISTANT_ROLE,
         model: mainLlm,
         provider: MAIN_PROVIDER,
+        brainModes: {
+          engineer: readBrainMode('engineer'),
+          commander: readBrainMode('commander'),
+        },
         groups: Object.entries(registeredGroups).map(([jid, g]) => {
           const queueStatus = queue.getGroupStatus(jid);
           const activity = chatActivity[jid] || {};
@@ -1747,15 +1774,21 @@ async function main(): Promise<void> {
       const ch = findChannel(channels, jid);
       if (!ch) return;
       const text = stripInternalTags(rawText);
-      if (text) await ch.sendMessage(jid, formatMainMessage(text));
+      if (text) {
+        await ch.sendMessage(jid, formatMainMessage(text));
+        await maybeCrossBotForward(jid, text);
+      }
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: async (jid, text) => {
       const ch = findChannel(channels, jid);
-      if (ch) return ch.sendMessage(jid, text);
-      logger.warn({ jid }, 'No channel found for IPC message');
-      return Promise.resolve();
+      if (!ch) {
+        logger.warn({ jid }, 'No channel found for IPC message');
+        return;
+      }
+      await ch.sendMessage(jid, text);
+      await maybeCrossBotForward(jid, text);
     },
     defaultSenderForGroup,
     sendImage: (jid, buffer, filename, mimetype, caption) => {
