@@ -82,32 +82,18 @@ apply_brain_env() {
     export CLAUDE_CODE_OAUTH_TOKEN="${BRAIN_OAUTH_TOKEN}"
   fi
 
-  # Local fallback: if no explicit profile OAuth token is set, reuse
-  # the operator's local NanoClaw token from nearby .env files.
+  # Local fallback: if no explicit profile OAuth token is set,
+  # pull from macOS keychain (Claude Code stores its OAuth there).
   if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-    local candidate_envs=(
-      "${ROOT_DIR}/nanoclaw/.env"
-      "${ROOT_DIR}/../nanoclaw/.env"
-    )
-    local env_file
-    for env_file in "${candidate_envs[@]}"; do
-      if [[ -f "${env_file}" ]]; then
-        local token_line
-        token_line="$(rg -n '^CLAUDE_CODE_OAUTH_TOKEN=' "${env_file}" -N -S | head -n1 || true)"
-        if [[ -n "${token_line}" ]]; then
-          local token_value
-          token_value="${token_line#CLAUDE_CODE_OAUTH_TOKEN=}"
-          token_value="${token_value%\"}"
-          token_value="${token_value#\"}"
-          token_value="${token_value%\'}"
-          token_value="${token_value#\'}"
-          if [[ -n "${token_value}" ]]; then
-            export CLAUDE_CODE_OAUTH_TOKEN="${token_value}"
-            break
-          fi
-        fi
+    local cred_json
+    cred_json="$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)"
+    if [[ -n "${cred_json}" ]]; then
+      local token_value
+      token_value="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['claudeAiOauth']['accessToken'])" "${cred_json}" 2>/dev/null || true)"
+      if [[ -n "${token_value}" ]]; then
+        export CLAUDE_CODE_OAUTH_TOKEN="${token_value}"
       fi
-    done
+    fi
   fi
 }
 
