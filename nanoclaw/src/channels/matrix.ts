@@ -361,6 +361,8 @@ export class MatrixChannel implements Channel {
   private botUserId = MATRIX_USER_ID;
   private opts: MatrixChannelOpts;
   private lastMessageEventId = new Map<string, string>();
+  private lastBotEventId = new Map<string, string>();
+  private lastPipReactionId = new Map<string, string>();
 
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
@@ -717,7 +719,7 @@ export class MatrixChannel implements Channel {
       // Restore math placeholders
       html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
 
-      await withTimeout(
+      const eventId = await withTimeout(
         this.client.sendMessage(roomId, {
           msgtype: 'm.text',
           body: normalizedText,
@@ -727,6 +729,7 @@ export class MatrixChannel implements Channel {
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage',
       );
+      if (eventId) this.lastBotEventId.set(roomId, eventId);
     } catch (err) {
       if (this.isAuthFailure(err)) {
         this.markDisconnected('Matrix auth failed while sending message', err);
@@ -834,11 +837,12 @@ export class MatrixChannel implements Channel {
         url: mxcUrl,
         info,
       };
-      await withTimeout(
+      const imgEventId = await withTimeout(
         this.client.sendMessage(roomId, content),
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage(image)',
       );
+      if (imgEventId) this.lastBotEventId.set(roomId, imgEventId);
       if (caption && caption.trim()) {
         await this.sendMessage(jid, caption.trim());
       }
@@ -875,11 +879,12 @@ export class MatrixChannel implements Channel {
           size: buffer.length,
         },
       };
-      await withTimeout(
+      const fileEventId = await withTimeout(
         this.client.sendMessage(roomId, content),
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage(file)',
       );
+      if (fileEventId) this.lastBotEventId.set(roomId, fileEventId);
       if (caption && caption.trim()) {
         await this.sendMessage(jid, caption.trim());
       }
@@ -898,6 +903,37 @@ export class MatrixChannel implements Channel {
       await this.client.setPresenceStatus(state as any, statusMessage);
     } catch {
       // Non-critical
+    }
+  }
+
+  async setStatusPip(jid: string, emoji: string): Promise<void> {
+    if (!this.client || !this._connected) return;
+    const roomId = toRoomId(jid);
+    const targetEventId = this.lastBotEventId.get(roomId);
+    if (!targetEventId) return;
+
+    // Redact old pip
+    const oldId = this.lastPipReactionId.get(roomId);
+    if (oldId) {
+      try {
+        await withTimeout(this.client.redactEvent(roomId, oldId), MATRIX_SEND_TIMEOUT_MS, 'redactPip');
+      } catch { /* non-critical */ }
+      this.lastPipReactionId.delete(roomId);
+    }
+
+    // Add new pip
+    try {
+      const reactionId = await withTimeout(
+        this.client.sendEvent(roomId, 'm.reaction', {
+          'm.relates_to': { rel_type: 'm.annotation', event_id: targetEventId, key: emoji },
+        }),
+        MATRIX_SEND_TIMEOUT_MS,
+        'setStatusPip',
+      );
+      if (reactionId) this.lastPipReactionId.set(roomId, reactionId);
+    } catch (err) {
+      if (this.isAuthFailure(err)) this.markDisconnected('Matrix auth failed setting pip', err);
+      logger.warn({ jid, emoji, err }, 'Failed to set status pip');
     }
   }
 

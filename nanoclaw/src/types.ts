@@ -99,6 +99,8 @@ export interface Channel {
   sendReaction?(jid:string, eventId: string, emoji: string): Promise<void>;
   // Optional: set presence/status visible next to bot display name
   setPresenceStatus?(state: string, statusMessage?: string): Promise<void>;
+  // Optional: react to the bot's own last message with a status pip emoji
+  setStatusPip?(jid: string, emoji: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

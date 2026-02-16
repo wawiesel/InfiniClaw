@@ -4,7 +4,6 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  ASSISTANT_REACTION,
   ASSISTANT_ROLE,
   ASSISTANT_TRIGGER,
   CONTAINER_IMAGE,
@@ -57,6 +56,7 @@ import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { readBrainMode } from './ipc.js';
 import { findChannel, formatMessages, stripInternalTags } from './router.js';
+import { syncPersona } from './service.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -75,6 +75,8 @@ const ACTIVE_PIPE_ACK_COOLDOWN_MS = 5_000;
 const lastActivePipeAckAt: Record<string, number> = {};
 const PROGRESS_CHAT_COOLDOWN_MS = 10_000;
 const lastProgressChatAt: Record<string, number> = {};
+const PIP_PULSE = ['🔵', '🔷', '🔹', '🔷'] as const;
+const pipPulseIndex: Record<string, number> = {};
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
 const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
@@ -661,33 +663,17 @@ function buildMainMissionContext(chatJid: string): string | undefined {
 
 
 /**
- * Sync group .md files back to personas/ directory for version control.
- * Copies groups/{name}/*.md → personas/{PERSONA_NAME}/groups/{name}/
+ * Sync group .md files + skills back to personas/ directory for version control.
+ * Delegates to service.syncPersona which is the single source of truth.
  */
 function syncPersonas(): void {
   const rootDir = process.env.INFINICLAW_ROOT;
   const personaName = process.env.PERSONA_NAME;
   if (!rootDir || !personaName) return;
 
-  const personaDir = path.join(rootDir, 'bots', 'personas', personaName);
-  if (!fs.existsSync(personaDir)) return;
-
   try {
-    const groupsBase = GROUPS_DIR;
-    if (!fs.existsSync(groupsBase)) return;
-
-    for (const gname of fs.readdirSync(groupsBase)) {
-      const gdir = path.join(groupsBase, gname);
-      if (!fs.statSync(gdir).isDirectory()) continue;
-
-      for (const file of fs.readdirSync(gdir)) {
-        if (!file.endsWith('.md')) continue;
-        const dst = path.join(personaDir, 'groups', gname);
-        fs.mkdirSync(dst, { recursive: true });
-        fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
-      }
-    }
-    logger.info({ personaName }, 'Synced group memory to personas/');
+    syncPersona(rootDir, personaName);
+    logger.info({ personaName }, 'Synced group memory and skills to personas/');
   } catch (err) {
     logger.warn({ err, personaName }, 'Failed to sync personas on shutdown');
   }
@@ -922,14 +908,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   markRunStarted(chatJid);
 
-  // React to the last message to acknowledge we're working on it
-  const lastMsg = missedMessages[missedMessages.length - 1];
-  if (channel?.sendReaction && lastMsg?.id) {
-    try {
-      await channel.sendReaction(chatJid, lastMsg.id, ASSISTANT_REACTION);
-    } catch (err) {
-      logger.warn({ err, chatJid }, 'Failed to send working reaction');
-    }
+  // Set working pip on bot's last message
+  if (channel?.setStatusPip) {
+    pipPulseIndex[chatJid] = 0;
+    void channel.setStatusPip(chatJid, PIP_PULSE[0]).catch(() => {});
   }
 
   if (isMainGroup) {
@@ -975,6 +957,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               void ch.sendMessage(chatJid, formatted).catch((err) => {
                 logger.warn({ chatJid, err }, 'Failed to send progress to chat');
               });
+              // Cycle pulse pip alongside progress
+              if (ch.setStatusPip) {
+                const idx = (pipPulseIndex[chatJid] || 0) % PIP_PULSE.length;
+                pipPulseIndex[chatJid] = idx + 1;
+                void ch.setStatusPip(chatJid, PIP_PULSE[idx]).catch(() => {});
+              }
             }
           }
         } else {
@@ -1004,6 +992,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
+  // Set idle pip on bot's last message
+  if (channel?.setStatusPip) {
+    void channel.setStatusPip(chatJid, '🟢').catch(() => {});
+  }
   if (idleTimer) clearTimeout(idleTimer);
   if (runProgressNudgeTimer) clearInterval(runProgressNudgeTimer);
 
@@ -1248,12 +1240,11 @@ async function startMessageLoop(): Promise<void> {
             ) {
               const ch = findChannel(channels, chatJid);
               if (ch) {
-                const lastMessage = messagesToSend[messagesToSend.length - 1];
-                if (ch.sendReaction && lastMessage?.id) {
-                  void ch.sendReaction(chatJid, lastMessage.id, ASSISTANT_REACTION).catch((err) => {
-                    logger.warn({ chatJid, err }, 'Failed to send active-run reaction acknowledgement');
-                  });
+                // Set working pip to acknowledge piped message
+                if (ch.setStatusPip) {
+                  void ch.setStatusPip(chatJid, '🔵').catch(() => {});
                 } else {
+                  const lastMessage = messagesToSend[messagesToSend.length - 1];
                   const objective = compactMessage(lastMessage?.content || '', 120);
                   void ch.sendMessage(
                     chatJid,
@@ -1285,10 +1276,10 @@ async function startMessageLoop(): Promise<void> {
               const ch = findChannel(channels, chatJid);
               if (ch) {
                 try {
-                  const lastMessage = messagesToSend[messagesToSend.length - 1];
-                  if (ch.sendReaction && lastMessage?.id) {
-                    await ch.sendReaction(chatJid, lastMessage.id, ASSISTANT_REACTION);
+                  if (ch.setStatusPip) {
+                    await ch.setStatusPip(chatJid, '🔵');
                   } else {
+                    const lastMessage = messagesToSend[messagesToSend.length - 1];
                     const objective = compactMessage(
                       lastMessage?.content || '',
                       160,
@@ -1605,6 +1596,13 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    // Set shutdown pip on all registered groups
+    for (const [jid] of Object.entries(registeredGroups)) {
+      const ch = findChannel(channels, jid);
+      if (ch?.setStatusPip) {
+        try { await ch.setStatusPip(jid, '🔴'); } catch { /* best-effort */ }
+      }
+    }
     for (const ch of channels) {
       if (ch.setPresenceStatus) await ch.setPresenceStatus('offline', 'shutting down...');
     }

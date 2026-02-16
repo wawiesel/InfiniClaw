@@ -168,12 +168,17 @@ function matchesBlockedPattern(
 }
 
 /**
- * Check if a real path is under an allowed root
+ * Check if a real path is under an allowed root.
+ * Returns the MOST SPECIFIC (longest) matching root so that
+ * ~/foo/bar (rw) takes precedence over ~ (ro).
  */
 function findAllowedRoot(
   realPath: string,
   allowedRoots: AllowedRoot[],
 ): AllowedRoot | null {
+  let bestRoot: AllowedRoot | null = null;
+  let bestRealRoot = '';
+
   for (const root of allowedRoots) {
     const expandedRoot = expandPath(root.path);
     const realRoot = getRealPath(expandedRoot);
@@ -186,11 +191,15 @@ function findAllowedRoot(
     // Check if realPath is under realRoot
     const relative = path.relative(realRoot, realPath);
     if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
-      return root;
+      // Pick the longest (most specific) matching root
+      if (realRoot.length > bestRealRoot.length) {
+        bestRoot = root;
+        bestRealRoot = realRoot;
+      }
     }
   }
 
-  return null;
+  return bestRoot;
 }
 
 /**

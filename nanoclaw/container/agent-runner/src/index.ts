@@ -58,7 +58,7 @@ interface SDKUserMessage {
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
-const IPC_SENT_TEXTS_FILE = '/workspace/ipc/.sent_texts';
+const IPC_SENT_TEXTS_FILE = '/workspace/ipc/.sent_texts'; // Legacy — kept for file cleanup only
 const IPC_POLL_MS = 500;
 const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
 const CAPABILITY_STATE_FILE = '/workspace/cache/capability-budget-state.json';
@@ -685,8 +685,8 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Clear IPC sent texts tracker (MCP server appends to this for dedup)
-  try { fs.writeFileSync(IPC_SENT_TEXTS_FILE, ''); } catch {}
+  // Clean up legacy sent-texts file
+  try { fs.unlinkSync(IPC_SENT_TEXTS_FILE); } catch {}
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -717,8 +717,6 @@ async function runQuery(
   const lastToolProgressAt = new Map<string, number>();
   let lastProgressText = '';
   let lastProgressAt = 0;
-  let lastAssistantText = '';
-
   const emitProgress = (text: string): void => {
     const cleaned = text.replace(/\r/g, '').trim();
     if (!cleaned) return;
@@ -861,13 +859,9 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
 
-    if (message.type === 'assistant') {
-      const assistantText = extractAssistantText(message);
-      if (assistantText) {
-        lastAssistantText = assistantText;
-        emitProgress(assistantText);
-      }
-    }
+    // Assistant text is NOT emitted as progress — it arrives via the SDK's
+    // result event and gets delivered to chat by the host as the final response.
+    // Only tool-related progress is streamed.
 
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
@@ -935,25 +929,7 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      const normalizedResult = (textResult || '')
-        .replace(/\r/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      // Dedup: suppress if already sent via stdout progress or IPC status_update
-      if (normalizedResult) {
-        if (normalizedResult === lastProgressText) {
-          log('Result matches lastProgressText, suppressing');
-          writeOutput({ status: 'success', result: null, newSessionId, model: activeModel });
-          continue;
-        }
-        let ipcSentTexts: string[] = [];
-        try { ipcSentTexts = fs.readFileSync(IPC_SENT_TEXTS_FILE, 'utf-8').split('\n').filter(Boolean); } catch {}
-        if (ipcSentTexts.includes(normalizedResult)) {
-          log('Result matches IPC-sent text, suppressing');
-          writeOutput({ status: 'success', result: null, newSessionId, model: activeModel });
-          continue;
-        }
-      }
+      // Always emit the result faithfully — the host decides formatting.
       writeOutput({
         status: 'success',
         result: textResult || null,

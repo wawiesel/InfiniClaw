@@ -20,6 +20,7 @@ import {
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { saveSkillsToPersona, loadSkillsToSession } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -260,19 +261,6 @@ function quoteEnvValue(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
 
-function copyDirRecursive(src: string, dst: string): void {
-  fs.mkdirSync(dst, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const srcPath = path.join(src, entry.name);
-    const dstPath = path.join(dst, entry.name);
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, dstPath);
-    } else {
-      fs.copyFileSync(srcPath, dstPath);
-    }
-  }
-}
-
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -341,26 +329,16 @@ function buildVolumeMounts(
     }, null, 2) + '\n');
   }
 
-  // Sync skills into each group's .claude/skills/
-  // Supports skill format: {skill}/SKILL.md, {skill}/scripts/*, etc.
+  // Sync skills: save session → persona (replace), then rebuild session from shared + persona
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  const syncSkillsFrom = (src: string) => {
-    if (!fs.existsSync(src)) return;
-    for (const skillDir of fs.readdirSync(src)) {
-      const srcDir = path.join(src, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      copyDirRecursive(srcDir, path.join(skillsDst, skillDir));
-    }
-  };
-
-  // Shared skills (all bots)
-  syncSkillsFrom(path.join(process.cwd(), 'container', 'skills'));
-
-  // Persona-specific skills (override shared if same name)
   const rootDir = process.env.INFINICLAW_ROOT;
   const personaName = process.env.PERSONA_NAME;
+  const sharedSkillsSrc = path.join(process.cwd(), 'container', 'skills');
+
   if (rootDir && personaName) {
-    syncSkillsFrom(path.join(rootDir, 'bots', 'personas', personaName, 'skills'));
+    const personaSkillsDir = path.join(rootDir, 'bots', 'personas', personaName, 'skills');
+    saveSkillsToPersona(skillsDst, personaSkillsDir, sharedSkillsSrc);
+    loadSkillsToSession(skillsDst, personaSkillsDir, sharedSkillsSrc);
   }
 
   mounts.push({

@@ -1,4 +1,4 @@
-import { execFile, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -15,6 +15,12 @@ import {
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { logger } from './logger.js';
+import {
+  validateDeploy as serviceValidateDeploy,
+  deployBot as serviceDeployBot,
+  rebuildImage as serviceRebuildImage,
+  resolveRoot,
+} from './service.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -37,67 +43,43 @@ export interface IpcDeps {
 let ipcWatcherRunning = false;
 
 function resolveInfiniClawRoot(): string {
-  const explicit = process.env.INFINICLAW_ROOT?.trim();
-  if (explicit) return explicit;
-  // Fallback from instances/<bot>/nanoclaw -> repo root
-  return path.resolve(process.cwd(), '..', '..', '..');
+  return resolveRoot();
 }
 
 function validateDeploy(bot: string): Promise<{ ok: boolean; errors: string }> {
   return new Promise((resolve) => {
-    const root = resolveInfiniClawRoot();
-    const script = path.join(root, 'scripts', 'validate-deploy.sh');
-    execFile(script, [bot], { timeout: 60_000 }, (err, _stdout, stderr) => {
-      if (err) {
-        resolve({ ok: false, errors: stderr || err.message });
-      } else {
-        resolve({ ok: true, errors: '' });
-      }
-    });
+    try {
+      const result = serviceValidateDeploy(resolveRoot(), bot);
+      resolve(result);
+    } catch (err) {
+      resolve({ ok: false, errors: err instanceof Error ? err.message : String(err) });
+    }
   });
 }
 
 /** Deploy instance: save persona, rsync code, deps, build, restore persona, rebuild container image. */
 function deployInstance(bot: string): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    const root = resolveInfiniClawRoot();
-    const common = path.join(root, 'scripts', 'common.sh');
-    const baseNanoclaw = path.join(root, 'nanoclaw');
-    const instance = path.join(root, '_runtime', 'instances', bot, 'nanoclaw');
-    const buildScript = path.join(root, 'bots', 'container', 'build.sh');
-    // Source common.sh for sync_persona/restore_persona, then rsync + build + persona restore + container rebuild
-    const script = [
-      `source "${common}"`,
-      `sync_persona "${bot}"`,
-      `rsync -a --delete --exclude node_modules --exclude data --exclude store --exclude groups --exclude logs --exclude .env.local "${baseNanoclaw}/" "${instance}/"`,
-      `cd "${instance}"`,
-      `if [ ! -d node_modules ] || ! diff -q "${baseNanoclaw}/package-lock.json" node_modules/.package-lock.json >/dev/null 2>&1; then npm ci && cp package-lock.json node_modules/.package-lock.json; fi`,
-      `npm run build`,
-      `restore_persona "${bot}"`,
-      `"${buildScript}" "${bot}"`,
-    ].join(' && ');
-    execFile('bash', ['-c', script], { timeout: 600_000 }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ ok: false, output: stderr || err.message });
-      } else {
-        resolve({ ok: true, output: stdout });
-      }
-    });
+    try {
+      const root = resolveRoot();
+      serviceDeployBot(root, bot);
+      serviceRebuildImage(root, bot);
+      resolve({ ok: true, output: '' });
+    } catch (err) {
+      resolve({ ok: false, output: err instanceof Error ? err.message : String(err) });
+    }
   });
 }
 
 /** Rebuild a container image (e.g. nanoclaw-commander:latest). */
 function rebuildImage(bot: string): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    const root = resolveInfiniClawRoot();
-    const script = path.join(root, 'bots', 'container', 'build.sh');
-    execFile(script, [bot], { timeout: 600_000 }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ ok: false, output: stderr || err.message });
-      } else {
-        resolve({ ok: true, output: stdout });
-      }
-    });
+    try {
+      serviceRebuildImage(resolveRoot(), bot);
+      resolve({ ok: true, output: '' });
+    } catch (err) {
+      resolve({ ok: false, output: err instanceof Error ? err.message : String(err) });
+    }
   });
 }
 

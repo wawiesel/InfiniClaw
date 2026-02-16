@@ -1,47 +1,35 @@
 ---
 name: podman-container
-description: Build and update Podman container images for yourself and the commander. Use when adding packages, tools, or dependencies to a bot's container.
+description: Build and update container images for yourself and the commander. Use when adding packages, tools, or dependencies to a bot's container image (apt, pip, npm globals, entrypoint changes).
 ---
 
-# Podman Container Management
+# Container Image Management
 
-You own the container images for both bots. When a bot needs new packages, tools, or system dependencies, you edit its Dockerfile and rebuild.
+Edit Dockerfiles and trigger host-side rebuilds. No podman inside the container — use IPC.
 
 ## Files
 
 ```
 /workspace/extra/InfiniClaw/bots/container/
-  build.sh                    # Build script
+  build.sh                    # Build script (host-side only)
   engineer/Dockerfile         # Your image
   commander/Dockerfile        # Johnny5's image
 ```
 
-## Build commands
+## How to rebuild
 
-From inside your container, run:
+Trigger a host-side rebuild via IPC:
 
 ```bash
-# Build one
-/workspace/extra/InfiniClaw/bots/container/build.sh engineer
-/workspace/extra/InfiniClaw/bots/container/build.sh commander
-
-# Build both
-/workspace/extra/InfiniClaw/bots/container/build.sh all
+echo '{"action":"rebuild_image","bot":"engineer"}' > /workspace/ipc/tasks/rebuild-eng-$(date +%s).json
+echo '{"action":"rebuild_image","bot":"commander"}' > /workspace/ipc/tasks/rebuild-cmd-$(date +%s).json
 ```
-
-The build context is `nanoclaw/container/` — Dockerfiles can `COPY agent-runner/` from there.
 
 Images are tagged `nanoclaw-engineer:latest` and `nanoclaw-commander:latest`.
 
-## When to rebuild
-
-- Adding apt packages, pip packages, or npm global tools
-- Changing the entrypoint or build steps
-- Updating SDK patches (engineer Dockerfile has Claude Agent SDK patches)
-
-A rebuild only takes effect on the **next container spawn** — no restart needed. The host uses the latest image each time it runs a container.
+A rebuild takes effect on the **next container spawn**. To force a new spawn, restart the bot after rebuilding.
 
 ## Image philosophy
 
-- **Engineer** (you): Lean. Git, ripgrep, python3, Claude Code. No browser, no heavy tools.
-- **Commander** (Johnny5): Full-featured. Browser (Chromium), data tools (docling, tesseract), build-essential. This image grows as you observe what Johnny5 needs.
+- **Engineer** (you): Lean. Git, ripgrep, python3, Claude Code. No browser.
+- **Commander** (Johnny5): Full-featured. Browser (Chromium), data tools (docling, tesseract), build-essential. Grows as you observe what Johnny5 needs.

@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install docling for PDF-to-markdown conversion (includes OCR via pytesseract/easyocr)
-RUN pip3 install --break-system-packages docling rapidocr-onnxruntime
+RUN pip3 install --break-system-packages docling rapidocr-onnxruntime pymupdf
 
 # Fix model directory permissions for node user
 RUN chmod -R 777 /usr/local/lib/python3.11/dist-packages/rapidocr/models/ || true

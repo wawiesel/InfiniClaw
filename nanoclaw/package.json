@@ -14,7 +14,8 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "status": "tsx src/status-cli.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "cli": "node dist/cli.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",

@@ -1,22 +1,17 @@
 ---
 name: reboot
-description: Restart yourself or the commander. Full redeploy — syncs code, persona, skills, and rebuilds the container image.
+description: Restart yourself or the commander. Full redeploy — syncs code, persona, skills, rebuilds container image. Use after source changes, skill edits, CLAUDE.md updates, Dockerfile changes, or when a bot is stuck.
 ---
 
 # Reboot
 
-Use the `restart_self` MCP tool to restart bots. This is a full redeploy — not just a process restart.
+Use the `restart_self` MCP tool. This is a full redeploy — not just a process restart.
 
-## Restart yourself
-
-```
-restart_self(bot: "engineer")
-```
-
-## Restart Johnny5
+## Commands
 
 ```
-restart_self(bot: "commander")
+restart_self(bot: "engineer")    # Restart yourself
+restart_self(bot: "commander")   # Restart Johnny5
 ```
 
 ## What happens
@@ -31,12 +26,3 @@ restart_self(bot: "commander")
 8. Restart bot process via launchd
 
 Skills, CLAUDE.md changes, and container image updates all take effect after reboot.
-
-## When to use
-
-- After editing nanoclaw source (bug fixes approved by the Captain)
-- After creating or modifying skills
-- After editing CLAUDE.md files
-- After changing Dockerfiles or agent-runner code
-- After config or profile changes
-- When a bot is stuck or unresponsive
