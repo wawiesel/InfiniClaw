@@ -15,11 +15,13 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const SENT_TEXTS_FILE = path.join(IPC_DIR, '.sent_texts');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const delegateOutputJid = process.env.NANOCLAW_DELEGATE_OUTPUT_JID || chatJid;
 const DEFAULT_DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_DELEGATE_TIMEOUT_MS = 60 * 60 * 1000;
 const DELEGATE_CWD_ROOTS = ['/workspace/group', '/workspace/extra'];
@@ -107,6 +109,15 @@ function listCapabilityUsageLines(): string[] {
 }
 
 function emitChatMessage(text: string, sender?: string): void {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return;
+
+  // Dedup: skip if this exact text was already sent in this query
+  try {
+    const sentTexts = fs.readFileSync(SENT_TEXTS_FILE, 'utf-8').split('\n').filter(Boolean);
+    if (sentTexts.includes(normalized)) return;
+  } catch {}
+
   const data: Record<string, string | undefined> = {
     type: 'message',
     chatJid,
@@ -116,6 +127,8 @@ function emitChatMessage(text: string, sender?: string): void {
     timestamp: new Date().toISOString(),
   };
   writeIpcFile(MESSAGES_DIR, data);
+  // Record sent text so agent-runner can dedup result.result
+  try { fs.appendFileSync(SENT_TEXTS_FILE, normalized + '\n'); } catch {}
 }
 
 function emitChatMessageTo(chatJidTarget: string, text: string, sender?: string): void {
@@ -128,6 +141,10 @@ function emitChatMessageTo(chatJidTarget: string, text: string, sender?: string)
     timestamp: new Date().toISOString(),
   };
   writeIpcFile(MESSAGES_DIR, data);
+}
+
+function emitDelegateMessage(text: string): void {
+  emitChatMessageTo(delegateOutputJid, text);
 }
 
 function guessMimeTypeFromFilename(filename: string): string {
@@ -303,16 +320,16 @@ const server = new McpServer({
 });
 
 server.tool(
-  'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
+  'status_update',
+  "Send a short status update to the chat while you're still working. Your final response is delivered automatically — this is ONLY for brief progress indicators during long tasks. Max 60 characters. Exception: scheduled tasks may use this for results since their final output is not auto-delivered.",
   {
-    text: z.string().describe('The message text to send'),
+    text: z.string().max(60).describe('Short status text (max 60 chars, e.g. "analyzing dependencies…")'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
   },
   async (args) => {
     emitChatMessage(args.text, args.sender);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    return { content: [{ type: 'text' as const, text: 'Status sent.' }] };
   },
 );
 
@@ -445,7 +462,7 @@ If unsure which mode to use, you can ask the user. Examples:
 - "Follow up on my request" \u2192 group (needs to know what was requested)
 - "Generate a daily report" \u2192 isolated (just needs instructions in prompt)
 
-MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It can also use send_message for immediate delivery, or wrap output in <internal> tags to suppress it. Include guidance in the prompt about whether the agent should:
+MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It can also use status_update for immediate delivery, or wrap output in <internal> tags to suppress it. Include guidance in the prompt about whether the agent should:
 \u2022 Always send a message (e.g., reminders, daily briefings)
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
@@ -770,13 +787,13 @@ Behavior:
 
     // Emit the lobe header and objective in one message
     const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-    emitChatMessage(headerAndObjective);
+    emitDelegateMessage(headerAndObjective);
 
     const cwdResult = resolveDelegateCwd(args.cwd);
     if (!cwdResult.ok) {
       const unavailable = `unavailable: ${cwdResult.error}`;
       const redText = `<font color="#cc0000">${unavailable}</font>`;
-      emitChatMessage(redText);
+      emitDelegateMessage(redText);
       return {
         content: [{ type: 'text' as const, text: `codex: ${unavailable}` }],
         isError: true,
@@ -839,7 +856,7 @@ Behavior:
         prefixedMessages.push(`codex: ${normalized}`);
         // Wrap lobe output in light grey
         const greyText = `<font color="#888888">${normalized}</font>`;
-        emitChatMessage(greyText);
+        emitDelegateMessage(greyText);
       };
 
       const failUnavailable = (reason: string) => {
@@ -905,7 +922,7 @@ Behavior:
         const reason = err instanceof Error ? err.message : String(err);
         const unavailable = `unavailable: ${reason}`;
         const redText = `<font color="#cc0000">${unavailable}</font>`;
-        emitChatMessage(redText);
+        emitDelegateMessage(redText);
         finalize({
           content: [{ type: 'text', text: `codex: ${unavailable}` }],
           isError: true,
@@ -1037,13 +1054,13 @@ Behavior:
 
     // Emit the lobe header and objective in one message
     const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-    emitChatMessage(headerAndObjective);
+    emitDelegateMessage(headerAndObjective);
 
     const cwdResult = resolveDelegateCwd(args.cwd);
     if (!cwdResult.ok) {
       const unavailable = `unavailable: ${cwdResult.error}`;
       const redText = `<font color="#cc0000">${unavailable}</font>`;
-      emitChatMessage(redText);
+      emitDelegateMessage(redText);
       return {
         content: [{ type: 'text' as const, text: `gemini: ${unavailable}` }],
         isError: true,
@@ -1104,7 +1121,7 @@ Behavior:
         prefixedMessages.push(`gemini: ${normalized}`);
         // Wrap lobe output in light grey
         const greyText = `<font color="#888888">${normalized}</font>`;
-        emitChatMessage(greyText);
+        emitDelegateMessage(greyText);
       };
 
       const failUnavailable = (reason: string) => {
@@ -1145,7 +1162,7 @@ Behavior:
         const reason = err instanceof Error ? err.message : String(err);
         const unavailable = `unavailable: ${reason}`;
         const redText = `<font color="#cc0000">${unavailable}</font>`;
-        emitChatMessage(redText);
+        emitDelegateMessage(redText);
         finalize({
           content: [{ type: 'text', text: `gemini: ${unavailable}` }],
           isError: true,
@@ -1275,7 +1292,7 @@ Behavior:
 
     // Emit the lobe header and objective in one message
     const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-    emitChatMessage(headerAndObjective);
+    emitDelegateMessage(headerAndObjective);
 
     const timeoutMs = Math.max(
       1000,
@@ -1303,7 +1320,7 @@ Behavior:
         const text = await res.text();
         const unavailable = `unavailable: Ollama error (${res.status}): ${text}`;
         const redText = `<font color="#cc0000">${unavailable}</font>`;
-        emitChatMessage(redText);
+        emitDelegateMessage(redText);
         return {
           content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
           isError: true,
@@ -1320,7 +1337,7 @@ Behavior:
       if (!responseText) {
         const doneText = 'completed with no textual output.';
         const greyText = `<font color="#888888">${doneText}</font>`;
-        emitChatMessage(greyText);
+        emitDelegateMessage(greyText);
         return {
           content: [{ type: 'text' as const, text: `ollama: ${doneText}` }],
         };
@@ -1328,14 +1345,14 @@ Behavior:
 
       // Wrap lobe output in light grey
       const greyText = `<font color="#888888">${responseText}</font>`;
-      emitChatMessage(greyText);
+      emitDelegateMessage(greyText);
       return {
         content: [{ type: 'text' as const, text: `ollama: ${responseText}` }],
       };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       const unavailable = `unavailable: ${reason}`;
-      emitChatMessage(unavailable);
+      emitDelegateMessage(unavailable);
       return {
         content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
         isError: true,

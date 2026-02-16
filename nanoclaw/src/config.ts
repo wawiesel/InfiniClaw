@@ -1,8 +1,10 @@
 import path from 'path';
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
+export const ASSISTANT_ROLE = process.env.ASSISTANT_ROLE!;
 export const ASSISTANT_TRIGGER =
   process.env.ASSISTANT_TRIGGER || ASSISTANT_NAME;
+export const ASSISTANT_REACTION = process.env.ASSISTANT_REACTION || '👍';
 export const POLL_INTERVAL = Math.max(
   100,
   parseInt(process.env.POLL_INTERVAL || '250', 10) || 250,

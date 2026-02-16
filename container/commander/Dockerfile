@@ -33,10 +33,12 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    tesseract-ocr \
+    tesseract-ocr-eng \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install docling for PDF-to-markdown conversion
+# Install docling for PDF-to-markdown conversion (includes OCR via pytesseract/easyocr)
 RUN pip3 install --break-system-packages docling
 
 # Set Chromium path for agent-browser

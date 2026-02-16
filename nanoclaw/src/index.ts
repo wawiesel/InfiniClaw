@@ -4,6 +4,8 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  ASSISTANT_REACTION,
+  ASSISTANT_ROLE,
   ASSISTANT_TRIGGER,
   CONTAINER_IMAGE,
   DATA_DIR,
@@ -384,7 +386,7 @@ function updateMainLlm(model?: string): void {
 
 function mainSender(): string {
   const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
-  const role = process.env.ASSISTANT_ROLE!;
+  const role = ASSISTANT_ROLE;
   return `<font color="#888888">🧠 ${role} <em>(${providerName}/${mainLlm})</em></font>`;
 }
 
@@ -530,6 +532,17 @@ function isIgnoredTrigger(text: string): boolean {
   if (IGNORE_PATTERNS.length === 0) return false;
   const trimmed = text.trim();
   return IGNORE_PATTERNS.some((p) => p.test(trimmed));
+}
+
+/** Returns true if the message should be ignored (other bot output). */
+function shouldIgnoreMessage(msg: NewMessage): boolean {
+  if (IGNORE_SENDERS.size > 0 && IGNORE_SENDERS.has(msg.sender)) {
+    return true;
+  }
+  if (isIgnoredTrigger(msg.content.trim())) {
+    return true;
+  }
+  return false;
 }
 
 function compactMessage(text: string, maxLen = 220): string | undefined {
@@ -796,32 +809,47 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (allMissed.length === 0) return true;
   const missedMessages = allMissed;
 
-  // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
-    const hasTrigger = missedMessages.some((m) =>
-      TRIGGER_PATTERN.test(m.content.trim()),
-    );
-    if (!hasTrigger) return true;
+  // Filter out other-bot noise; everything else gets processed
+  const filteredMessages = missedMessages.filter((msg) => !shouldIgnoreMessage(msg));
+  if (filteredMessages.length === 0) return true;
+
+  // Route-to-main: redirect linked group messages to the main container
+  if (group.routeToMain && !isMainGroup) {
+    const mainJid = getMainChatJid();
+    if (mainJid) {
+      const labeled = filteredMessages.map((m) => ({
+        ...m,
+        sender_name: `[${group.name}] ${m.sender_name}`,
+      }));
+      const formatted = formatMessages(labeled);
+      if (queue.sendMessage(mainJid, formatted)) {
+        logger.debug({ chatJid, mainJid, count: labeled.length }, 'Routed linked group messages to main container (recovery)');
+      } else {
+        queue.enqueueMessageCheck(mainJid);
+      }
+      lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+      saveState();
+      return true;
+    }
   }
 
-  setObjectiveFromMessages(chatJid, missedMessages);
+  setObjectiveFromMessages(chatJid, filteredMessages);
 
-  const basePrompt = formatMessages(missedMessages);
+  const basePrompt = formatMessages(filteredMessages);
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
   const prompt = missionContext
     ? `${missionContext}\n\n${basePrompt}`
     : basePrompt;
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
+  // Advance cursor past ALL messages (including ignored) so we don't reprocess
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    { group: group.name, messageCount: filteredMessages.length },
     'Processing messages',
   );
 
@@ -848,12 +876,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   markRunStarted(chatJid);
 
-  // Send working indicator
-  if (channel) {
+  // React to the last message to acknowledge we're working on it
+  const lastMsg = missedMessages[missedMessages.length - 1];
+  if (channel?.sendReaction && lastMsg?.id) {
     try {
-      await channel.sendMessage(chatJid, '🔧 `working...`');
+      await channel.sendReaction(chatJid, lastMsg.id, ASSISTANT_REACTION);
     } catch (err) {
-      logger.warn({ err, chatJid }, 'Failed to send working indicator');
+      logger.warn({ err, chatJid }, 'Failed to send working reaction');
     }
   }
 
@@ -882,17 +911,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        markProgress(chatJid, text);
-        lastResponseBody = text;
         lastRunOutputAt = Date.now();
-        const ch = findChannel(channels, chatJid);
-        if (ch) {
-          await ch.sendMessage(chatJid, formatMainMessage(text));
+        if (result.isProgress) {
+          // Progress-only: track internally but don't send to chat
+          // (delegate progress is already delivered via IPC)
+          markProgress(chatJid, text);
+        } else {
+          // Final result: deliver to chat
+          markProgress(chatJid, text);
+          lastResponseBody = text;
+          const ch = findChannel(channels, chatJid);
+          if (ch) {
+            await ch.sendMessage(chatJid, formatMainMessage(text));
+          }
+          outputSentToUser = true;
+          agentResponses.push(formatMainMessage(text));
         }
-        outputSentToUser = true;
-        agentResponses.push(formatMainMessage(text));
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -1029,6 +1064,7 @@ async function runAgent(
         sessionId,
         groupFolder: group.folder,
         chatJid,
+        delegateOutputJid: getMainChatJid() || chatJid,
         isMain,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -1102,27 +1138,42 @@ async function startMessageLoop(): Promise<void> {
           if (!group) continue;
 
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
-            const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
-            );
-            if (!hasTrigger) continue;
+          // Filter out other-bot noise; everything else gets processed
+          const filtered = groupMessages.filter((msg) => !shouldIgnoreMessage(msg));
+          if (filtered.length === 0) continue;
+
+          // --- Route-to-main: pipe linked group messages into the main container ---
+          if (group.routeToMain && !isMainGroup) {
+            const mainJid = getMainChatJid();
+            if (mainJid) {
+              // Format with group name so the agent knows where messages came from
+              const labeled = filtered.map((m) => ({
+                ...m,
+                sender_name: `[${group.name}] ${m.sender_name}`,
+              }));
+              const formatted = formatMessages(labeled);
+              // Pipe into main container if active, otherwise enqueue for main
+              if (queue.sendMessage(mainJid, formatted)) {
+                logger.debug({ chatJid, mainJid, count: labeled.length }, 'Routed linked group messages to main container');
+              } else {
+                queue.enqueueMessageCheck(mainJid);
+              }
+              // Advance cursor for this group so we don't reprocess
+              lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
+              saveState();
+              continue;
+            }
           }
 
-          // Pull all messages since lastAgentTimestamp so context
-          // that accumulated between triggers is included.
+          // Pull all messages since lastAgentTimestamp so context is included
           const allPending = getMessagesSince(
             chatJid,
             lastAgentTimestamp[chatJid] || '',
             ASSISTANT_NAME,
-          );
+          ).filter((msg) => !shouldIgnoreMessage(msg));
           const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
+            allPending.length > 0 ? allPending : filtered;
 
           setObjectiveFromMessages(chatJid, messagesToSend);
           const formatted = formatMessages(messagesToSend);
@@ -1141,7 +1192,7 @@ async function startMessageLoop(): Promise<void> {
               if (ch) {
                 const lastMessage = messagesToSend[messagesToSend.length - 1];
                 if (ch.sendReaction && lastMessage?.id) {
-                  void ch.sendReaction(chatJid, lastMessage.id, '👍').catch((err) => {
+                  void ch.sendReaction(chatJid, lastMessage.id, ASSISTANT_REACTION).catch((err) => {
                     logger.warn({ chatJid, err }, 'Failed to send active-run reaction acknowledgement');
                   });
                 } else {
@@ -1177,7 +1228,7 @@ async function startMessageLoop(): Promise<void> {
                 try {
                   const lastMessage = messagesToSend[messagesToSend.length - 1];
                   if (ch.sendReaction && lastMessage?.id) {
-                    await ch.sendReaction(chatJid, lastMessage.id, '👍');
+                    await ch.sendReaction(chatJid, lastMessage.id, ASSISTANT_REACTION);
                   } else {
                     const objective = compactMessage(
                       lastMessage?.content || '',
@@ -1641,37 +1692,15 @@ async function main(): Promise<void> {
   injectResumeMessage();
   startMessageLoop();
 
-  // Send boot announcement once main channel is available (debounced to avoid duplicates on rapid restarts)
+  // Send boot announcement once main channel is available
   const bootAnnounceTimer = setInterval(async () => {
     const mainJid = getMainChatJid();
     if (!mainJid) return;
     const ch = findChannel(channels, mainJid);
     if (!ch) return;
     clearInterval(bootAnnounceTimer);
-    // Debounce: skip if another instance announced within last 30s
-    const bootFile = path.join(DATA_DIR, '.last-boot-announce');
-    try {
-      if (fs.existsSync(bootFile)) {
-        const lastBoot = parseInt(fs.readFileSync(bootFile, 'utf-8').trim(), 10);
-        if (Date.now() - lastBoot < 30_000) {
-          logger.info('Skipping boot announcement (recent restart)');
-          return;
-        }
-      }
-    } catch { /* ignore */ }
-    try {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-      fs.writeFileSync(bootFile, String(Date.now()));
-    } catch { /* ignore */ }
     try {
       await ch.sendMessage(mainJid, `✅ <font color="#00cc00">online.</font>\n\n${mainSender()}`);
-
-      // Check for pending messages and resume processing immediately
-      const snapshot = queue.getGroupStatus(mainJid);
-      if (snapshot.pendingTasks > 0) {
-        logger.info({ pendingTasks: snapshot.pendingTasks }, 'Resuming with pending tasks after boot');
-        // The main processing loop will pick these up automatically
-      }
     } catch (err) {
       logger.warn({ err }, 'Failed to send boot announcement');
     }

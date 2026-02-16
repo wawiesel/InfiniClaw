@@ -55,7 +55,7 @@ Status messages use the format: `<emoji> <text>` where text color matches the em
 | Restarting | `⭕️ restarting...` |
 | Working | `🔧 working...` |
 
-Don't use send_message for your final answer — it is delivered automatically. Use send_message only for progress updates during long tasks.
+Don't use status_update for your final answer — it is delivered automatically. Use status_update only for brief progress indicators during long tasks (max 60 chars).
 
 ## Deploy Validation
 

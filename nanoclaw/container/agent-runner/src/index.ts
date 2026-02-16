@@ -24,6 +24,7 @@ interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  delegateOutputJid?: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
@@ -32,6 +33,7 @@ interface ContainerInput {
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
+  isProgress?: boolean;
   newSessionId?: string;
   model?: string;
   error?: string;
@@ -57,6 +59,7 @@ interface SDKUserMessage {
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+const IPC_SENT_TEXTS_FILE = '/workspace/ipc/.sent_texts';
 const IPC_POLL_MS = 500;
 const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
 const CAPABILITY_STATE_FILE = '/workspace/cache/capability-budget-state.json';
@@ -93,7 +96,7 @@ const MAIN_DELEGATE_POLICY = `Main brain / lobe policy:
 - Own final quality: verify lobe outputs, correct drift, and take responsibility for final results.
 - Keep lobe control explicit: use delegate_list/delegate_status/delegate_cancel/delegate_amend to monitor and correct active runs.
 - If user asks "what are you doing" during active work, provide concrete state (completed, running, next) immediately.
-- Your final response text is delivered to the user automatically. Do NOT use send_message for your final answer. Use send_message only for progress updates during long tasks.`;
+- Your final response text is delivered to the user automatically. Do NOT use status_update for your final answer. Use status_update only for brief progress indicators during long tasks (max 60 chars).`;
 
 type CapabilityState = {
   budgets: Record<string, number>;
@@ -598,6 +601,9 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt);
 
+  // Clear IPC sent texts tracker (MCP server appends to this for dedup)
+  try { fs.writeFileSync(IPC_SENT_TEXTS_FILE, ''); } catch {}
+
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
   let closedDuringQuery = false;
@@ -646,6 +652,7 @@ async function runQuery(
     writeOutput({
       status: 'success',
       result: cleaned,
+      isProgress: true,
       newSessionId,
       model: activeModel,
     });
@@ -717,6 +724,9 @@ async function runQuery(
               NANOCLAW_CHAT_JID: containerInput.chatJid,
               NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
               NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+              ...(containerInput.delegateOutputJid
+                ? { NANOCLAW_DELEGATE_OUTPUT_JID: containerInput.delegateOutputJid }
+                : {}),
               ...(sdkEnv.ASSISTANT_NAME
                 ? { NANOCLAW_ASSISTANT_NAME: sdkEnv.ASSISTANT_NAME }
                 : {}),
@@ -774,9 +784,8 @@ async function runQuery(
 
     if (message.type === 'assistant') {
       const assistantText = extractAssistantText(message);
-      if (assistantText && assistantText !== lastAssistantText) {
+      if (assistantText) {
         lastAssistantText = assistantText;
-        emitProgress(assistantText);
       }
     }
 
@@ -850,14 +859,20 @@ async function runQuery(
         .replace(/\r/g, '')
         .replace(/\s+/g, ' ')
         .trim();
-      if (normalizedResult && normalizedResult === lastProgressText) {
-        writeOutput({
-          status: 'success',
-          result: null,
-          newSessionId,
-          model: activeModel,
-        });
-        continue;
+      // Dedup: suppress if already sent via stdout progress or IPC status_update
+      if (normalizedResult) {
+        if (normalizedResult === lastProgressText) {
+          log('Result matches lastProgressText, suppressing');
+          writeOutput({ status: 'success', result: null, newSessionId, model: activeModel });
+          continue;
+        }
+        let ipcSentTexts: string[] = [];
+        try { ipcSentTexts = fs.readFileSync(IPC_SENT_TEXTS_FILE, 'utf-8').split('\n').filter(Boolean); } catch {}
+        if (ipcSentTexts.includes(normalizedResult)) {
+          log('Result matches IPC-sent text, suppressing');
+          writeOutput({ status: 'success', result: null, newSessionId, model: activeModel });
+          continue;
+        }
       }
       writeOutput({
         status: 'success',

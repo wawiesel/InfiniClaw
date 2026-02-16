@@ -41,6 +41,7 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
+  delegateOutputJid?: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
@@ -49,6 +50,7 @@ export interface ContainerInput {
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
+  isProgress?: boolean;
   newSessionId?: string;
   model?: string;
   error?: string;

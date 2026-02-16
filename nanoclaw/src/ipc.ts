@@ -6,6 +6,7 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   ASSISTANT_NAME,
+  ASSISTANT_ROLE,
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
@@ -284,9 +285,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(tasksDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
               fs.unlinkSync(filePath);
+              await processTaskIpc(data, sourceGroup, isMain, deps);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
@@ -334,6 +334,7 @@ export async function processTaskIpc(
     folder?: string;
     trigger?: string;
     requiresTrigger?: boolean;
+    routeToMain?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
   },
   sourceGroup: string, // Verified identity from IPC directory
@@ -530,6 +531,7 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
+          routeToMain: data.routeToMain,
         });
       } else {
         logger.warn(
@@ -595,34 +597,31 @@ export async function processTaskIpc(
         break;
       }
       // Determine if this is a self-restart or cross-bot restart
-      const selfBot = ASSISTANT_NAME.trim().toLowerCase() === 'j5' ? 'commander' : 'engineer';
+      const selfBot = ASSISTANT_ROLE.toLowerCase();
       if (bot === selfBot) {
-        logger.info({ bot }, 'Deploy validation passed — self-restarting');
-        // Debounced restart message — only send if no restart in last 30s
-        if (chatJid) {
-          const restartFile = path.join(DATA_DIR, '.last-restart-announce');
-          let shouldAnnounce = true;
-          try {
-            if (fs.existsSync(restartFile)) {
-              const last = parseInt(fs.readFileSync(restartFile, 'utf-8').trim(), 10);
-              if (Date.now() - last < 30_000) shouldAnnounce = false;
-            }
-          } catch { /* ignore */ }
-          if (shouldAnnounce) {
+        logger.info({ bot }, 'Deploy validation passed — deploying to self then restarting');
+        const deploy = await deployInstance(bot);
+        if (!deploy.ok) {
+          logger.error({ bot, output: deploy.output }, 'Self-deploy failed — aborting restart');
+          if (chatJid) {
             try {
-              fs.mkdirSync(DATA_DIR, { recursive: true });
-              fs.writeFileSync(restartFile, String(Date.now()));
-              await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
+              const trimmed = deploy.output.length > 3000 ? deploy.output.slice(-3000) : deploy.output;
+              await deps.sendMessage(chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${trimmed}\n\`\`\``);
             } catch {}
           }
+          break;
         }
-        // Exit gracefully — launchd/supervisor will restart us
+        if (chatJid) {
+          try {
+            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
+          } catch {}
+        }
+        // Exit gracefully — launchd will restart with the newly deployed code
         setTimeout(() => {
           process.exit(0);
         }, 500);
       } else {
         // Cross-bot: sync code, build, then restart via launchctl
-        // Status messages go to logs only — no chat noise in the originating room
         logger.info({ bot }, 'Deploy validation passed — deploying instance');
         const deploy = await deployInstance(bot);
         if (!deploy.ok) {
@@ -630,6 +629,11 @@ export async function processTaskIpc(
           break;
         }
         logger.info({ bot }, 'Instance deployed — restarting via launchctl');
+        if (chatJid) {
+          try {
+            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
+          } catch {}
+        }
         try {
           const uid = execSync('id -u').toString().trim();
           execSync(`launchctl kickstart -k gui/${uid}/com.infiniclaw.${bot}`, { timeout: 10_000 });
