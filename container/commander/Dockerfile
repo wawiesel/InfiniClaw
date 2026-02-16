@@ -6,6 +6,7 @@ FROM node:22-slim
 
 # System dependencies: browser, dev tools, data tools
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     chromium \
     fonts-liberation \
     fonts-noto-color-emoji \
@@ -32,7 +33,11 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Install docling for PDF-to-markdown conversion
+RUN pip3 install --break-system-packages docling
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

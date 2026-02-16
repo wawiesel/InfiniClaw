@@ -64,7 +64,7 @@ function deployInstance(bot: string): Promise<{ ok: boolean; output: string }> {
     const instance = path.join(root, 'instances', bot, 'nanoclaw');
     // Run sync + deps + build as a single shell sequence
     const script = [
-      `rsync -a --delete --exclude node_modules --exclude data --exclude store --exclude groups --exclude logs "${baseNanoclaw}/" "${instance}/"`,
+      `rsync -a --delete --exclude node_modules --exclude data --exclude store --exclude groups --exclude logs --exclude .env.local "${baseNanoclaw}/" "${instance}/"`,
       `cd "${instance}"`,
       `if [ ! -d node_modules ] || ! diff -q "${baseNanoclaw}/package-lock.json" node_modules/.package-lock.json >/dev/null 2>&1; then npm ci && cp package-lock.json node_modules/.package-lock.json; fi`,
       `npm run build`,
@@ -598,10 +598,23 @@ export async function processTaskIpc(
       const selfBot = ASSISTANT_NAME.trim().toLowerCase() === 'j5' ? 'commander' : 'engineer';
       if (bot === selfBot) {
         logger.info({ bot }, 'Deploy validation passed — self-restarting');
+        // Debounced restart message — only send if no restart in last 30s
         if (chatJid) {
+          const restartFile = path.join(DATA_DIR, '.last-restart-announce');
+          let shouldAnnounce = true;
           try {
-            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
-          } catch {}
+            if (fs.existsSync(restartFile)) {
+              const last = parseInt(fs.readFileSync(restartFile, 'utf-8').trim(), 10);
+              if (Date.now() - last < 30_000) shouldAnnounce = false;
+            }
+          } catch { /* ignore */ }
+          if (shouldAnnounce) {
+            try {
+              fs.mkdirSync(DATA_DIR, { recursive: true });
+              fs.writeFileSync(restartFile, String(Date.now()));
+              await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
+            } catch {}
+          }
         }
         // Exit gracefully — launchd/supervisor will restart us
         setTimeout(() => {
@@ -609,19 +622,11 @@ export async function processTaskIpc(
         }, 500);
       } else {
         // Cross-bot: sync code, build, then restart via launchctl
+        // Status messages go to logs only — no chat noise in the originating room
         logger.info({ bot }, 'Deploy validation passed — deploying instance');
-        if (chatJid) {
-          try { await deps.sendMessage(chatJid, `🔧 deploying ${bot}...`); } catch {}
-        }
         const deploy = await deployInstance(bot);
         if (!deploy.ok) {
           logger.error({ bot, output: deploy.output }, 'Instance deploy failed');
-          if (chatJid) {
-            try {
-              const trimmed = deploy.output.length > 3000 ? deploy.output.slice(-3000) : deploy.output;
-              await deps.sendMessage(chatJid, `⛔ deploy failed for ${bot}:\n\n\`\`\`\n${trimmed}\n\`\`\``);
-            } catch {}
-          }
           break;
         }
         logger.info({ bot }, 'Instance deployed — restarting via launchctl');
@@ -629,16 +634,8 @@ export async function processTaskIpc(
           const uid = execSync('id -u').toString().trim();
           execSync(`launchctl kickstart -k gui/${uid}/com.infiniclaw.${bot}`, { timeout: 10_000 });
           logger.info({ bot }, 'Cross-bot restart succeeded');
-          if (chatJid) {
-            try { await deps.sendMessage(chatJid, `✅ ${bot} deployed and restarted`); } catch {}
-          }
         } catch (err) {
           logger.error({ bot, err }, 'Cross-bot restart via launchctl failed');
-          if (chatJid) {
-            try {
-              await deps.sendMessage(chatJid, `⛔ failed to restart ${bot}: ${err instanceof Error ? err.message : String(err)}`);
-            } catch {}
-          }
         }
       }
       break;

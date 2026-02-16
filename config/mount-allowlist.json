@@ -1,14 +1,9 @@
 {
   "allowedRoots": [
     {
-      "path": "~/",
-      "allowReadWrite": false,
-      "description": "Home directories (read-only by default)"
-    },
-    {
       "path": "~/_vault",
       "allowReadWrite": true,
-      "description": "Vault — read-write workspace for J5"
+      "description": "Vault — Johnny5's read-write workspace"
     },
     {
       "path": "~/2026-Nanoclaw/InfiniClaw",
@@ -16,18 +11,6 @@
       "description": "InfiniClaw repo — Cid's workspace"
     }
   ],
-  "blockedPatterns": [
-    ".config",
-    ".local",
-    ".npm",
-    ".nvm",
-    ".cargo",
-    ".rustup",
-    ".cache",
-    ".Trash",
-    ".zsh_history",
-    ".bash_history",
-    "Library"
-  ],
+  "blockedPatterns": [".*"],
   "nonMainReadOnly": false
 }

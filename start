@@ -82,6 +82,12 @@ start_bot() {
         <string>${ASSISTANT_NAME:-}</string>
         <key>ASSISTANT_TRIGGER</key>
         <string>${ASSISTANT_TRIGGER:-}</string>
+        <key>ASSISTANT_ROLE</key>
+        <string>${ASSISTANT_ROLE:-}</string>
+        <key>IGNORE_TRIGGERS</key>
+        <string>${IGNORE_TRIGGERS:-}</string>
+        <key>IGNORE_SENDERS</key>
+        <string>${IGNORE_SENDERS:-}</string>
         <key>MATRIX_HOMESERVER</key>
         <string>${MATRIX_HOMESERVER:-}</string>
         <key>MATRIX_ACCESS_TOKEN</key>

@@ -22,6 +22,8 @@ import {
   MEMORY_CHECK_INTERVAL,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
+  IGNORE_PATTERNS,
+  IGNORE_SENDERS,
 } from './config.js';
 import { MatrixChannel } from './channels/matrix.js';
 import { LocalCliChannel } from './channels/local-cli.js';
@@ -389,9 +391,8 @@ function updateMainLlm(model?: string): void {
 }
 
 function mainSender(): string {
-  // Format: 🧠 Engineer (Provider/model) in light grey
   const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
-  const role = "Engineer"; // TODO: Could make this configurable via env var
+  const role = process.env.ASSISTANT_ROLE!;
   return `<font color="#888888">🧠 ${role} <em>(${providerName}/${mainLlm})</em></font>`;
 }
 
@@ -452,7 +453,7 @@ function ensureGroupForIncomingChat(
         folder: deriveFolderFromChatJid(chatJid),
         trigger: defaultTrigger,
         added_at: addedAt,
-        requiresTrigger: localDirectMode ? false : true,
+        requiresTrigger: false,
       }
     : {
         name,
@@ -539,6 +540,13 @@ function ensureChatActivity(chatJid: string): ChatActivity {
     }
   }
   return chatActivity[chatJid];
+}
+
+/** Returns true if the message is addressed to another bot and should be ignored. */
+function isIgnoredTrigger(text: string): boolean {
+  if (IGNORE_PATTERNS.length === 0) return false;
+  const trimmed = text.trim();
+  return IGNORE_PATTERNS.some((p) => p.test(trimmed));
 }
 
 function compactMessage(text: string, maxLen = 220): string | undefined {
@@ -635,64 +643,32 @@ function formatDuration(ms: number): string {
   return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
 }
 
-function statusTextForChat(chatJid: string, includeTodoReminder: boolean): string {
+function statusTextForChat(chatJid: string): string {
   const snapshot = queue.getGroupStatus(chatJid);
   const runtimeActive = hasRuntimeActiveGroupRun(chatJid);
   const activity = ensureChatActivity(chatJid);
   const now = Date.now();
 
   if (snapshot.active || runtimeActive) {
-    const parts: string[] = ['status: active run.'];
-    if (activity.runStartedAt) {
-      parts.push(`elapsed: ${formatDuration(now - activity.runStartedAt)}.`);
-    }
-    if (activity.currentObjective) {
-      parts.push(`objective: ${activity.currentObjective}.`);
-    }
-    if (activity.lastProgress) {
-      const age = activity.lastProgressAt
-        ? formatDuration(now - activity.lastProgressAt)
-        : 'unknown';
-      parts.push(`latest: ${activity.lastProgress} (${age} ago).`);
-    } else if (activity.runStartedAt && now - activity.runStartedAt >= STATUS_NUDGE_STALE_MS) {
-      parts.push('latest: no output yet; run is still active.');
-    }
-    if (snapshot.pendingTasks > 0) {
-      parts.push(
-        `queued tasks: ${snapshot.pendingTasks}.`,
-      );
-    }
-    return parts.join(' ');
+    const elapsed = activity.runStartedAt
+      ? ` (${formatDuration(now - activity.runStartedAt)})`
+      : '';
+    const queued = snapshot.pendingTasks > 0
+      ? `, ${snapshot.pendingTasks} queued`
+      : '';
+    return `active${elapsed}${queued}`;
   }
 
   if (snapshot.pendingMessages || snapshot.pendingTasks > 0 || snapshot.waitingForSlot) {
-    const parts = ['status: queued and waiting for execution slot.'];
-    if (activity.currentObjective) {
-      parts.push(`next objective: ${activity.currentObjective}.`);
-    }
-    if (snapshot.pendingTasks > 0) {
-      parts.push(`queued tasks: ${snapshot.pendingTasks}.`);
-    }
-    return parts.join(' ');
+    const queued = snapshot.pendingTasks > 0
+      ? ` (${snapshot.pendingTasks} tasks)`
+      : '';
+    return `queued${queued}`;
   }
 
-  const idleParts: string[] = ['status: idle.'];
-  if (activity.lastCompletion) {
-    const age = activity.lastCompletionAt
-      ? formatDuration(now - activity.lastCompletionAt)
-      : 'unknown';
-    idleParts.push(`last completion ${age} ago: ${activity.lastCompletion}.`);
-  }
-  if (activity.lastError) {
-    const age = activity.lastErrorAt
-      ? formatDuration(now - activity.lastErrorAt)
-      : 'unknown';
-    idleParts.push(`last error ${age} ago: ${activity.lastError}.`);
-  }
-  if (includeTodoReminder && chatJid === getMainChatJid()) {
-    idleParts.push('next step: pick the highest-priority pending item from groups/global/CLAUDE.md.');
-  }
-  return idleParts.join(' ');
+  const lastAt = activity.lastCompletionAt || activity.lastErrorAt;
+  const ago = lastAt ? ` — last activity ${formatDuration(now - lastAt)} ago` : '';
+  return `idle${ago}`;
 }
 
 function maybeNudgeActiveRunForStatus(chatJid: string): boolean {
@@ -777,20 +753,21 @@ function hasRuntimeActiveGroupRun(chatJid: string): boolean {
   }
 }
 
-function heartbeatTextForChat(chatJid: string, includeTodoReminder = false): string {
+function heartbeatTextForChat(chatJid: string): string {
   const healthy = channels.length > 0 && runtimeHealthy();
-  return healthy
-    ? `heartbeat: online. ${statusTextForChat(chatJid, includeTodoReminder)}`
-    : `heartbeat: degraded. check runtime/channel health, then continue from groups/global/CLAUDE.md.`;
+  if (!healthy) return '🕐 degraded — check runtime/channel health.';
+  const uptime = formatDuration(process.uptime() * 1000);
+  const heapMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+  return `🕐 ${statusTextForChat(chatJid)} · uptime ${uptime} · heap ${heapMB}MB`;
 }
 
-async function sendHeartbeat(chatJid: string, includeTodoReminder = false): Promise<void> {
+async function sendHeartbeat(chatJid: string): Promise<void> {
   const ch = findChannel(channels, chatJid);
   if (!ch) return;
   try {
     await ch.sendMessage(
       chatJid,
-      formatMainMessage(heartbeatTextForChat(chatJid, includeTodoReminder)),
+      formatMainMessage(heartbeatTextForChat(chatJid)),
     );
   } catch (err) {
     logger.warn({ err, chatJid }, 'Failed to send heartbeat');
@@ -945,13 +922,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(
+  const allMissed = getMessagesSince(
     chatJid,
     sinceTimestamp,
     ASSISTANT_NAME,
   );
 
-  if (missedMessages.length === 0) return true;
+  if (allMissed.length === 0) return true;
+  const missedMessages = allMissed;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
@@ -1005,7 +983,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   markRunStarted(chatJid);
 
-  // Send working indicator to channel
+  // Send working indicator
   if (channel) {
     try {
       await channel.sendMessage(chatJid, '🔧 `working...`');
@@ -1271,8 +1249,8 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
-          // context that accumulated between triggers is included.
+          // Pull all messages since lastAgentTimestamp so context
+          // that accumulated between triggers is included.
           const allPending = getMessagesSince(
             chatJid,
             lastAgentTimestamp[chatJid] || '',
@@ -1289,7 +1267,7 @@ async function startMessageLoop(): Promise<void> {
           const hasStatusRequest = statusMessages.length > 0;
 
           if (hasHeartbeatRequest) {
-            await sendHeartbeat(chatJid, true);
+            await sendHeartbeat(chatJid);
           }
 
           if (hasStatusRequest) {
@@ -1300,7 +1278,7 @@ async function startMessageLoop(): Promise<void> {
                 await ch.sendMessage(
                   chatJid,
                   formatMainMessage(
-                    `observed ${statusTextForChat(chatJid, true)}${nudged ? ' requested a live check-in from the active run.' : ''}`,
+                    `${statusTextForChat(chatJid)}${nudged ? ' — checking in with active run.' : ''}`,
                   ),
                 );
               } catch (err) {
@@ -1433,12 +1411,25 @@ function recoverPendingMessages(): void {
 /**
  * After any restart, inject a synthetic message into the main chat
  * so the agent re-enters the conversation instead of sitting idle.
+ * Only injects if there are real pending messages to resume from.
  */
 function injectResumeMessage(): void {
   const mainJid = Object.entries(registeredGroups).find(
     ([, g]) => g.folder === MAIN_GROUP_FOLDER,
   )?.[0];
   if (!mainJid) return;
+
+  // Only inject if there are real pending messages — otherwise the bot
+  // just responds "Done. Idle." which triggers a nudge feedback loop.
+  const pending = getMessagesSince(
+    mainJid,
+    lastAgentTimestamp[mainJid] || '',
+    ASSISTANT_NAME,
+  );
+  if (pending.length === 0) {
+    logger.info({ mainJid }, 'No pending messages after restart — skipping resume injection');
+    return;
+  }
 
   storeMessage({
     id: `resume-${Date.now()}`,
@@ -1450,7 +1441,7 @@ function injectResumeMessage(): void {
     timestamp: new Date().toISOString(),
   });
   queue.enqueueMessageCheck(mainJid);
-  logger.info({ mainJid }, 'Injected resume message after restart');
+  logger.info({ mainJid, pendingCount: pending.length }, 'Injected resume message after restart');
 }
 
 type PodmanMachineListEntry = {
@@ -1610,7 +1601,9 @@ function cleanupOrphanedPodmanContainers(): void {
       if (Array.isArray(c.Names)) return c.Names;
       return c.Names ? [c.Names] : [];
     });
-    const orphans = names.filter((n) => n.startsWith('nanoclaw-'));
+    const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ownPrefix = `nanoclaw-${botTag}-`;
+    const orphans = names.filter((n) => n.startsWith(ownPrefix));
     for (const name of orphans) {
       try {
         execSync(`podman stop -t 1 ${name}`, { stdio: 'pipe' });
@@ -1656,6 +1649,25 @@ async function ensureContainerSystemRunning(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Load supplemental env from .env.local (for vars not in launchd plist)
+  const envLocalPath = path.join(process.cwd(), '.env.local');
+  if (fs.existsSync(envLocalPath)) {
+    for (const line of fs.readFileSync(envLocalPath, 'utf-8').split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx < 1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      const val = trimmed.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+      if (!process.env[key]) process.env[key] = val;
+    }
+  }
+  // Ensure common tool paths are available (launchd provides minimal PATH)
+  for (const p of ['/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin']) {
+    if (!(process.env.PATH || '').includes(p)) {
+      process.env.PATH = `${p}:${process.env.PATH || ''}`;
+    }
+  }
   await ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -1682,7 +1694,10 @@ async function main(): Promise<void> {
         ensureGroupForIncomingChat(msg.chat_jid, msg.chat_name);
         storeMessage(msg);
       },
-      onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
+      onChatMetadata: (chatJid, timestamp, name) => {
+        ensureGroupForIncomingChat(chatJid, name);
+        storeChatMetadata(chatJid, timestamp, name);
+      },
       registeredGroups: () => registeredGroups,
     });
   }
@@ -1807,13 +1822,28 @@ async function main(): Promise<void> {
   injectResumeMessage();
   startMessageLoop();
 
-  // Send boot announcement once main channel is available
+  // Send boot announcement once main channel is available (debounced to avoid duplicates on rapid restarts)
   const bootAnnounceTimer = setInterval(async () => {
     const mainJid = getMainChatJid();
     if (!mainJid) return;
     const ch = findChannel(channels, mainJid);
     if (!ch) return;
     clearInterval(bootAnnounceTimer);
+    // Debounce: skip if another instance announced within last 30s
+    const bootFile = path.join(DATA_DIR, '.last-boot-announce');
+    try {
+      if (fs.existsSync(bootFile)) {
+        const lastBoot = parseInt(fs.readFileSync(bootFile, 'utf-8').trim(), 10);
+        if (Date.now() - lastBoot < 30_000) {
+          logger.info('Skipping boot announcement (recent restart)');
+          return;
+        }
+      }
+    } catch { /* ignore */ }
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(bootFile, String(Date.now()));
+    } catch { /* ignore */ }
     try {
       await ch.sendMessage(mainJid, `✅ <font color="#00cc00">online.</font>\n\n${mainSender()}`);
 
@@ -1838,7 +1868,7 @@ async function main(): Promise<void> {
       (!snapshot.active && !hasRuntimeActiveGroupRun(mainChatJid)) &&
       (snapshot.pendingMessages || snapshot.pendingTasks > 0 || snapshot.waitingForSlot);
     if (!shouldHeartbeat) return;
-    await sendHeartbeat(mainChatJid, false);
+    await sendHeartbeat(mainChatJid);
   }, HEARTBEAT_INTERVAL_MS);
 }
 

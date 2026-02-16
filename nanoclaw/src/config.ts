@@ -66,8 +66,23 @@ function escapeRegex(str: string): string {
 }
 
 export const TRIGGER_PATTERN = new RegExp(
-  `^@${escapeRegex(ASSISTANT_TRIGGER)}\\b`,
+  `^@?${escapeRegex(ASSISTANT_TRIGGER)}\\b`,
   'i',
+);
+
+// Other bot triggers to ignore (comma-separated, e.g. "@Cid,@OtherBot")
+const ignoreTriggerStr = (process.env.IGNORE_TRIGGERS || '').trim();
+export const IGNORE_PATTERNS: RegExp[] = ignoreTriggerStr
+  ? ignoreTriggerStr.split(',').map((t) => {
+      const cleaned = t.trim().replace(/^@/, '');
+      return new RegExp(`^@?${escapeRegex(cleaned)}\\b`, 'i');
+    })
+  : [];
+
+// Senders to ignore entirely (comma-separated Matrix user IDs, e.g. "@cidolfus-bot:matrix.org")
+const ignoreSendersStr = (process.env.IGNORE_SENDERS || '').trim();
+export const IGNORE_SENDERS: Set<string> = new Set(
+  ignoreSendersStr ? ignoreSendersStr.split(',').map((s) => s.trim()).filter(Boolean) : [],
 );
 
 // Matrix channel configuration

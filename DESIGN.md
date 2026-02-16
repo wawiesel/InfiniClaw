@@ -6,29 +6,32 @@ InfiniClaw is a multi-bot orchestration layer built on top of a maintained NanoC
 It provides two cooperating bots on a shared Matrix room called the Bridge:
 
 - `engineer` aka **Cid** — chief engineer, infra + operations + lifecycle control
-- `commander` aka **J5** — right-hand commander, takes orders and executes tasks
+- `commander` aka **Johnny5** — right-hand commander, takes orders and executes tasks
 
-The operator (Picard/God) gives orders to J5 on the Bridge. Cid watches autonomously from the Bridge, only responding when addressed directly with `@Cid`. Cid can proactively improve J5's code and restart him based on what he observes.
+The operator (Captain) gives orders to Johnny5 on the Bridge. Cid watches autonomously from the Bridge, only responding when addressed directly with `@Cid`. Cid can proactively improve Johnny5's code and restart him based on what he observes.
 
 ## Roles
 
-### Operator (Picard)
+### Operator (Captain)
 - Gives orders on the Bridge
-- Addresses J5 directly for task execution
+- Addresses Johnny5 directly for task execution
 - Addresses Cid with `@Cid` for infrastructure work
 
-### Commander — J5 (`@J5`)
-- Takes orders on the Bridge
+### Commander — Johnny5 (`@Johnny5`)
+- Takes orders on the Bridge — responds to everything except `@Cid` callouts
+- The Bridge is Johnny5's main room (`requiresTrigger: false`)
+- Sees ALL messages (no code-level filtering) — decides what to respond to via CLAUDE.md
 - Executes tasks in his workspace/container
 - Cannot modify his own code — requests changes from Cid
-- Containers get `~/` read-only and `~/_vault` read-write (no dotfiles)
-- Does NOT have InfiniClaw mounted in his containers
+- Only `~/_vault` is mounted (read-write). No home directory, no dotfiles, no InfiniClaw.
 
 ### Engineer — Cid (`@Cid`)
 - Watches the Bridge autonomously for opportunities to improve
 - Only responds on the Bridge when addressed with `@Cid`
-- Works in his own channel (Engineering room), reporting progress there
-- Can modify and restart J5 to improve him
+- Bridge responses must be brief (1-2 sentences): acknowledge and say "working in Engineering"
+- All detailed work, code, logs, analysis goes in the Engineering room
+- Posts a short summary back to the Bridge when done
+- Can modify and restart Johnny5to improve him
 - Manages infrastructure, builds, and deployments
 - Containers get InfiniClaw mounted read-write
 
@@ -48,8 +51,8 @@ The operator (Picard/God) gives orders to J5 on the Bridge. Cid watches autonomo
 - Bot state is isolated per instance under `./instances`.
 
 4. Explicit ownership and boundaries
-- Cid can manage container/runtime and may patch J5's code.
-- J5 does not perform container lifecycle operations or modify his own code.
+- Cid can manage container/runtime and may patch Johnny5'scode.
+- Johnny5does not perform container lifecycle operations or modify his own code.
 
 ## Architecture
 
@@ -74,26 +77,33 @@ The operator (Picard/God) gives orders to J5 on the Bridge. Cid watches autonomo
   - Commander containers: `nanoclaw-commander:latest` (full-featured, grows over time)
 
 - Shared Matrix room (the Bridge) receives commands for both bots:
-  - `@J5 ...` — commander takes the order
-  - `@Cid ...` — engineer responds
+  - Any message → Johnny5 sees it (his main room, no trigger required)
+  - Johnny5 decides via CLAUDE.md whether to respond (ignores @Cid callouts)
+  - `@Cid ...` or `Cid: ...` → Cid responds (trigger pattern matches with or without `@`)
+  - All bots see all messages — no code-level filtering
+  - Rooms auto-register on first message (first room becomes `main`)
 
 ### Container images
 
 | Image | Bot | Purpose |
 |-------|-----|---------|
 | `nanoclaw-engineer:latest` | Cid | Lean — git, ripgrep, Claude Code. No browser. |
-| `nanoclaw-commander:latest` | J5 | Full — browser, Python, build tools. Grows as needed. |
+| `nanoclaw-commander:latest` | Johnny5| Full — browser, Python, build tools. Grows as needed. |
 
-Cid autonomously monitors J5's Bridge interactions and adds dependencies to `nanoclaw-commander` as needed.
+Cid autonomously monitors Johnny5'sBridge interactions and adds dependencies to `nanoclaw-commander` as needed.
 
 ### Container mount policy
 
-| Bot | Mount | Access |
-|-----|-------|--------|
-| Cid | `~/2026-Nanoclaw/InfiniClaw` | read-write |
-| J5 | `~/` (non-dotfile dirs) | read-only |
-| J5 | `~/_vault` | read-write |
-| J5 | InfiniClaw | **not mounted** |
+| Bot | Mount | Container path | Access |
+|-----|-------|---------------|--------|
+| Cid | `/home/2026-Nanoclaw/InfiniClaw` | `/workspace/extra/InfiniClaw` | read-write |
+| Johnny5 | `/home/_vault` | `/workspace/extra/home/_vault` | read-write |
+
+**Hard rules:**
+- No home directory mount (`~/`). Only specific subdirectories.
+- No dotfiles/dotdirs (`~/.ssh`, `~/.config`, etc.) ever accessible from containers.
+- Johnny5 has NO access to InfiniClaw code.
+- Cid has NO access to the Captain's home directory beyond InfiniClaw.
 
 Mount security is enforced by `~/.config/nanoclaw/mount-allowlist.json` (host-side, tamper-proof from containers).
 
@@ -108,7 +118,7 @@ Mac Host (launchd)
 │   └── Can restart commander via IPC (restart_bot)
 │
 ├── com.infiniclaw.commander → node instances/commander/nanoclaw/dist/index.js
-│   ├── Connects to Matrix as @johnny5-bot (J5)
+│   ├── Connects to Matrix as @johnny5-bot (Johnny5)
 │   ├── Takes orders on the Bridge
 │   └── Spawns nanoclaw-commander containers for tasks
 │
@@ -124,17 +134,17 @@ InfiniClaw/
   start                       # Sync, build, install launchd, start both bots
   stop                        # Unload launchd, stop containers
   chat-engineer               # Interactive terminal chat with Cid
-  chat-commander              # Interactive terminal chat with J5
+  chat-commander              # Interactive terminal chat with Johnny5
   nanoclaw/                   # NanoClaw fork (planned submodule)
   profiles/
     engineer/env              # Cid's env config
-    commander/env             # J5's env config
+    commander/env             # Johnny5'senv config
   instances/
     engineer/nanoclaw/        # Cid's runtime instance (synced from nanoclaw/)
-    commander/nanoclaw/       # J5's runtime instance (synced from nanoclaw/)
+    commander/nanoclaw/       # Johnny5'sruntime instance (synced from nanoclaw/)
   container/
     engineer/Dockerfile       # Lean agent image for Cid
-    commander/Dockerfile      # Full agent image for J5
+    commander/Dockerfile      # Full agent image for Johnny5
     build.sh                  # Build one or both container images
   config/
     mount-allowlist.json      # Template for ~/.config/nanoclaw/
@@ -160,7 +170,7 @@ InfiniClaw/
 ### Interactive chat
 
 - `./chat-engineer` — terminal chat with Cid (mirrors to Matrix)
-- `./chat-commander` — terminal chat with J5 (mirrors to Matrix)
+- `./chat-commander` — terminal chat with Johnny5(mirrors to Matrix)
 
 ### IPC commands (from engineer agent containers)
 
@@ -173,13 +183,13 @@ InfiniClaw/
 
 ### Commander deployment (Cid's workflow)
 
-Cid can deploy changes to J5 without operator intervention:
+Cid can deploy changes to Johnny5without operator intervention:
 
 1. **Code changes**: Edit `nanoclaw/src/`, then IPC `restart_bot` with `bot: "commander"`.
    The host process syncs code, builds TS, and restarts commander via launchctl.
 
 2. **Container image changes**: Edit `container/commander/Dockerfile`, then IPC `rebuild_image`
-   with `bot: "commander"`. Next time J5 spawns an agent container, it uses the new image.
+   with `bot: "commander"`. Next time Johnny5spawns an agent container, it uses the new image.
 
 3. **Both**: `rebuild_image` first, then `restart_bot`.
 
@@ -187,7 +197,7 @@ Cid can deploy changes to J5 without operator intervention:
 
 Cid can modify his own code in `nanoclaw/src/` and call `restart_bot` with `bot: "engineer"`.
 The host validates TS compilation before exiting — if validation fails, Cid stays running and
-gets the errors in chat. This is intentionally friction-heavy; most changes should target J5.
+gets the errors in chat. This is intentionally friction-heavy; most changes should target Johnny5.
 
 ## What belongs where
 
@@ -221,7 +231,7 @@ Keep:
 - Runtime secrets sourced from env and local secure stores.
 - `data/` and `instances/` excluded from version control.
 - Mount allowlist stored outside project root (tamper-proof from containers).
-- J5 cannot access InfiniClaw code from inside containers.
+- Johnny5cannot access InfiniClaw code from inside containers.
 - Least-privilege execution by role.
 
 ## Change management
