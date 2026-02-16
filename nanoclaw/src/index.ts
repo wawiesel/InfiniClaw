@@ -68,13 +68,6 @@ const QUEUED_ACK_COOLDOWN_MS = 30_000;
 const lastQueuedAckAt: Record<string, number> = {};
 const ACTIVE_PIPE_ACK_COOLDOWN_MS = 5_000;
 const lastActivePipeAckAt: Record<string, number> = {};
-const STATUS_REQUEST_PATTERN = /\b(progress|status|report)\b/i;
-const ACTIVITY_STATUS_PATTERN =
-  /\b(what are you doing|what are you working on|what's happening|whats happening|where are you at|how's it going|hows it going)\b/i;
-const HEARTBEAT_ONLY_PATTERN = /^(?:@[^\s]+\s+)?(?:ping|heartbeat|hello|hi|hey|are you there|check[-\s]?in)\b[\s!?.,:;]*$/i;
-const HEARTBEAT_INTERVAL_MS = 15 * 60 * 1000;
-const STATUS_NUDGE_STALE_MS = 45_000;
-const STATUS_NUDGE_COOLDOWN_MS = 90_000;
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
 const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
@@ -97,7 +90,6 @@ interface ChatActivity {
 }
 
 const chatActivity: Record<string, ChatActivity> = {};
-const lastStatusNudgeAt: Record<string, number> = {};
 const CHAT_ACTIVITY_STATE_PREFIX = 'chat_activity:';
 
 function firstSet(...values: Array<string | undefined>): string | undefined {
@@ -517,15 +509,6 @@ function persistChatActivity(chatJid: string): void {
   }
 }
 
-function isStatusProbe(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  return (
-    STATUS_REQUEST_PATTERN.test(trimmed) ||
-    ACTIVITY_STATUS_PATTERN.test(trimmed)
-  );
-}
-
 function ensureChatActivity(chatJid: string): ChatActivity {
   if (!chatActivity[chatJid]) {
     const persisted = getRouterState(chatActivityStateKey(chatJid));
@@ -583,8 +566,6 @@ function setObjectiveFromMessages(chatJid: string, messages: NewMessage[]): void
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const content = messages[i].content.trim();
     if (!content) continue;
-    if (isStatusProbe(content)) continue;
-    if (HEARTBEAT_ONLY_PATTERN.test(content)) continue;
     recordUserContext(chatJid, content);
     setCurrentObjective(chatJid, content);
     return;
@@ -630,68 +611,6 @@ function markError(chatJid: string, error: string): void {
   persistChatActivity(chatJid);
 }
 
-function formatDuration(ms: number): string {
-  const seconds = Math.max(1, Math.floor(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remMinutes = minutes % 60;
-  if (hours < 24) return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`;
-  const days = Math.floor(hours / 24);
-  const remHours = hours % 24;
-  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
-}
-
-function statusTextForChat(chatJid: string): string {
-  const snapshot = queue.getGroupStatus(chatJid);
-  const runtimeActive = hasRuntimeActiveGroupRun(chatJid);
-  const activity = ensureChatActivity(chatJid);
-  const now = Date.now();
-
-  if (snapshot.active || runtimeActive) {
-    const elapsed = activity.runStartedAt
-      ? ` (${formatDuration(now - activity.runStartedAt)})`
-      : '';
-    const queued = snapshot.pendingTasks > 0
-      ? `, ${snapshot.pendingTasks} queued`
-      : '';
-    return `active${elapsed}${queued}`;
-  }
-
-  if (snapshot.pendingMessages || snapshot.pendingTasks > 0 || snapshot.waitingForSlot) {
-    const queued = snapshot.pendingTasks > 0
-      ? ` (${snapshot.pendingTasks} tasks)`
-      : '';
-    return `queued${queued}`;
-  }
-
-  const lastAt = activity.lastCompletionAt || activity.lastErrorAt;
-  const ago = lastAt ? ` — last activity ${formatDuration(now - lastAt)} ago` : '';
-  return `idle${ago}`;
-}
-
-function maybeNudgeActiveRunForStatus(chatJid: string): boolean {
-  const snapshot = queue.getGroupStatus(chatJid);
-  if (!snapshot.active) return false;
-
-  const activity = ensureChatActivity(chatJid);
-  const now = Date.now();
-  const lastProgressAt = activity.lastProgressAt || activity.runStartedAt || 0;
-  if (!lastProgressAt || now - lastProgressAt < STATUS_NUDGE_STALE_MS) return false;
-
-  const lastNudgeAt = lastStatusNudgeAt[chatJid] || 0;
-  if (now - lastNudgeAt < STATUS_NUDGE_COOLDOWN_MS) return false;
-
-  const nudge =
-    'Status check requested by user. Reply now with a concise concrete progress update: what is done, what is running, and next step.';
-  if (!queue.sendMessage(chatJid, nudge)) return false;
-
-  lastStatusNudgeAt[chatJid] = now;
-  logger.info({ chatJid }, 'Sent status nudge to active run');
-  return true;
-}
-
 function buildMainMissionContext(chatJid: string): string | undefined {
   const activity = ensureChatActivity(chatJid);
   const lines: string[] = [];
@@ -719,60 +638,6 @@ function buildMainMissionContext(chatJid: string): string | undefined {
   ].join('\n');
 }
 
-function runtimeHealthy(): boolean {
-  return canReachPodmanApi();
-}
-
-function hasRuntimeActiveGroupRun(chatJid: string): boolean {
-  const group = registeredGroups[chatJid];
-  if (!group) return false;
-
-  const safeFolder = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const prefix = `nanoclaw-${safeFolder}-`;
-
-  try {
-    const output = execSync('podman ps --format json', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const parsed: unknown = JSON.parse(output || '[]');
-    if (!Array.isArray(parsed)) return false;
-    return parsed.some((entry) => {
-      if (!entry || typeof entry !== 'object') return false;
-      const record = entry as Record<string, unknown>;
-      const namesRaw = record.Names ?? record.Name;
-      const names = Array.isArray(namesRaw)
-        ? namesRaw.filter((n): n is string => typeof n === 'string')
-        : typeof namesRaw === 'string'
-          ? [namesRaw]
-          : [];
-      return names.some((n) => n.startsWith(prefix));
-    });
-  } catch {
-    return false;
-  }
-}
-
-function heartbeatTextForChat(chatJid: string): string {
-  const healthy = channels.length > 0 && runtimeHealthy();
-  if (!healthy) return '🕐 degraded — check runtime/channel health.';
-  const uptime = formatDuration(process.uptime() * 1000);
-  const heapMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
-  return `🕐 ${statusTextForChat(chatJid)} · uptime ${uptime} · heap ${heapMB}MB`;
-}
-
-async function sendHeartbeat(chatJid: string): Promise<void> {
-  const ch = findChannel(channels, chatJid);
-  if (!ch) return;
-  try {
-    await ch.sendMessage(
-      chatJid,
-      formatMainMessage(heartbeatTextForChat(chatJid)),
-    );
-  } catch (err) {
-    logger.warn({ err, chatJid }, 'Failed to send heartbeat');
-  }
-}
 
 let channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -1258,59 +1123,13 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const statusMessages = messagesToSend.filter((m) =>
-            isStatusProbe(m.content),
-          );
-          const hasHeartbeatRequest = messagesToSend.some((m) =>
-            HEARTBEAT_ONLY_PATTERN.test(m.content.trim()),
-          );
-          const hasStatusRequest = statusMessages.length > 0;
 
-          if (hasHeartbeatRequest) {
-            await sendHeartbeat(chatJid);
-          }
-
-          if (hasStatusRequest) {
-            const ch = findChannel(channels, chatJid);
-            if (ch) {
-              try {
-                const nudged = maybeNudgeActiveRunForStatus(chatJid);
-                await ch.sendMessage(
-                  chatJid,
-                  formatMainMessage(
-                    `${statusTextForChat(chatJid)}${nudged ? ' — checking in with active run.' : ''}`,
-                  ),
-                );
-              } catch (err) {
-                logger.warn(
-                  { chatJid, err },
-                  'Failed to send observed status acknowledgement',
-                );
-              }
-            }
-          }
-
-          const nonProbeMessages = messagesToSend.filter(
-            (m) =>
-              !isStatusProbe(m.content) &&
-              !HEARTBEAT_ONLY_PATTERN.test(m.content.trim()),
-          );
-
-          // Probe-only prompts are answered by observed state/heartbeat and should not
-          // be piped into active runs.
-          if (nonProbeMessages.length === 0) {
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            continue;
-          }
-
-          setObjectiveFromMessages(chatJid, nonProbeMessages);
-          const formatted = formatMessages(nonProbeMessages);
+          setObjectiveFromMessages(chatJid, messagesToSend);
+          const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
-              { chatJid, count: nonProbeMessages.length },
+              { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
             const now = Date.now();
@@ -1320,7 +1139,7 @@ async function startMessageLoop(): Promise<void> {
             ) {
               const ch = findChannel(channels, chatJid);
               if (ch) {
-                const lastMessage = nonProbeMessages[nonProbeMessages.length - 1];
+                const lastMessage = messagesToSend[messagesToSend.length - 1];
                 if (ch.sendReaction && lastMessage?.id) {
                   void ch.sendReaction(chatJid, lastMessage.id, '👍').catch((err) => {
                     logger.warn({ chatJid, err }, 'Failed to send active-run reaction acknowledgement');
@@ -1356,7 +1175,7 @@ async function startMessageLoop(): Promise<void> {
               const ch = findChannel(channels, chatJid);
               if (ch) {
                 try {
-                  const lastMessage = nonProbeMessages[nonProbeMessages.length - 1];
+                  const lastMessage = messagesToSend[messagesToSend.length - 1];
                   if (ch.sendReaction && lastMessage?.id) {
                     await ch.sendReaction(chatJid, lastMessage.id, '👍');
                   } else {
@@ -1858,18 +1677,6 @@ async function main(): Promise<void> {
     }
   }, 2000);
 
-  setInterval(async () => {
-    const mainChatJid = getMainChatJid();
-    if (!mainChatJid) return;
-    const snapshot = queue.getGroupStatus(mainChatJid);
-    // Only send periodic heartbeats when queued/waiting, not during active runs.
-    // Active runs send their own progress via IPC send_message.
-    const shouldHeartbeat =
-      (!snapshot.active && !hasRuntimeActiveGroupRun(mainChatJid)) &&
-      (snapshot.pendingMessages || snapshot.pendingTasks > 0 || snapshot.waitingForSlot);
-    if (!shouldHeartbeat) return;
-    await sendHeartbeat(mainChatJid);
-  }, HEARTBEAT_INTERVAL_MS);
 }
 
 // Guard: only run when executed directly, not when imported by tests
