@@ -107,29 +107,6 @@ function listCapabilityUsageLines(): string[] {
   });
 }
 
-function emitChatMessage(text: string, sender?: string): void {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (!normalized) return;
-
-  // Dedup: skip if this exact text was already sent in this query
-  try {
-    const sentTexts = fs.readFileSync(SENT_TEXTS_FILE, 'utf-8').split('\n').filter(Boolean);
-    if (sentTexts.includes(normalized)) return;
-  } catch {}
-
-  const data: Record<string, string | undefined> = {
-    type: 'message',
-    chatJid,
-    text,
-    sender: sender || undefined,
-    groupFolder,
-    timestamp: new Date().toISOString(),
-  };
-  writeIpcFile(MESSAGES_DIR, data);
-  // Record sent text so agent-runner can dedup result.result
-  try { fs.appendFileSync(SENT_TEXTS_FILE, normalized + '\n'); } catch {}
-}
-
 function emitChatMessageTo(chatJidTarget: string, text: string, sender?: string): void {
   const data: Record<string, string | undefined> = {
     type: 'message',
@@ -317,20 +294,6 @@ const server = new McpServer({
   name: 'nanoclaw',
   version: '1.0.0',
 });
-
-server.tool(
-  'status_update',
-  "Send a short status update to the chat while you're still working. Your final response is delivered automatically — this is ONLY for brief progress indicators during long tasks. Max 60 characters. Exception: scheduled tasks may use this for results since their final output is not auto-delivered.",
-  {
-    text: z.string().max(60).describe('Short status text (max 60 chars, e.g. "analyzing dependencies…")'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
-  },
-  async (args) => {
-    emitChatMessage(args.text, args.sender);
-
-    return { content: [{ type: 'text' as const, text: 'Status sent.' }] };
-  },
-);
 
 server.tool(
   'send_image',

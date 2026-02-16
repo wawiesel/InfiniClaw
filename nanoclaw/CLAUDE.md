@@ -68,7 +68,7 @@ Status messages use the format: `<emoji> <text>` where text color matches the em
 | Restarting | `⭕️ restarting...` |
 | Working | `🔧 working...` |
 
-Don't use status_update for your final answer — it is delivered automatically. Use status_update only for brief progress indicators during long tasks (max 60 chars).
+Your final response text is automatically delivered to chat by the host.
 
 ## Deploy Validation
 
