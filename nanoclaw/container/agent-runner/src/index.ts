@@ -99,7 +99,7 @@ const MAIN_DELEGATE_POLICY = `Main brain / lobe policy:
 - Own final quality: verify lobe outputs, correct drift, and take responsibility for final results.
 - Keep lobe control explicit: use delegate_list/delegate_status/delegate_cancel/delegate_amend to monitor and correct active runs.
 - If user asks "what are you doing" during active work, provide concrete state (completed, running, next) immediately.
-- Your final response text is delivered to the user automatically. Do NOT use status_update for your final answer. Use status_update only for brief progress indicators during long tasks (max 60 chars).`;
+- Your final response text is delivered to the user automatically by the host.`;
 
 type CapabilityState = {
   budgets: Record<string, number>;

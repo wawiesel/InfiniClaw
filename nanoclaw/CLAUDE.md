@@ -68,8 +68,6 @@ Status messages use the format: `<emoji> <text>` where text color matches the em
 | Restarting | `⭕️ restarting...` |
 | Working | `🔧 working...` |
 
-Your final response text is automatically delivered to chat by the host.
-
 ## Deploy Validation
 
 When `restart_self` is called, the host stages your code to `staging/{bot}/` and runs `tsc --noEmit` before restarting. If compilation fails, the bot stays running and errors are sent to chat. Fix the errors and call `restart_self` again.

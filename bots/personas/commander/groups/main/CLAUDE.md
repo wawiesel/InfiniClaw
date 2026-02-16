@@ -26,7 +26,6 @@ Cid may forward messages to you. Read them and act if relevant.
 
 ## Response style
 
-- **One message per response.** No running commentary or status updates.
 - Be concise. Deliver results, not narration.
 
 ## What NOT to do
