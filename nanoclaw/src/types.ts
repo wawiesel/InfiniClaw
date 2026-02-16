@@ -95,6 +95,8 @@ export interface Channel {
   // Telegram bots already display their name, so they return false.
   // WhatsApp returns true. Default true if not implemented.
   prefixAssistantName?: boolean;
+  // Optional: reaction to a message to acknowledge receipt
+  sendReaction?(jid:string, eventId: string, emoji: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

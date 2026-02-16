@@ -693,13 +693,34 @@ export class MatrixChannel implements Channel {
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);
+    const normalizedText = normalizeSenderPrefixForMarkdown(text);
     try {
-      const html = await marked(text, { breaks: true, gfm: true });
+      // Strategy: Extract math to protect it, apply markdown, then restore math
+      const mathTokens: string[] = [];
+      const mathPlaceholder = (html: string): string => {
+        const idx = mathTokens.push(html) - 1;
+        return `@@MATH_${idx}@@`;
+      };
+
+      // Extract inline and display math before markdown processing
+      let working = normalizedText;
+      working = working.replace(/\$\$([^\$]+)\$\$/g, (_m, latex) => {
+        return mathPlaceholder(`<div data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></div>`);
+      });
+      working = working.replace(/\$([^\$\n]+)\$/g, (_m, latex) => {
+        return mathPlaceholder(`<span data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></span>`);
+      });
+
+      // Apply markdown
+      let html = await marked(working, { breaks: true, gfm: true });
+
+      // Restore math placeholders
+      html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
 
       await withTimeout(
         this.client.sendMessage(roomId, {
           msgtype: 'm.text',
-          body: text,
+          body: normalizedText,
           format: 'org.matrix.custom.html',
           formatted_body: html.trim(),
         }),

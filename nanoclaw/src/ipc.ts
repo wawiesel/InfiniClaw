@@ -1,10 +1,11 @@
-import { execFile } from 'child_process';
+import { execFile, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
 import {
+  ASSISTANT_NAME,
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
@@ -50,6 +51,44 @@ function validateDeploy(bot: string): Promise<{ ok: boolean; errors: string }> {
         resolve({ ok: false, errors: stderr || err.message });
       } else {
         resolve({ ok: true, errors: '' });
+      }
+    });
+  });
+}
+
+/** Sync vendored code to instance, install deps if needed, build TS. */
+function deployInstance(bot: string): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolve) => {
+    const root = resolveInfiniClawRoot();
+    const baseNanoclaw = path.join(root, 'nanoclaw');
+    const instance = path.join(root, 'instances', bot, 'nanoclaw');
+    // Run sync + deps + build as a single shell sequence
+    const script = [
+      `rsync -a --delete --exclude node_modules --exclude data --exclude store --exclude groups --exclude logs "${baseNanoclaw}/" "${instance}/"`,
+      `cd "${instance}"`,
+      `if [ ! -d node_modules ] || ! diff -q "${baseNanoclaw}/package-lock.json" node_modules/.package-lock.json >/dev/null 2>&1; then npm ci && cp package-lock.json node_modules/.package-lock.json; fi`,
+      `npm run build`,
+    ].join(' && ');
+    execFile('bash', ['-c', script], { timeout: 120_000 }, (err, stdout, stderr) => {
+      if (err) {
+        resolve({ ok: false, output: stderr || err.message });
+      } else {
+        resolve({ ok: true, output: stdout });
+      }
+    });
+  });
+}
+
+/** Rebuild a container image (e.g. nanoclaw-commander:latest). */
+function rebuildImage(bot: string): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolve) => {
+    const root = resolveInfiniClawRoot();
+    const script = path.join(root, 'container', 'build.sh');
+    execFile(script, [bot], { timeout: 600_000 }, (err, stdout, stderr) => {
+      if (err) {
+        resolve({ ok: false, output: stderr || err.message });
+      } else {
+        resolve({ ok: true, output: stdout });
       }
     });
   });
@@ -555,16 +594,125 @@ export async function processTaskIpc(
         }
         break;
       }
-      logger.info({ bot }, 'Deploy validation passed — restarting');
-      if (chatJid) {
+      // Determine if this is a self-restart or cross-bot restart
+      const selfBot = ASSISTANT_NAME.trim().toLowerCase() === 'j5' ? 'commander' : 'engineer';
+      if (bot === selfBot) {
+        logger.info({ bot }, 'Deploy validation passed — self-restarting');
+        if (chatJid) {
+          try {
+            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
+          } catch {}
+        }
+        // Exit gracefully — launchd/supervisor will restart us
+        setTimeout(() => {
+          process.exit(0);
+        }, 500);
+      } else {
+        // Cross-bot: sync code, build, then restart via launchctl
+        logger.info({ bot }, 'Deploy validation passed — deploying instance');
+        if (chatJid) {
+          try { await deps.sendMessage(chatJid, `🔧 deploying ${bot}...`); } catch {}
+        }
+        const deploy = await deployInstance(bot);
+        if (!deploy.ok) {
+          logger.error({ bot, output: deploy.output }, 'Instance deploy failed');
+          if (chatJid) {
+            try {
+              const trimmed = deploy.output.length > 3000 ? deploy.output.slice(-3000) : deploy.output;
+              await deps.sendMessage(chatJid, `⛔ deploy failed for ${bot}:\n\n\`\`\`\n${trimmed}\n\`\`\``);
+            } catch {}
+          }
+          break;
+        }
+        logger.info({ bot }, 'Instance deployed — restarting via launchctl');
         try {
-          await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
-        } catch {}
+          const uid = execSync('id -u').toString().trim();
+          execSync(`launchctl kickstart -k gui/${uid}/com.infiniclaw.${bot}`, { timeout: 10_000 });
+          logger.info({ bot }, 'Cross-bot restart succeeded');
+          if (chatJid) {
+            try { await deps.sendMessage(chatJid, `✅ ${bot} deployed and restarted`); } catch {}
+          }
+        } catch (err) {
+          logger.error({ bot, err }, 'Cross-bot restart via launchctl failed');
+          if (chatJid) {
+            try {
+              await deps.sendMessage(chatJid, `⛔ failed to restart ${bot}: ${err instanceof Error ? err.message : String(err)}`);
+            } catch {}
+          }
+        }
       }
-      // Exit gracefully — the supervisor loop in ./start will restart us
-      setTimeout(() => {
-        process.exit(0);
-      }, 500);
+      break;
+    }
+
+    case 'rebuild_image': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized rebuild_image attempt blocked');
+        break;
+      }
+      const imgBot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
+        ? data.bot
+        : 'commander';
+      const imgChatJid = typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
+        ? data.chatJid
+        : null;
+      logger.info({ bot: imgBot }, 'Container image rebuild requested via IPC');
+      if (imgChatJid) {
+        try { await deps.sendMessage(imgChatJid, `🔧 rebuilding nanoclaw-${imgBot}:latest...`); } catch {}
+      }
+      const result = await rebuildImage(imgBot);
+      if (!result.ok) {
+        logger.error({ bot: imgBot, output: result.output }, 'Image rebuild failed');
+        if (imgChatJid) {
+          try {
+            const trimmed = result.output.length > 3000 ? result.output.slice(-3000) : result.output;
+            await deps.sendMessage(imgChatJid, `⛔ image rebuild failed for ${imgBot}:\n\n\`\`\`\n${trimmed}\n\`\`\``);
+          } catch {}
+        }
+      } else {
+        logger.info({ bot: imgBot }, 'Image rebuild succeeded');
+        if (imgChatJid) {
+          try { await deps.sendMessage(imgChatJid, `✅ nanoclaw-${imgBot}:latest rebuilt`); } catch {}
+        }
+      }
+      break;
+    }
+
+    case 'bot_status': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized bot_status attempt blocked');
+        break;
+      }
+      const statusBot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
+        ? data.bot
+        : 'commander';
+      const statusChatJid = typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
+        ? data.chatJid
+        : null;
+      if (!statusChatJid) break;
+
+      try {
+        const logDir = path.resolve(process.env.INFINICLAW_ROOT || process.cwd(), 'logs');
+        const errorLogPath = path.join(logDir, `${statusBot}.error.log`);
+        const lastErrors = fs.existsSync(errorLogPath)
+          ? fs.readFileSync(errorLogPath, 'utf8').split('\n').slice(-50).join('\n').trim()
+          : '(no error log)';
+
+        let launchctlInfo = '';
+        try {
+          launchctlInfo = execSync(`launchctl list com.infiniclaw.${statusBot} 2>&1`, { timeout: 5_000 }).toString().trim();
+        } catch (e) {
+          launchctlInfo = e instanceof Error ? e.message : 'unknown';
+        }
+
+        const parts = [`**${statusBot} status:**\n\`\`\`\n${launchctlInfo}\n\`\`\``];
+        if (lastErrors && lastErrors !== '(no error log)') {
+          const trimmed = lastErrors.length > 3000 ? lastErrors.slice(-3000) : lastErrors;
+          parts.push(`**Last errors:**\n\`\`\`\n${trimmed}\n\`\`\``);
+        }
+        await deps.sendMessage(statusChatJid, parts.join('\n\n'));
+      } catch (err) {
+        logger.error({ statusBot, err }, 'Failed to get bot status');
+      }
       break;
     }
 

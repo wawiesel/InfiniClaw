@@ -1,4 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('./config.js', () => ({
+  ASSISTANT_NAME: 'Andy',
+  ASSISTANT_TRIGGER: 'Andy',
+  TRIGGER_PATTERN: /^@Andy\b/i,
+}));
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
 import {

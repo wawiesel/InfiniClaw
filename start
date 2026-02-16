@@ -1,109 +1,143 @@
 #!/usr/bin/env bash
-# Start InfiniClaw with auto-restart supervisor.
-# Bots that exit are automatically restarted (profile env re-read each time).
+# Start InfiniClaw. Syncs code, builds, installs launchd services.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/scripts/common.sh"
 
-required_cmd npm
 required_cmd rsync
+required_cmd node
 
-echo "=== Starting InfiniClaw ==="
+NODE_BIN="$(command -v node)"
+LAUNCH_AGENTS_DIR="${HOME}/Library/LaunchAgents"
+mkdir -p "${LAUNCH_AGENTS_DIR}" "${LOG_DIR}"
 
 ensure_podman_ready
-mkdir -p "$LOG_DIR" "$RUN_DIR"
 
 start_bot() {
   local bot="$1"
-  local instance spid_file
-
+  local label="com.infiniclaw.${bot}"
+  local plist_path="${LAUNCH_AGENTS_DIR}/${label}.plist"
+  local instance
   instance="$(instance_dir "$bot")"
-  [[ -d "$instance" ]] || return 0
+  mkdir -p "${instance}"
 
-  spid_file="${RUN_DIR}/${bot}.supervisor.pid"
+  # Sync vendored code to instance
+  rsync -a --delete \
+    --exclude node_modules \
+    --exclude data \
+    --exclude store \
+    --exclude groups \
+    --exclude logs \
+    "${BASE_NANOCLAW_DIR}/" "${instance}/"
 
-  # Already running?
-  if [[ -f "$spid_file" ]] && kill -0 "$(cat "$spid_file")" 2>/dev/null; then
-    echo "${bot}: already running (supervisor pid $(cat "$spid_file"))"
-    return 0
+  # Install deps if needed
+  if [[ ! -d "${instance}/node_modules" ]] || \
+     ! diff -q "${BASE_NANOCLAW_DIR}/package-lock.json" "${instance}/node_modules/.package-lock.json" >/dev/null 2>&1; then
+    echo "${bot}: installing dependencies..."
+    (cd "${instance}" && npm ci)
+    cp "${instance}/package-lock.json" "${instance}/node_modules/.package-lock.json" 2>/dev/null || true
   fi
 
-  rm -f "${RUN_DIR}/${bot}.stop" "${RUN_DIR}/${bot}.pid" "$spid_file"
+  # Build TypeScript
+  echo "${bot}: building..."
+  (cd "${instance}" && npm run build)
 
-  # Launch supervisor in background
-  _supervisor "$bot" &
-  local pid=$!
-  echo "$pid" > "$spid_file"
-  disown "$pid"
+  # Load profile env
+  load_profile_env "$bot"
+  apply_brain_env
 
-  echo "${bot}: started (supervisor pid ${pid}, log: $(log_path "$bot"))"
+  # Unload existing plist if present
+  launchctl unload "${plist_path}" 2>/dev/null || true
+
+  # Generate plist with expanded env vars
+  cat > "${plist_path}" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${label}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${NODE_BIN}</string>
+        <string>${instance}/dist/index.js</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${instance}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${HOME}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>${HOME}</string>
+        <key>INFINICLAW_ROOT</key>
+        <string>${ROOT_DIR}</string>
+        <key>ASSISTANT_NAME</key>
+        <string>${ASSISTANT_NAME:-}</string>
+        <key>ASSISTANT_TRIGGER</key>
+        <string>${ASSISTANT_TRIGGER:-}</string>
+        <key>MATRIX_HOMESERVER</key>
+        <string>${MATRIX_HOMESERVER:-}</string>
+        <key>MATRIX_ACCESS_TOKEN</key>
+        <string>${MATRIX_ACCESS_TOKEN:-}</string>
+        <key>MATRIX_USER_ID</key>
+        <string>${MATRIX_USER_ID:-}</string>
+        <key>MATRIX_USERNAME</key>
+        <string>${MATRIX_USERNAME:-}</string>
+        <key>MATRIX_PASSWORD</key>
+        <string>${MATRIX_PASSWORD:-}</string>
+        <key>MATRIX_DEVICE_NAME</key>
+        <string>${MATRIX_DEVICE_NAME:-}</string>
+        <key>LOCAL_MIRROR_MATRIX_JID</key>
+        <string>${LOCAL_MIRROR_MATRIX_JID:-}</string>
+        <key>LOCAL_CHAT_SENDER_NAME</key>
+        <string>${LOCAL_CHAT_SENDER_NAME:-}</string>
+        <key>CONTAINER_IMAGE</key>
+        <string>${CONTAINER_IMAGE:-nanoclaw-agent:latest}</string>
+        <key>LOG_LEVEL</key>
+        <string>${LOG_LEVEL:-info}</string>
+        <key>ANTHROPIC_MODEL</key>
+        <string>${ANTHROPIC_MODEL:-}</string>
+        <key>ANTHROPIC_BASE_URL</key>
+        <string>${ANTHROPIC_BASE_URL:-}</string>
+        <key>ANTHROPIC_API_KEY</key>
+        <string>${ANTHROPIC_API_KEY:-}</string>
+        <key>ANTHROPIC_AUTH_TOKEN</key>
+        <string>${ANTHROPIC_AUTH_TOKEN:-}</string>
+        <key>CLAUDE_CODE_OAUTH_TOKEN</key>
+        <string>${CLAUDE_CODE_OAUTH_TOKEN:-}</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>${LOG_DIR}/${bot}.log</string>
+    <key>StandardErrorPath</key>
+    <string>${LOG_DIR}/${bot}.error.log</string>
+</dict>
+</plist>
+PLIST
+
+  launchctl load "${plist_path}"
+  echo "${bot}: started (${label})"
 }
 
-_supervisor() {
-  local bot="$1"
-  local log_file instance_dir
-
-  log_file="$(log_path "$bot")"
-  instance_dir="$(instance_dir "$bot")"
-
-  while true; do
-    # Sync vendored code to instance before each restart
-    rsync -a --delete \
-      --exclude node_modules \
-      --exclude data \
-      --exclude store \
-      --exclude groups \
-      --exclude logs \
-      "${BASE_NANOCLAW_DIR}/" "${instance_dir}/"
-
-    # Install deps if package-lock changed or node_modules missing
-    if [[ ! -d "${instance_dir}/node_modules" ]] || \
-       ! diff -q "${BASE_NANOCLAW_DIR}/package-lock.json" "${instance_dir}/node_modules/.package-lock.json" >/dev/null 2>&1; then
-      echo "--- ${bot} installing dependencies ---" >> "$log_file"
-      (cd "${instance_dir}" && npm ci >> "$log_file" 2>&1)
-      cp "${instance_dir}/package-lock.json" "${instance_dir}/node_modules/.package-lock.json" 2>/dev/null || true
-    fi
-
-    # Build TypeScript (skip if dist/ is newer than src/)
-    local src_newest dist_newest
-    src_newest="$(find "${instance_dir}/src" -name '*.ts' -newer "${instance_dir}/dist/index.js" 2>/dev/null | head -1)"
-    if [[ ! -f "${instance_dir}/dist/index.js" || -n "$src_newest" ]]; then
-      echo "--- ${bot} building TypeScript ---" >> "$log_file"
-      (cd "${instance_dir}" && npm run build >> "$log_file" 2>&1)
-    fi
-
-    # Re-read profile on every restart (bot may have changed its config)
-    load_profile_env "$bot"
-    apply_brain_env
-    export INFINICLAW_ROOT="${ROOT_DIR}"
-
-    echo "--- ${bot} starting at $(date) | model=${ANTHROPIC_MODEL:-unset} ---" >> "$log_file"
-
-    cd "$instance_dir"
-    npm start >> "$log_file" 2>&1 &
-    local child=$!
-    echo "$child" > "${RUN_DIR}/${bot}.pid"
-
-    wait "$child" || true
-    rm -f "${RUN_DIR}/${bot}.pid"
-
-    echo "--- ${bot} exited at $(date) ---" >> "$log_file"
-
-    # Stop sentinel = don't restart
-    if [[ -f "${RUN_DIR}/${bot}.stop" ]]; then
-      rm -f "${RUN_DIR}/${bot}.stop" "${RUN_DIR}/${bot}.supervisor.pid"
-      echo "--- ${bot} supervisor stopped ---" >> "$log_file"
-      exit 0
-    fi
-
-    sleep 1
-  done
-}
+# Install mount allowlist if not already present
+ALLOWLIST_DIR="${HOME}/.config/nanoclaw"
+ALLOWLIST_FILE="${ALLOWLIST_DIR}/mount-allowlist.json"
+if [[ ! -f "${ALLOWLIST_FILE}" ]]; then
+  mkdir -p "${ALLOWLIST_DIR}"
+  cp "${ROOT_DIR}/config/mount-allowlist.json" "${ALLOWLIST_FILE}"
+  echo "Installed mount allowlist: ${ALLOWLIST_FILE}"
+fi
 
 for bot in engineer commander; do
-  start_bot "$bot"
+  start_bot "$bot" || true
 done
 
-echo "=== InfiniClaw running ==="
+echo ""
+echo "InfiniClaw running. Check status:"
+echo "  launchctl list | grep infiniclaw"
