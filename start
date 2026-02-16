@@ -140,6 +140,14 @@ if [[ ! -f "${ALLOWLIST_FILE}" ]]; then
   echo "Installed mount allowlist: ${ALLOWLIST_FILE}"
 fi
 
+# Stop lingering nanoclaw containers so fresh ones spawn with new code
+if command -v podman >/dev/null 2>&1; then
+  podman ps --format '{{.Names}}' 2>/dev/null | grep '^nanoclaw-' | while read -r name; do
+    echo "Stopping stale container: $name"
+    podman stop -t 5 "$name" 2>/dev/null || true
+  done || true
+fi
+
 for bot in engineer commander; do
   start_bot "$bot" || true
 done
