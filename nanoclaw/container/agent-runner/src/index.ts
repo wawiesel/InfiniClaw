@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, PostToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -24,7 +24,6 @@ interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  delegateOutputJid?: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
@@ -73,8 +72,12 @@ const SDK_PROCESS_ENV_KEYS = [
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_MODEL',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'NANOCLAW_SKIP_TOKEN_COUNTING',
+  'NANOCLAW_CONTEXT_WINDOW',
+  'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
   'INFINICLAW_ROOT',
-  'ENGINEER_COMMANDER_CHAT_JID',
   'HTTP_PROXY',
   'HTTPS_PROXY',
   'ALL_PROXY',
@@ -392,6 +395,19 @@ function createPreCompactHook(): HookCallback {
 // be visible to commands Kit runs.
 const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
+function createToolProgressHook(emitFn: (text: string) => void): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const postInput = input as PostToolUseHookInput;
+    const formatted = formatToolCallWithOutput(
+      postInput.tool_name,
+      postInput.tool_input,
+      postInput.tool_response,
+    );
+    emitFn(formatted);
+    return {};
+  };
+}
+
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preInput = input as PreToolUseHookInput;
@@ -482,6 +498,69 @@ function extractAssistantText(message: unknown): string {
   }
 
   return parts.join('\n').trim();
+}
+
+function formatToolInput(name: string, input: unknown): string {
+  if (input && typeof input === 'object') {
+    const obj = input as Record<string, unknown>;
+    if (name === 'Bash' && typeof obj.command === 'string') return obj.command;
+    if (name === 'Read' && typeof obj.file_path === 'string') return obj.file_path;
+    if ((name === 'Edit' || name === 'Write') && typeof obj.file_path === 'string') return obj.file_path;
+    if ((name === 'Grep' || name === 'Glob') && typeof obj.pattern === 'string') return obj.pattern;
+    if (name === 'WebFetch' && typeof obj.url === 'string') return obj.url;
+    if (name === 'WebSearch' && typeof obj.query === 'string') return obj.query;
+    if (name === 'Task' && typeof obj.prompt === 'string') return obj.prompt;
+    return JSON.stringify(input, null, 2);
+  }
+  return String(input || '');
+}
+
+function formatToolResponse(response: unknown): string {
+  if (typeof response === 'string') return response;
+  if (response && typeof response === 'object') return JSON.stringify(response, null, 2);
+  return String(response || '');
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function describeToolCall(name: string, input: unknown): string {
+  if (!input || typeof input !== 'object') return name;
+  const obj = input as Record<string, unknown>;
+
+  // Tools with an explicit description field
+  if (typeof obj.description === 'string' && obj.description.trim()) {
+    return `${name} - ${obj.description.trim()}`;
+  }
+
+  // Derive from input for other tools
+  if (typeof obj.file_path === 'string') {
+    const basename = obj.file_path.split('/').pop() || obj.file_path;
+    return `${name} - ${basename}`;
+  }
+  if (typeof obj.pattern === 'string') return `${name} - ${obj.pattern}`;
+  if (typeof obj.query === 'string') return `${name} - ${obj.query}`;
+  if (typeof obj.url === 'string') {
+    try { return `${name} - ${new URL(obj.url).hostname}`; } catch {}
+  }
+  if (typeof obj.prompt === 'string') {
+    const short = obj.prompt.replace(/\s+/g, ' ').trim().slice(0, 60);
+    return `${name} - ${short}`;
+  }
+  if (typeof obj.command === 'string') {
+    const short = obj.command.replace(/\s+/g, ' ').trim().slice(0, 60);
+    return `${name} - ${short}`;
+  }
+  if (typeof obj.skill === 'string') return `${name} - ${obj.skill}`;
+  return name;
+}
+
+function formatToolCallWithOutput(name: string, input: unknown, response: unknown): string {
+  const label = escapeHtml(describeToolCall(name, input));
+  const inputText = escapeHtml(formatToolInput(name, input));
+  const outputText = escapeHtml(formatToolResponse(response));
+  return `<small><details><summary>🔧 ${label}</summary><b>Input:</b><pre><code>${inputText}</code></pre><b>Output:</b><pre><code>${outputText}</code></pre></details></small>`;
 }
 
 function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {
@@ -724,9 +803,6 @@ async function runQuery(
               NANOCLAW_CHAT_JID: containerInput.chatJid,
               NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
               NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-              ...(containerInput.delegateOutputJid
-                ? { NANOCLAW_DELEGATE_OUTPUT_JID: containerInput.delegateOutputJid }
-                : {}),
               ...(sdkEnv.ASSISTANT_NAME
                 ? { NANOCLAW_ASSISTANT_NAME: sdkEnv.ASSISTANT_NAME }
                 : {}),
@@ -756,9 +832,6 @@ async function runQuery(
               ...(sdkEnv.INFINICLAW_ROOT
                 ? { INFINICLAW_ROOT: sdkEnv.INFINICLAW_ROOT }
                 : {}),
-              ...(sdkEnv.ENGINEER_COMMANDER_CHAT_JID
-                ? { ENGINEER_COMMANDER_CHAT_JID: sdkEnv.ENGINEER_COMMANDER_CHAT_JID }
-                : {}),
               ...(sdkEnv.NODE_TLS_REJECT_UNAUTHORIZED
                 ? {
                     NODE_TLS_REJECT_UNAUTHORIZED:
@@ -771,6 +844,7 @@ async function runQuery(
         hooks: {
           PreCompact: [{ hooks: [createPreCompactHook()] }],
           PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+          PostToolUse: [{ hooks: [createToolProgressHook(emitProgress)] }],
         },
       }
     })) {
@@ -786,6 +860,7 @@ async function runQuery(
       const assistantText = extractAssistantText(message);
       if (assistantText) {
         lastAssistantText = assistantText;
+        emitProgress(assistantText);
       }
     }
 
@@ -988,11 +1063,13 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+    // Don't output newSessionId here — runQuery threw before returning,
+    // so sessionId is still the ORIGINAL (possibly corrupted) value.
+    // Any valid session established during the query was already saved
+    // by the host's streaming output handler.
     writeOutput({
       status: 'error',
       result: null,
-      newSessionId: sessionId,
-      model: activeModel,
       error: errorMessage
     });
     process.exit(1);

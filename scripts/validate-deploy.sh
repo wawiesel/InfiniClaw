@@ -11,7 +11,7 @@ source "${SCRIPT_DIR}/common.sh"
 bot="${1:?Usage: validate-deploy.sh <bot>}"
 instance="$(instance_dir "$bot")"
 
-staging="${ROOT_DIR}/staging/${bot}/nanoclaw"
+staging="${ROOT_DIR}/_runtime/staging/${bot}/nanoclaw"
 mkdir -p "$staging"
 
 # Sync vendored source to staging (same excludes as supervisor)

@@ -39,7 +39,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install docling for PDF-to-markdown conversion (includes OCR via pytesseract/easyocr)
-RUN pip3 install --break-system-packages docling
+RUN pip3 install --break-system-packages docling rapidocr-onnxruntime
+
+# Fix model directory permissions for node user
+RUN chmod -R 777 /usr/local/lib/python3.11/dist-packages/rapidocr/models/ || true
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

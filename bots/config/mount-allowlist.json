@@ -1,6 +1,11 @@
 {
   "allowedRoots": [
     {
+      "path": "~",
+      "allowReadWrite": false,
+      "description": "Home directory — read-only access (excludes dotfiles)"
+    },
+    {
       "path": "~/_vault",
       "allowReadWrite": true,
       "description": "Vault — Johnny5's read-write workspace"

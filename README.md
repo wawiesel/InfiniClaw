@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/infiniclaw-banner.png" alt="InfiniClaw" width="1200">
+  <img src="docs/assets/infiniclaw-banner.png" alt="InfiniClaw" width="1200">
 </p>
 
 # InfiniClaw
@@ -18,35 +18,35 @@ Runtime: Podman only.
 Create per-bot env files from examples:
 
 ```text
-profiles/engineer/env
-profiles/commander/env
+bots/profiles/engineer/env
+bots/profiles/commander/env
 ```
 
 Start bots:
 
 ```bash
-./start
+./scripts/start
 ```
 
 Stop bots:
 
 ```bash
-./stop
+./scripts/stop
 ```
 
-Terminal chat (pipeline-identical, recommended for testing without Matrix UI):
+Terminal chat:
 
 ```bash
-./chat-engineer
-./chat-commander
+./scripts/chat engineer
+./scripts/chat commander
 ```
 
 ## Brain LLM per bot
 
 Each bot has a single brain config section in its profile env:
 
-- `profiles/engineer/env`
-- `profiles/commander/env`
+- `bots/profiles/engineer/env`
+- `bots/profiles/commander/env`
 
 Set:
 
@@ -57,9 +57,19 @@ Set:
 The `start` script maps these to NanoClaw runtime env (`ANTHROPIC_*` / `CLAUDE_CODE_OAUTH_TOKEN`).
 This keeps model/backend switching to one place per bot.
 
+## Directory structure
+
+```
+scripts/       Entry points: start, stop, chat
+nanoclaw/      Core code (vendored NanoClaw fork)
+bots/          Bot definitions: personas, profiles, container images, config
+docs/          Design docs and assets
+_runtime/      Gitignored runtime state: instances, data, logs
+```
+
 ## Design
 
-See [`DESIGN.md`](DESIGN.md) for architecture, boundaries, and operating model.
+See [`docs/DESIGN.md`](docs/DESIGN.md) for architecture, boundaries, and operating model.
 
 ## Notes
 

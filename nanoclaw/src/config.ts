@@ -72,6 +72,15 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+// Cross-bot @mention forwarding
+// When a message matches CROSS_BOT_PATTERN, forward it to CROSS_BOT_ROOM_JID
+const crossBotTrigger = (process.env.CROSS_BOT_TRIGGER || '').trim();
+export const CROSS_BOT_ROOM_JID = (process.env.CROSS_BOT_ROOM_JID || '').trim();
+export const CROSS_BOT_PATTERN: RegExp | null =
+  crossBotTrigger && CROSS_BOT_ROOM_JID
+    ? new RegExp(`^@?${escapeRegex(crossBotTrigger)}\\b`, 'i')
+    : null;
+
 // Other bot triggers to ignore (comma-separated, e.g. "@Cid,@OtherBot")
 const ignoreTriggerStr = (process.env.IGNORE_TRIGGERS || '').trim();
 export const IGNORE_PATTERNS: RegExp[] = ignoreTriggerStr

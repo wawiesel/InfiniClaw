@@ -70,8 +70,7 @@ function createSchema(database: Database.Database): void {
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1,
-      route_to_main INTEGER DEFAULT 0
+      requires_trigger INTEGER DEFAULT 1
     );
   `);
 
@@ -84,14 +83,8 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
-  // Add route_to_main column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN route_to_main INTEGER DEFAULT 0`,
-    );
-  } catch {
-    /* column already exists */
-  }
+  // Drop route_to_main column if it exists (migration for existing DBs)
+  // SQLite doesn't support DROP COLUMN before 3.35; just ignore the old column in queries.
 }
 
 export function initDatabase(): void {
@@ -519,8 +512,8 @@ export function setRegisteredGroup(
   group: RegisteredGroup,
 ): void {
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, route_to_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -529,7 +522,6 @@ export function setRegisteredGroup(
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
-    group.routeToMain ? 1 : 0,
   );
 }
 
@@ -544,7 +536,6 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
-    route_to_main: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -557,7 +548,6 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         ? JSON.parse(row.container_config)
         : undefined,
       requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      routeToMain: row.route_to_main === 1,
     };
   }
   return result;

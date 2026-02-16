@@ -1,7 +1,2 @@
-/data/
-/instances/
-/run/
-/logs/
-/tmp/
-profiles/*/env
-staging/
+/_runtime/
+bots/profiles/*/env

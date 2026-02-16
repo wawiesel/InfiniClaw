@@ -62,7 +62,7 @@ function deployInstance(bot: string): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     const root = resolveInfiniClawRoot();
     const baseNanoclaw = path.join(root, 'nanoclaw');
-    const instance = path.join(root, 'instances', bot, 'nanoclaw');
+    const instance = path.join(root, '_runtime', 'instances', bot, 'nanoclaw');
     // Run sync + deps + build as a single shell sequence
     const script = [
       `rsync -a --delete --exclude node_modules --exclude data --exclude store --exclude groups --exclude logs --exclude .env.local "${baseNanoclaw}/" "${instance}/"`,
@@ -84,7 +84,7 @@ function deployInstance(bot: string): Promise<{ ok: boolean; output: string }> {
 function rebuildImage(bot: string): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     const root = resolveInfiniClawRoot();
-    const script = path.join(root, 'container', 'build.sh');
+    const script = path.join(root, 'bots', 'container', 'build.sh');
     execFile(script, [bot], { timeout: 600_000 }, (err, stdout, stderr) => {
       if (err) {
         resolve({ ok: false, output: stderr || err.message });
@@ -118,7 +118,7 @@ function applyBrainMode(
   model?: string,
 ): string {
   const root = resolveInfiniClawRoot();
-  const envFile = path.join(root, 'profiles', bot, 'env');
+  const envFile = path.join(root, 'bots', 'profiles', bot, 'env');
   if (!fs.existsSync(envFile)) {
     throw new Error(`Missing profile env: ${envFile}`);
   }
@@ -334,7 +334,6 @@ export async function processTaskIpc(
     folder?: string;
     trigger?: string;
     requiresTrigger?: boolean;
-    routeToMain?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
   },
   sourceGroup: string, // Verified identity from IPC directory
@@ -531,7 +530,6 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
-          routeToMain: data.routeToMain,
         });
       } else {
         logger.warn(

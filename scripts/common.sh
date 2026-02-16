@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_NANOCLAW_DIR="${ROOT_DIR}/nanoclaw"
-INSTANCES_DIR="${ROOT_DIR}/instances"
-DATA_DIR="${ROOT_DIR}/data"
-RUN_DIR="${ROOT_DIR}/run"
-LOG_DIR="${ROOT_DIR}/logs"
+INSTANCES_DIR="${ROOT_DIR}/_runtime/instances"
+DATA_DIR="${ROOT_DIR}/_runtime/data"
+RUN_DIR="${ROOT_DIR}/_runtime/run"
+LOG_DIR="${ROOT_DIR}/_runtime/logs"
 
 required_cmd() {
   local cmd="$1"
@@ -18,12 +18,12 @@ required_cmd() {
 
 profile_env_path() {
   local bot="$1"
-  echo "${ROOT_DIR}/profiles/${bot}/env"
+  echo "${ROOT_DIR}/bots/profiles/${bot}/env"
 }
 
 profile_env_example_path() {
   local bot="$1"
-  echo "${ROOT_DIR}/profiles/${bot}/env.example"
+  echo "${ROOT_DIR}/bots/profiles/${bot}/env.example"
 }
 
 instance_dir() {
@@ -58,9 +58,16 @@ load_profile_env() {
 
 apply_brain_env() {
   # Unified "brain" knobs for each bot profile.
-  # If BRAIN_* values are set, map them onto NanoClaw runtime env.
+  # Clear all mapped vars first to prevent leaking between bots.
+  unset ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN 2>/dev/null || true
+
+  # Map BRAIN_* onto NanoClaw runtime env.
   if [[ -n "${BRAIN_MODEL:-}" ]]; then
     export ANTHROPIC_MODEL="${BRAIN_MODEL}"
+    # Set all SDK model slots to the same model so haiku/sonnet
+    # fallbacks never try models the backend doesn't have.
+    export ANTHROPIC_SMALL_FAST_MODEL="${BRAIN_MODEL}"
+    export ANTHROPIC_DEFAULT_SONNET_MODEL="${BRAIN_MODEL}"
   fi
   if [[ -n "${BRAIN_BASE_URL:-}" ]]; then
     export ANTHROPIC_BASE_URL="${BRAIN_BASE_URL}"
@@ -146,5 +153,54 @@ write_env_if_set() {
   local val="${!key:-}"
   if [[ -n "${val}" ]]; then
     printf '%s=%s\n' "${key}" "${val}" >> "${file}"
+  fi
+}
+
+# Save runtime group .md files from instance → personas/ (captures bot memory changes)
+sync_persona() {
+  local bot="$1"
+  local instance
+  instance="$(instance_dir "$bot")"
+  local persona="${ROOT_DIR}/bots/personas/${bot}"
+  [[ -d "${persona}" ]] || return 0
+
+  # SAVE: capture runtime changes from instance groups → personas
+  if [[ -d "${instance}/groups" ]]; then
+    for group_dir in "${instance}/groups"/*/; do
+      [[ -d "$group_dir" ]] || continue
+      local gname
+      gname="$(basename "$group_dir")"
+      for md in "${group_dir}"*.md; do
+        [[ -f "$md" ]] || continue
+        mkdir -p "${persona}/groups/${gname}"
+        cp "$md" "${persona}/groups/${gname}/$(basename "$md")"
+      done
+    done
+  fi
+}
+
+# Append persona CLAUDE.md to instance base and seed group files
+restore_persona() {
+  local bot="$1"
+  local instance
+  instance="$(instance_dir "$bot")"
+  local persona="${ROOT_DIR}/bots/personas/${bot}"
+  [[ -d "${persona}" ]] || return 0
+
+  # Append persona CLAUDE.md to base CLAUDE.md
+  if [[ -f "${persona}/CLAUDE.md" ]]; then
+    printf '\n' >> "${instance}/CLAUDE.md"
+    cat "${persona}/CLAUDE.md" >> "${instance}/CLAUDE.md"
+  fi
+
+  # RESTORE: seed group files from personas → instance groups
+  if [[ -d "${persona}/groups" ]]; then
+    for gdir in "${persona}/groups"/*/; do
+      [[ -d "$gdir" ]] || continue
+      local gname
+      gname="$(basename "$gdir")"
+      mkdir -p "${instance}/groups/${gname}"
+      cp "${gdir}"*.md "${instance}/groups/${gname}/" 2>/dev/null || true
+    done
   fi
 }

@@ -36,7 +36,7 @@ Run commands directly—don't tell the user to run them.
 ```bash
 npm run dev          # Run with hot reload
 npm run build        # Compile TypeScript
-./container/build.sh # Rebuild agent container
+./bots/container/build.sh # Rebuild agent container
 ```
 
 Service management:
@@ -67,7 +67,7 @@ Apple Container's buildkit caches the build context aggressively. `--no-cache` a
 
 ```bash
 container builder stop && container builder rm && container builder start
-./container/build.sh
+./bots/container/build.sh
 ```
 
 Always verify after rebuild: `container run -i --rm --entrypoint wc nanoclaw-agent:latest -l /app/src/index.ts`

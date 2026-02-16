@@ -41,7 +41,6 @@ export interface ContainerInput {
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
-  delegateOutputJid?: string;
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
@@ -69,11 +68,16 @@ const ALLOWED_ENV_VARS = [
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_MODEL',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'NANOCLAW_SKIP_TOKEN_COUNTING',
+  'NANOCLAW_CONTEXT_WINDOW',
+  'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
   'OLLAMA_HOST',
   'OPENAI_API_KEY',
   'OPENAI_BASE_URL',
   'INFINICLAW_ROOT',
-  'ENGINEER_COMMANDER_CHAT_JID',
+  'PERSONA_NAME',
   // Network/TLS passthrough for environments with corporate proxies/certs.
   'HTTP_PROXY',
   'HTTPS_PROXY',
@@ -173,11 +177,23 @@ function normalizeProviderSecrets(
   const explicitModel = normalized.ANTHROPIC_MODEL?.trim();
   if (explicitModel) {
     normalized.ANTHROPIC_MODEL = explicitModel;
+    // Force all SDK model slots to the same ollama model so haiku/sonnet
+    // fallbacks never try models ollama doesn't have.
+    normalized.ANTHROPIC_SMALL_FAST_MODEL = explicitModel;
+    normalized.ANTHROPIC_DEFAULT_SONNET_MODEL = explicitModel;
   }
 
   if (!normalized.ANTHROPIC_AUTH_TOKEN?.trim()) {
     normalized.ANTHROPIC_AUTH_TOKEN = 'ollama';
   }
+
+  // SDK runtime knobs for local models:
+  // - Skip token counting API (ollama has no /v1/messages/count_tokens)
+  // - Cap context window to match local model limits
+  // - Reduce max output tokens so input context has room (32K - 4K = 28K input)
+  normalized.NANOCLAW_SKIP_TOKEN_COUNTING = '1';
+  normalized.NANOCLAW_CONTEXT_WINDOW = '32000';
+  normalized.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '4096';
 
   return normalized;
 }
@@ -328,6 +344,25 @@ function buildVolumeMounts(
       }
     }
   }
+
+  // Sync persona-specific skills (from personas/{bot}/skills/)
+  const rootDir = process.env.INFINICLAW_ROOT;
+  const personaName = process.env.PERSONA_NAME;
+  if (rootDir && personaName) {
+    const personaSkillsSrc = path.join(rootDir, 'bots', 'personas', personaName, 'skills');
+    if (fs.existsSync(personaSkillsSrc)) {
+      for (const skillDir of fs.readdirSync(personaSkillsSrc)) {
+        const srcDir = path.join(personaSkillsSrc, skillDir);
+        if (!fs.statSync(srcDir).isDirectory()) continue;
+        const dstDir = path.join(skillsDst, skillDir);
+        fs.mkdirSync(dstDir, { recursive: true });
+        for (const file of fs.readdirSync(srcDir)) {
+          fs.copyFileSync(path.join(srcDir, file), path.join(dstDir, file));
+        }
+      }
+    }
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
@@ -638,13 +673,26 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain.then(() => {
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
+          const chainTimer = setTimeout(() => {
+            logger.warn(
+              { group: group.name, containerName },
+              'outputChain stalled 30s after container close, force-resolving',
+            );
+            resolve({ status: 'success', result: null, newSessionId });
+          }, 30_000);
+          outputChain
+            .then(() => {
+              clearTimeout(chainTimer);
+              resolve({ status: 'success', result: null, newSessionId });
+            })
+            .catch((err) => {
+              clearTimeout(chainTimer);
+              logger.error(
+                { group: group.name, err },
+                'outputChain rejected after container close',
+              );
+              resolve({ status: 'success', result: null, newSessionId });
             });
-          });
           return;
         }
 
@@ -653,10 +701,11 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
+        const timeoutMinutes = Math.round(configTimeout / 60_000);
         resolve({
           status: 'error',
           result: null,
-          error: `Container timed out after ${configTimeout}ms`,
+          error: `Task timed out after ${timeoutMinutes} minutes with no response. Try again or simplify the request.`,
         });
         return;
       }
@@ -734,24 +783,37 @@ export async function runContainerAgent(
         resolve({
           status: 'error',
           result: null,
-          error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
+          error: `Container exited with code ${code}: ${stderr}`,
         });
         return;
       }
 
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
-        outputChain.then(() => {
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
+        const chainTimer = setTimeout(() => {
+          logger.warn(
+            { group: group.name, containerName, duration },
+            'outputChain stalled 30s after container close, force-resolving',
           );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
+          resolve({ status: 'success', result: null, newSessionId });
+        }, 30_000);
+        outputChain
+          .then(() => {
+            clearTimeout(chainTimer);
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
+            resolve({ status: 'success', result: null, newSessionId });
+          })
+          .catch((err) => {
+            clearTimeout(chainTimer);
+            logger.error(
+              { group: group.name, err },
+              'outputChain rejected after container close',
+            );
+            resolve({ status: 'success', result: null, newSessionId });
           });
-        });
         return;
       }
 

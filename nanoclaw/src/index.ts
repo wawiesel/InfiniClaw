@@ -18,6 +18,8 @@ import {
   MATRIX_PASSWORD,
   MATRIX_RECONNECT_INTERVAL,
   MATRIX_USERNAME,
+  CROSS_BOT_PATTERN,
+  CROSS_BOT_ROOM_JID,
   LOCAL_CHANNEL_ENABLED,
   LOCAL_CHAT_JID,
   LOCAL_MIRROR_MATRIX_JID,
@@ -70,6 +72,8 @@ const QUEUED_ACK_COOLDOWN_MS = 30_000;
 const lastQueuedAckAt: Record<string, number> = {};
 const ACTIVE_PIPE_ACK_COOLDOWN_MS = 5_000;
 const lastActivePipeAckAt: Record<string, number> = {};
+const PROGRESS_CHAT_COOLDOWN_MS = 10_000;
+const lastProgressChatAt: Record<string, number> = {};
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
 const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
@@ -339,8 +343,8 @@ async function maybeAutoSwitchBrainsOnQuotaError(
   if (Date.now() - lastAutoBrainSwitchAt < AUTO_BRAIN_SWITCH_COOLDOWN_MS) return;
 
   const root = process.env.INFINICLAW_ROOT?.trim() || path.resolve(process.cwd(), '..', '..', '..');
-  const engineerEnv = path.join(root, 'profiles', 'engineer', 'env');
-  const commanderEnv = path.join(root, 'profiles', 'commander', 'env');
+  const engineerEnv = path.join(root, 'bots', 'profiles', 'engineer', 'env');
+  const commanderEnv = path.join(root, 'bots', 'profiles', 'commander', 'env');
   if (!fs.existsSync(engineerEnv) || !fs.existsSync(commanderEnv)) return;
 
   try {
@@ -414,6 +418,9 @@ function ensureGroupForIncomingChat(
   chatJid: string,
   chatName?: string,
 ): void {
+  // Never auto-register the cross-bot room — we only send there, never listen
+  if (CROSS_BOT_ROOM_JID && chatJid === CROSS_BOT_ROOM_JID) return;
+
   if (registeredGroups[chatJid]) {
     if (
       LOCAL_CHANNEL_ENABLED &&
@@ -652,6 +659,39 @@ function buildMainMissionContext(chatJid: string): string | undefined {
 }
 
 
+/**
+ * Sync group .md files back to personas/ directory for version control.
+ * Copies groups/{name}/*.md → personas/{PERSONA_NAME}/groups/{name}/
+ */
+function syncPersonas(): void {
+  const rootDir = process.env.INFINICLAW_ROOT;
+  const personaName = process.env.PERSONA_NAME;
+  if (!rootDir || !personaName) return;
+
+  const personaDir = path.join(rootDir, 'bots', 'personas', personaName);
+  if (!fs.existsSync(personaDir)) return;
+
+  try {
+    const groupsBase = GROUPS_DIR;
+    if (!fs.existsSync(groupsBase)) return;
+
+    for (const gname of fs.readdirSync(groupsBase)) {
+      const gdir = path.join(groupsBase, gname);
+      if (!fs.statSync(gdir).isDirectory()) continue;
+
+      for (const file of fs.readdirSync(gdir)) {
+        if (!file.endsWith('.md')) continue;
+        const dst = path.join(personaDir, 'groups', gname);
+        fs.mkdirSync(dst, { recursive: true });
+        fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
+      }
+    }
+    logger.info({ personaName }, 'Synced group memory to personas/');
+  } catch (err) {
+    logger.warn({ err, personaName }, 'Failed to sync personas on shutdown');
+  }
+}
+
 let channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -813,34 +853,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const filteredMessages = missedMessages.filter((msg) => !shouldIgnoreMessage(msg));
   if (filteredMessages.length === 0) return true;
 
-  // Route-to-main: redirect linked group messages to the main container
-  if (group.routeToMain && !isMainGroup) {
-    const mainJid = getMainChatJid();
-    if (mainJid) {
-      const labeled = filteredMessages.map((m) => ({
-        ...m,
-        sender_name: `[${group.name}] ${m.sender_name}`,
-      }));
-      const formatted = formatMessages(labeled);
-      if (queue.sendMessage(mainJid, formatted)) {
-        logger.debug({ chatJid, mainJid, count: labeled.length }, 'Routed linked group messages to main container (recovery)');
-      } else {
-        queue.enqueueMessageCheck(mainJid);
-      }
-      lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
-      saveState();
-      return true;
-    }
-  }
-
   setObjectiveFromMessages(chatJid, filteredMessages);
 
   const basePrompt = formatMessages(filteredMessages);
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
-  const prompt = missionContext
-    ? `${missionContext}\n\n${basePrompt}`
-    : basePrompt;
+  const parts: string[] = [];
+  if (missionContext) parts.push(missionContext);
+  parts.push(basePrompt);
+  const prompt = parts.join('\n\n');
 
   // Advance cursor past ALL messages (including ignored) so we don't reprocess
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -914,9 +935,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         lastRunOutputAt = Date.now();
         if (result.isProgress) {
-          // Progress-only: track internally but don't send to chat
-          // (delegate progress is already delivered via IPC)
           markProgress(chatJid, text);
+          // Forward progress to chat with rate limiting
+          const now = Date.now();
+          if (!lastProgressChatAt[chatJid] || now - lastProgressChatAt[chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
+            lastProgressChatAt[chatJid] = now;
+            const ch = findChannel(channels, chatJid);
+            if (ch) {
+              // Tool calls already have <small><details> formatting from agent-runner;
+              // plain thinking text gets dimmed small italic
+              const formatted = text.includes('<details>')
+                ? text
+                : `<small><font color="#888888"><em>${text}</em></font></small>`;
+              void ch.sendMessage(chatJid, formatted).catch((err) => {
+                logger.warn({ chatJid, err }, 'Failed to send progress to chat');
+              });
+            }
+          }
         } else {
           // Final result: deliver to chat
           markProgress(chatJid, text);
@@ -950,7 +985,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       runResult.error ||
       (hadError ? 'agent returned an error status' : 'unknown error');
     await maybeAutoSwitchBrainsOnQuotaError(rawError, chatJid);
-    const compactError = rawError.replace(/\s+/g, ' ').slice(0, 220);
+    const compactError = rawError.replace(/\s+/g, ' ').slice(0, 1000);
     markError(chatJid, compactError);
 
     if (!outputSentToUser && channel) {
@@ -1064,7 +1099,6 @@ async function runAgent(
         sessionId,
         groupFolder: group.folder,
         chatJid,
-        delegateOutputJid: getMainChatJid() || chatJid,
         isMain,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -1143,26 +1177,38 @@ async function startMessageLoop(): Promise<void> {
           const filtered = groupMessages.filter((msg) => !shouldIgnoreMessage(msg));
           if (filtered.length === 0) continue;
 
-          // --- Route-to-main: pipe linked group messages into the main container ---
-          if (group.routeToMain && !isMainGroup) {
-            const mainJid = getMainChatJid();
-            if (mainJid) {
-              // Format with group name so the agent knows where messages came from
-              const labeled = filtered.map((m) => ({
-                ...m,
-                sender_name: `[${group.name}] ${m.sender_name}`,
-              }));
-              const formatted = formatMessages(labeled);
-              // Pipe into main container if active, otherwise enqueue for main
-              if (queue.sendMessage(mainJid, formatted)) {
-                logger.debug({ chatJid, mainJid, count: labeled.length }, 'Routed linked group messages to main container');
-              } else {
-                queue.enqueueMessageCheck(mainJid);
+          // --- Cross-bot @mention forwarding ---
+          // Messages matching @OtherBot get forwarded to the other bot's room
+          if (CROSS_BOT_PATTERN && CROSS_BOT_ROOM_JID) {
+            const forOtherBot = filtered.filter((m) => CROSS_BOT_PATTERN!.test(m.content.trim()));
+            if (forOtherBot.length > 0) {
+              const ch = findChannel(channels, CROSS_BOT_ROOM_JID);
+              if (ch) {
+                for (const msg of forOtherBot) {
+                  const forwarded = `[From ${group.name}] ${msg.sender_name}: ${msg.content}`;
+                  try {
+                    await ch.sendMessage(CROSS_BOT_ROOM_JID, forwarded);
+                  } catch (err) {
+                    logger.warn({ chatJid, err }, 'Failed to forward cross-bot message');
+                  }
+                }
+                logger.info(
+                  { chatJid, target: CROSS_BOT_ROOM_JID, count: forOtherBot.length },
+                  'Forwarded cross-bot messages',
+                );
               }
-              // Advance cursor for this group so we don't reprocess
-              lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
-              saveState();
-              continue;
+              // Remove forwarded messages from the set to process locally
+              const forwardedIds = new Set(forOtherBot.map((m) => m.id));
+              const forThisBot = filtered.filter((m) => !forwardedIds.has(m.id));
+              if (forThisBot.length === 0) {
+                // All messages were for other bot — advance cursor and skip
+                lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
+                saveState();
+                continue;
+              }
+              // Replace filtered with only this-bot messages for further processing
+              filtered.length = 0;
+              filtered.push(...forThisBot);
             }
           }
 
@@ -1546,6 +1592,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    syncPersonas();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -1637,16 +1684,67 @@ async function main(): Promise<void> {
 
   // Memory watchdog — gracefully recycle before OOM
   const heapLimitBytes = HEAP_LIMIT_MB * 1024 * 1024;
+  const heartbeatPath = path.join(DATA_DIR, 'heartbeat');
   setInterval(() => {
     const usage = process.memoryUsage();
     const heapMB = Math.round(usage.heapUsed / 1024 / 1024);
     const rssMB = Math.round(usage.rss / 1024 / 1024);
     logger.info({ heapMB, rssMB, limitMB: HEAP_LIMIT_MB }, 'Memory');
+    // Write heartbeat so external tooling can detect a stuck event loop
+    try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch {}
     if (usage.heapUsed > heapLimitBytes) {
       logger.warn({ heapMB, limitMB: HEAP_LIMIT_MB }, 'Heap limit exceeded, recycling');
       shutdown('HEAP_LIMIT');
     }
   }, MEMORY_CHECK_INTERVAL);
+  // Write initial heartbeat
+  try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch {}
+
+  // Periodic status snapshot for containers to read via check_health MCP tool
+  const STATUS_SNAPSHOT_INTERVAL = 30_000;
+  const writeStatusSnapshot = () => {
+    try {
+      const snapshot = {
+        timestamp: new Date().toISOString(),
+        bot: ASSISTANT_NAME,
+        role: ASSISTANT_ROLE,
+        model: mainLlm,
+        provider: MAIN_PROVIDER,
+        groups: Object.entries(registeredGroups).map(([jid, g]) => {
+          const queueStatus = queue.getGroupStatus(jid);
+          const activity = chatActivity[jid] || {};
+          return {
+            jid,
+            name: g.name,
+            folder: g.folder,
+            active: queueStatus.active,
+            hasProcess: queueStatus.hasProcess,
+            containerName: queueStatus.containerName,
+            pendingMessages: queueStatus.pendingMessages,
+            pendingTasks: queueStatus.pendingTasks,
+            currentObjective: activity.currentObjective,
+            lastProgress: activity.lastProgress,
+            lastProgressAt: activity.lastProgressAt,
+            lastError: activity.lastError,
+            lastErrorAt: activity.lastErrorAt,
+          };
+        }),
+      };
+
+      for (const [, g] of Object.entries(registeredGroups)) {
+        const ipcDir = path.join(DATA_DIR, 'ipc', g.folder);
+        if (!fs.existsSync(ipcDir)) continue;
+        const statusPath = path.join(ipcDir, 'status.json');
+        const tmpPath = `${statusPath}.tmp`;
+        fs.writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2));
+        fs.renameSync(tmpPath, statusPath);
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to write status snapshot');
+    }
+  };
+  writeStatusSnapshot();
+  setInterval(writeStatusSnapshot, STATUS_SNAPSHOT_INTERVAL);
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

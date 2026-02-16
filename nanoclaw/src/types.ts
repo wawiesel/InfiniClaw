@@ -39,7 +39,6 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
-  routeToMain?: boolean; // If true, messages are piped into the main group's container instead of spawning a separate one
 }
 
 export interface NewMessage {

@@ -21,7 +21,6 @@ const SENT_TEXTS_FILE = path.join(IPC_DIR, '.sent_texts');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
-const delegateOutputJid = process.env.NANOCLAW_DELEGATE_OUTPUT_JID || chatJid;
 const DEFAULT_DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_DELEGATE_TIMEOUT_MS = 60 * 60 * 1000;
 const DELEGATE_CWD_ROOTS = ['/workspace/group', '/workspace/extra'];
@@ -144,7 +143,7 @@ function emitChatMessageTo(chatJidTarget: string, text: string, sender?: string)
 }
 
 function emitDelegateMessage(text: string): void {
-  emitChatMessageTo(delegateOutputJid, text);
+  emitChatMessageTo(chatJid, text);
 }
 
 function guessMimeTypeFromFilename(filename: string): string {
@@ -330,53 +329,6 @@ server.tool(
     emitChatMessage(args.text, args.sender);
 
     return { content: [{ type: 'text' as const, text: 'Status sent.' }] };
-  },
-);
-
-server.tool(
-  'delegate_commander',
-  `Delegate an objective to the commander bot by sending a task message to the commander's chat.
-
-Use this when acting as engineer infrastructure orchestrator.
-Behavior:
-- Sends a message to commander chat JID
-- By default prefixes objective with "@commander " so commander trigger rules fire
-- Returns an error if target chat JID is missing`,
-  {
-    objective: z.string().describe('Task/objective to hand off to commander'),
-    target_chat_jid: z.string().optional().describe('Target chat JID for commander (defaults to ENGINEER_COMMANDER_CHAT_JID env if set)'),
-    include_trigger: z.boolean().default(true).describe('If true, prefixes objective with "@commander "'),
-    sender: z.string().default('engineer').describe('Sender label for the handoff message'),
-  },
-  async (args) => {
-    const defaultTarget = process.env.ENGINEER_COMMANDER_CHAT_JID?.trim();
-    const targetChatJid = (args.target_chat_jid || defaultTarget || '').trim();
-    if (!targetChatJid) {
-      return {
-        content: [{ type: 'text' as const, text: 'Missing target chat JID. Set target_chat_jid or ENGINEER_COMMANDER_CHAT_JID.' }],
-        isError: true,
-      };
-    }
-
-    if (!isMain && targetChatJid !== chatJid) {
-      return {
-        content: [{ type: 'text' as const, text: 'Only MAIN can delegate to other chats. Run from main context.' }],
-        isError: true,
-      };
-    }
-
-    const body = args.include_trigger
-      ? `@commander ${args.objective}`
-      : args.objective;
-
-    emitChatMessageTo(targetChatJid, body, args.sender);
-
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Delegated to commander (${targetChatJid}).`,
-      }],
-    };
   },
 );
 
@@ -1438,6 +1390,33 @@ Use this after making code changes that require a process restart.`,
     return {
       content: [{ type: 'text' as const, text: `Restart requested for ${args.bot}. The host daemon will handle the restart.` }],
     };
+  },
+);
+
+server.tool(
+  'check_health',
+  'Check the host system health and status. Returns bot status, active containers, group activity, and queue state. The host writes this snapshot every 30 seconds.',
+  {},
+  async () => {
+    const statusPath = path.join(IPC_DIR, 'status.json');
+    if (!fs.existsSync(statusPath)) {
+      return {
+        content: [{ type: 'text' as const, text: 'No status snapshot available yet. The host writes status.json every 30s.' }],
+      };
+    }
+
+    try {
+      const raw = fs.readFileSync(statusPath, 'utf-8');
+      const status = JSON.parse(raw);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(status, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to read status: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
   },
 );
 

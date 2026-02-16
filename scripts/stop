@@ -4,9 +4,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
-source "${SCRIPT_DIR}/scripts/common.sh"
+source "${SCRIPT_DIR}/common.sh"
 
 LAUNCH_AGENTS_DIR="${HOME}/Library/LaunchAgents"
+
+# Save persona group memory before stopping
+for bot in engineer commander; do
+  sync_persona "$bot" 2>/dev/null || true
+done
 
 for bot in engineer commander; do
   label="com.infiniclaw.${bot}"
@@ -19,6 +24,18 @@ for bot in engineer commander; do
     echo "${bot}: not installed"
   fi
 done
+
+# Remove legacy single-bot plist if it exists
+if [[ -f "${LAUNCH_AGENTS_DIR}/com.nanoclaw.plist" ]]; then
+  launchctl unload "${LAUNCH_AGENTS_DIR}/com.nanoclaw.plist" 2>/dev/null || true
+  rm -f "${LAUNCH_AGENTS_DIR}/com.nanoclaw.plist"
+  echo "Removed legacy com.nanoclaw.plist"
+fi
+
+# Kill any rogue nanoclaw node processes not managed by launchctl
+pgrep -f 'nanoclaw.*dist/index\.js' 2>/dev/null | while read -r pid; do
+  kill "$pid" 2>/dev/null || true
+done || true
 
 # Stop all nanoclaw podman containers
 if command -v podman >/dev/null 2>&1; then

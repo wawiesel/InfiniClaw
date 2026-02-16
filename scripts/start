@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
-source "${SCRIPT_DIR}/scripts/common.sh"
+source "${SCRIPT_DIR}/common.sh"
 
 required_cmd rsync
 required_cmd node
@@ -22,6 +22,9 @@ start_bot() {
   local instance
   instance="$(instance_dir "$bot")"
   mkdir -p "${instance}"
+
+  # SAVE: capture runtime group memory before rsync wipes code
+  sync_persona "$bot"
 
   # Sync vendored code to instance
   rsync -a --delete \
@@ -43,6 +46,9 @@ start_bot() {
   # Build TypeScript
   echo "${bot}: building..."
   (cd "${instance}" && npm run build)
+
+  # RESTORE: append persona identity + seed group memory after rsync
+  restore_persona "$bot"
 
   # Load profile env
   load_profile_env "$bot"
@@ -78,12 +84,16 @@ start_bot() {
         <string>${HOME}</string>
         <key>INFINICLAW_ROOT</key>
         <string>${ROOT_DIR}</string>
+        <key>PERSONA_NAME</key>
+        <string>${bot}</string>
         <key>ASSISTANT_NAME</key>
         <string>${ASSISTANT_NAME:-}</string>
         <key>ASSISTANT_TRIGGER</key>
         <string>${ASSISTANT_TRIGGER:-}</string>
         <key>ASSISTANT_ROLE</key>
         <string>${ASSISTANT_ROLE:-}</string>
+        <key>ASSISTANT_REACTION</key>
+        <string>${ASSISTANT_REACTION:-}</string>
         <key>IGNORE_TRIGGERS</key>
         <string>${IGNORE_TRIGGERS:-}</string>
         <key>IGNORE_SENDERS</key>
@@ -110,6 +120,10 @@ start_bot() {
         <string>${LOG_LEVEL:-info}</string>
         <key>ANTHROPIC_MODEL</key>
         <string>${ANTHROPIC_MODEL:-}</string>
+        <key>ANTHROPIC_SMALL_FAST_MODEL</key>
+        <string>${ANTHROPIC_SMALL_FAST_MODEL:-}</string>
+        <key>ANTHROPIC_DEFAULT_SONNET_MODEL</key>
+        <string>${ANTHROPIC_DEFAULT_SONNET_MODEL:-}</string>
         <key>ANTHROPIC_BASE_URL</key>
         <string>${ANTHROPIC_BASE_URL:-}</string>
         <key>ANTHROPIC_API_KEY</key>
@@ -118,6 +132,10 @@ start_bot() {
         <string>${ANTHROPIC_AUTH_TOKEN:-}</string>
         <key>CLAUDE_CODE_OAUTH_TOKEN</key>
         <string>${CLAUDE_CODE_OAUTH_TOKEN:-}</string>
+        <key>CROSS_BOT_TRIGGER</key>
+        <string>${CROSS_BOT_TRIGGER:-}</string>
+        <key>CROSS_BOT_ROOM_JID</key>
+        <string>${CROSS_BOT_ROOM_JID:-}</string>
     </dict>
     <key>StandardOutPath</key>
     <string>${LOG_DIR}/${bot}.log</string>
@@ -136,11 +154,31 @@ ALLOWLIST_DIR="${HOME}/.config/nanoclaw"
 ALLOWLIST_FILE="${ALLOWLIST_DIR}/mount-allowlist.json"
 if [[ ! -f "${ALLOWLIST_FILE}" ]]; then
   mkdir -p "${ALLOWLIST_DIR}"
-  cp "${ROOT_DIR}/config/mount-allowlist.json" "${ALLOWLIST_FILE}"
+  cp "${ROOT_DIR}/bots/config/mount-allowlist.json" "${ALLOWLIST_FILE}"
   echo "Installed mount allowlist: ${ALLOWLIST_FILE}"
 fi
 
-# Stop lingering nanoclaw containers so fresh ones spawn with new code
+# Unload all services FIRST so old code stops before we build
+for bot in engineer commander; do
+  label="com.infiniclaw.${bot}"
+  plist_path="${LAUNCH_AGENTS_DIR}/${label}.plist"
+  launchctl unload "${plist_path}" 2>/dev/null || true
+done
+
+# Also unload legacy single-bot plist if it exists
+if [[ -f "${LAUNCH_AGENTS_DIR}/com.nanoclaw.plist" ]]; then
+  launchctl unload "${LAUNCH_AGENTS_DIR}/com.nanoclaw.plist" 2>/dev/null || true
+  rm -f "${LAUNCH_AGENTS_DIR}/com.nanoclaw.plist"
+  echo "Removed legacy com.nanoclaw.plist"
+fi
+
+# Kill any rogue nanoclaw node processes not managed by launchctl
+pgrep -f 'nanoclaw.*dist/index\.js' 2>/dev/null | while read -r pid; do
+  kill "$pid" 2>/dev/null || true
+done || true
+sleep 1
+
+# Kill stale containers (no old services can respawn them now)
 if command -v podman >/dev/null 2>&1; then
   podman ps --format '{{.Names}}' 2>/dev/null | grep '^nanoclaw-' | while read -r name; do
     echo "Stopping stale container: $name"
