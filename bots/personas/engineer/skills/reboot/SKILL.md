@@ -1,11 +1,11 @@
 ---
 name: reboot
-description: Restart yourself or the commander. Use after code changes, config updates, or when a bot is stuck.
+description: Restart yourself or the commander. Full redeploy — syncs code, persona, skills, and rebuilds the container image.
 ---
 
 # Reboot
 
-Use the `restart_self` MCP tool to restart bots. It validates code before restarting — if `tsc --noEmit` fails, the bot stays running and you get the errors to fix.
+Use the `restart_self` MCP tool to restart bots. This is a full redeploy — not just a process restart.
 
 ## Restart yourself
 
@@ -21,12 +21,22 @@ restart_self(bot: "commander")
 
 ## What happens
 
-1. Host stages code and runs `tsc --noEmit`
-2. If validation fails: bot stays up, errors reported to chat — fix and retry
-3. If validation passes: bot exits, launchd restarts it with new code
+1. Validate code with `tsc --noEmit` — if it fails, bot stays up and you get errors to fix
+2. Save persona groups (preserves room memory)
+3. Rsync nanoclaw source to instance
+4. Install deps if package-lock changed
+5. Build TypeScript
+6. Restore persona (appends persona CLAUDE.md, seeds group files)
+7. Rebuild container image (picks up agent-runner changes)
+8. Restart bot process via launchd
+
+Skills, CLAUDE.md changes, and container image updates all take effect after reboot.
 
 ## When to use
 
 - After editing nanoclaw source (bug fixes approved by the Captain)
-- After config or profile changes that need a process restart
+- After creating or modifying skills
+- After editing CLAUDE.md files
+- After changing Dockerfiles or agent-runner code
+- After config or profile changes
 - When a bot is stuck or unresponsive

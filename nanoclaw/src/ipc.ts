@@ -57,20 +57,26 @@ function validateDeploy(bot: string): Promise<{ ok: boolean; errors: string }> {
   });
 }
 
-/** Sync vendored code to instance, install deps if needed, build TS. */
+/** Deploy instance: save persona, rsync code, deps, build, restore persona, rebuild container image. */
 function deployInstance(bot: string): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     const root = resolveInfiniClawRoot();
+    const common = path.join(root, 'scripts', 'common.sh');
     const baseNanoclaw = path.join(root, 'nanoclaw');
     const instance = path.join(root, '_runtime', 'instances', bot, 'nanoclaw');
-    // Run sync + deps + build as a single shell sequence
+    const buildScript = path.join(root, 'bots', 'container', 'build.sh');
+    // Source common.sh for sync_persona/restore_persona, then rsync + build + persona restore + container rebuild
     const script = [
+      `source "${common}"`,
+      `sync_persona "${bot}"`,
       `rsync -a --delete --exclude node_modules --exclude data --exclude store --exclude groups --exclude logs --exclude .env.local "${baseNanoclaw}/" "${instance}/"`,
       `cd "${instance}"`,
       `if [ ! -d node_modules ] || ! diff -q "${baseNanoclaw}/package-lock.json" node_modules/.package-lock.json >/dev/null 2>&1; then npm ci && cp package-lock.json node_modules/.package-lock.json; fi`,
       `npm run build`,
+      `restore_persona "${bot}"`,
+      `"${buildScript}" "${bot}"`,
     ].join(' && ');
-    execFile('bash', ['-c', script], { timeout: 120_000 }, (err, stdout, stderr) => {
+    execFile('bash', ['-c', script], { timeout: 600_000 }, (err, stdout, stderr) => {
       if (err) {
         resolve({ ok: false, output: stderr || err.message });
       } else {
