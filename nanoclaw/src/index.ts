@@ -887,6 +887,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const channel = findChannel(channels, chatJid);
   if (channel?.setTyping) await channel.setTyping(chatJid, true);
+  if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'processing...');
   let hadError = false;
   let outputSentToUser = false;
   const agentResponses: string[] = [];
@@ -977,6 +978,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   });
 
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
+  if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   if (idleTimer) clearTimeout(idleTimer);
   if (runProgressNudgeTimer) clearInterval(runProgressNudgeTimer);
 
@@ -1011,9 +1013,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
       appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
       markRunEnded(chatJid);
-      if (channel) {
-        try { await channel.sendMessage(chatJid, '`idle`'); } catch {}
-      }
       return true;
     }
     // Roll back cursor so retries can re-process these messages
@@ -1021,9 +1020,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
     markRunEnded(chatJid);
-    if (channel) {
-      try { await channel.sendMessage(chatJid, '`idle`'); } catch {}
-    }
     return false;
   }
 
@@ -1031,15 +1027,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     markCompletion(chatJid, lastResponseBody);
   }
   markRunEnded(chatJid);
-
-  // Send idle indicator to channel
-  if (channel) {
-    try {
-      await channel.sendMessage(chatJid, '`idle`');
-    } catch (err) {
-      logger.warn({ err, chatJid }, 'Failed to send idle indicator');
-    }
-  }
 
   appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
   return true;
@@ -1258,9 +1245,10 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
-            // Show typing indicator while the container processes the piped message
+            // Show typing/presence indicator while the container processes the piped message
             const ch = findChannel(channels, chatJid);
             if (ch?.setTyping) await ch.setTyping(chatJid, true);
+            if (ch?.setPresenceStatus) await ch.setPresenceStatus('online', 'processing...');
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
@@ -1592,6 +1580,9 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    for (const ch of channels) {
+      if (ch.setPresenceStatus) await ch.setPresenceStatus('offline', 'shutting down...');
+    }
     syncPersonas();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
@@ -1798,6 +1789,7 @@ async function main(): Promise<void> {
     if (!ch) return;
     clearInterval(bootAnnounceTimer);
     try {
+      if (ch.setPresenceStatus) await ch.setPresenceStatus('online', 'idle');
       await ch.sendMessage(mainJid, `✅ <font color="#00cc00">online.</font>\n\n${mainSender()}`);
     } catch (err) {
       logger.warn({ err }, 'Failed to send boot announcement');

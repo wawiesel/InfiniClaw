@@ -892,6 +892,15 @@ export class MatrixChannel implements Channel {
     }
   }
 
+  async setPresenceStatus(state: string, statusMessage?: string): Promise<void> {
+    if (!this.client || !this._connected) return;
+    try {
+      await this.client.setPresenceStatus(state as any, statusMessage);
+    } catch {
+      // Non-critical
+    }
+  }
+
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);

@@ -97,6 +97,8 @@ export interface Channel {
   prefixAssistantName?: boolean;
   // Optional: reaction to a message to acknowledge receipt
   sendReaction?(jid:string, eventId: string, emoji: string): Promise<void>;
+  // Optional: set presence/status visible next to bot display name
+  setPresenceStatus?(state: string, statusMessage?: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
