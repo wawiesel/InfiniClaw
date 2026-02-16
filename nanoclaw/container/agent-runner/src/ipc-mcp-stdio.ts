@@ -1420,6 +1420,41 @@ server.tool(
   },
 );
 
+server.tool(
+  'get_brain_mode',
+  'Get the current brain mode (anthropic or ollama) and model for each bot. Reads from the host status snapshot.',
+  {},
+  async () => {
+    const statusPath = path.join(IPC_DIR, 'status.json');
+    if (!fs.existsSync(statusPath)) {
+      return {
+        content: [{ type: 'text' as const, text: 'No status snapshot available yet.' }],
+      };
+    }
+
+    try {
+      const raw = fs.readFileSync(statusPath, 'utf-8');
+      const status = JSON.parse(raw) as { brainModes?: Record<string, { mode: string; model: string }> };
+      if (!status.brainModes) {
+        return {
+          content: [{ type: 'text' as const, text: 'Brain modes not available in status snapshot. Host may need restart.' }],
+        };
+      }
+      const lines = Object.entries(status.brainModes).map(
+        ([bot, info]) => `${bot}: ${info.mode} (${info.model || 'no model'})`,
+      );
+      return {
+        content: [{ type: 'text' as const, text: lines.join('\n') }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to read brain modes: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

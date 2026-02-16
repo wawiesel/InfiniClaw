@@ -147,6 +147,29 @@ function applyBrainMode(
   return `Updated ${bot} to ollama mode. Restart required.`;
 }
 
+export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'unknown'; model: string } {
+  const root = resolveInfiniClawRoot();
+  const envFile = path.join(root, 'bots', 'profiles', bot, 'env');
+  if (!fs.existsSync(envFile)) {
+    return { mode: 'unknown', model: '' };
+  }
+  const content = fs.readFileSync(envFile, 'utf-8');
+  const getValue = (key: string): string => {
+    const match = content.match(new RegExp(`^${key}=(.*)`, 'm'));
+    return match ? match[1].trim() : '';
+  };
+  const model = getValue('BRAIN_MODEL');
+  const baseUrl = getValue('BRAIN_BASE_URL');
+  const authToken = getValue('BRAIN_AUTH_TOKEN');
+  if (baseUrl && (baseUrl.includes('ollama') || baseUrl.includes('11434'))) {
+    return { mode: 'ollama', model };
+  }
+  if (authToken === 'ollama') {
+    return { mode: 'ollama', model };
+  }
+  return { mode: model ? 'anthropic' : 'unknown', model };
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -611,7 +634,7 @@ export async function processTaskIpc(
         }
         if (chatJid) {
           try {
-            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
+            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting ${bot}...</font>`);
           } catch {}
         }
         // Exit gracefully — launchd will restart with the newly deployed code
@@ -629,7 +652,7 @@ export async function processTaskIpc(
         logger.info({ bot }, 'Instance deployed — restarting via launchctl');
         if (chatJid) {
           try {
-            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting...</font>`);
+            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting ${bot}...</font>`);
           } catch {}
         }
         try {

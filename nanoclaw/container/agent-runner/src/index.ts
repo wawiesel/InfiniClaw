@@ -394,6 +394,7 @@ function createPreCompactHook(): HookCallback {
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
 const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SANITIZE_PREFIX = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
 
 function createToolProgressHook(emitFn: (text: string) => void): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -414,13 +415,12 @@ function createSanitizeBashHook(): HookCallback {
     const command = (preInput.tool_input as { command?: string })?.command;
     if (!command) return {};
 
-    const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         updatedInput: {
           ...(preInput.tool_input as Record<string, unknown>),
-          command: unsetPrefix + command,
+          command: SANITIZE_PREFIX + command,
         },
       },
     };
@@ -503,7 +503,10 @@ function extractAssistantText(message: unknown): string {
 function formatToolInput(name: string, input: unknown): string {
   if (input && typeof input === 'object') {
     const obj = input as Record<string, unknown>;
-    if (name === 'Bash' && typeof obj.command === 'string') return obj.command;
+    if (name === 'Bash' && typeof obj.command === 'string') {
+      const cmd = obj.command;
+      return cmd.startsWith(SANITIZE_PREFIX) ? cmd.slice(SANITIZE_PREFIX.length) : cmd;
+    }
     if (name === 'Read' && typeof obj.file_path === 'string') return obj.file_path;
     if ((name === 'Edit' || name === 'Write') && typeof obj.file_path === 'string') return obj.file_path;
     if ((name === 'Grep' || name === 'Glob') && typeof obj.pattern === 'string') return obj.pattern;
@@ -549,7 +552,9 @@ function describeToolCall(name: string, input: unknown): string {
     return `${name} - ${short}`;
   }
   if (typeof obj.command === 'string') {
-    const short = obj.command.replace(/\s+/g, ' ').trim().slice(0, 60);
+    let cmd = obj.command;
+    if (cmd.startsWith(SANITIZE_PREFIX)) cmd = cmd.slice(SANITIZE_PREFIX.length);
+    const short = cmd.replace(/\s+/g, ' ').trim().slice(0, 60);
     return `${name} - ${short}`;
   }
   if (typeof obj.skill === 'string') return `${name} - ${obj.skill}`;
@@ -560,7 +565,7 @@ function formatToolCallWithOutput(name: string, input: unknown, response: unknow
   const label = escapeHtml(describeToolCall(name, input));
   const inputText = escapeHtml(formatToolInput(name, input));
   const outputText = escapeHtml(formatToolResponse(response));
-  return `<small><details><summary>🔧 ${label}</summary><b>Input:</b><pre><code>${inputText}</code></pre><b>Output:</b><pre><code>${outputText}</code></pre></details></small>`;
+  return `<small><details><summary><code>🔧 ${label}</code></summary><b>Input:</b><pre><code>${inputText}</code></pre><b>Output:</b><pre><code>${outputText}</code></pre></details></small>`;
 }
 
 function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {
