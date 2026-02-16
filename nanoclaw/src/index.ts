@@ -703,7 +703,9 @@ const queue = new GroupQueue();
  */
 async function maybeCrossBotForward(chatJid: string, text: string): Promise<void> {
   if (!CROSS_BOT_PATTERN || !CROSS_BOT_ROOM_JID) return;
-  if (!CROSS_BOT_PATTERN.test(text.trim())) return;
+  // Use non-anchored pattern — bot output may have preamble before the @mention
+  const unanchored = new RegExp(CROSS_BOT_PATTERN.source.replace(/^\^/, ''), CROSS_BOT_PATTERN.flags);
+  if (!unanchored.test(text)) return;
   const ch = findChannel(channels, CROSS_BOT_ROOM_JID);
   if (!ch) return;
   const group = registeredGroups[chatJid];
