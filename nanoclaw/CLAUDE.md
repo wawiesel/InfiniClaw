@@ -19,15 +19,28 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `container/skills/{name}/SKILL.md` | Shared bot skills (all bots) |
 
 ## Skills
+
+Skills are the primary way to add capabilities. Each skill is a directory with a `SKILL.md` and optional `scripts/`.
+
+### Operator skills (for developing NanoClaw)
 
 | Skill | When to Use |
 |-------|-------------|
 | `/setup` | First-time installation, authentication, service configuration |
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
+
+### Bot skills (available inside containers)
+
+| Source | Scope |
+|--------|-------|
+| `container/skills/{name}/` | All bots (shared) |
+| `bots/personas/{bot}/skills/{name}/` | That bot only (persona-specific) |
+
+Persona skills override shared skills with the same name. Skills are synced into the container's `.claude/skills/` on every spawn.
 
 ## Development
 

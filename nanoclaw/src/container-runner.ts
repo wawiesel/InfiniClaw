@@ -260,6 +260,19 @@ function quoteEnvValue(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
 
+function copyDirRecursive(src: string, dst: string): void {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name);
+    const dstPath = path.join(dst, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, dstPath);
+    } else {
+      fs.copyFileSync(srcPath, dstPath);
+    }
+  }
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -328,39 +341,26 @@ function buildVolumeMounts(
     }, null, 2) + '\n');
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+  // Sync skills into each group's .claude/skills/
+  // Supports skill format: {skill}/SKILL.md, {skill}/scripts/*, etc.
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
+  const syncSkillsFrom = (src: string) => {
+    if (!fs.existsSync(src)) return;
+    for (const skillDir of fs.readdirSync(src)) {
+      const srcDir = path.join(src, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      fs.mkdirSync(dstDir, { recursive: true });
-      for (const file of fs.readdirSync(srcDir)) {
-        const srcFile = path.join(srcDir, file);
-        const dstFile = path.join(dstDir, file);
-        fs.copyFileSync(srcFile, dstFile);
-      }
+      copyDirRecursive(srcDir, path.join(skillsDst, skillDir));
     }
-  }
+  };
 
-  // Sync persona-specific skills (from personas/{bot}/skills/)
+  // Shared skills (all bots)
+  syncSkillsFrom(path.join(process.cwd(), 'container', 'skills'));
+
+  // Persona-specific skills (override shared if same name)
   const rootDir = process.env.INFINICLAW_ROOT;
   const personaName = process.env.PERSONA_NAME;
   if (rootDir && personaName) {
-    const personaSkillsSrc = path.join(rootDir, 'bots', 'personas', personaName, 'skills');
-    if (fs.existsSync(personaSkillsSrc)) {
-      for (const skillDir of fs.readdirSync(personaSkillsSrc)) {
-        const srcDir = path.join(personaSkillsSrc, skillDir);
-        if (!fs.statSync(srcDir).isDirectory()) continue;
-        const dstDir = path.join(skillsDst, skillDir);
-        fs.mkdirSync(dstDir, { recursive: true });
-        for (const file of fs.readdirSync(srcDir)) {
-          fs.copyFileSync(path.join(srcDir, file), path.join(dstDir, file));
-        }
-      }
-    }
+    syncSkillsFrom(path.join(rootDir, 'bots', 'personas', personaName, 'skills'));
   }
 
   mounts.push({
