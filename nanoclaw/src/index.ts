@@ -873,6 +873,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const filteredMessages = missedMessages.filter((msg) => !shouldIgnoreMessage(msg));
   if (filteredMessages.length === 0) return true;
 
+  // Trigger gating: non-main groups with requiresTrigger skip messages without the trigger
+  if (!isMainGroup && group.requiresTrigger !== false) {
+    const hasTrigger = filteredMessages.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
+    if (!hasTrigger) {
+      // Advance cursor past these messages without processing
+      lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+      saveState();
+      return true;
+    }
+  }
+
   setObjectiveFromMessages(chatJid, filteredMessages);
 
   // Thread routing: prefer incoming message thread, fall back to work thread set by container
@@ -1197,6 +1208,16 @@ async function startMessageLoop(): Promise<void> {
           // Filter out other-bot noise; everything else gets processed
           const filtered = groupMessages.filter((msg) => !shouldIgnoreMessage(msg));
           if (filtered.length === 0) continue;
+
+          // Trigger gating: non-main groups with requiresTrigger skip messages without the trigger
+          if (!isMainGroup && group.requiresTrigger !== false) {
+            const hasTrigger = filtered.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
+            if (!hasTrigger) {
+              lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
+              saveState();
+              continue;
+            }
+          }
 
           // --- Cross-bot @mention forwarding ---
           // Messages matching @OtherBot get forwarded to the other bot's room
