@@ -10,6 +10,7 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
+import { saveMcpServersToPersona } from './mcp-sync.js';
 import { saveSkillsToPersona } from './skill-sync.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -245,6 +246,12 @@ export function syncPersona(root: string, bot: string): void {
       const skillsDir = path.join(sessionsBase, folder, '.claude', 'skills');
       if (!fs.existsSync(skillsDir)) continue;
       saveSkillsToPersona(skillsDir, path.join(persona, 'skills'), sharedSkillsSrc);
+
+      // Also save MCP server changes back to persona
+      const settingsFile = path.join(sessionsBase, folder, '.claude', 'settings.json');
+      const sessionMcpDir = path.join(sessionsBase, folder, '.claude', 'mcp-servers');
+      const personaMcpDir = path.join(persona, 'mcp-servers');
+      saveMcpServersToPersona(settingsFile, personaMcpDir, sessionMcpDir);
       break; // Only need one session (main)
     }
   }

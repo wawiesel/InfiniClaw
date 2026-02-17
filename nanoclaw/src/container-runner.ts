@@ -20,6 +20,7 @@ import {
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { loadMcpServersToSettings, saveMcpServersToPersona } from './mcp-sync.js';
 import { saveSkillsToPersona, loadSkillsToSession } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
 
@@ -340,6 +341,13 @@ function buildVolumeMounts(
     const personaSkillsDir = path.join(rootDir, 'bots', 'personas', personaName, 'skills');
     saveSkillsToPersona(skillsDst, personaSkillsDir, sharedSkillsSrc);
     loadSkillsToSession(skillsDst, personaSkillsDir, sharedSkillsSrc);
+
+    // Sync persona MCP servers into settings.json
+    const personaMcpDir = path.join(rootDir, 'bots', 'personas', personaName, 'mcp-servers');
+    const sessionMcpDir = path.join(groupSessionsDir, 'mcp-servers');
+    const containerMcpPath = '/home/node/.claude/mcp-servers';
+    saveMcpServersToPersona(settingsFile, personaMcpDir, sessionMcpDir);
+    loadMcpServersToSettings(settingsFile, personaMcpDir, sessionMcpDir, containerMcpPath);
   }
 
   mounts.push({
