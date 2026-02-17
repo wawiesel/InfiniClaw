@@ -1,0 +1,8 @@
+{
+  "name": "AddPerson",
+  "description": "Add a person to the Obsidian vault People section with a well-structured profile",
+  "version": "1.0.0",
+  "author": "Johnny5",
+  "trigger": "/AddPerson",
+  "instructions": "SKILL.md"
+}

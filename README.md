@@ -25,20 +25,20 @@ bots/profiles/commander/env
 Start bots:
 
 ```bash
-./scripts/start
+cd nanoclaw && npm run cli start
 ```
 
 Stop bots:
 
 ```bash
-./scripts/stop
+cd nanoclaw && npm run cli stop
 ```
 
 Terminal chat:
 
 ```bash
-./scripts/chat engineer
-./scripts/chat commander
+cd nanoclaw && npm run cli chat engineer
+cd nanoclaw && npm run cli chat commander
 ```
 
 ## Brain LLM per bot
@@ -54,14 +54,13 @@ Set:
 - `BRAIN_BASE_URL` (optional backend endpoint)
 - `BRAIN_AUTH_TOKEN` / `BRAIN_API_KEY` / `BRAIN_OAUTH_TOKEN` as needed
 
-The `start` script maps these to NanoClaw runtime env (`ANTHROPIC_*` / `CLAUDE_CODE_OAUTH_TOKEN`).
+The CLI maps these to NanoClaw runtime env (`ANTHROPIC_*` / `CLAUDE_CODE_OAUTH_TOKEN`).
 This keeps model/backend switching to one place per bot.
 
 ## Directory structure
 
 ```
-scripts/       Entry points: start, stop, chat
-nanoclaw/      Core code (vendored NanoClaw fork)
+nanoclaw/      Core code (NanoClaw fork via git subtree)
 bots/          Bot definitions: personas, profiles, container images, config
 docs/          Design docs and assets
 _runtime/      Gitignored runtime state: instances, data, logs
@@ -73,4 +72,4 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for architecture, boundaries, and operati
 
 ## Notes
 
-- `nanoclaw/` is currently a normal clone on `main` (not submodule yet).
+- `nanoclaw/` is a git subtree from `wawiesel/nanoclaw` — editable in place, push changes back with `git subtree push`.
