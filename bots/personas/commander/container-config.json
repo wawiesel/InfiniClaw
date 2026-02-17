@@ -10,9 +10,9 @@
     "wksm": {
       "command": "python3",
       "args": ["-m", "wks.mcp.main"],
-      "cwd": "/workspace/extra/home/2025-WKS/hodor",
+      "cwd": "/workspace/extra/home/2025-WKS/main",
       "env": {
-        "PYTHONPATH": "/workspace/extra/home/2025-WKS/hodor"
+        "PYTHONPATH": "/workspace/extra/home/2025-WKS/main"
       }
     }
   }
