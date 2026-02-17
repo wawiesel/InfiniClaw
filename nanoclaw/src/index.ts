@@ -77,6 +77,8 @@ const PROGRESS_CHAT_COOLDOWN_MS = 10_000;
 const lastProgressChatAt: Record<string, number> = {};
 const PIP_PULSE = ['🔵', '🔷', '🔹', '🔷'] as const;
 const pipPulseIndex: Record<string, number> = {};
+// Per-group work thread IDs — set by container via IPC, used by processGroupMessages
+const workThreadIds: Record<string, string> = {};
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
 const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
@@ -865,9 +867,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   setObjectiveFromMessages(chatJid, filteredMessages);
 
-  // If the most recent message is in a thread, auto-reply in that thread
+  // Thread routing: prefer incoming message thread, fall back to work thread set by container
   const lastMsg = filteredMessages[filteredMessages.length - 1];
-  const replyThreadId = lastMsg?.thread_id;
+  let replyThreadId = lastMsg?.thread_id || workThreadIds[chatJid];
 
   const basePrompt = formatMessages(filteredMessages);
   const missionContext =
