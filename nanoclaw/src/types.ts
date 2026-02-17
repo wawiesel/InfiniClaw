@@ -50,7 +50,6 @@ export interface NewMessage {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
-  is_bot_message?: boolean;
 }
 
 export interface ScheduledTask {
@@ -92,14 +91,16 @@ export interface Channel {
   sendImage?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
   // Optional: send a generic file attachment. Buffer is the raw file data.
   sendFile?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
-  // Optional: reaction to a message to acknowledge receipt
-  sendReaction?(jid: string, eventId: string, emoji: string): Promise<void>;
   // Whether to prefix outbound messages with the assistant name.
   // Telegram bots already display their name, so they return false.
   // WhatsApp returns true. Default true if not implemented.
   prefixAssistantName?: boolean;
+  // Optional: reaction to a message to acknowledge receipt
+  sendReaction?(jid:string, eventId: string, emoji: string): Promise<void>;
   // Optional: set presence/status visible next to bot display name
   setPresenceStatus?(state: string, statusMessage?: string): Promise<void>;
+  // Optional: react to the bot's own last message with a status pip emoji
+  setStatusPip?(jid: string, emoji: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

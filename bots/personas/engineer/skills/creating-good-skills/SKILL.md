@@ -79,8 +79,6 @@ The description field is the only thing Claude always sees. Body is loaded *afte
 
 Persona skills override shared skills with the same name. Skills sync into the container's `.claude/skills/` on every spawn — not mid-session. New or changed skills require a reboot.
 
-**After finishing all skill edits, reboot the affected bot(s) so changes take effect.** Do not reboot mid-edit — wait until all changes are complete.
-
 ### Naming
 
 - Directory name = kebab-case (`creating-good-skills`, not `CreatingGoodSkills`)

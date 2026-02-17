@@ -1,9 +1,9 @@
 import {
   MatrixClient,
   MatrixAuth,
-  SimpleFsStorageProvider,
   LogService,
   LogLevel,
+  SimpleFsStorageProvider,
 } from 'matrix-bot-sdk';
 import { marked } from 'marked';
 
@@ -47,6 +47,54 @@ const MATRIX_SEND_TIMEOUT_MS = 4_000;
 const MATRIX_TYPING_TIMEOUT_MS = 1_500;
 const MATRIX_META_TIMEOUT_MS = 2_500;
 const MATRIX_HEALTH_TIMEOUT_MS = 5_000;
+let matrixSdkLoggerConfigured = false;
+
+function isExpectedAccountDataMissing(args: unknown[]): boolean {
+  return args.some((arg) => {
+    if (!arg || typeof arg !== 'object') return false;
+    const record = arg as Record<string, unknown>;
+    const errcode =
+      typeof record.errcode === 'string'
+        ? record.errcode
+        : typeof (record.body as Record<string, unknown> | undefined)?.errcode ===
+            'string'
+          ? ((record.body as Record<string, unknown>).errcode as string)
+          : undefined;
+    const message =
+      typeof record.error === 'string'
+        ? record.error
+        : typeof (record.body as Record<string, unknown> | undefined)?.error ===
+            'string'
+          ? ((record.body as Record<string, unknown>).error as string)
+          : '';
+    return errcode === 'M_NOT_FOUND' && message === 'Account data not found';
+  });
+}
+
+function configureMatrixSdkLogger(): void {
+  if (matrixSdkLoggerConfigured) return;
+  matrixSdkLoggerConfigured = true;
+  LogService.setLevel(LogLevel.INFO);
+  LogService.setLogger({
+    info: (module, ...args) => logger.debug({ module, args }, 'matrix-sdk info'),
+    debug: (module, ...args) => logger.trace({ module, args }, 'matrix-sdk debug'),
+    trace: (module, ...args) => logger.trace({ module, args }, 'matrix-sdk trace'),
+    warn: (module, ...args) => {
+      if (isExpectedAccountDataMissing(args)) {
+        logger.debug('Matrix account-data not found (expected on fresh sessions)');
+        return;
+      }
+      logger.warn({ module, args }, 'matrix-sdk warn');
+    },
+    error: (module, ...args) => {
+      if (isExpectedAccountDataMissing(args)) {
+        logger.debug('Matrix account-data not found (expected on fresh sessions)');
+        return;
+      }
+      logger.warn({ module, args }, 'matrix-sdk error');
+    },
+  });
+}
 
 async function withTimeout<T>(
   promise: Promise<T>,
@@ -304,55 +352,6 @@ function matrixErrCode(err: unknown): string | undefined {
   return undefined;
 }
 
-let matrixSdkLoggerConfigured = false;
-
-function isExpectedAccountDataMissing(args: unknown[]): boolean {
-  return args.some((arg) => {
-    if (!arg || typeof arg !== 'object') return false;
-    const record = arg as Record<string, unknown>;
-    const errcode =
-      typeof record.errcode === 'string'
-        ? record.errcode
-        : typeof (record.body as Record<string, unknown> | undefined)?.errcode ===
-            'string'
-          ? ((record.body as Record<string, unknown>).errcode as string)
-          : undefined;
-    const message =
-      typeof record.error === 'string'
-        ? record.error
-        : typeof (record.body as Record<string, unknown> | undefined)?.error ===
-            'string'
-          ? ((record.body as Record<string, unknown>).error as string)
-          : '';
-    return errcode === 'M_NOT_FOUND' && message === 'Account data not found';
-  });
-}
-
-function configureMatrixSdkLogger(): void {
-  if (matrixSdkLoggerConfigured) return;
-  matrixSdkLoggerConfigured = true;
-  LogService.setLevel(LogLevel.INFO);
-  LogService.setLogger({
-    info: (module, ...args) => logger.debug({ module, args }, 'matrix-sdk info'),
-    debug: (module, ...args) => logger.trace({ module, args }, 'matrix-sdk debug'),
-    trace: (module, ...args) => logger.trace({ module, args }, 'matrix-sdk trace'),
-    warn: (module, ...args) => {
-      if (isExpectedAccountDataMissing(args)) {
-        logger.debug('Matrix account-data not found (expected on fresh sessions)');
-        return;
-      }
-      logger.warn({ module, args }, 'matrix-sdk warn');
-    },
-    error: (module, ...args) => {
-      if (isExpectedAccountDataMissing(args)) {
-        logger.debug('Matrix account-data not found (expected on fresh sessions)');
-        return;
-      }
-      logger.warn({ module, args }, 'matrix-sdk error');
-    },
-  });
-}
-
 export class MatrixChannel implements Channel {
   name = 'matrix';
   prefixAssistantName = false; // Bot display name shows in Matrix
@@ -362,10 +361,12 @@ export class MatrixChannel implements Channel {
   private botUserId = MATRIX_USER_ID;
   private opts: MatrixChannelOpts;
   private lastMessageEventId = new Map<string, string>();
+  private lastBotEventId = new Map<string, string>();
+  private lastPipReactionId = new Map<string, string>();
 
   constructor(opts: MatrixChannelOpts) {
-    configureMatrixSdkLogger();
     this.opts = opts;
+    configureMatrixSdkLogger();
   }
 
   private readStored(
@@ -718,7 +719,7 @@ export class MatrixChannel implements Channel {
       // Restore math placeholders
       html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
 
-      await withTimeout(
+      const eventId = await withTimeout(
         this.client.sendMessage(roomId, {
           msgtype: 'm.text',
           body: normalizedText,
@@ -728,6 +729,7 @@ export class MatrixChannel implements Channel {
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage',
       );
+      if (eventId) this.lastBotEventId.set(roomId, eventId);
     } catch (err) {
       if (this.isAuthFailure(err)) {
         this.markDisconnected('Matrix auth failed while sending message', err);
@@ -835,11 +837,12 @@ export class MatrixChannel implements Channel {
         url: mxcUrl,
         info,
       };
-      await withTimeout(
+      const imgEventId = await withTimeout(
         this.client.sendMessage(roomId, content),
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage(image)',
       );
+      if (imgEventId) this.lastBotEventId.set(roomId, imgEventId);
       if (caption && caption.trim()) {
         await this.sendMessage(jid, caption.trim());
       }
@@ -876,11 +879,12 @@ export class MatrixChannel implements Channel {
           size: buffer.length,
         },
       };
-      await withTimeout(
+      const fileEventId = await withTimeout(
         this.client.sendMessage(roomId, content),
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage(file)',
       );
+      if (fileEventId) this.lastBotEventId.set(roomId, fileEventId);
       if (caption && caption.trim()) {
         await this.sendMessage(jid, caption.trim());
       }
@@ -899,6 +903,37 @@ export class MatrixChannel implements Channel {
       await this.client.setPresenceStatus(state as any, statusMessage);
     } catch {
       // Non-critical
+    }
+  }
+
+  async setStatusPip(jid: string, emoji: string): Promise<void> {
+    if (!this.client || !this._connected) return;
+    const roomId = toRoomId(jid);
+    const targetEventId = this.lastBotEventId.get(roomId);
+    if (!targetEventId) return;
+
+    // Redact old pip
+    const oldId = this.lastPipReactionId.get(roomId);
+    if (oldId) {
+      try {
+        await withTimeout(this.client.redactEvent(roomId, oldId), MATRIX_SEND_TIMEOUT_MS, 'redactPip');
+      } catch { /* non-critical */ }
+      this.lastPipReactionId.delete(roomId);
+    }
+
+    // Add new pip
+    try {
+      const reactionId = await withTimeout(
+        this.client.sendEvent(roomId, 'm.reaction', {
+          'm.relates_to': { rel_type: 'm.annotation', event_id: targetEventId, key: emoji },
+        }),
+        MATRIX_SEND_TIMEOUT_MS,
+        'setStatusPip',
+      );
+      if (reactionId) this.lastPipReactionId.set(roomId, reactionId);
+    } catch (err) {
+      if (this.isAuthFailure(err)) this.markDisconnected('Matrix auth failed setting pip', err);
+      logger.warn({ jid, emoji, err }, 'Failed to set status pip');
     }
   }
 

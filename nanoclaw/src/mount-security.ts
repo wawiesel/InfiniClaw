@@ -23,26 +23,13 @@ let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
 
 /**
- * Default blocked patterns - paths that should never be mounted
+ * Default blocked patterns - always merged with allowlist patterns.
+ * ".*" blocks all dotfiles/dotdirs. Specific entries catch non-dot sensitive paths.
  */
 const DEFAULT_BLOCKED_PATTERNS = [
-  '.ssh',
-  '.gnupg',
-  '.gpg',
-  '.aws',
-  '.azure',
-  '.gcloud',
-  '.kube',
-  '.docker',
+  '.*',
   'credentials',
-  '.env',
-  '.netrc',
-  '.npmrc',
-  '.pypirc',
-  'id_rsa',
-  'id_ed25519',
   'private_key',
-  '.secret',
 ];
 
 /**
@@ -144,7 +131,8 @@ function getRealPath(p: string): string | null {
 }
 
 /**
- * Check if a path matches any blocked pattern
+ * Check if a path matches any blocked pattern.
+ * The special pattern ".*" blocks any path component starting with a dot (dotfiles/dotdirs).
  */
 function matchesBlockedPattern(
   realPath: string,
@@ -153,6 +141,16 @@ function matchesBlockedPattern(
   const pathParts = realPath.split(path.sep);
 
   for (const pattern of blockedPatterns) {
+    if (pattern === '.*') {
+      // Block any path component that starts with a dot
+      for (const part of pathParts) {
+        if (part.startsWith('.')) {
+          return `.*  (matched "${part}")`;
+        }
+      }
+      continue;
+    }
+
     // Check if any path component matches the pattern
     for (const part of pathParts) {
       if (part === pattern || part.includes(pattern)) {
@@ -170,12 +168,17 @@ function matchesBlockedPattern(
 }
 
 /**
- * Check if a real path is under an allowed root
+ * Check if a real path is under an allowed root.
+ * Returns the MOST SPECIFIC (longest) matching root so that
+ * ~/foo/bar (rw) takes precedence over ~ (ro).
  */
 function findAllowedRoot(
   realPath: string,
   allowedRoots: AllowedRoot[],
 ): AllowedRoot | null {
+  let bestRoot: AllowedRoot | null = null;
+  let bestRealRoot = '';
+
   for (const root of allowedRoots) {
     const expandedRoot = expandPath(root.path);
     const realRoot = getRealPath(expandedRoot);
@@ -188,11 +191,15 @@ function findAllowedRoot(
     // Check if realPath is under realRoot
     const relative = path.relative(realRoot, realPath);
     if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
-      return root;
+      // Pick the longest (most specific) matching root
+      if (realRoot.length > bestRealRoot.length) {
+        bestRoot = root;
+        bestRealRoot = realRoot;
+      }
     }
   }
 
-  return null;
+  return bestRoot;
 }
 
 /**

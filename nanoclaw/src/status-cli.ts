@@ -7,8 +7,6 @@
  *   npx tsx src/status-cli.ts --watch  # refresh every 5s
  *   npx tsx src/status-cli.ts --json   # JSON output
  *   npx tsx src/status-cli.ts --mcp    # stdio MCP server
- *
- * This module is fork-only — upstream nanoclaw does not have it.
  */
 import path from 'path';
 
@@ -77,6 +75,7 @@ function formatBot(bot: BotStatus): string {
       : '';
   lines.push(`${nameDisplay}${modelTag}     ${serviceIndicator(bot.service)}${pidTag}${heartbeatTag}`);
 
+  // Containers
   if (bot.containers.length > 0) {
     for (const c of bot.containers) {
       lines.push(`  Container: ${c.name}  ${c.uptime}`);
@@ -85,6 +84,7 @@ function formatBot(bot: BotStatus): string {
     lines.push('  No active containers');
   }
 
+  // Groups
   for (const g of bot.groups) {
     const activity = g.lastActivity ? relativeTime(g.lastActivity) : 'no activity';
     const objective = g.currentObjective ? ` \u2014 "${truncate(g.currentObjective, 80)}"` : '';
@@ -102,6 +102,7 @@ function formatBot(bot: BotStatus): string {
     }
   }
 
+  // Tasks
   const activeTasks = bot.tasks.filter((t) => t.status === 'active');
   const pausedTasks = bot.tasks.filter((t) => t.status === 'paused');
   const taskParts: string[] = [];
@@ -111,12 +112,14 @@ function formatBot(bot: BotStatus): string {
     lines.push(`  Tasks: ${taskParts.join(', ')}`);
   }
 
+  // Token usage
   if (bot.tokenUsage && bot.tokenUsage.length > 0) {
     for (const t of bot.tokenUsage) {
       lines.push(`  Tokens (${t.model}): ${formatTokens(t.inputTokens)} in / ${formatTokens(t.outputTokens)} out / ${formatTokens(t.cacheReadTokens)} cache`);
     }
   }
 
+  // Log files
   lines.push(`  Logs: ${displayPath(bot.logFiles.stderr)}`);
   lines.push(`         ${displayPath(bot.logFiles.stdout)}`);
   lines.push(`  DB:   ${displayPath(bot.logFiles.db)}`);
@@ -127,7 +130,7 @@ function formatBot(bot: BotStatus): string {
 function formatStatus(status: SystemStatus): string {
   const ts = new Date(status.timestamp).toLocaleString();
   const lines: string[] = [
-    `NanoClaw Status \u2014 ${ts}`,
+    `InfiniClaw Status \u2014 ${ts}`,
     '\u2550'.repeat(50),
     '',
   ];
@@ -142,6 +145,7 @@ function formatStatus(status: SystemStatus): string {
     lines.push('');
   }
 
+  // Recent errors summary
   const hasErrors = status.bots.some((b) => b.recentErrors.length > 0);
   if (hasErrors) {
     lines.push('Recent Errors:');
@@ -150,6 +154,7 @@ function formatStatus(status: SystemStatus): string {
         const lastAt = bot.lastErrorAt ? ` (last: ${relativeTime(bot.lastErrorAt)})` : '';
         lines.push(`  [${bot.name}]${lastAt}`);
         for (const err of bot.recentErrors.slice(-3)) {
+          // Strip ANSI codes and truncate
           const cleaned = err.replace(/\x1B\[[0-9;]*m/g, '').trim();
           const truncated = cleaned.length > 120 ? cleaned.slice(0, 117) + '...' : cleaned;
           lines.push(`    ${truncated}`);
@@ -180,6 +185,7 @@ function printOnce(json: boolean): void {
 function startWatch(json: boolean): void {
   const refresh = () => {
     const status = getSystemStatus(ROOT_DIR);
+    // Clear screen
     process.stdout.write('\x1B[2J\x1B[H');
     if (json) {
       console.log(JSON.stringify(status, null, 2));

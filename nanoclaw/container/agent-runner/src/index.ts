@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, PostToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -58,17 +58,26 @@ interface SDKUserMessage {
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+const IPC_SENT_TEXTS_FILE = '/workspace/ipc/.sent_texts'; // Legacy — kept for file cleanup only
 const IPC_POLL_MS = 500;
-const DOCLING_VENV_BIN = '/workspace/cache/venvs/docling_venv/bin';
+const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
+const CAPABILITY_STATE_FILE = '/workspace/cache/capability-budget-state.json';
 const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
 const TOOL_PROGRESS_EMIT_MS = 15_000;
 const GENERAL_PROGRESS_DEDUPE_MS = 5_000;
 const SDK_PROCESS_ENV_KEYS = [
+  'ASSISTANT_NAME',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_MODEL',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'NANOCLAW_SKIP_TOKEN_COUNTING',
+  'NANOCLAW_CONTEXT_WINDOW',
+  'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+  'INFINICLAW_ROOT',
   'HTTP_PROXY',
   'HTTPS_PROXY',
   'ALL_PROXY',
@@ -90,7 +99,54 @@ const MAIN_DELEGATE_POLICY = `Main brain / lobe policy:
 - Own final quality: verify lobe outputs, correct drift, and take responsibility for final results.
 - Keep lobe control explicit: use delegate_list/delegate_status/delegate_cancel/delegate_amend to monitor and correct active runs.
 - If user asks "what are you doing" during active work, provide concrete state (completed, running, next) immediately.
-- Your final response text is delivered to the user automatically. Do NOT use status_update for your final answer. Use status_update only for brief progress indicators during long tasks (max 60 chars).`;
+- Your final response text is delivered to the user automatically by the host.`;
+
+type CapabilityState = {
+  budgets: Record<string, number>;
+  used: Record<string, number>;
+};
+
+function capabilityKey(provider: string, model: string): string {
+  return `${provider.trim().toLowerCase()}:${model.trim()}`;
+}
+
+function estimateTokens(text: string): number {
+  const normalized = (text || '').trim();
+  if (!normalized) return 0;
+  return Math.max(1, Math.ceil(normalized.length / 4));
+}
+
+function loadCapabilityState(): CapabilityState {
+  try {
+    if (!fs.existsSync(CAPABILITY_STATE_FILE)) {
+      return { budgets: {}, used: {} };
+    }
+    const parsed = JSON.parse(
+      fs.readFileSync(CAPABILITY_STATE_FILE, 'utf-8'),
+    ) as Partial<CapabilityState>;
+    return {
+      budgets: parsed.budgets || {},
+      used: parsed.used || {},
+    };
+  } catch {
+    return { budgets: {}, used: {} };
+  }
+}
+
+function saveCapabilityState(state: CapabilityState): void {
+  fs.mkdirSync(path.dirname(CAPABILITY_STATE_FILE), { recursive: true });
+  const tmp = `${CAPABILITY_STATE_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, CAPABILITY_STATE_FILE);
+}
+
+function recordCapabilityUsage(provider: string, model: string, tokens: number): void {
+  if (!model || tokens <= 0) return;
+  const key = capabilityKey(provider, model);
+  const state = loadCapabilityState();
+  state.used[key] = (state.used[key] || 0) + tokens;
+  saveCapabilityState(state);
+}
 
 const DEFAULT_ALLOWED_TOOLS = [
   'Bash',
@@ -338,6 +394,20 @@ function createPreCompactHook(): HookCallback {
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
 const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SANITIZE_PREFIX = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
+
+function createToolProgressHook(emitFn: (text: string) => void): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const postInput = input as PostToolUseHookInput;
+    const formatted = formatToolCallWithOutput(
+      postInput.tool_name,
+      postInput.tool_input,
+      postInput.tool_response,
+    );
+    emitFn(formatted);
+    return {};
+  };
+}
 
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -345,13 +415,12 @@ function createSanitizeBashHook(): HookCallback {
     const command = (preInput.tool_input as { command?: string })?.command;
     if (!command) return {};
 
-    const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         updatedInput: {
           ...(preInput.tool_input as Record<string, unknown>),
-          command: unsetPrefix + command,
+          command: SANITIZE_PREFIX + command,
         },
       },
     };
@@ -429,6 +498,74 @@ function extractAssistantText(message: unknown): string {
   }
 
   return parts.join('\n').trim();
+}
+
+function formatToolInput(name: string, input: unknown): string {
+  if (input && typeof input === 'object') {
+    const obj = input as Record<string, unknown>;
+    if (name === 'Bash' && typeof obj.command === 'string') {
+      const cmd = obj.command;
+      return cmd.startsWith(SANITIZE_PREFIX) ? cmd.slice(SANITIZE_PREFIX.length) : cmd;
+    }
+    if (name === 'Read' && typeof obj.file_path === 'string') return obj.file_path;
+    if ((name === 'Edit' || name === 'Write') && typeof obj.file_path === 'string') return obj.file_path;
+    if ((name === 'Grep' || name === 'Glob') && typeof obj.pattern === 'string') return obj.pattern;
+    if (name === 'WebFetch' && typeof obj.url === 'string') return obj.url;
+    if (name === 'WebSearch' && typeof obj.query === 'string') return obj.query;
+    if (name === 'Task' && typeof obj.prompt === 'string') return obj.prompt;
+    return JSON.stringify(input, null, 2);
+  }
+  return String(input || '');
+}
+
+function formatToolResponse(response: unknown): string {
+  if (typeof response === 'string') return response;
+  if (response && typeof response === 'object') return JSON.stringify(response, null, 2);
+  return String(response || '');
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function describeToolCall(name: string, input: unknown): string {
+  if (!input || typeof input !== 'object') return name;
+  const obj = input as Record<string, unknown>;
+
+  // Tools with an explicit description field
+  if (typeof obj.description === 'string' && obj.description.trim()) {
+    return `${name} - ${obj.description.trim()}`;
+  }
+
+  // Derive from input for other tools
+  if (typeof obj.file_path === 'string') {
+    const basename = obj.file_path.split('/').pop() || obj.file_path;
+    return `${name} - ${basename}`;
+  }
+  if (typeof obj.pattern === 'string') return `${name} - ${obj.pattern}`;
+  if (typeof obj.query === 'string') return `${name} - ${obj.query}`;
+  if (typeof obj.url === 'string') {
+    try { return `${name} - ${new URL(obj.url).hostname}`; } catch {}
+  }
+  if (typeof obj.prompt === 'string') {
+    const short = obj.prompt.replace(/\s+/g, ' ').trim().slice(0, 60);
+    return `${name} - ${short}`;
+  }
+  if (typeof obj.command === 'string') {
+    let cmd = obj.command;
+    if (cmd.startsWith(SANITIZE_PREFIX)) cmd = cmd.slice(SANITIZE_PREFIX.length);
+    const short = cmd.replace(/\s+/g, ' ').trim().slice(0, 60);
+    return `${name} - ${short}`;
+  }
+  if (typeof obj.skill === 'string') return `${name} - ${obj.skill}`;
+  return name;
+}
+
+function formatToolCallWithOutput(name: string, input: unknown, response: unknown): string {
+  const label = escapeHtml(describeToolCall(name, input));
+  const inputText = escapeHtml(formatToolInput(name, input));
+  const outputText = escapeHtml(formatToolResponse(response));
+  return `<small><details><summary><code>🔧 ${label}</code></summary><b>Input:</b><pre><code>${inputText}</code></pre><b>Output:</b><pre><code>${outputText}</code></pre></details></small>`;
 }
 
 function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {
@@ -548,6 +685,9 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt);
 
+  // Clean up legacy sent-texts file
+  try { fs.unlinkSync(IPC_SENT_TEXTS_FILE); } catch {}
+
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
   let closedDuringQuery = false;
@@ -577,23 +717,23 @@ async function runQuery(
   const lastToolProgressAt = new Map<string, number>();
   let lastProgressText = '';
   let lastProgressAt = 0;
-  let lastAssistantText = '';
-
   const emitProgress = (text: string): void => {
-    const normalized = text.replace(/\r/g, '').replace(/\s+/g, ' ').trim();
-    if (!normalized) return;
+    const cleaned = text.replace(/\r/g, '').trim();
+    if (!cleaned) return;
+    // Normalize whitespace only for dedup comparison
+    const dedup = cleaned.replace(/\s+/g, ' ');
     const now = Date.now();
     if (
-      normalized === lastProgressText &&
+      dedup === lastProgressText &&
       now - lastProgressAt < GENERAL_PROGRESS_DEDUPE_MS
     ) {
       return;
     }
-    lastProgressText = normalized;
+    lastProgressText = dedup;
     lastProgressAt = now;
     writeOutput({
       status: 'success',
-      result: normalized,
+      result: cleaned,
       isProgress: true,
       newSessionId,
       model: activeModel,
@@ -666,6 +806,9 @@ async function runQuery(
               NANOCLAW_CHAT_JID: containerInput.chatJid,
               NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
               NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+              ...(sdkEnv.ASSISTANT_NAME
+                ? { NANOCLAW_ASSISTANT_NAME: sdkEnv.ASSISTANT_NAME }
+                : {}),
               ...(sdkEnv.HTTP_PROXY
                 ? { HTTP_PROXY: sdkEnv.HTTP_PROXY }
                 : {}),
@@ -689,6 +832,9 @@ async function runQuery(
               ...(sdkEnv.GIT_SSL_CAINFO
                 ? { GIT_SSL_CAINFO: sdkEnv.GIT_SSL_CAINFO }
                 : {}),
+              ...(sdkEnv.INFINICLAW_ROOT
+                ? { INFINICLAW_ROOT: sdkEnv.INFINICLAW_ROOT }
+                : {}),
               ...(sdkEnv.NODE_TLS_REJECT_UNAUTHORIZED
                 ? {
                     NODE_TLS_REJECT_UNAUTHORIZED:
@@ -701,6 +847,7 @@ async function runQuery(
         hooks: {
           PreCompact: [{ hooks: [createPreCompactHook()] }],
           PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+          PostToolUse: [{ hooks: [createToolProgressHook(emitProgress)] }],
         },
       }
     })) {
@@ -712,13 +859,9 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
 
-    if (message.type === 'assistant') {
-      const assistantText = extractAssistantText(message);
-      if (assistantText && assistantText !== lastAssistantText) {
-        lastAssistantText = assistantText;
-        emitProgress(assistantText);
-      }
-    }
+    // Assistant text is NOT emitted as progress — it arrives via the SDK's
+    // result event and gets delivered to chat by the host as the final response.
+    // Only tool-related progress is streamed.
 
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
@@ -786,19 +929,7 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      const normalizedResult = (textResult || '')
-        .replace(/\r/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (normalizedResult && normalizedResult === lastProgressText) {
-        writeOutput({
-          status: 'success',
-          result: null,
-          newSessionId,
-          model: activeModel,
-        });
-        continue;
-      }
+      // Always emit the result faithfully — the host decides formatting.
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -840,7 +971,9 @@ async function main(): Promise<void> {
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
   }
-  sdkEnv.PATH = prependToPath(sdkEnv.PATH, DOCLING_VENV_BIN);
+  if (EXTRA_PATH_PREPEND.trim().length > 0) {
+    sdkEnv.PATH = prependToPath(sdkEnv.PATH, EXTRA_PATH_PREPEND);
+  }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
@@ -911,11 +1044,13 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+    // Don't output newSessionId here — runQuery threw before returning,
+    // so sessionId is still the ORIGINAL (possibly corrupted) value.
+    // Any valid session established during the query was already saved
+    // by the host's streaming output handler.
     writeOutput({
       status: 'error',
       result: null,
-      newSessionId: sessionId,
-      model: activeModel,
       error: errorMessage
     });
     process.exit(1);

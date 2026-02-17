@@ -1,7 +1,6 @@
 /**
  * NanoClaw Status — Core status gathering module
  * Read-only: opens its own SQLite connection, shells out to launchctl/podman.
- * This module is fork-only — upstream nanoclaw does not have it.
  */
 import { execSync } from 'child_process';
 import Database from 'better-sqlite3';
@@ -102,11 +101,13 @@ function getBotServiceStatus(bot: string): { service: 'running' | 'stopped'; pid
   const raw = safeExec(`launchctl list ${label} 2>/dev/null`);
   if (!raw) return { service: 'stopped' };
 
+  // launchctl list <label> outputs key-value pairs; look for PID
   const pidMatch = raw.match(/"PID"\s*=\s*(\d+)/);
   if (pidMatch) {
     return { service: 'running', pid: parseInt(pidMatch[1], 10) };
   }
 
+  // Fallback: try tabular output format "PID\tStatus\tLabel"
   const lines = raw.split('\n');
   for (const line of lines) {
     const parts = line.trim().split(/\s+/);
@@ -118,6 +119,7 @@ function getBotServiceStatus(bot: string): { service: 'running' | 'stopped'; pid
     }
   }
 
+  // If we got output at all, the service is loaded
   return { service: 'running' };
 }
 
@@ -152,6 +154,7 @@ function getActiveContainers(): ContainerInfo[] {
       return names
         .filter((n: string) => n.startsWith('nanoclaw-'))
         .map((name: string) => {
+          // Parse group from name: nanoclaw-{bot}-{group}-{ts}
           const parts = name.split('-');
           const group = parts.length >= 3 ? parts.slice(2, -1).join('-') : 'unknown';
           return {
@@ -192,6 +195,7 @@ function getDbGroups(db: Database.Database): GroupStatus[] {
         sessionId: r.session_id || undefined,
       };
 
+      // Get chat activity from router_state
       const activityKey = `chat_activity:${encodeURIComponent(r.jid)}`;
       const activityRow = db.prepare('SELECT value FROM router_state WHERE key = ?').get(activityKey) as { value: string } | undefined;
       if (activityRow?.value) {
@@ -206,9 +210,10 @@ function getDbGroups(db: Database.Database): GroupStatus[] {
           if (typeof activity.lastErrorAt === 'number') {
             group.lastErrorAt = new Date(activity.lastErrorAt).toISOString();
           }
-        } catch { /* ignore parse errors */ }
+        } catch {}
       }
 
+      // Get last activity timestamp from messages
       const lastMsg = db.prepare(
         'SELECT timestamp FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1',
       ).get(r.jid) as { timestamp: string } | undefined;
@@ -253,23 +258,28 @@ function getDbTasks(db: Database.Database): TaskStatus[] {
 // ── Error logs ─────────────────────────────────────────────────────
 
 function getRecentErrors(rootDir: string, bot: string, maxErrors = 10): { lines: string[]; lastErrorAt?: string } {
+  // The .error.log is actually all pino output (stderr). Filter to only real errors.
   const logPath = path.join(rootDir, '_runtime', 'logs', `${bot}.error.log`);
   if (!fs.existsSync(logPath)) return { lines: [] };
 
   try {
     const content = fs.readFileSync(logPath, 'utf-8');
     const allLines = content.split('\n');
+    // Only keep lines that contain ERROR or FATAL — the pino log level markers
     const errorLines = allLines.filter((l) => {
       const stripped = l.replace(/\x1B\[[0-9;]*m/g, '');
       return /\b(ERROR|FATAL)\b/.test(stripped);
     });
     const recent = errorLines.slice(-maxErrors);
 
+    // Extract timestamp from the last error line: [HH:MM:SS.mmm] or ISO format
     let lastErrorAt: string | undefined;
     if (recent.length > 0) {
       const lastLine = recent[recent.length - 1].replace(/\x1B\[[0-9;]*m/g, '');
+      // Pino-pretty format: [HH:MM:SS.mmm]
       const timeMatch = lastLine.match(/\[(\d{2}:\d{2}:\d{2}\.\d{3})\]/);
       if (timeMatch) {
+        // Combine with today's date
         const today = new Date().toISOString().slice(0, 10);
         lastErrorAt = new Date(`${today}T${timeMatch[1]}Z`).toISOString();
       }
@@ -353,7 +363,7 @@ function getBrainConfig(rootDir: string, bot: string): { model?: string; provide
 
 // ── Heartbeat ───────────────────────────────────────────────────────
 
-const HEARTBEAT_STALE_MS = 3 * 60 * 1000;
+const HEARTBEAT_STALE_MS = 3 * 60 * 1000; // 3 minutes
 
 function getHeartbeat(instanceDir: string): { lastHeartbeat?: string; heartbeatStale?: boolean } {
   const heartbeatPath = path.join(instanceDir, 'data', 'heartbeat');
@@ -383,6 +393,16 @@ export function getSystemStatus(rootDir: string): SystemStatus {
     const { model, provider } = getBrainConfig(rootDir, bot);
     const instanceDir = path.join(rootDir, '_runtime', 'instances', bot, 'nanoclaw');
 
+    // Match containers by bot name prefix
+    const botContainers = allContainers.filter((c) => {
+      const parts = c.name.split('-');
+      return parts.length >= 2 && parts[1] === bot.slice(0, 3);
+    });
+
+    // Special case: engineer bot tag is "cid", commander is "johnny5" or similar
+    // The container name pattern is nanoclaw-{botTag}-{group}-{ts}
+    // botTag comes from ASSISTANT_NAME lowercased stripped of non-alnum
+    // We'll match by checking the instance dir's groups instead
     const botTag = bot === 'engineer' ? 'cid' : 'johnny5';
     const matchedContainers = allContainers.filter((c) => c.name.includes(`nanoclaw-${botTag}-`));
 
@@ -391,6 +411,7 @@ export function getSystemStatus(rootDir: string): SystemStatus {
     const tasks = db ? getDbTasks(db) : [];
     if (db) db.close();
 
+    // Attach container log dir path to each group
     for (const g of groups) {
       const logDir = path.join(instanceDir, 'groups', g.folder, 'logs');
       if (fs.existsSync(logDir)) {
@@ -401,6 +422,7 @@ export function getSystemStatus(rootDir: string): SystemStatus {
     const { lines: recentErrors, lastErrorAt: logLastErrorAt } = getRecentErrors(rootDir, bot, 10);
     const tokenUsage = getTokenUsage(instanceDir, 'main');
 
+    // Best lastErrorAt: prefer the more recent of log-parsed vs group chat_activity
     let bestLastErrorAt = logLastErrorAt;
     for (const g of groups) {
       if (g.lastErrorAt && (!bestLastErrorAt || g.lastErrorAt > bestLastErrorAt)) {
@@ -460,7 +482,7 @@ export function getRecentLogLines(rootDir: string, bot: string, logType: 'error'
 }
 
 /**
- * Get current activity summary for each bot.
+ * Get current activity summary for each bot — what they're working on right now.
  */
 export function getBotActivity(rootDir: string): Array<{ bot: string; activity: string }> {
   const result: Array<{ bot: string; activity: string }> = [];
@@ -475,6 +497,7 @@ export function getBotActivity(rootDir: string): Array<{ bot: string; activity: 
 
     const lines: string[] = [];
     try {
+      // Get all registered groups
       const groups = db.prepare('SELECT jid, name, folder FROM registered_groups').all() as Array<{ jid: string; name: string; folder: string }>;
 
       for (const group of groups) {
@@ -498,9 +521,9 @@ export function getBotActivity(rootDir: string): Array<{ bot: string; activity: 
           }
           if (activity.lastError) parts.push(`error: ${activity.lastError}`);
           lines.push(parts.join(' — '));
-        } catch { /* ignore parse errors */ }
+        } catch {}
       }
-    } catch { /* ignore db errors */ }
+    } catch {}
 
     db.close();
     result.push({ bot, activity: lines.length > 0 ? lines.join('\n') : 'idle' });
