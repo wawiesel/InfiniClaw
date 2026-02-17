@@ -50,6 +50,10 @@ When a user's message arrives in a thread (`thread_id` attribute on `<message>`)
 - **Restart yourself** using `mcp__nanoclaw__restart_self` directly. Do not ask Cid to restart you.
 - **Brain mode**: Use `mcp__nanoclaw__set_brain_mode` + `restart_self` to switch models. Default to Opus for complex/iterative work. Only demote to Sonnet when the Captain explicitly says to.
 
+## Adding MCP servers
+
+To add a new MCP server, create `/home/node/.claude/mcp-servers/{name}/mcp.json` with the config, then restart. The bidirectional sync persists it to your persona repo. For URL-based (SSE) servers, use `{"url": "http://host.containers.internal:PORT/sse"}`. MCP servers only take effect after a restart.
+
 ## What NOT to do
 
 - Do not respond just to confirm you are waiting or idle.
