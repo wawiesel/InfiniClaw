@@ -1047,7 +1047,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
   if (idleTimer) clearTimeout(idleTimer);
   if (runProgressNudgeTimer) clearInterval(runProgressNudgeTimer);
-  delete activeReplyThreadIds[chatJid];
 
   if (runResult.status === 'error' || hadError) {
     const rawError =
@@ -1079,6 +1078,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (outputSentToUser) {
       logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
       appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
+      delete activeReplyThreadIds[chatJid];
       markRunEnded(chatJid);
       return true;
     }
@@ -1086,6 +1086,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
+    delete activeReplyThreadIds[chatJid];
     markRunEnded(chatJid);
     return false;
   }
@@ -1093,6 +1094,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (lastResponseBody) {
     markCompletion(chatJid, lastResponseBody);
   }
+  delete activeReplyThreadIds[chatJid];
   markRunEnded(chatJid);
 
   appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
