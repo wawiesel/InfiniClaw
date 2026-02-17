@@ -19,6 +19,9 @@ import {
   validateDeploy as serviceValidateDeploy,
   deployBot as serviceDeployBot,
   rebuildImage as serviceRebuildImage,
+  holodeckCreate as serviceHolodeckCreate,
+  holodeckTeardown as serviceHolodeckTeardown,
+  holodeckPromote as serviceHolodeckPromote,
   resolveRoot,
 } from './service.js';
 import { RegisteredGroup } from './types.js';
@@ -346,6 +349,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For holodeck
+    branch?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -722,6 +727,71 @@ export async function processTaskIpc(
         await deps.sendMessage(statusChatJid, parts.join('\n\n'));
       } catch (err) {
         logger.error({ statusBot, err }, 'Failed to get bot status');
+      }
+      break;
+    }
+
+    case 'holodeck_create': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized holodeck_create attempt blocked');
+        break;
+      }
+      const branch = typeof data.branch === 'string' ? data.branch.trim() : '';
+      const hChatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+      if (!branch) {
+        if (hChatJid) await deps.sendMessage(hChatJid, '⛔ holodeck_create requires a branch name');
+        break;
+      }
+      try {
+        const root = resolveRoot();
+        serviceHolodeckCreate(root, branch);
+        if (hChatJid) await deps.sendMessage(hChatJid, `✅ Holodeck launched from branch \`${branch}\``);
+      } catch (err) {
+        logger.error({ err }, 'holodeck_create failed');
+        if (hChatJid) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await deps.sendMessage(hChatJid, `⛔ holodeck_create failed: ${msg}`);
+        }
+      }
+      break;
+    }
+
+    case 'holodeck_teardown': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized holodeck_teardown attempt blocked');
+        break;
+      }
+      const tChatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+      try {
+        const root = resolveRoot();
+        serviceHolodeckTeardown(root);
+        if (tChatJid) await deps.sendMessage(tChatJid, '✅ Holodeck torn down');
+      } catch (err) {
+        logger.error({ err }, 'holodeck_teardown failed');
+        if (tChatJid) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await deps.sendMessage(tChatJid, `⛔ holodeck_teardown failed: ${msg}`);
+        }
+      }
+      break;
+    }
+
+    case 'holodeck_promote': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized holodeck_promote attempt blocked');
+        break;
+      }
+      const pChatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+      try {
+        const root = resolveRoot();
+        serviceHolodeckPromote(root);
+        if (pChatJid) await deps.sendMessage(pChatJid, '✅ Holodeck promoted to main. Restart engineer to apply.');
+      } catch (err) {
+        logger.error({ err }, 'holodeck_promote failed');
+        if (pChatJid) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await deps.sendMessage(pChatJid, `⛔ holodeck_promote failed: ${msg}`);
+        }
       }
       break;
     }

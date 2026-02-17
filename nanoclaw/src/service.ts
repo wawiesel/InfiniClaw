@@ -538,6 +538,143 @@ export function chat(bot: string): void {
   process.exit(result.status ?? 1);
 }
 
+// ── Holodeck (blue-green test instance) ────────────────────────────────
+
+const HOLODECK_BOT = 'holodeck';
+const HOLODECK_LABEL = 'com.infiniclaw.holodeck';
+const HOLODECK_WORKTREE = '_holodeck';
+
+function holodeckWorktreePath(root: string): string {
+  return path.join(root, HOLODECK_WORKTREE);
+}
+
+/**
+ * Create a holodeck test instance from a feature branch.
+ * 1. Creates a git worktree at _holodeck/
+ * 2. Deploys nanoclaw from the worktree to _runtime/instances/holodeck/
+ * 3. Launches as a launchd service using engineer's profile
+ */
+export function holodeckCreate(root: string, branch: string): void {
+  const worktree = holodeckWorktreePath(root);
+  const instance = instanceDir(root, HOLODECK_BOT);
+
+  // Create worktree from branch
+  if (fs.existsSync(worktree)) {
+    throw new Error(`Holodeck worktree already exists at ${worktree}. Tear down first.`);
+  }
+  execSync(`git worktree add "${worktree}" "${branch}"`, { cwd: root, stdio: 'inherit' });
+
+  // Deploy: rsync from worktree's nanoclaw → holodeck instance
+  const worktreeNanoclaw = path.join(worktree, 'nanoclaw');
+  fs.mkdirSync(instance, { recursive: true });
+
+  const excludeArgs = RSYNC_EXCLUDES.flatMap((e) => ['--exclude', e]);
+  execFileSync('rsync', ['-a', '--delete', ...excludeArgs, `${worktreeNanoclaw}/`, `${instance}/`], {
+    stdio: 'inherit',
+  });
+
+  // Install deps + build
+  if (!fs.existsSync(path.join(instance, 'node_modules'))) {
+    console.log('holodeck: installing dependencies...');
+    execSync('npm ci', { cwd: instance, stdio: 'inherit' });
+  }
+  console.log('holodeck: building...');
+  execSync('npm run build', { cwd: instance, stdio: 'inherit' });
+
+  // Use engineer's persona but for the holodeck group
+  restorePersona(root, 'engineer');
+
+  // Launch as launchd service
+  const nodeBin = process.execPath;
+  const logs = logDir(root);
+  fs.mkdirSync(logs, { recursive: true });
+
+  const profileEnv = loadProfileEnv(root, 'engineer');
+  const env = applyBrainEnv(profileEnv);
+  env.PATH = `${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`;
+  env.HOME = os.homedir();
+  env.INFINICLAW_ROOT = root;
+  env.PERSONA_NAME = 'engineer';
+  env.ASSISTANT_NAME = 'Cid+';
+  env.MAIN_GROUP_FOLDER = 'holodeck';
+
+  const plistPath = path.join(LAUNCH_AGENTS_DIR, `${HOLODECK_LABEL}.plist`);
+  try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
+
+  const plist = generatePlist(HOLODECK_LABEL, nodeBin, instance, logs, HOLODECK_BOT, env);
+  fs.writeFileSync(plistPath, plist);
+  execSync(`launchctl load "${plistPath}"`, { stdio: 'inherit' });
+
+  console.log(`holodeck: started from branch "${branch}" (${HOLODECK_LABEL})`);
+}
+
+/**
+ * Tear down the holodeck instance.
+ * Stops the service, removes the instance dir and worktree.
+ */
+export function holodeckTeardown(root: string): void {
+  const worktree = holodeckWorktreePath(root);
+  const instance = instanceDir(root, HOLODECK_BOT);
+
+  // Stop launchd service
+  const plistPath = path.join(LAUNCH_AGENTS_DIR, `${HOLODECK_LABEL}.plist`);
+  if (fs.existsSync(plistPath)) {
+    try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
+    fs.unlinkSync(plistPath);
+    console.log('holodeck: service stopped');
+  }
+
+  // Kill any stale holodeck containers
+  try {
+    const output = execSync("podman ps --format '{{.Names}}'", {
+      stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8',
+    });
+    for (const name of output.split('\n').filter((n) => n.startsWith('nanoclaw-holodeck-') || n.startsWith('nanoclaw-cid+-'))) {
+      try { execSync(`podman stop -t 5 "${name}"`, { stdio: 'pipe' }); } catch { /* ok */ }
+    }
+  } catch { /* ok */ }
+
+  // Remove instance dir
+  if (fs.existsSync(instance)) {
+    fs.rmSync(instance, { recursive: true });
+    console.log('holodeck: instance removed');
+  }
+
+  // Remove worktree
+  if (fs.existsSync(worktree)) {
+    execSync(`git worktree remove --force "${worktree}"`, { cwd: root, stdio: 'inherit' });
+    console.log('holodeck: worktree removed');
+  }
+
+  console.log('holodeck: teardown complete');
+}
+
+/**
+ * Promote holodeck branch to main.
+ * Merges the worktree's branch into main, then tears down holodeck.
+ */
+export function holodeckPromote(root: string): void {
+  const worktree = holodeckWorktreePath(root);
+  if (!fs.existsSync(worktree)) {
+    throw new Error('No holodeck worktree found. Nothing to promote.');
+  }
+
+  // Get the branch name from the worktree
+  const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+    cwd: worktree, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+
+  // Merge into main
+  console.log(`holodeck: merging branch "${branch}" into main...`);
+  execSync(`git checkout main`, { cwd: root, stdio: 'inherit' });
+  execSync(`git merge "${branch}"`, { cwd: root, stdio: 'inherit' });
+
+  // Teardown
+  holodeckTeardown(root);
+
+  console.log(`holodeck: promoted "${branch}" to main. Restart engineer to pick up changes.`);
+}
+
 // ── Utilities ──────────────────────────────────────────────────────────
 
 function filesEqual(a: string, b: string): boolean {

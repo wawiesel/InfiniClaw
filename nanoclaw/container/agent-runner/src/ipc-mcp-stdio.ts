@@ -23,7 +23,7 @@ const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 const DEFAULT_DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_DELEGATE_TIMEOUT_MS = 60 * 60 * 1000;
-const DELEGATE_CWD_ROOTS = ['/workspace/group', '/workspace/extra'];
+const DELEGATE_CWD_ROOTS = ['/workspace', '/workspace/group', '/workspace/extra'];
 const DELEGATE_CACHE_ROOT = '/workspace/cache';
 const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
 const HOST_CERT_FALLBACK = '/workspace/host-certs/node_extra_ca_certs-corporate-certs.pem';
@@ -145,10 +145,10 @@ function guessMimeTypeFromFilename(filename: string): string {
 }
 
 function resolveDelegateCwd(cwd?: string): { ok: true; cwd: string } | { ok: false; error: string } {
-  const requested = cwd?.trim() || '/workspace/group';
+  const requested = cwd?.trim() || '/workspace';
   const resolved = path.isAbsolute(requested)
     ? path.resolve(requested)
-    : path.resolve('/workspace/group', requested);
+    : path.resolve('/workspace', requested);
 
   const allowed = DELEGATE_CWD_ROOTS.some((root) => {
     const normalizedRoot = path.resolve(root);
@@ -729,7 +729,6 @@ Behavior:
       cwdResult.cwd,
     ];
     codexArgs.push('--model', effectiveModel);
-    codexArgs.push('--reasoning-effort', 'high');
     const delegatedObjective = [
       'Execution constraints:',
       '- Do NOT create Python virtual environments inside /workspace/group or /workspace/extra.',

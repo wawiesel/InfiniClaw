@@ -919,6 +919,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const now = Date.now();
       if (now - lastRunOutputAt < RUN_PROGRESS_NUDGE_STALE_MS) return;
       if (now - lastRunProgressNudgeAt < RUN_PROGRESS_NUDGE_COOLDOWN_MS) return;
+      // Don't nudge if the agent already reported done/idle
+      const activity = ensureChatActivity(chatJid);
+      if (activity.lastCompletion && /\b(idle|done)\b/i.test(activity.lastCompletion)) return;
       const nudged = queue.sendMessage(
         chatJid,
         'If you are still running, send a concise progress update now: done, in-progress, next.',
@@ -1331,7 +1334,7 @@ function recoverPendingMessages(): void {
 /**
  * After any restart, inject a synthetic message into the main chat
  * so the agent re-enters the conversation instead of sitting idle.
- * Only injects if there are real pending messages to resume from.
+ * Injects if there are pending messages OR an active objective to resume.
  */
 function injectResumeMessage(): void {
   const mainJid = Object.entries(registeredGroups).find(
@@ -1339,15 +1342,16 @@ function injectResumeMessage(): void {
   )?.[0];
   if (!mainJid) return;
 
-  // Only inject if there are real pending messages — otherwise the bot
-  // just responds "Done. Idle." which triggers a nudge feedback loop.
   const pending = getMessagesSince(
     mainJid,
     lastAgentTimestamp[mainJid] || '',
     ASSISTANT_NAME,
   );
-  if (pending.length === 0) {
-    logger.info({ mainJid }, 'No pending messages after restart — skipping resume injection');
+
+  const activity = ensureChatActivity(mainJid);
+
+  if (pending.length === 0 && !activity.currentObjective) {
+    logger.info({ mainJid }, 'No pending messages or objective after restart — skipping resume injection');
     return;
   }
 
@@ -1357,11 +1361,14 @@ function injectResumeMessage(): void {
     chat_name: registeredGroups[mainJid].name,
     sender: 'system',
     sender_name: 'System',
-    content: 'You just restarted. Check the conversation above for context and resume where you left off.',
+    content: 'You just restarted. Check your todo list for pending tasks and continue working. Do not wait for instructions.',
     timestamp: new Date().toISOString(),
   });
   queue.enqueueMessageCheck(mainJid);
-  logger.info({ mainJid, pendingCount: pending.length }, 'Injected resume message after restart');
+  logger.info(
+    { mainJid, pendingCount: pending.length, objective: activity.currentObjective || '(none)' },
+    'Injected resume message after restart',
+  );
 }
 
 type PodmanMachineListEntry = {

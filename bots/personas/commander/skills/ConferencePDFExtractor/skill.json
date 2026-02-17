@@ -1,0 +1,8 @@
+{
+  "name": "ConferencePDFExtractor",
+  "description": "Decompose conference PDFs into Obsidian-ready markdown with thematic threads and bidirectional links",
+  "version": "1.0.0",
+  "author": "Johnny5",
+  "trigger": "/ConferencePDFExtractor",
+  "instructions": "instructions.md"
+}

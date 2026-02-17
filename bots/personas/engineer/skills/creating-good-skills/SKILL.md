@@ -70,14 +70,23 @@ The description field is the only thing Claude always sees. Body is loaded *afte
 
 ## NanoClaw Conventions
 
-### Skill locations
+### Creating skills
+
+**Always create skills in your container session at `/home/node/.claude/skills/`.** The bidirectional skill sync automatically copies them out to your persona source. Do not write directly to persona source.
+
+To create a skill for another bot (e.g. commander), send them a message asking them to create it themselves. You cannot create skills for other bots.
+
+After finishing all skill edits, reboot so changes persist to persona source. Do not reboot mid-edit.
+
+### Skill locations (reference)
 
 | Path | Scope |
 |------|-------|
-| `bots/personas/{bot}/skills/{name}/` | That bot only (persona-specific) |
+| `/home/node/.claude/skills/{name}/` | Where you create skills (container session) |
+| `bots/personas/{bot}/skills/{name}/` | Persona source (auto-synced from session) |
 | `nanoclaw/container/skills/{name}/` | All bots (shared) |
 
-Persona skills override shared skills with the same name. Skills sync into the container's `.claude/skills/` on every spawn — not mid-session. New or changed skills require a reboot.
+Persona skills override shared skills with the same name. Skills sync bidirectionally on every spawn — new skills in session get copied to source, skills missing from source get deleted from session.
 
 ### Naming
 
