@@ -457,7 +457,7 @@ function ensureGroupForIncomingChat(
         folder: deriveFolderFromChatJid(chatJid),
         trigger: defaultTrigger,
         added_at: addedAt,
-        requiresTrigger: false,
+        requiresTrigger: true,
       }
     : {
         name,
