@@ -596,7 +596,7 @@ export function holodeckCreate(root: string, branch: string, holodeckJid?: strin
   if (fs.existsSync(worktree)) {
     throw new Error(`Holodeck worktree already exists at ${worktree}. Tear down first.`);
   }
-  execSync(`git worktree add "${worktree}" "${branch}"`, { cwd: root, stdio: 'inherit' });
+  execSync(`git worktree add --detach "${worktree}" "${branch}"`, { cwd: root, stdio: 'inherit' });
 
   // Deploy: rsync from worktree's nanoclaw → holodeck instance
   const worktreeNanoclaw = path.join(worktree, 'nanoclaw');
