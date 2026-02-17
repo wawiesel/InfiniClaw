@@ -641,7 +641,7 @@ export async function processTaskIpc(
         }
         if (chatJid) {
           try {
-            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting ${bot}...</font>`);
+            await deps.sendMessage(chatJid, `<font color="#555555">⭕️ restarting ${bot}...</font>`);
           } catch {}
         }
         // Exit gracefully — launchd will restart with the newly deployed code
@@ -659,7 +659,7 @@ export async function processTaskIpc(
         logger.info({ bot }, 'Instance deployed — restarting via launchctl');
         if (chatJid) {
           try {
-            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting ${bot}...</font>`);
+            await deps.sendMessage(chatJid, `<font color="#555555">⭕️ restarting ${bot}...</font>`);
           } catch {}
         }
         try {

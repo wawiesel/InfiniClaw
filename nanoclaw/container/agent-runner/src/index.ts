@@ -565,7 +565,7 @@ function formatToolCallWithOutput(name: string, input: unknown, response: unknow
   const label = escapeHtml(describeToolCall(name, input));
   const inputText = escapeHtml(formatToolInput(name, input));
   const outputText = escapeHtml(formatToolResponse(response));
-  return `<small><details><summary><code>🔧 ${label}</code></summary><b>Input:</b><pre><code>${inputText}</code></pre><b>Output:</b><pre><code>${outputText}</code></pre></details></small>`;
+  return `<details><summary><code>🔧 ${label}</code></summary><b>Input:</b><pre><code>${inputText}</code></pre><b>Output:</b><pre><code>${outputText}</code></pre></details>`;
 }
 
 function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {

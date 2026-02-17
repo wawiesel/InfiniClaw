@@ -991,7 +991,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               // plain thinking text gets dimmed small italic
               const formatted = text.includes('<details>')
                 ? text
-                : `<small><font color="#888888"><em>${text}</em></font></small>`;
+                : `<small><em>${text}</em></small>`;
               void ch.sendMessage(chatJid, formatted, activeReplyThreadIds[chatJid]).catch((err) => {
                 logger.warn({ chatJid, err }, 'Failed to send progress to chat');
               });
