@@ -8,9 +8,7 @@
   ],
   "mcpServers": {
     "wksm": {
-      "command": "bash",
-      "args": ["-c", "PYTHONPATH=/workspace/extra/home/2025-WKS/main exec python3 -m wks.mcp.main"],
-      "cwd": "/workspace/extra/home/2025-WKS/main"
+      "url": "http://host.containers.internal:8765/sse"
     }
   }
 }
