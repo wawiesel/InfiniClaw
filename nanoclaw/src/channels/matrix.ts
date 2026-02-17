@@ -705,27 +705,36 @@ export class MatrixChannel implements Channel {
     }
     const normalizedText = normalizeSenderPrefixForMarkdown(text);
     try {
-      // Strategy: Extract math to protect it, apply markdown, then restore math
-      const mathTokens: string[] = [];
-      const mathPlaceholder = (html: string): string => {
-        const idx = mathTokens.push(html) - 1;
-        return `@@MATH_${idx}@@`;
-      };
+      // If text is already structured HTML (e.g. <details> from tool calls),
+      // skip markdown processing to avoid breaking the HTML structure.
+      const isPreformattedHtml = text.startsWith('<details') || text.startsWith('<small>');
 
-      // Extract inline and display math before markdown processing
-      let working = normalizedText;
-      working = working.replace(/\$\$([^\$]+)\$\$/g, (_m, latex) => {
-        return mathPlaceholder(`<div data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></div>`);
-      });
-      working = working.replace(/\$([^\$\n]+)\$/g, (_m, latex) => {
-        return mathPlaceholder(`<span data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></span>`);
-      });
+      let html: string;
+      if (isPreformattedHtml) {
+        html = text;
+      } else {
+        // Strategy: Extract math to protect it, apply markdown, then restore math
+        const mathTokens: string[] = [];
+        const mathPlaceholder = (htmlStr: string): string => {
+          const idx = mathTokens.push(htmlStr) - 1;
+          return `@@MATH_${idx}@@`;
+        };
 
-      // Apply markdown
-      let html = await marked(working, { breaks: true, gfm: true });
+        // Extract inline and display math before markdown processing
+        let working = normalizedText;
+        working = working.replace(/\$\$([^\$]+)\$\$/g, (_m, latex) => {
+          return mathPlaceholder(`<div data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></div>`);
+        });
+        working = working.replace(/\$([^\$\n]+)\$/g, (_m, latex) => {
+          return mathPlaceholder(`<span data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></span>`);
+        });
 
-      // Restore math placeholders
-      html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
+        // Apply markdown
+        html = await marked(working, { breaks: true, gfm: true });
+
+        // Restore math placeholders
+        html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
+      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const msgContent: Record<string, any> = {
