@@ -50,6 +50,7 @@ export interface NewMessage {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  thread_id?: string; // Matrix thread root event ID (MSC3440)
 }
 
 export interface ScheduledTask {
@@ -81,7 +82,7 @@ export interface TaskRunLog {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(jid: string, text: string, threadId?: string): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

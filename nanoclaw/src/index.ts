@@ -865,6 +865,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   setObjectiveFromMessages(chatJid, filteredMessages);
 
+  // If the most recent message is in a thread, auto-reply in that thread
+  const lastMsg = filteredMessages[filteredMessages.length - 1];
+  const replyThreadId = lastMsg?.thread_id;
+
   const basePrompt = formatMessages(filteredMessages);
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
@@ -957,7 +961,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               const formatted = text.includes('<details>')
                 ? text
                 : `<small><font color="#888888"><em>${text}</em></font></small>`;
-              void ch.sendMessage(chatJid, formatted).catch((err) => {
+              void ch.sendMessage(chatJid, formatted, replyThreadId).catch((err) => {
                 logger.warn({ chatJid, err }, 'Failed to send progress to chat');
               });
               // Cycle pulse pip alongside progress
@@ -974,7 +978,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           lastResponseBody = text;
           const ch = findChannel(channels, chatJid);
           if (ch) {
-            await ch.sendMessage(chatJid, formatMainMessage(text));
+            await ch.sendMessage(chatJid, formatMainMessage(text), replyThreadId);
           }
           await maybeCrossBotForward(chatJid, text);
           outputSentToUser = true;
@@ -1016,7 +1020,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           `I hit an error while processing that request: ${compactError}`,
         );
       try {
-        await channel.sendMessage(chatJid, errorReply);
+        await channel.sendMessage(chatJid, errorReply, replyThreadId);
         outputSentToUser = true;
         agentResponses.push(errorReply);
       } catch (sendErr) {
@@ -1788,13 +1792,13 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: async (jid, text) => {
+    sendMessage: async (jid, text, threadId) => {
       const ch = findChannel(channels, jid);
       if (!ch) {
         logger.warn({ jid }, 'No channel found for IPC message');
         return;
       }
-      await ch.sendMessage(jid, text);
+      await ch.sendMessage(jid, text, threadId);
       await maybeCrossBotForward(jid, text);
     },
     defaultSenderForGroup,

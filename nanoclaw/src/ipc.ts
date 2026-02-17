@@ -27,7 +27,7 @@ import {
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
   sendImage: (jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string) => Promise<void>;
   sendFile: (jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string) => Promise<void>;
   defaultSenderForGroup: (sourceGroup: string) => string;
@@ -212,9 +212,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     typeof data.sender === 'string' && data.sender.trim()
                       ? data.sender.trim()
                       : deps.defaultSenderForGroup(sourceGroup);
+                  const threadId = typeof data.threadId === 'string' ? data.threadId : undefined;
                   await deps.sendMessage(
                     data.chatJid,
                     `${sender}:\n\n${String(data.text)}`,
+                    threadId,
                   );
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },

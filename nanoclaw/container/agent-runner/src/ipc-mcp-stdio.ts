@@ -107,12 +107,13 @@ function listCapabilityUsageLines(): string[] {
   });
 }
 
-function emitChatMessageTo(chatJidTarget: string, text: string, sender?: string): void {
+function emitChatMessageTo(chatJidTarget: string, text: string, sender?: string, threadId?: string): void {
   const data: Record<string, string | undefined> = {
     type: 'message',
     chatJid: chatJidTarget,
     text,
     sender: sender || undefined,
+    threadId: threadId || undefined,
     groupFolder,
     timestamp: new Date().toISOString(),
   };
@@ -294,6 +295,19 @@ const server = new McpServer({
   name: 'nanoclaw',
   version: '1.0.0',
 });
+
+server.tool(
+  'send_message',
+  'Send a text message to the chat, optionally in a Matrix thread. Use thread_id to reply within an existing thread, or omit it for the main timeline.',
+  {
+    text: z.string().describe('The message text to send'),
+    thread_id: z.string().optional().describe('Matrix thread root event ID to reply in a thread (MSC3440)'),
+  },
+  async (args) => {
+    emitChatMessageTo(chatJid, args.text, undefined, args.thread_id);
+    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
 
 server.tool(
   'send_image',

@@ -669,6 +669,10 @@ export class MatrixChannel implements Channel {
         return;
       }
 
+      // Extract thread ID from m.relates_to (MSC3440)
+      const relatesTo = content['m.relates_to'] as Record<string, unknown> | undefined;
+      const threadId = relatesTo?.rel_type === 'm.thread' ? (relatesTo.event_id as string) : undefined;
+
       const msg: NewMessage = {
         id: event.event_id as string,
         chat_jid: matrixJid,
@@ -676,6 +680,7 @@ export class MatrixChannel implements Channel {
         sender_name: senderName,
         content: content.body as string,
         timestamp,
+        thread_id: threadId,
       };
 
       logger.debug({ matrixJid, content: content.body }, 'Matrix message delivered to onMessage');
@@ -692,7 +697,7 @@ export class MatrixChannel implements Channel {
     }
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string, threadId?: string): Promise<void> {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);
     const normalizedText = normalizeSenderPrefixForMarkdown(text);
@@ -719,13 +724,24 @@ export class MatrixChannel implements Channel {
       // Restore math placeholders
       html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msgContent: Record<string, any> = {
+        msgtype: 'm.text',
+        body: normalizedText,
+        format: 'org.matrix.custom.html',
+        formatted_body: html.trim(),
+      };
+
+      // MSC3440 thread support
+      if (threadId) {
+        msgContent['m.relates_to'] = {
+          rel_type: 'm.thread',
+          event_id: threadId,
+        };
+      }
+
       const eventId = await withTimeout(
-        this.client.sendMessage(roomId, {
-          msgtype: 'm.text',
-          body: normalizedText,
-          format: 'org.matrix.custom.html',
-          formatted_body: html.trim(),
-        }),
+        this.client.sendMessage(roomId, msgContent),
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage',
       );
