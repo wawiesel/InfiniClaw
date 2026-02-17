@@ -18,6 +18,7 @@ import { logger } from './logger.js';
 import {
   validateDeploy as serviceValidateDeploy,
   BOTS,
+  bootstrapBot as serviceBootstrapBot,
   deployBot as serviceDeployBot,
   rebuildImage as serviceRebuildImage,
   holodeckCreate as serviceHolodeckCreate,
@@ -650,25 +651,24 @@ export async function processTaskIpc(
           process.exit(0);
         }, 500);
       } else {
-        // Cross-bot: sync code, build, then restart via launchctl
-        logger.info({ bot }, 'Deploy validation passed — deploying instance');
-        const deploy = await deployInstance(bot);
-        if (!deploy.ok) {
-          logger.error({ bot, output: deploy.output }, 'Instance deploy failed');
-          break;
-        }
-        logger.info({ bot }, 'Instance deployed — restarting via launchctl');
+        // Cross-bot: use bootstrapBot (handles both new and existing bots)
+        logger.info({ bot }, 'Deploy validation passed — bootstrapping');
         if (chatJid) {
           try {
             await deps.sendMessage(chatJid, `<font color="#555555">⭕️ restarting ${bot}...</font>`);
           } catch {}
         }
         try {
-          const uid = execSync('id -u').toString().trim();
-          execSync(`launchctl kickstart -k gui/${uid}/com.infiniclaw.${bot}`, { timeout: 10_000 });
-          logger.info({ bot }, 'Cross-bot restart succeeded');
+          const root = resolveRoot();
+          serviceBootstrapBot(root, bot);
+          logger.info({ bot }, 'Cross-bot bootstrap succeeded');
         } catch (err) {
-          logger.error({ bot, err }, 'Cross-bot restart via launchctl failed');
+          logger.error({ bot, err }, 'Cross-bot bootstrap failed');
+          if (chatJid) {
+            try {
+              await deps.sendMessage(chatJid, `⛔ bootstrap failed for ${bot}: ${(err as Error).message}`);
+            } catch {}
+          }
         }
       }
       break;

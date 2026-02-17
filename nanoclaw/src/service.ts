@@ -408,6 +408,34 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/**
+ * Bootstrap a new bot: deploy, create launchd plist, and load it.
+ * Safe to call on an already-running bot (unloads first).
+ */
+export function bootstrapBot(root: string, bot: string): void {
+  const instance = instanceDir(root, bot);
+  deployBot(root, bot);
+
+  const profileEnv = loadProfileEnv(root, bot);
+  const env = applyBrainEnv(profileEnv);
+  env.PATH = `${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`;
+  env.HOME = os.homedir();
+  env.INFINICLAW_ROOT = root;
+  env.PERSONA_NAME = bot;
+
+  const nodeBin = process.execPath;
+  const logs = path.join(root, '_runtime', 'logs');
+  fs.mkdirSync(logs, { recursive: true });
+
+  const label = `com.infiniclaw.${bot}`;
+  const plistPath = path.join(LAUNCH_AGENTS_DIR, `${label}.plist`);
+  try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
+
+  const plist = generatePlist(label, nodeBin, instance, logs, bot, env);
+  fs.writeFileSync(plistPath, plist);
+  execSync(`launchctl load "${plistPath}"`, { stdio: 'inherit' });
+}
+
 export function installAllowlist(root: string): void {
   const dir = path.join(os.homedir(), '.config', 'nanoclaw');
   const file = path.join(dir, 'mount-allowlist.json');
