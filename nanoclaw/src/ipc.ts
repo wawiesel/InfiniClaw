@@ -34,6 +34,7 @@ export interface IpcDeps {
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   unregisterGroup: (jid: string) => void;
+  setWorkThread: (chatJid: string, threadId: string | null) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -357,6 +358,8 @@ export async function processTaskIpc(
     // For git_push
     remote?: string;
     branches?: string[];
+    // For set_thread
+    threadId?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -809,6 +812,25 @@ export async function processTaskIpc(
           await deps.sendMessage(pChatJid, `⛔ holodeck_promote failed: ${msg}`);
         }
       }
+      break;
+    }
+
+    case 'set_thread': {
+      // Any group can set its own work thread; main can set any group's thread
+      const targetJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+      if (!targetJid) {
+        logger.warn({ sourceGroup }, 'set_thread missing chatJid');
+        break;
+      }
+      const targetGroup = registeredGroups[targetJid];
+      const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup);
+      if (!authorized) {
+        logger.warn({ sourceGroup, targetJid }, 'Unauthorized set_thread attempt blocked');
+        break;
+      }
+      const threadId = typeof data.threadId === 'string' && data.threadId.trim() ? data.threadId.trim() : null;
+      deps.setWorkThread(targetJid, threadId);
+      logger.info({ chatJid: targetJid, threadId, sourceGroup }, 'Work thread updated via IPC');
       break;
     }
 

@@ -310,6 +310,26 @@ server.tool(
 );
 
 server.tool(
+  'set_thread',
+  'Set a persistent work thread for all future replies in this group. Pass thread_id to route replies into a Matrix thread, or omit it to clear and reply on the main timeline.',
+  {
+    thread_id: z.string().optional().describe('Matrix thread root event ID (MSC3440). Omit or pass empty string to clear.'),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'set_thread',
+      chatJid,
+      threadId: args.thread_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    const action = args.thread_id ? `set to ${args.thread_id}` : 'cleared';
+    return { content: [{ type: 'text' as const, text: `Work thread ${action}.` }] };
+  },
+);
+
+server.tool(
   'send_image',
   'Send an image file to the user or group. The file must exist in the container filesystem (e.g. /workspace/group/screenshot.png). Supports PNG, JPEG, GIF, WebP.',
   {

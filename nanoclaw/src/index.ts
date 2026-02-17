@@ -1848,6 +1848,13 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     registerGroup,
     unregisterGroup,
+    setWorkThread: (chatJid: string, threadId: string | null) => {
+      if (threadId) {
+        workThreadIds[chatJid] = threadId;
+      } else {
+        delete workThreadIds[chatJid];
+      }
+    },
     syncGroupMetadata: async () => {},
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
