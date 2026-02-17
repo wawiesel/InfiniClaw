@@ -337,8 +337,14 @@ export function validateDeploy(root: string, bot: string): { ok: boolean; errors
     stdio: 'pipe',
   });
 
-  // Symlink node_modules from live instance
-  const instanceModules = path.join(instance, 'node_modules');
+  // Symlink node_modules from live instance (fall back to any bot's instance for new bots)
+  let instanceModules = path.join(instance, 'node_modules');
+  if (!fs.existsSync(instanceModules)) {
+    for (const fallback of BOTS) {
+      const alt = path.join(instanceDir(root, fallback), 'node_modules');
+      if (fs.existsSync(alt)) { instanceModules = alt; break; }
+    }
+  }
   if (fs.existsSync(instanceModules)) {
     const stagingModules = path.join(staging, 'node_modules');
     try { fs.unlinkSync(stagingModules); } catch { /* ok */ }
