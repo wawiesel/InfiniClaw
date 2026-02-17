@@ -351,6 +351,9 @@ export async function processTaskIpc(
     containerConfig?: RegisteredGroup['containerConfig'];
     // For holodeck
     branch?: string;
+    // For git_push
+    remote?: string;
+    branches?: string[];
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -791,6 +794,41 @@ export async function processTaskIpc(
         if (pChatJid) {
           const msg = err instanceof Error ? err.message : String(err);
           await deps.sendMessage(pChatJid, `⛔ holodeck_promote failed: ${msg}`);
+        }
+      }
+      break;
+    }
+
+    case 'git_push': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized git_push attempt blocked');
+        break;
+      }
+      const gpChatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+      const remote = typeof data.remote === 'string' ? data.remote.trim() : 'origin';
+      const branches = Array.isArray(data.branches) ? data.branches.map(String) : ['main'];
+      // Validate branch names (no shell injection)
+      const safeBranch = /^[a-zA-Z0-9._\-/]+$/;
+      if (!safeBranch.test(remote) || branches.some((b) => !safeBranch.test(b))) {
+        if (gpChatJid) await deps.sendMessage(gpChatJid, '⛔ git_push: invalid remote or branch name');
+        break;
+      }
+      try {
+        const root = resolveRoot();
+        const branchArgs = branches.join(' ');
+        const output = execSync(`git push ${remote} ${branchArgs}`, {
+          cwd: root,
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 30000,
+        });
+        logger.info({ remote, branches }, 'git_push succeeded');
+        if (gpChatJid) await deps.sendMessage(gpChatJid, `✅ Pushed ${branches.join(', ')} to ${remote}`);
+      } catch (err) {
+        logger.error({ err, remote, branches }, 'git_push failed');
+        if (gpChatJid) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await deps.sendMessage(gpChatJid, `⛔ git_push failed: ${msg}`);
         }
       }
       break;
