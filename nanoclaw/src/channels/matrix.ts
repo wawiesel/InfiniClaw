@@ -1,3 +1,4 @@
+import fs from 'fs';
 import {
   MatrixClient,
   MatrixAuth,
@@ -363,10 +364,40 @@ export class MatrixChannel implements Channel {
   private lastMessageEventId = new Map<string, string>();
   private lastBotEventId = new Map<string, string>();
   private lastPipReactionId = new Map<string, string>();
+  private pipStatePath: string;
 
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
     configureMatrixSdkLogger();
+    this.pipStatePath = `${STORE_DIR}/matrix-pip-state.json`;
+    this.loadPipState();
+  }
+
+  private loadPipState(): void {
+    try {
+      if (!fs.existsSync(this.pipStatePath)) return;
+      const data = JSON.parse(fs.readFileSync(this.pipStatePath, 'utf-8'));
+      if (data.lastBotEventId) {
+        for (const [k, v] of Object.entries(data.lastBotEventId)) {
+          this.lastBotEventId.set(k, v as string);
+        }
+      }
+      if (data.lastPipReactionId) {
+        for (const [k, v] of Object.entries(data.lastPipReactionId)) {
+          this.lastPipReactionId.set(k, v as string);
+        }
+      }
+    } catch { /* non-critical */ }
+  }
+
+  private savePipState(): void {
+    try {
+      const data = {
+        lastBotEventId: Object.fromEntries(this.lastBotEventId),
+        lastPipReactionId: Object.fromEntries(this.lastPipReactionId),
+      };
+      fs.writeFileSync(this.pipStatePath, JSON.stringify(data));
+    } catch { /* non-critical */ }
   }
 
   private readStored(
@@ -695,6 +726,24 @@ export class MatrixChannel implements Channel {
       this.markDisconnected('Failed to connect to Matrix', err);
       throw err;
     }
+
+    // Clean up stale pips from previous sessions
+    this.cleanupStalePips().catch(() => {});
+  }
+
+  private async cleanupStalePips(): Promise<void> {
+    for (const [roomId, pipId] of this.lastPipReactionId) {
+      try {
+        await withTimeout(
+          this.client!.redactEvent(roomId, pipId),
+          MATRIX_SEND_TIMEOUT_MS,
+          'cleanupStalePip',
+        );
+        logger.debug({ roomId }, 'Cleaned up stale pip from previous session');
+      } catch { /* non-critical */ }
+    }
+    this.lastPipReactionId.clear();
+    this.savePipState();
   }
 
   async sendMessage(jid: string, text: string, threadId?: string): Promise<void> {
@@ -757,7 +806,10 @@ export class MatrixChannel implements Channel {
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage',
       );
-      if (eventId) this.lastBotEventId.set(roomId, eventId);
+      if (eventId) {
+        this.lastBotEventId.set(roomId, eventId);
+        this.savePipState();
+      }
     } catch (err) {
       if (this.isAuthFailure(err)) {
         this.markDisconnected('Matrix auth failed while sending message', err);
@@ -958,7 +1010,10 @@ export class MatrixChannel implements Channel {
         MATRIX_SEND_TIMEOUT_MS,
         'setStatusPip',
       );
-      if (reactionId) this.lastPipReactionId.set(roomId, reactionId);
+      if (reactionId) {
+        this.lastPipReactionId.set(roomId, reactionId);
+        this.savePipState();
+      }
     } catch (err) {
       if (this.isAuthFailure(err)) this.markDisconnected('Matrix auth failed setting pip', err);
       logger.warn({ jid, emoji, err }, 'Failed to set status pip');
