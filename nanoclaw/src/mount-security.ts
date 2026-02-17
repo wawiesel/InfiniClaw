@@ -23,26 +23,13 @@ let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
 
 /**
- * Default blocked patterns - paths that should never be mounted
+ * Default blocked patterns - always merged with allowlist patterns.
+ * ".*" blocks all dotfiles/dotdirs. Specific entries catch non-dot sensitive paths.
  */
 const DEFAULT_BLOCKED_PATTERNS = [
-  '.ssh',
-  '.gnupg',
-  '.gpg',
-  '.aws',
-  '.azure',
-  '.gcloud',
-  '.kube',
-  '.docker',
+  '.*',
   'credentials',
-  '.env',
-  '.netrc',
-  '.npmrc',
-  '.pypirc',
-  'id_rsa',
-  'id_ed25519',
   'private_key',
-  '.secret',
 ];
 
 /**
@@ -144,7 +131,8 @@ function getRealPath(p: string): string | null {
 }
 
 /**
- * Check if a path matches any blocked pattern
+ * Check if a path matches any blocked pattern.
+ * The special pattern ".*" blocks any path component starting with a dot (dotfiles/dotdirs).
  */
 function matchesBlockedPattern(
   realPath: string,
@@ -153,6 +141,16 @@ function matchesBlockedPattern(
   const pathParts = realPath.split(path.sep);
 
   for (const pattern of blockedPatterns) {
+    if (pattern === '.*') {
+      // Block any path component that starts with a dot
+      for (const part of pathParts) {
+        if (part.startsWith('.')) {
+          return `.*  (matched "${part}")`;
+        }
+      }
+      continue;
+    }
+
     // Check if any path component matches the pattern
     for (const part of pathParts) {
       if (part === pattern || part.includes(pattern)) {
@@ -170,12 +168,17 @@ function matchesBlockedPattern(
 }
 
 /**
- * Check if a real path is under an allowed root
+ * Check if a real path is under an allowed root.
+ * Returns the MOST SPECIFIC (longest) matching root so that
+ * ~/foo/bar (rw) takes precedence over ~ (ro).
  */
 function findAllowedRoot(
   realPath: string,
   allowedRoots: AllowedRoot[],
 ): AllowedRoot | null {
+  let bestRoot: AllowedRoot | null = null;
+  let bestRealRoot = '';
+
   for (const root of allowedRoots) {
     const expandedRoot = expandPath(root.path);
     const realRoot = getRealPath(expandedRoot);
@@ -188,11 +191,15 @@ function findAllowedRoot(
     // Check if realPath is under realRoot
     const relative = path.relative(realRoot, realPath);
     if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
-      return root;
+      // Pick the longest (most specific) matching root
+      if (realRoot.length > bestRealRoot.length) {
+        bestRoot = root;
+        bestRealRoot = realRoot;
+      }
     }
   }
 
-  return null;
+  return bestRoot;
 }
 
 /**
@@ -328,8 +335,75 @@ export function validateMount(
 }
 
 /**
+ * Find allowlist entries that are children of a mounted path with different
+ * permissions. These become overlapping mounts so subdirectory permissions
+ * are enforced by the container runtime.
+ *
+ * Example: mounting ~/InfiniClaw (rw) with allowlist entry
+ * ~/InfiniClaw/_runtime (ro) produces an extra mount for _runtime:ro.
+ */
+function findChildOverrides(
+  parentRealPath: string,
+  parentContainerPath: string,
+  parentReadonly: boolean,
+  allowedRoots: AllowedRoot[],
+  isMain: boolean,
+  nonMainReadOnly: boolean,
+): Array<{ hostPath: string; containerPath: string; readonly: boolean }> {
+  const overrides: Array<{
+    hostPath: string;
+    containerPath: string;
+    readonly: boolean;
+  }> = [];
+
+  for (const root of allowedRoots) {
+    const expandedRoot = expandPath(root.path);
+    const realRoot = getRealPath(expandedRoot);
+    if (realRoot === null) continue;
+
+    // Must be a strict child of the parent (not the parent itself)
+    const relative = path.relative(parentRealPath, realRoot);
+    if (
+      !relative ||
+      relative.startsWith('..') ||
+      path.isAbsolute(relative)
+    ) {
+      continue;
+    }
+
+    // Determine effective readonly for this child
+    let childReadonly = !root.allowReadWrite;
+    if (!isMain && nonMainReadOnly) childReadonly = true;
+
+    // Only add override if permissions differ from parent
+    if (childReadonly === parentReadonly) continue;
+
+    // Check the child path actually exists
+    if (!fs.existsSync(realRoot)) continue;
+
+    overrides.push({
+      hostPath: realRoot,
+      containerPath: path.join(parentContainerPath, relative),
+      readonly: childReadonly,
+    });
+
+    logger.debug(
+      {
+        parent: parentRealPath,
+        child: realRoot,
+        readonly: childReadonly,
+      },
+      'Adding subdirectory permission override mount',
+    );
+  }
+
+  return overrides;
+}
+
+/**
  * Validate all additional mounts for a group.
  * Returns array of validated mounts (only those that passed validation).
+ * Also adds overlapping mounts for subdirectories with different permissions.
  * Logs warnings for rejected mounts.
  */
 export function validateAdditionalMounts(
@@ -341,6 +415,7 @@ export function validateAdditionalMounts(
   containerPath: string;
   readonly: boolean;
 }> {
+  const allowlist = loadMountAllowlist();
   const validatedMounts: Array<{
     hostPath: string;
     containerPath: string;
@@ -351,9 +426,10 @@ export function validateAdditionalMounts(
     const result = validateMount(mount, isMain);
 
     if (result.allowed) {
+      const containerPath = `/workspace/extra/${result.resolvedContainerPath}`;
       validatedMounts.push({
         hostPath: result.realHostPath!,
-        containerPath: `/workspace/extra/${result.resolvedContainerPath}`,
+        containerPath,
         readonly: result.effectiveReadonly!,
       });
 
@@ -367,6 +443,19 @@ export function validateAdditionalMounts(
         },
         'Mount validated successfully',
       );
+
+      // Add overlapping mounts for child entries with different permissions
+      if (allowlist) {
+        const overrides = findChildOverrides(
+          result.realHostPath!,
+          containerPath,
+          result.effectiveReadonly!,
+          allowlist.allowedRoots,
+          isMain,
+          allowlist.nonMainReadOnly,
+        );
+        validatedMounts.push(...overrides);
+      }
     } else {
       logger.warn(
         {
@@ -379,6 +468,12 @@ export function validateAdditionalMounts(
       );
     }
   }
+
+  // Sort by path depth (shallowest first) so container runtime applies
+  // the most specific mount last, ensuring subdirectory overrides win.
+  validatedMounts.sort(
+    (a, b) => a.hostPath.split(path.sep).length - b.hostPath.split(path.sep).length,
+  );
 
   return validatedMounts;
 }
