@@ -77,50 +77,8 @@ Compiles TypeScript from `src/` -> `dist/`. The host runs `node dist/cli.js star
 | Bug fixes, core infra | `nanoclaw/src/` | Captain approval needed |
 | Container image | `nanoclaw/container/` + `bots/container/` | Rebuild via podman-container skill |
 
-## Version branches & git strategy
-
-We maintain **named version branches** (aqua, bingo, charlie, ...) as stable checkpoints.
-
-### Creating a version branch
-
-When you reach a good stable state:
-
-1. Commit all changes to `main`
-2. Create the version branch from the subtree merge point with a squashed commit:
-   ```bash
-   git checkout -b <name> a89d41c   # subtree merge commit
-   git merge --squash main
-   git commit -m "<name>: <description of this version state>"
-   ```
-3. Switch back to main: `git checkout main`
-
-This gives a clean single-commit diff against upstream nanoclaw for each version.
-
-### Current branches
-
-- `aqua` — first checkpoint (mount security, holodeck, lobes, resume, skills, NEXT.md)
-
-### Background task: history rewriting
-
-Ongoing low-priority work: rewrite the main branch history for optimal commit separation. Goal is clean, logical commits that could each be cherry-picked independently. This is the default background task when no higher-priority work exists.
-
-## Holodeck (blue-green testing)
-
-Test nanoclaw changes safely before promoting to production:
-
-1. Create a feature branch: `git checkout -b feature-xyz`
-2. Make changes, commit
-3. Launch holodeck: IPC `holodeck_create` with `branch: "feature-xyz"`
-4. Test in the Holodeck Matrix room — Cid+ runs the new code
-5. If good: IPC `holodeck_promote` (merges to main, tears down)
-6. If bad: IPC `holodeck_teardown` (kills instance, removes worktree)
-
-The holodeck runs as a separate launchd service (`com.infiniclaw.holodeck`) with its own instance dir, data, and containers.
-
 ## Rules
 
 - **Skills over code** for bot capabilities. Only touch `nanoclaw/src/` for bug fixes or core infrastructure with Captain approval.
 - **Commit separately**: keep nanoclaw source changes in their own commits, separate from bots/docs changes. This makes subtree push possible.
 - **Build after changes**: always run `npm run build` in `nanoclaw/` after modifying source.
-- **Version branches**: create a new named branch at each stable milestone, squashing all changes into one commit on top of upstream nanoclaw.
-- **History rewriting**: ongoing background task — reorganize main branch commits for clean separation. Always revertible via version branches.
