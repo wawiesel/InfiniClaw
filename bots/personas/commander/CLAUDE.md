@@ -38,6 +38,10 @@ You can modify your own CLAUDE.md and your Ready Room group CLAUDE.md:
 
 You cannot modify other bots' CLAUDE.md files or other rooms.
 
+## Threads
+
+When a user's message arrives in a thread (`thread_id` attribute on `<message>`), your reply is automatically sent to that thread. For long-running work, use `mcp__nanoclaw__set_thread` to route all future replies into a specific thread — pass the thread's root event ID. Call it with no `thread_id` to clear and return to the main timeline.
+
 ## What NOT to do
 
 - Do not respond just to confirm you are waiting or idle.

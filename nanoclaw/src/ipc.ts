@@ -121,14 +121,12 @@ function applyBrainMode(
     upsertEnvValue(envFile, 'BRAIN_BASE_URL', '');
     upsertEnvValue(envFile, 'BRAIN_AUTH_TOKEN', '');
     upsertEnvValue(envFile, 'BRAIN_API_KEY', '');
-    return `Updated ${bot} to anthropic mode. Restart required.`;
+    const effectiveModel = model || 'claude-sonnet-4-5';
+    return `Updated ${bot} to anthropic/${effectiveModel}. Restart required.`;
   }
 
-  upsertEnvValue(
-    envFile,
-    'BRAIN_MODEL',
-    model || 'devstral-small-2-fast:latest',
-  );
+  const effectiveModel = model || 'devstral-small-2-fast:latest';
+  upsertEnvValue(envFile, 'BRAIN_MODEL', effectiveModel);
   upsertEnvValue(
     envFile,
     'BRAIN_BASE_URL',
@@ -137,7 +135,7 @@ function applyBrainMode(
   upsertEnvValue(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
   upsertEnvValue(envFile, 'BRAIN_API_KEY', '');
   upsertEnvValue(envFile, 'BRAIN_OAUTH_TOKEN', '');
-  return `Updated ${bot} to ollama mode. Restart required.`;
+  return `Updated ${bot} to ollama/${effectiveModel}. Restart required.`;
 }
 
 export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'unknown'; model: string } {

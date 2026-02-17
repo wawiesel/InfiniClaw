@@ -649,7 +649,7 @@ Note: bot restart is required for changes to take effect.`,
     return {
       content: [{
         type: 'text' as const,
-        text: `Brain mode update queued for ${args.bot} (${args.mode}). Restart required.`,
+        text: `Brain mode update queued for ${args.bot} (${args.mode}/${args.model || (args.mode === 'anthropic' ? 'claude-sonnet-4-5' : 'devstral-small-2-fast:latest')}). Restart required.`,
       }],
     };
   },
@@ -1364,7 +1364,9 @@ The host daemon will:
 
 Use this after making code changes that require a process restart.`,
   {
-    bot: z.enum(['engineer', 'commander']).default('engineer').describe('Which bot to restart'),
+    bot: z.enum(['engineer', 'commander']).default(
+      (process.env.ASSISTANT_ROLE || 'engineer').toLowerCase() as 'engineer' | 'commander',
+    ).describe('Which bot to restart'),
   },
   async (args) => {
     if (!isMain) {

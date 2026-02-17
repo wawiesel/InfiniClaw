@@ -700,6 +700,9 @@ export class MatrixChannel implements Channel {
   async sendMessage(jid: string, text: string, threadId?: string): Promise<void> {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);
+    if (threadId) {
+      logger.info({ roomId, threadId }, 'Matrix sendMessage with thread');
+    }
     const normalizedText = normalizeSenderPrefixForMarkdown(text);
     try {
       // Strategy: Extract math to protect it, apply markdown, then restore math

@@ -80,6 +80,9 @@ const PIP_PULSE = ['🔵', '🔷', '🔹', '🔷'] as const;
 const pipPulseIndex: Record<string, number> = {};
 // Per-group work thread IDs — set by container via IPC, used by processGroupMessages
 const workThreadIds: Record<string, string> = {};
+// Per-group reply thread — tracks the thread for the active run's replies.
+// Updated both at run start and when messages are piped to an active container.
+const activeReplyThreadIds: Record<string, string | undefined> = {};
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
 const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
@@ -886,9 +889,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   setObjectiveFromMessages(chatJid, filteredMessages);
 
-  // Thread routing: prefer incoming message thread, fall back to work thread set by container
+  // Thread routing: prefer incoming message thread, fall back to work thread set by container.
+  // Uses activeReplyThreadIds map so piped messages can update thread mid-run.
   const lastMsg = filteredMessages[filteredMessages.length - 1];
-  let replyThreadId = lastMsg?.thread_id || workThreadIds[chatJid];
+  activeReplyThreadIds[chatJid] = lastMsg?.thread_id || workThreadIds[chatJid];
+  logger.info(
+    { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], lastMsgThreadId: lastMsg?.thread_id, workThread: workThreadIds[chatJid], msgCount: filteredMessages.length },
+    'Thread routing resolved',
+  );
 
   const basePrompt = formatMessages(filteredMessages);
   const missionContext =
@@ -984,7 +992,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               const formatted = text.includes('<details>')
                 ? text
                 : `<small><font color="#888888"><em>${text}</em></font></small>`;
-              void ch.sendMessage(chatJid, formatted, replyThreadId).catch((err) => {
+              void ch.sendMessage(chatJid, formatted, activeReplyThreadIds[chatJid]).catch((err) => {
                 logger.warn({ chatJid, err }, 'Failed to send progress to chat');
               });
               // Cycle pulse pip alongside progress
@@ -1011,7 +1019,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             lastResponseBody = text;
             const ch = findChannel(channels, chatJid);
             if (ch) {
-              await ch.sendMessage(chatJid, formatMainMessage(text), replyThreadId);
+              await ch.sendMessage(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
             }
             await maybeCrossBotForward(chatJid, text);
             outputSentToUser = true;
@@ -1039,6 +1047,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
   if (idleTimer) clearTimeout(idleTimer);
   if (runProgressNudgeTimer) clearInterval(runProgressNudgeTimer);
+  delete activeReplyThreadIds[chatJid];
 
   if (runResult.status === 'error' || hadError) {
     const rawError =
@@ -1054,7 +1063,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           `I hit an error while processing that request: ${compactError}`,
         );
       try {
-        await channel.sendMessage(chatJid, errorReply, replyThreadId);
+        await channel.sendMessage(chatJid, errorReply, activeReplyThreadIds[chatJid]);
         outputSentToUser = true;
         agentResponses.push(errorReply);
       } catch (sendErr) {
@@ -1278,6 +1287,13 @@ async function startMessageLoop(): Promise<void> {
 
           setObjectiveFromMessages(chatJid, messagesToSend);
           const formatted = formatMessages(messagesToSend);
+
+          // Update reply thread from piped messages so responses go to the right thread
+          const lastPiped = messagesToSend[messagesToSend.length - 1];
+          const pipedThread = lastPiped?.thread_id || workThreadIds[chatJid];
+          if (pipedThread) {
+            activeReplyThreadIds[chatJid] = pipedThread;
+          }
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
