@@ -1290,12 +1290,10 @@ async function startMessageLoop(): Promise<void> {
           setObjectiveFromMessages(chatJid, messagesToSend);
           const formatted = formatMessages(messagesToSend);
 
-          // Update reply thread from piped messages so responses go to the right thread
+          // Update reply thread from piped messages so responses go to the right thread.
+          // Always update (even to undefined) so a main-timeline message clears a stale thread.
           const lastPiped = messagesToSend[messagesToSend.length - 1];
-          const pipedThread = lastPiped?.thread_id || workThreadIds[chatJid];
-          if (pipedThread) {
-            activeReplyThreadIds[chatJid] = pipedThread;
-          }
+          activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid];
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
