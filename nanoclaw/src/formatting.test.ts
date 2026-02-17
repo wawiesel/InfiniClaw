@@ -103,6 +103,17 @@ describe('formatMessages', () => {
     const result = formatMessages([]);
     expect(result).toBe('<messages>\n\n</messages>');
   });
+
+  it('includes thread_id attribute when present', () => {
+    const result = formatMessages([makeMsg({ thread_id: '$abc123' })]);
+    expect(result).toContain('thread_id="$abc123"');
+    expect(result).toContain('sender="Alice"');
+  });
+
+  it('omits thread_id attribute when absent', () => {
+    const result = formatMessages([makeMsg()]);
+    expect(result).not.toContain('thread_id');
+  });
 });
 
 // --- TRIGGER_PATTERN ---
