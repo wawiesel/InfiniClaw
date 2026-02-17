@@ -8,6 +8,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import Database from 'better-sqlite3';
+
 import { saveSkillsToPersona } from './skill-sync.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -586,7 +588,7 @@ function holodeckWorktreePath(root: string): string {
  * 2. Deploys nanoclaw from the worktree to _runtime/instances/holodeck/
  * 3. Launches as a launchd service using engineer's profile
  */
-export function holodeckCreate(root: string, branch: string): void {
+export function holodeckCreate(root: string, branch: string, holodeckJid?: string): void {
   const worktree = holodeckWorktreePath(root);
   const instance = instanceDir(root, HOLODECK_BOT);
 
@@ -634,6 +636,24 @@ export function holodeckCreate(root: string, branch: string): void {
         }
       }
     }
+  }
+
+  // Pre-register the Holodeck room so Cid+ doesn't auto-register Engineering as main
+  if (holodeckJid) {
+    const storeDir = path.join(instance, 'store');
+    fs.mkdirSync(storeDir, { recursive: true });
+    const seedDb = new Database(path.join(storeDir, 'messages.db'));
+    seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
+      jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
+      trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
+      container_config TEXT, requires_trigger INTEGER DEFAULT 1
+    )`);
+    seedDb.prepare(
+      `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(holodeckJid, 'Holodeck', 'holodeck', '@Cid+', new Date().toISOString(), 0);
+    seedDb.close();
+    console.log(`holodeck: pre-registered ${holodeckJid} as main group`);
   }
 
   // Launch as launchd service

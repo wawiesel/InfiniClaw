@@ -747,7 +747,10 @@ export async function processTaskIpc(
       }
       try {
         const root = resolveRoot();
-        serviceHolodeckCreate(root, branch);
+        // Find the holodeck room JID to pre-register in the new instance
+        const holodeckJid = Object.entries(registeredGroups)
+          .find(([, g]) => g.folder === 'holodeck')?.[0];
+        serviceHolodeckCreate(root, branch, holodeckJid);
         if (hChatJid) await deps.sendMessage(hChatJid, `✅ Holodeck launched from branch \`${branch}\``);
       } catch (err) {
         logger.error({ err }, 'holodeck_create failed');
