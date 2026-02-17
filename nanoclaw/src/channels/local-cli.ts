@@ -104,6 +104,10 @@ export class LocalCliChannel implements Channel {
     this.prompt();
   }
 
+  async setPresenceStatus(_state: string, statusMessage?: string): Promise<void> {
+    if (statusMessage) process.stdout.write(`\n[${statusMessage}]\n`);
+  }
+
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.ownsJid(jid)) return;
     if (isTyping) {

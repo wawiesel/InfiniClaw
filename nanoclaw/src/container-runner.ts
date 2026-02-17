@@ -8,21 +8,19 @@ import os from 'os';
 import path from 'path';
 
 import {
-  ASSISTANT_NAME,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_CPUS,
   CONTAINER_MEMORY_MB,
-  CONTAINER_RUNTIME,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  ASSISTANT_NAME,
 } from './config.js';
-import { isPodmanRuntime, containerCli } from './container-runtime.js';
-import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { saveSkillsToPersona, loadSkillsToSession } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -65,14 +63,22 @@ interface VolumeMount {
 }
 
 const ALLOWED_ENV_VARS = [
+  'ASSISTANT_NAME',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_MODEL',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'NANOCLAW_SKIP_TOKEN_COUNTING',
+  'NANOCLAW_CONTEXT_WINDOW',
+  'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
   'OLLAMA_HOST',
   'OPENAI_API_KEY',
   'OPENAI_BASE_URL',
+  'INFINICLAW_ROOT',
+  'PERSONA_NAME',
   // Network/TLS passthrough for environments with corporate proxies/certs.
   'HTTP_PROXY',
   'HTTPS_PROXY',
@@ -92,7 +98,6 @@ const CERT_PATH_ENV_VARS = [
   'CURL_CA_BUNDLE',
   'GIT_SSL_CAINFO',
 ] as const;
-
 
 function parseEnvLine(line: string): [string, string] | null {
   const trimmed = line.trim();
@@ -173,11 +178,23 @@ function normalizeProviderSecrets(
   const explicitModel = normalized.ANTHROPIC_MODEL?.trim();
   if (explicitModel) {
     normalized.ANTHROPIC_MODEL = explicitModel;
+    // Force all SDK model slots to the same ollama model so haiku/sonnet
+    // fallbacks never try models ollama doesn't have.
+    normalized.ANTHROPIC_SMALL_FAST_MODEL = explicitModel;
+    normalized.ANTHROPIC_DEFAULT_SONNET_MODEL = explicitModel;
   }
 
   if (!normalized.ANTHROPIC_AUTH_TOKEN?.trim()) {
     normalized.ANTHROPIC_AUTH_TOKEN = 'ollama';
   }
+
+  // SDK runtime knobs for local models:
+  // - Skip token counting API (ollama has no /v1/messages/count_tokens)
+  // - Cap context window to match local model limits
+  // - Reduce max output tokens so input context has room (32K - 4K = 28K input)
+  normalized.NANOCLAW_SKIP_TOKEN_COUNTING = '1';
+  normalized.NANOCLAW_CONTEXT_WINDOW = '32000';
+  normalized.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '4096';
 
   return normalized;
 }
@@ -312,22 +329,18 @@ function buildVolumeMounts(
     }, null, 2) + '\n');
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+  // Sync skills: save session → persona (replace), then rebuild session from shared + persona
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      fs.mkdirSync(dstDir, { recursive: true });
-      for (const file of fs.readdirSync(srcDir)) {
-        const srcFile = path.join(srcDir, file);
-        const dstFile = path.join(dstDir, file);
-        fs.copyFileSync(srcFile, dstFile);
-      }
-    }
+  const rootDir = process.env.INFINICLAW_ROOT;
+  const personaName = process.env.PERSONA_NAME;
+  const sharedSkillsSrc = path.join(process.cwd(), 'container', 'skills');
+
+  if (rootDir && personaName) {
+    const personaSkillsDir = path.join(rootDir, 'bots', 'personas', personaName, 'skills');
+    saveSkillsToPersona(skillsDst, personaSkillsDir, sharedSkillsSrc);
+    loadSkillsToSession(skillsDst, personaSkillsDir, sharedSkillsSrc);
   }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
@@ -415,45 +428,22 @@ function buildVolumeMounts(
   return mounts;
 }
 
-/**
- * Read allowed secrets from .env for passing to the container via stdin.
- * Secrets are never written to disk or mounted as files.
- */
-function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
-}
-
-
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  if (isPodmanRuntime()) {
-    // Prefer local image for podman: don't pull from remote registries.
-    args.push('--pull=never');
-    if (CONTAINER_MEMORY_MB > 0) {
-      args.push('--memory', `${CONTAINER_MEMORY_MB}m`);
-    }
-    if (CONTAINER_CPUS > 0) {
-      args.push('--cpus', String(CONTAINER_CPUS));
-    }
-    for (const mount of mounts) {
-      args.push(
-        '-v',
-        `${mount.hostPath}:${mount.containerPath}${mount.readonly ? ':ro' : ''}`,
-      );
-    }
-  } else {
-    // Apple Container: --mount for readonly, -v for read-write
-    for (const mount of mounts) {
-      if (mount.readonly) {
-        args.push(
-          '--mount',
-          `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`,
-        );
-      } else {
-        args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
-      }
-    }
+  // Podman-only runtime.
+  args.push('--pull=never');
+  if (CONTAINER_MEMORY_MB > 0) {
+    args.push('--memory', `${CONTAINER_MEMORY_MB}m`);
+  }
+  if (CONTAINER_CPUS > 0) {
+    args.push('--cpus', String(CONTAINER_CPUS));
+  }
+  for (const mount of mounts) {
+    args.push(
+      '-v',
+      `${mount.hostPath}:${mount.containerPath}${mount.readonly ? ':ro' : ''}`,
+    );
   }
 
   args.push(CONTAINER_IMAGE);
@@ -505,7 +495,7 @@ export async function runContainerAgent(
     {
       group: group.name,
       containerName,
-      runtime: CONTAINER_RUNTIME,
+      runtime: 'podman',
       mountCount: mounts.length,
       isMain: input.isMain,
     },
@@ -516,8 +506,7 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const runtimeCmd = containerCli();
-    const container = spawn(runtimeCmd, containerArgs, {
+    const container = spawn('podman', containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -621,7 +610,7 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      exec(`${runtimeCmd} stop ${containerName}`, { timeout: 15000 }, (err) => {
+      exec(`podman stop ${containerName}`, { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');
@@ -662,13 +651,26 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain.then(() => {
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
+          const chainTimer = setTimeout(() => {
+            logger.warn(
+              { group: group.name, containerName },
+              'outputChain stalled 30s after container close, force-resolving',
+            );
+            resolve({ status: 'success', result: null, newSessionId });
+          }, 30_000);
+          outputChain
+            .then(() => {
+              clearTimeout(chainTimer);
+              resolve({ status: 'success', result: null, newSessionId });
+            })
+            .catch((err) => {
+              clearTimeout(chainTimer);
+              logger.error(
+                { group: group.name, err },
+                'outputChain rejected after container close',
+              );
+              resolve({ status: 'success', result: null, newSessionId });
             });
-          });
           return;
         }
 
@@ -677,10 +679,11 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
+        const timeoutMinutes = Math.round(configTimeout / 60_000);
         resolve({
           status: 'error',
           result: null,
-          error: `Container timed out after ${configTimeout}ms`,
+          error: `Task timed out after ${timeoutMinutes} minutes with no response. Try again or simplify the request.`,
         });
         return;
       }
@@ -758,24 +761,37 @@ export async function runContainerAgent(
         resolve({
           status: 'error',
           result: null,
-          error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
+          error: `Container exited with code ${code}: ${stderr}`,
         });
         return;
       }
 
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
-        outputChain.then(() => {
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
+        const chainTimer = setTimeout(() => {
+          logger.warn(
+            { group: group.name, containerName, duration },
+            'outputChain stalled 30s after container close, force-resolving',
           );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
+          resolve({ status: 'success', result: null, newSessionId });
+        }, 30_000);
+        outputChain
+          .then(() => {
+            clearTimeout(chainTimer);
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
+            resolve({ status: 'success', result: null, newSessionId });
+          })
+          .catch((err) => {
+            clearTimeout(chainTimer);
+            logger.error(
+              { group: group.name, err },
+              'outputChain rejected after container close',
+            );
+            resolve({ status: 'success', result: null, newSessionId });
           });
-        });
         return;
       }
 
