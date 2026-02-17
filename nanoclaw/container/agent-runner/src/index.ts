@@ -513,15 +513,23 @@ function formatToolInput(name: string, input: unknown): string {
     if (name === 'WebFetch' && typeof obj.url === 'string') return obj.url;
     if (name === 'WebSearch' && typeof obj.query === 'string') return obj.query;
     if (name === 'Task' && typeof obj.prompt === 'string') return obj.prompt;
-    return JSON.stringify(input, null, 2);
+    return expandMultilineJson(JSON.stringify(input, null, 2));
   }
   return String(input || '');
 }
 
 function formatToolResponse(response: unknown): string {
   if (typeof response === 'string') return response;
-  if (response && typeof response === 'object') return JSON.stringify(response, null, 2);
+  if (response && typeof response === 'object') return expandMultilineJson(JSON.stringify(response, null, 2));
   return String(response || '');
+}
+
+/** Expand escaped newlines in JSON string values into real newlines for readability. */
+function expandMultilineJson(json: string): string {
+  return json.replace(/"((?:[^"\\]|\\.)*)"/g, (_match, inner: string) => {
+    if (!inner.includes('\\n')) return _match;
+    return '"' + inner.replace(/\\n/g, '\n') + '"';
+  });
 }
 
 function escapeHtml(text: string): string {

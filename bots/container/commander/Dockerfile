@@ -39,7 +39,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install docling for PDF-to-markdown conversion (includes OCR via pytesseract/easyocr)
-RUN pip3 install --break-system-packages docling rapidocr-onnxruntime pymupdf
+# Also install wks deps for the wksm MCP server (~/2025-WKS/hodor)
+RUN pip3 install --break-system-packages \
+    docling rapidocr-onnxruntime pymupdf \
+    watchdog rich typer shellingham pydantic pymongo \
+    sentence-transformers bsdiff4 mongomock jinja2 pyyaml
 
 # Fix model directory permissions for node user
 RUN chmod -R 777 /usr/local/lib/python3.11/dist-packages/rapidocr/models/ || true

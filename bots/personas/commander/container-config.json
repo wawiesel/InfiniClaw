@@ -8,9 +8,12 @@
   ],
   "mcpServers": {
     "wksm": {
-      "command": "node",
-      "args": ["dist/index.js"],
-      "cwd": "/workspace/extra/home/2025-WKS/hodor"
+      "command": "python3",
+      "args": ["-m", "wks.mcp.main"],
+      "cwd": "/workspace/extra/home/2025-WKS/hodor",
+      "env": {
+        "PYTHONPATH": "/workspace/extra/home/2025-WKS/hodor"
+      }
     }
   }
 }
