@@ -12,12 +12,12 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
+    "status": "tsx src/status-cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "status": "tsx src/status-cli.ts"
+    "cli": "node dist/cli.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
@@ -25,8 +25,8 @@
     "matrix-bot-sdk": "^0.8.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
-    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {

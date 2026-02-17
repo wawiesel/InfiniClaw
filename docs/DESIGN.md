@@ -116,13 +116,9 @@ Mac Host (launchd)
 InfiniClaw/
   README.md
   .gitignore
-  scripts/
-    start                     # Sync, build, install launchd, start all bots
-    stop                      # Unload launchd, stop containers
-    chat                      # Interactive terminal chat: ./scripts/chat <bot>
-    common.sh                 # Shared shell helpers
-    validate-deploy.sh        # Pre-restart code validation (used by IPC)
-  nanoclaw/                   # NanoClaw fork (planned submodule)
+  nanoclaw/                   # NanoClaw fork (git subtree from wawiesel/nanoclaw)
+    src/cli.ts                # Entry point: start|stop|chat
+    src/service.ts            # All start/stop/chat/deploy logic
   bots/
     personas/
       {bot}/CLAUDE.md         # Bot identity and rules
@@ -156,12 +152,12 @@ InfiniClaw/
 
 ### Start / Stop
 
-- `./scripts/start` — syncs vendored code, builds TS, installs launchd plists, starts all bots
-- `./scripts/stop` — syncs personas, unloads launchd plists, stops orphan containers
+- `cd nanoclaw && npm run cli start` — syncs code, builds TS, installs launchd plists, starts all bots
+- `cd nanoclaw && npm run cli stop` — syncs personas, unloads launchd plists, stops orphan containers
 
 ### Interactive chat
 
-- `./scripts/chat <bot>` — terminal chat with any bot (mirrors to Matrix)
+- `cd nanoclaw && npm run cli chat <bot>` — terminal chat with any bot (mirrors to Matrix)
 
 ### IPC commands (from engineer agent containers)
 

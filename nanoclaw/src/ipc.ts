@@ -1,9 +1,12 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
 import {
+  ASSISTANT_NAME,
+  ASSISTANT_ROLE,
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
@@ -11,8 +14,16 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import { processExtendedTaskIpc } from './ipc-extensions.js';
 import { logger } from './logger.js';
+import {
+  validateDeploy as serviceValidateDeploy,
+  deployBot as serviceDeployBot,
+  rebuildImage as serviceRebuildImage,
+  holodeckCreate as serviceHolodeckCreate,
+  holodeckTeardown as serviceHolodeckTeardown,
+  holodeckPromote as serviceHolodeckPromote,
+  resolveRoot,
+} from './service.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -33,6 +44,122 @@ export interface IpcDeps {
 }
 
 let ipcWatcherRunning = false;
+
+function resolveInfiniClawRoot(): string {
+  return resolveRoot();
+}
+
+function validateDeploy(bot: string): Promise<{ ok: boolean; errors: string }> {
+  return new Promise((resolve) => {
+    try {
+      const result = serviceValidateDeploy(resolveRoot(), bot);
+      resolve(result);
+    } catch (err) {
+      resolve({ ok: false, errors: err instanceof Error ? err.message : String(err) });
+    }
+  });
+}
+
+/** Deploy instance: save persona, rsync code, deps, build, restore persona, rebuild container image. */
+function deployInstance(bot: string): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolve) => {
+    try {
+      const root = resolveRoot();
+      serviceDeployBot(root, bot);
+      serviceRebuildImage(root, bot);
+      resolve({ ok: true, output: '' });
+    } catch (err) {
+      resolve({ ok: false, output: err instanceof Error ? err.message : String(err) });
+    }
+  });
+}
+
+/** Rebuild a container image (e.g. nanoclaw-commander:latest). */
+function rebuildImage(bot: string): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolve) => {
+    try {
+      serviceRebuildImage(resolveRoot(), bot);
+      resolve({ ok: true, output: '' });
+    } catch (err) {
+      resolve({ ok: false, output: err instanceof Error ? err.message : String(err) });
+    }
+  });
+}
+
+function upsertEnvValue(envFile: string, key: string, value: string): void {
+  const lines = fs.existsSync(envFile)
+    ? fs.readFileSync(envFile, 'utf-8').split('\n')
+    : [];
+  const next = `${key}=${value}`;
+  let updated = false;
+  const out = lines.map((line) => {
+    if (line.startsWith(`${key}=`)) {
+      updated = true;
+      return next;
+    }
+    return line;
+  });
+  if (!updated) out.push(next);
+  fs.writeFileSync(envFile, `${out.join('\n').replace(/\n*$/, '\n')}`);
+}
+
+function applyBrainMode(
+  bot: string,
+  mode: 'anthropic' | 'ollama',
+  model?: string,
+): string {
+  const root = resolveInfiniClawRoot();
+  const envFile = path.join(root, 'bots', 'profiles', bot, 'env');
+  if (!fs.existsSync(envFile)) {
+    throw new Error(`Missing profile env: ${envFile}`);
+  }
+
+  if (mode === 'anthropic') {
+    upsertEnvValue(envFile, 'BRAIN_MODEL', model || 'claude-sonnet-4-5');
+    upsertEnvValue(envFile, 'BRAIN_BASE_URL', '');
+    upsertEnvValue(envFile, 'BRAIN_AUTH_TOKEN', '');
+    upsertEnvValue(envFile, 'BRAIN_API_KEY', '');
+    return `Updated ${bot} to anthropic mode. Restart required.`;
+  }
+
+  upsertEnvValue(
+    envFile,
+    'BRAIN_MODEL',
+    model || 'devstral-small-2-fast:latest',
+  );
+  upsertEnvValue(
+    envFile,
+    'BRAIN_BASE_URL',
+    'http://host.containers.internal:11434',
+  );
+  upsertEnvValue(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
+  upsertEnvValue(envFile, 'BRAIN_API_KEY', '');
+  upsertEnvValue(envFile, 'BRAIN_OAUTH_TOKEN', '');
+  return `Updated ${bot} to ollama mode. Restart required.`;
+}
+
+export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'unknown'; model: string } {
+  const root = resolveInfiniClawRoot();
+  const envFile = path.join(root, 'bots', 'profiles', bot, 'env');
+  if (!fs.existsSync(envFile)) {
+    return { mode: 'unknown', model: '' };
+  }
+  const content = fs.readFileSync(envFile, 'utf-8');
+  const getValue = (key: string): string => {
+    const match = content.match(new RegExp(`^${key}=(.*)`, 'm'));
+    return match ? match[1].trim() : '';
+  };
+  const model = getValue('BRAIN_MODEL');
+  const baseUrl = getValue('BRAIN_BASE_URL');
+  const authToken = getValue('BRAIN_AUTH_TOKEN');
+  if (baseUrl && (baseUrl.includes('ollama') || baseUrl.includes('11434'))) {
+    return { mode: 'ollama', model };
+  }
+  if (authToken === 'ollama') {
+    return { mode: 'ollama', model };
+  }
+  return { mode: model ? 'anthropic' : 'unknown', model };
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -172,9 +299,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(tasksDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
               fs.unlinkSync(filePath);
+              await processTaskIpc(data, sourceGroup, isMain, deps);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
@@ -212,6 +338,10 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For brain mode control
+    bot?: string;
+    mode?: string;
+    model?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -219,6 +349,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For holodeck
+    branch?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -423,18 +555,248 @@ export async function processTaskIpc(
       }
       break;
 
-    default: {
-      // Delegate to extended IPC handlers (deploy, restart, brain mode, etc.)
-      const handled = await processExtendedTaskIpc(
-        data,
-        isMain,
-        sourceGroup,
-        { sendMessage: deps.sendMessage },
-      );
-      if (!handled) {
-        logger.warn({ type: data.type }, 'Unknown IPC task type');
+    case 'set_brain_mode':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized set_brain_mode attempt blocked',
+        );
+        break;
+      }
+      if (
+        data.bot &&
+        (data.bot === 'engineer' || data.bot === 'commander') &&
+        data.mode &&
+        (data.mode === 'anthropic' || data.mode === 'ollama')
+      ) {
+        try {
+          const summary = applyBrainMode(
+            data.bot,
+            data.mode,
+            typeof data.model === 'string' ? data.model : undefined,
+          );
+          logger.info({ bot: data.bot, mode: data.mode }, 'Brain mode updated via IPC');
+          if (typeof data.chatJid === 'string' && data.chatJid.trim().length > 0) {
+            await deps.sendMessage(data.chatJid, `engineer:\n\n${summary}`);
+          }
+        } catch (err) {
+          logger.error({ err, data }, 'Failed to apply set_brain_mode');
+        }
+      } else {
+        logger.warn({ data }, 'Invalid set_brain_mode request');
+      }
+      break;
+
+    case 'restart_bot': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized restart_bot attempt blocked');
+        break;
+      }
+      const bot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
+        ? data.bot
+        : 'engineer';
+      logger.info({ bot }, 'Restart requested via IPC — validating deploy');
+      const chatJid = typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
+        ? data.chatJid
+        : null;
+      const { ok, errors } = await validateDeploy(bot);
+      if (!ok) {
+        logger.error({ bot, errors }, 'Deploy validation failed — aborting restart');
+        if (chatJid) {
+          try {
+            const trimmed = errors.length > 3000 ? errors.slice(-3000) : errors;
+            await deps.sendMessage(chatJid, `⛔ deploy validation failed — not restarting:\n\n\`\`\`\n${trimmed}\n\`\`\``);
+          } catch {}
+        }
+        break;
+      }
+      // Determine if this is a self-restart or cross-bot restart
+      const selfBot = ASSISTANT_ROLE.toLowerCase();
+      if (bot === selfBot) {
+        logger.info({ bot }, 'Deploy validation passed — deploying to self then restarting');
+        const deploy = await deployInstance(bot);
+        if (!deploy.ok) {
+          logger.error({ bot, output: deploy.output }, 'Self-deploy failed — aborting restart');
+          if (chatJid) {
+            try {
+              const trimmed = deploy.output.length > 3000 ? deploy.output.slice(-3000) : deploy.output;
+              await deps.sendMessage(chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${trimmed}\n\`\`\``);
+            } catch {}
+          }
+          break;
+        }
+        if (chatJid) {
+          try {
+            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting ${bot}...</font>`);
+          } catch {}
+        }
+        // Exit gracefully — launchd will restart with the newly deployed code
+        setTimeout(() => {
+          process.exit(0);
+        }, 500);
+      } else {
+        // Cross-bot: sync code, build, then restart via launchctl
+        logger.info({ bot }, 'Deploy validation passed — deploying instance');
+        const deploy = await deployInstance(bot);
+        if (!deploy.ok) {
+          logger.error({ bot, output: deploy.output }, 'Instance deploy failed');
+          break;
+        }
+        logger.info({ bot }, 'Instance deployed — restarting via launchctl');
+        if (chatJid) {
+          try {
+            await deps.sendMessage(chatJid, `⭕️ <font color="#ff0000">restarting ${bot}...</font>`);
+          } catch {}
+        }
+        try {
+          const uid = execSync('id -u').toString().trim();
+          execSync(`launchctl kickstart -k gui/${uid}/com.infiniclaw.${bot}`, { timeout: 10_000 });
+          logger.info({ bot }, 'Cross-bot restart succeeded');
+        } catch (err) {
+          logger.error({ bot, err }, 'Cross-bot restart via launchctl failed');
+        }
       }
       break;
     }
+
+    case 'rebuild_image': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized rebuild_image attempt blocked');
+        break;
+      }
+      const imgBot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
+        ? data.bot
+        : 'commander';
+      const imgChatJid = typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
+        ? data.chatJid
+        : null;
+      logger.info({ bot: imgBot }, 'Container image rebuild requested via IPC');
+      if (imgChatJid) {
+        try { await deps.sendMessage(imgChatJid, `🔧 rebuilding nanoclaw-${imgBot}:latest...`); } catch {}
+      }
+      const result = await rebuildImage(imgBot);
+      if (!result.ok) {
+        logger.error({ bot: imgBot, output: result.output }, 'Image rebuild failed');
+        if (imgChatJid) {
+          try {
+            const trimmed = result.output.length > 3000 ? result.output.slice(-3000) : result.output;
+            await deps.sendMessage(imgChatJid, `⛔ image rebuild failed for ${imgBot}:\n\n\`\`\`\n${trimmed}\n\`\`\``);
+          } catch {}
+        }
+      } else {
+        logger.info({ bot: imgBot }, 'Image rebuild succeeded');
+        if (imgChatJid) {
+          try { await deps.sendMessage(imgChatJid, `✅ nanoclaw-${imgBot}:latest rebuilt`); } catch {}
+        }
+      }
+      break;
+    }
+
+    case 'bot_status': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized bot_status attempt blocked');
+        break;
+      }
+      const statusBot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
+        ? data.bot
+        : 'commander';
+      const statusChatJid = typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
+        ? data.chatJid
+        : null;
+      if (!statusChatJid) break;
+
+      try {
+        const logDir = path.resolve(process.env.INFINICLAW_ROOT || process.cwd(), 'logs');
+        const errorLogPath = path.join(logDir, `${statusBot}.error.log`);
+        const lastErrors = fs.existsSync(errorLogPath)
+          ? fs.readFileSync(errorLogPath, 'utf8').split('\n').slice(-50).join('\n').trim()
+          : '(no error log)';
+
+        let launchctlInfo = '';
+        try {
+          launchctlInfo = execSync(`launchctl list com.infiniclaw.${statusBot} 2>&1`, { timeout: 5_000 }).toString().trim();
+        } catch (e) {
+          launchctlInfo = e instanceof Error ? e.message : 'unknown';
+        }
+
+        const parts = [`**${statusBot} status:**\n\`\`\`\n${launchctlInfo}\n\`\`\``];
+        if (lastErrors && lastErrors !== '(no error log)') {
+          const trimmed = lastErrors.length > 3000 ? lastErrors.slice(-3000) : lastErrors;
+          parts.push(`**Last errors:**\n\`\`\`\n${trimmed}\n\`\`\``);
+        }
+        await deps.sendMessage(statusChatJid, parts.join('\n\n'));
+      } catch (err) {
+        logger.error({ statusBot, err }, 'Failed to get bot status');
+      }
+      break;
+    }
+
+    case 'holodeck_create': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized holodeck_create attempt blocked');
+        break;
+      }
+      const branch = typeof data.branch === 'string' ? data.branch.trim() : '';
+      const hChatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+      if (!branch) {
+        if (hChatJid) await deps.sendMessage(hChatJid, '⛔ holodeck_create requires a branch name');
+        break;
+      }
+      try {
+        const root = resolveRoot();
+        serviceHolodeckCreate(root, branch);
+        if (hChatJid) await deps.sendMessage(hChatJid, `✅ Holodeck launched from branch \`${branch}\``);
+      } catch (err) {
+        logger.error({ err }, 'holodeck_create failed');
+        if (hChatJid) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await deps.sendMessage(hChatJid, `⛔ holodeck_create failed: ${msg}`);
+        }
+      }
+      break;
+    }
+
+    case 'holodeck_teardown': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized holodeck_teardown attempt blocked');
+        break;
+      }
+      const tChatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+      try {
+        const root = resolveRoot();
+        serviceHolodeckTeardown(root);
+        if (tChatJid) await deps.sendMessage(tChatJid, '✅ Holodeck torn down');
+      } catch (err) {
+        logger.error({ err }, 'holodeck_teardown failed');
+        if (tChatJid) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await deps.sendMessage(tChatJid, `⛔ holodeck_teardown failed: ${msg}`);
+        }
+      }
+      break;
+    }
+
+    case 'holodeck_promote': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized holodeck_promote attempt blocked');
+        break;
+      }
+      const pChatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+      try {
+        const root = resolveRoot();
+        serviceHolodeckPromote(root);
+        if (pChatJid) await deps.sendMessage(pChatJid, '✅ Holodeck promoted to main. Restart engineer to apply.');
+      } catch (err) {
+        logger.error({ err }, 'holodeck_promote failed');
+        if (pChatJid) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await deps.sendMessage(pChatJid, `⛔ holodeck_promote failed: ${msg}`);
+        }
+      }
+      break;
+    }
+
+    default:
+      logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
 }

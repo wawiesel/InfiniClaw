@@ -19,15 +19,28 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `container/skills/{name}/SKILL.md` | Shared bot skills (all bots) |
 
 ## Skills
+
+Skills are the primary way to add capabilities. Each skill is a directory with a `SKILL.md` and optional `scripts/`.
+
+### Operator skills (for developing NanoClaw)
 
 | Skill | When to Use |
 |-------|-------------|
 | `/setup` | First-time installation, authentication, service configuration |
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
+
+### Bot skills (available inside containers)
+
+| Source | Scope |
+|--------|-------|
+| `container/skills/{name}/` | All bots (shared) |
+| `bots/personas/{bot}/skills/{name}/` | That bot only (persona-specific) |
+
+Persona skills override shared skills with the same name. Skills are synced into the container's `.claude/skills/` on every spawn.
 
 ## Development
 
@@ -36,7 +49,7 @@ Run commands directly—don't tell the user to run them.
 ```bash
 npm run dev          # Run with hot reload
 npm run build        # Compile TypeScript
-./container/build.sh # Rebuild agent container
+./bots/container/build.sh # Rebuild agent container
 ```
 
 Service management:
@@ -45,13 +58,27 @@ launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
 ```
 
+## Status Messages
+
+Status messages use the format: `<emoji> <text>` where text color matches the emoji's main color.
+
+| Status | Format |
+|--------|--------|
+| Online | `✅ online.` (green) |
+| Restarting | `⭕️ restarting...` |
+| Working | `🔧 working...` |
+
+## Deploy Validation
+
+When `restart_self` is called, the host stages your code to `staging/{bot}/` and runs `tsc --noEmit` before restarting. If compilation fails, the bot stays running and errors are sent to chat. Fix the errors and call `restart_self` again.
+
 ## Container Build Cache
 
 Apple Container's buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild:
 
 ```bash
 container builder stop && container builder rm && container builder start
-./container/build.sh
+./bots/container/build.sh
 ```
 
 Always verify after rebuild: `container run -i --rm --entrypoint wc nanoclaw-agent:latest -l /app/src/index.ts`

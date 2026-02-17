@@ -14,6 +14,11 @@
       "path": "~/2026-Nanoclaw/InfiniClaw",
       "allowReadWrite": true,
       "description": "InfiniClaw repo — Cid's workspace"
+    },
+    {
+      "path": "~/2026-Nanoclaw/InfiniClaw/_runtime",
+      "allowReadWrite": false,
+      "description": "Runtime data — read-only (instances, staging, logs)"
     }
   ],
   "blockedPatterns": [".*"],

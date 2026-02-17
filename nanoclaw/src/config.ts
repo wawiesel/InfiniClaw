@@ -1,20 +1,9 @@
 import path from 'path';
 
-import { readEnvFile } from './env.js';
-
-// Read config values from .env (falls back to process.env).
-// Secrets are NOT read here — they stay on disk and are loaded only
-// where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
-
-export const ASSISTANT_NAME =
-  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
-export const ASSISTANT_HAS_OWN_NUMBER =
-  (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
+export const ASSISTANT_ROLE = process.env.ASSISTANT_ROLE!;
 export const ASSISTANT_TRIGGER =
   process.env.ASSISTANT_TRIGGER || ASSISTANT_NAME;
-export const ASSISTANT_ROLE = process.env.ASSISTANT_ROLE || ASSISTANT_NAME;
-export const ASSISTANT_REACTION = process.env.ASSISTANT_REACTION || '';
 export const POLL_INTERVAL = Math.max(
   100,
   parseInt(process.env.POLL_INTERVAL || '250', 10) || 250,
@@ -39,8 +28,7 @@ export const MAIN_GROUP_FOLDER = 'main';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
-export const CONTAINER_RUNTIME =
-  (process.env.CONTAINER_RUNTIME || 'container').toLowerCase();
+export const CONTAINER_RUNTIME = 'podman';
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,
@@ -83,24 +71,6 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
-// Matrix channel configuration
-export const MATRIX_HOMESERVER = process.env.MATRIX_HOMESERVER || '';
-export const MATRIX_ACCESS_TOKEN = process.env.MATRIX_ACCESS_TOKEN || '';
-export const MATRIX_USER_ID = process.env.MATRIX_USER_ID || '';
-export const MATRIX_USERNAME = process.env.MATRIX_USERNAME || '';
-export const MATRIX_PASSWORD = process.env.MATRIX_PASSWORD || '';
-export const MATRIX_DEVICE_NAME =
-  process.env.MATRIX_DEVICE_NAME || 'nanoclaw-bot';
-export const MATRIX_RECONNECT_INTERVAL = parseInt(
-  process.env.MATRIX_RECONNECT_INTERVAL || '30000',
-  10,
-);
-
-// Timezone for scheduled tasks (cron expressions, etc.)
-// Uses system timezone by default
-export const TIMEZONE =
-  process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
-
 // Cross-bot @mention forwarding
 // When a message matches CROSS_BOT_PATTERN, forward it to CROSS_BOT_ROOM_JID
 const crossBotTrigger = (process.env.CROSS_BOT_TRIGGER || '').trim();
@@ -125,6 +95,19 @@ export const IGNORE_SENDERS: Set<string> = new Set(
   ignoreSendersStr ? ignoreSendersStr.split(',').map((s) => s.trim()).filter(Boolean) : [],
 );
 
+// Matrix channel configuration
+export const MATRIX_HOMESERVER = process.env.MATRIX_HOMESERVER || '';
+export const MATRIX_ACCESS_TOKEN = process.env.MATRIX_ACCESS_TOKEN || '';
+export const MATRIX_USER_ID = process.env.MATRIX_USER_ID || '';
+export const MATRIX_USERNAME = process.env.MATRIX_USERNAME || '';
+export const MATRIX_PASSWORD = process.env.MATRIX_PASSWORD || '';
+export const MATRIX_DEVICE_NAME =
+  process.env.MATRIX_DEVICE_NAME || 'nanoclaw-bot';
+export const MATRIX_RECONNECT_INTERVAL = parseInt(
+  process.env.MATRIX_RECONNECT_INTERVAL || '30000',
+  10,
+);
+
 // Local terminal channel (for direct CLI chat without Matrix/WhatsApp)
 export const LOCAL_CHANNEL_ENABLED =
   process.env.LOCAL_CHANNEL_ENABLED === '1' ||
@@ -134,3 +117,8 @@ export const LOCAL_CHAT_NAME = process.env.LOCAL_CHAT_NAME || 'Local Terminal';
 export const LOCAL_CHAT_SENDER_NAME = process.env.LOCAL_CHAT_SENDER_NAME || '';
 export const LOCAL_MIRROR_MATRIX_JID =
   process.env.LOCAL_MIRROR_MATRIX_JID || '';
+
+// Timezone for scheduled tasks (cron expressions, etc.)
+// Uses system timezone by default
+export const TIMEZONE =
+  process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;

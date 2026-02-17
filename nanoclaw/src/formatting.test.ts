@@ -1,13 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
-import { TRIGGER_PATTERN } from './config.js';
+vi.mock('./config.js', () => ({
+  ASSISTANT_NAME: 'Andy',
+  ASSISTANT_TRIGGER: 'Andy',
+  TRIGGER_PATTERN: /^@Andy\b/i,
+}));
+
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
 import {
   escapeXml,
   formatMessages,
   formatOutbound,
   stripInternalTags,
 } from './router.js';
-import { NewMessage } from './types.js';
+import { Channel, NewMessage } from './types.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -162,18 +168,34 @@ describe('stripInternalTags', () => {
 });
 
 describe('formatOutbound', () => {
-  it('returns text with internal tags stripped', () => {
-    expect(formatOutbound('hello world')).toBe('hello world');
+  const waChannel = { prefixAssistantName: true } as Channel;
+  const noPrefixChannel = { prefixAssistantName: false } as Channel;
+  const defaultChannel = {} as Channel;
+
+  it('prefixes with assistant name when channel wants it', () => {
+    expect(formatOutbound(waChannel, 'hello world')).toBe(
+      `${ASSISTANT_NAME}: hello world`,
+    );
+  });
+
+  it('does not prefix when channel opts out', () => {
+    expect(formatOutbound(noPrefixChannel, 'hello world')).toBe('hello world');
+  });
+
+  it('defaults to prefixing when prefixAssistantName is undefined', () => {
+    expect(formatOutbound(defaultChannel, 'hello world')).toBe(
+      `${ASSISTANT_NAME}: hello world`,
+    );
   });
 
   it('returns empty string when all text is internal', () => {
-    expect(formatOutbound('<internal>hidden</internal>')).toBe('');
+    expect(formatOutbound(waChannel, '<internal>hidden</internal>')).toBe('');
   });
 
-  it('strips internal tags from remaining text', () => {
+  it('strips internal tags and prefixes remaining text', () => {
     expect(
-      formatOutbound('<internal>thinking</internal>The answer is 42'),
-    ).toBe('The answer is 42');
+      formatOutbound(waChannel, '<internal>thinking</internal>The answer is 42'),
+    ).toBe(`${ASSISTANT_NAME}: The answer is 42`);
   });
 });
 

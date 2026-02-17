@@ -15,6 +15,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+// SENT_TEXTS_FILE removed — status_update tool was deleted, nothing writes to it.
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -22,11 +23,16 @@ const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 const DEFAULT_DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_DELEGATE_TIMEOUT_MS = 60 * 60 * 1000;
-const DELEGATE_CWD_ROOTS = ['/workspace/group', '/workspace/extra'];
+const DELEGATE_CWD_ROOTS = ['/workspace', '/workspace/group', '/workspace/extra'];
 const DELEGATE_CACHE_ROOT = '/workspace/cache';
-const DOCLING_VENV_BIN = '/workspace/cache/venvs/docling_venv/bin';
+const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
 const HOST_CERT_FALLBACK = '/workspace/host-certs/node_extra_ca_certs-corporate-certs.pem';
+const CAPABILITY_STATE_FILE = '/workspace/cache/capability-budget-state.json';
 type DelegateEnv = Record<string, string | undefined>;
+type CapabilityState = {
+  budgets: Record<string, number>;
+  used: Record<string, number>;
+};
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -42,16 +48,79 @@ function writeIpcFile(dir: string, data: object): string {
   return filename;
 }
 
-function emitChatMessage(text: string, sender?: string): void {
+function capabilityKey(provider: string, model: string): string {
+  return `${provider.trim().toLowerCase()}:${model.trim()}`;
+}
+
+function estimateTokens(text: string): number {
+  const normalized = (text || '').trim();
+  if (!normalized) return 0;
+  return Math.max(1, Math.ceil(normalized.length / 4));
+}
+
+function loadCapabilityState(): CapabilityState {
+  try {
+    if (!fs.existsSync(CAPABILITY_STATE_FILE)) {
+      return { budgets: {}, used: {} };
+    }
+    const parsed = JSON.parse(fs.readFileSync(CAPABILITY_STATE_FILE, 'utf-8')) as Partial<CapabilityState>;
+    return {
+      budgets: parsed.budgets || {},
+      used: parsed.used || {},
+    };
+  } catch {
+    return { budgets: {}, used: {} };
+  }
+}
+
+function saveCapabilityState(state: CapabilityState): void {
+  fs.mkdirSync(path.dirname(CAPABILITY_STATE_FILE), { recursive: true });
+  const tmp = `${CAPABILITY_STATE_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, CAPABILITY_STATE_FILE);
+}
+
+function recordCapabilityUsage(provider: string, model: string, tokens: number): void {
+  if (tokens <= 0) return;
+  const key = capabilityKey(provider, model);
+  const state = loadCapabilityState();
+  state.used[key] = (state.used[key] || 0) + tokens;
+  saveCapabilityState(state);
+}
+
+function listCapabilityUsageLines(): string[] {
+  const state = loadCapabilityState();
+  const keys = Array.from(
+    new Set([...Object.keys(state.budgets), ...Object.keys(state.used)]),
+  ).sort();
+  if (keys.length === 0) {
+    return ['No capability budgets configured yet.'];
+  }
+  return keys.map((key) => {
+    const [provider, ...modelParts] = key.split(':');
+    const model = modelParts.join(':');
+    const used = state.used[key] || 0;
+    const total = state.budgets[key];
+    const remaining =
+      typeof total === 'number' && total >= 0 ? Math.max(0, total - used) : null;
+    return `${provider}/${model}: used=${used} tokens, remaining=${remaining === null ? 'unknown' : `${remaining} tokens`}`;
+  });
+}
+
+function emitChatMessageTo(chatJidTarget: string, text: string, sender?: string): void {
   const data: Record<string, string | undefined> = {
     type: 'message',
-    chatJid,
+    chatJid: chatJidTarget,
     text,
     sender: sender || undefined,
     groupFolder,
     timestamp: new Date().toISOString(),
   };
   writeIpcFile(MESSAGES_DIR, data);
+}
+
+function emitDelegateMessage(text: string): void {
+  emitChatMessageTo(chatJid, text);
 }
 
 function guessMimeTypeFromFilename(filename: string): string {
@@ -76,10 +145,10 @@ function guessMimeTypeFromFilename(filename: string): string {
 }
 
 function resolveDelegateCwd(cwd?: string): { ok: true; cwd: string } | { ok: false; error: string } {
-  const requested = cwd?.trim() || '/workspace/group';
+  const requested = cwd?.trim() || '/workspace';
   const resolved = path.isAbsolute(requested)
     ? path.resolve(requested)
-    : path.resolve('/workspace/group', requested);
+    : path.resolve('/workspace', requested);
 
   const allowed = DELEGATE_CWD_ROOTS.some((root) => {
     const normalizedRoot = path.resolve(root);
@@ -141,9 +210,11 @@ function formatDelegateSender(
   provider: 'codex' | 'gemini' | 'ollama',
   llm: string,
 ): string {
-  const base = name.trim();
+  const lobeName = name.trim();
   const model = llm.trim();
-  return `${base}(${provider},${model})`;
+  // Format: 💭 LobeName (Provider/model) in light grey
+  const providerName = provider.charAt(0).toUpperCase() + provider.slice(1);
+  return `<font color="#888888">💭 ${lobeName} <em>(${providerName}/${model})</em></font>`;
 }
 
 function firstSet(...values: Array<string | undefined>): string | undefined {
@@ -174,7 +245,9 @@ function buildDelegateEnv(): DelegateEnv {
       process.env.VIRTUALENV_OVERRIDE_APP_DATA ||
       `${DELEGATE_CACHE_ROOT}/virtualenv`,
   };
-  delegateEnv.PATH = prependToPath(delegateEnv.PATH, DOCLING_VENV_BIN);
+  if (EXTRA_PATH_PREPEND.trim().length > 0) {
+    delegateEnv.PATH = prependToPath(delegateEnv.PATH, EXTRA_PATH_PREPEND);
+  }
 
   if (fs.existsSync(HOST_CERT_FALLBACK)) {
     if (!delegateEnv.NODE_EXTRA_CA_CERTS) {
@@ -221,20 +294,6 @@ const server = new McpServer({
   name: 'nanoclaw',
   version: '1.0.0',
 });
-
-server.tool(
-  'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
-  {
-    text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
-  },
-  async (args) => {
-    emitChatMessage(args.text, args.sender);
-
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
-  },
-);
 
 server.tool(
   'send_image',
@@ -318,7 +377,7 @@ If unsure which mode to use, you can ask the user. Examples:
 - "Follow up on my request" \u2192 group (needs to know what was requested)
 - "Generate a daily report" \u2192 isolated (just needs instructions in prompt)
 
-MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It can also use send_message for immediate delivery, or wrap output in <internal> tags to suppress it. Include guidance in the prompt about whether the agent should:
+MESSAGING BEHAVIOR - The task agent's final output is sent to the user or group automatically. It can wrap output in <internal> tags to suppress it. Include guidance in the prompt about whether the agent should:
 \u2022 Always send a message (e.g., reminders, daily briefings)
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
@@ -517,19 +576,109 @@ Use available_groups.json to find the JID for a group. The folder name should be
 );
 
 server.tool(
-  'delegate_codex',
-  `Delegate a coding objective to Codex CLI in the same mounted workspace.
+  'set_brain_mode',
+  `Set InfiniClaw brain mode for a bot profile.
 
-Use this when you want Codex to directly read/write files and run commands (including Python) inside the container.
+This updates profiles/<bot>/env in the InfiniClaw root and is intended for
+operator use from engineer main context.
+
+Modes:
+- anthropic: clears base URL/auth token fields and sets model
+- ollama: sets host Ollama base URL + auth token, and sets model
+
+Note: bot restart is required for changes to take effect.`,
+  {
+    bot: z.enum(['engineer', 'commander']).describe('Bot profile to update'),
+    mode: z.enum(['anthropic', 'ollama']).describe('Brain provider mode'),
+    model: z.string().optional().describe('Optional model override for the selected mode'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only MAIN can change brain mode.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'set_brain_mode',
+      bot: args.bot,
+      mode: args.mode,
+      model: args.model,
+      chatJid,
+      groupFolder,
+      isMain,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Brain mode update queued for ${args.bot} (${args.mode}). Restart required.`,
+      }],
+    };
+  },
+);
+
+server.tool(
+  'set_capability_budget',
+  `Set approximate token budget for a provider/model capability.
+
+These are local estimates for routing decisions, not provider-authoritative accounting.
+`,
+  {
+    provider: z.string().describe('Capability provider name (e.g. anthropic, codex, gemini, ollama)'),
+    model: z.string().describe('Model identifier'),
+    total_tokens: z.number().int().positive().describe('Approximate total token budget'),
+    reset_used: z.boolean().default(false).describe('Reset used token counter for this capability'),
+  },
+  async (args) => {
+    const key = capabilityKey(args.provider, args.model);
+    const state = loadCapabilityState();
+    state.budgets[key] = args.total_tokens;
+    if (args.reset_used) {
+      state.used[key] = 0;
+    }
+    saveCapabilityState(state);
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Budget set for ${args.provider}/${args.model}: total=${args.total_tokens} tokens.`,
+      }],
+    };
+  },
+);
+
+server.tool(
+  'list_capability_budgets',
+  `List approximate used and remaining tokens by provider/model capability.
+
+Use this before delegation to choose the best provider/model given remaining budget.
+`,
+  {},
+  async () => {
+    const lines = listCapabilityUsageLines();
+    return {
+      content: [{ type: 'text' as const, text: lines.join('\n') }],
+    };
+  },
+);
+
+server.tool(
+  'delegate_codex',
+  `Spawn a Codex lobe clone in the same mounted workspace.
+
+Use this when the main brain wants a tightly scoped clone to directly read/write files and run commands (including Python) inside the container.
 
 Behavior:
-- Streams Codex assistant text back to chat prefixed as "codex: ..."
-- Returns the exact same prefixed text to the main agent
+- Streams lobe output back to chat prefixed as "codex: ..."
+- Returns the same prefixed text to the main brain for collapse/integration
 - If Codex cannot run (auth/quota/rate-limit/provider errors), it fails immediately and emits:
   "codex: unavailable: ..."
 `,
   {
-    name: z.string().min(1).describe('Display name for this delegate instance (provided by johnny5-bot, e.g. "Renamer").'),
+    name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Renamer").'),
     objective: z.string().describe('Task for Codex to execute'),
     cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
     model: z.string().optional().describe('Optional Codex model override (e.g. "o3").'),
@@ -545,15 +694,21 @@ Behavior:
     const effectiveModel =
       firstSet(args.model, process.env.CODEX_MODEL, process.env.OPENAI_MODEL) ||
       'gpt-5-codex';
-    const delegateSender = formatDelegateSender(
+    const delegateHeader = formatDelegateSender(
       args.name,
       'codex',
       effectiveModel,
     );
+
+    // Emit the lobe header and objective in one message
+    const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+    emitDelegateMessage(headerAndObjective);
+
     const cwdResult = resolveDelegateCwd(args.cwd);
     if (!cwdResult.ok) {
       const unavailable = `unavailable: ${cwdResult.error}`;
-      emitChatMessage(unavailable, delegateSender);
+      const redText = `<font color="#cc0000">${unavailable}</font>`;
+      emitDelegateMessage(redText);
       return {
         content: [{ type: 'text' as const, text: `codex: ${unavailable}` }],
         isError: true,
@@ -601,6 +756,10 @@ Behavior:
         payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean },
       ) => {
         if (finalized) return;
+        const estimatedTokens =
+          estimateTokens(args.objective) +
+          estimateTokens(prefixedMessages.join('\n\n'));
+        recordCapabilityUsage('codex', effectiveModel, estimatedTokens);
         finalized = true;
         resolve(payload);
       };
@@ -609,7 +768,9 @@ Behavior:
         const normalized = text.replace(/\r/g, '').trim();
         if (!normalized) return;
         prefixedMessages.push(`codex: ${normalized}`);
-        emitChatMessage(normalized, delegateSender);
+        // Wrap lobe output in light grey
+        const greyText = `<font color="#888888">${normalized}</font>`;
+        emitDelegateMessage(greyText);
       };
 
       const failUnavailable = (reason: string) => {
@@ -674,7 +835,8 @@ Behavior:
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         const unavailable = `unavailable: ${reason}`;
-        emitChatMessage(unavailable, delegateSender);
+        const redText = `<font color="#cc0000">${unavailable}</font>`;
+        emitDelegateMessage(redText);
         finalize({
           content: [{ type: 'text', text: `codex: ${unavailable}` }],
           isError: true,
@@ -772,18 +934,18 @@ Behavior:
 
 server.tool(
   'delegate_gemini',
-  `Delegate a coding objective to Gemini CLI in the same mounted workspace.
+  `Spawn a Gemini lobe clone in the same mounted workspace.
 
-Use this when you want Gemini CLI to directly read/write files and run commands (including Python) inside the container.
+Use this when the main brain wants a tightly scoped clone to directly read/write files and run commands (including Python) inside the container.
 
 Behavior:
-- Streams Gemini assistant text back to chat prefixed as "gemini: ..."
-- Returns the exact same prefixed text to the main agent
+- Streams lobe output back to chat prefixed as "gemini: ..."
+- Returns the same prefixed text to the main brain for collapse/integration
 - If Gemini cannot run (auth/quota/rate-limit/provider errors), it fails immediately and emits:
   "gemini: unavailable: ..."
 `,
   {
-    name: z.string().min(1).describe('Display name for this delegate instance (provided by johnny5-bot, e.g. "Reviewer").'),
+    name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Reviewer").'),
     objective: z.string().describe('Task for Gemini to execute'),
     cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
     model: z.string().optional().describe('Optional Gemini model override (e.g. "gemini-2.5-pro").'),
@@ -798,15 +960,21 @@ Behavior:
   async (args) => {
     const effectiveModel =
       firstSet(args.model, process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
-    const delegateSender = formatDelegateSender(
+    const delegateHeader = formatDelegateSender(
       args.name,
       'gemini',
       effectiveModel,
     );
+
+    // Emit the lobe header and objective in one message
+    const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+    emitDelegateMessage(headerAndObjective);
+
     const cwdResult = resolveDelegateCwd(args.cwd);
     if (!cwdResult.ok) {
       const unavailable = `unavailable: ${cwdResult.error}`;
-      emitChatMessage(unavailable, delegateSender);
+      const redText = `<font color="#cc0000">${unavailable}</font>`;
+      emitDelegateMessage(redText);
       return {
         content: [{ type: 'text' as const, text: `gemini: ${unavailable}` }],
         isError: true,
@@ -853,6 +1021,10 @@ Behavior:
         payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean },
       ) => {
         if (finalized) return;
+        const estimatedTokens =
+          estimateTokens(args.objective) +
+          estimateTokens(prefixedMessages.join('\n\n'));
+        recordCapabilityUsage('gemini', effectiveModel, estimatedTokens);
         finalized = true;
         resolve(payload);
       };
@@ -861,7 +1033,9 @@ Behavior:
         const normalized = text.replace(/\r/g, '').trim();
         if (!normalized) return;
         prefixedMessages.push(`gemini: ${normalized}`);
-        emitChatMessage(normalized, delegateSender);
+        // Wrap lobe output in light grey
+        const greyText = `<font color="#888888">${normalized}</font>`;
+        emitDelegateMessage(greyText);
       };
 
       const failUnavailable = (reason: string) => {
@@ -901,7 +1075,8 @@ Behavior:
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         const unavailable = `unavailable: ${reason}`;
-        emitChatMessage(unavailable, delegateSender);
+        const redText = `<font color="#cc0000">${unavailable}</font>`;
+        emitDelegateMessage(redText);
         finalize({
           content: [{ type: 'text', text: `gemini: ${unavailable}` }],
           isError: true,
@@ -1001,16 +1176,16 @@ const ollamaHost = process.env.OLLAMA_HOST || (process.env.NANOCLAW_IPC_DIR ? 'h
 
 server.tool(
   'delegate_ollama',
-  `Delegate an objective to a local Ollama model on the host machine.
+  `Spawn an Ollama lobe clone on the host machine.
 
 Behavior:
-- Sends the objective to Ollama and returns output prefixed as "ollama: ..."
+- Sends the objective to Ollama as a tightly scoped lobe and returns output prefixed as "ollama: ..."
 - Emits the same prefixed text to chat immediately
 - On connection/auth/runtime errors, returns:
   "ollama: unavailable: ..."
 `,
   {
-    name: z.string().min(1).describe('Display name for this delegate instance (provided by johnny5-bot, e.g. "Summarizer").'),
+    name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Summarizer").'),
     objective: z.string().describe('Task/objective for Ollama to execute'),
     model: z.string().default('llama3.2').describe('Ollama model name'),
     system: z.string().optional().describe('Optional system prompt'),
@@ -1023,11 +1198,16 @@ Behavior:
       .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
   },
   async (args) => {
-    const delegateSender = formatDelegateSender(
+    const delegateHeader = formatDelegateSender(
       args.name,
       'ollama',
       args.model,
     );
+
+    // Emit the lobe header and objective in one message
+    const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+    emitDelegateMessage(headerAndObjective);
+
     const timeoutMs = Math.max(
       1000,
       Math.min(args.timeout_ms ?? DEFAULT_DELEGATE_TIMEOUT_MS, MAX_DELEGATE_TIMEOUT_MS),
@@ -1053,7 +1233,8 @@ Behavior:
       if (!res.ok) {
         const text = await res.text();
         const unavailable = `unavailable: Ollama error (${res.status}): ${text}`;
-        emitChatMessage(unavailable, delegateSender);
+        const redText = `<font color="#cc0000">${unavailable}</font>`;
+        emitDelegateMessage(redText);
         return {
           content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
           isError: true,
@@ -1062,22 +1243,30 @@ Behavior:
 
       const data = await res.json() as { response?: string };
       const responseText = (data.response || '').trim();
+      recordCapabilityUsage(
+        'ollama',
+        args.model,
+        estimateTokens(args.objective) + estimateTokens(responseText),
+      );
       if (!responseText) {
         const doneText = 'completed with no textual output.';
-        emitChatMessage(doneText, delegateSender);
+        const greyText = `<font color="#888888">${doneText}</font>`;
+        emitDelegateMessage(greyText);
         return {
           content: [{ type: 'text' as const, text: `ollama: ${doneText}` }],
         };
       }
 
-      emitChatMessage(responseText, delegateSender);
+      // Wrap lobe output in light grey
+      const greyText = `<font color="#888888">${responseText}</font>`;
+      emitDelegateMessage(greyText);
       return {
         content: [{ type: 'text' as const, text: `ollama: ${responseText}` }],
       };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       const unavailable = `unavailable: ${reason}`;
-      emitChatMessage(unavailable, delegateSender);
+      emitDelegateMessage(unavailable);
       return {
         content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
         isError: true,
@@ -1124,6 +1313,104 @@ server.tool(
     } catch (err) {
       return {
         content: [{ type: 'text' as const, text: `Failed to reach Ollama at ${ollamaHost}: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'restart_self',
+  `Request a graceful restart of the current bot process.
+
+The host daemon will:
+1. Stage your code changes and run \`tsc --noEmit\` to validate
+2. If validation fails: stay running and report errors to chat — fix them and retry
+3. If validation passes: send "restarting..." and exit for supervisor restart
+
+Use this after making code changes that require a process restart.`,
+  {
+    bot: z.enum(['engineer', 'commander']).default('engineer').describe('Which bot to restart'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only MAIN can trigger restarts.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'restart_bot',
+      bot: args.bot,
+      chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Restart requested for ${args.bot}. The host daemon will handle the restart.` }],
+    };
+  },
+);
+
+server.tool(
+  'check_health',
+  'Check the host system health and status. Returns bot status, active containers, group activity, and queue state. The host writes this snapshot every 30 seconds.',
+  {},
+  async () => {
+    const statusPath = path.join(IPC_DIR, 'status.json');
+    if (!fs.existsSync(statusPath)) {
+      return {
+        content: [{ type: 'text' as const, text: 'No status snapshot available yet. The host writes status.json every 30s.' }],
+      };
+    }
+
+    try {
+      const raw = fs.readFileSync(statusPath, 'utf-8');
+      const status = JSON.parse(raw);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(status, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to read status: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'get_brain_mode',
+  'Get the current brain mode (anthropic or ollama) and model for each bot. Reads from the host status snapshot.',
+  {},
+  async () => {
+    const statusPath = path.join(IPC_DIR, 'status.json');
+    if (!fs.existsSync(statusPath)) {
+      return {
+        content: [{ type: 'text' as const, text: 'No status snapshot available yet.' }],
+      };
+    }
+
+    try {
+      const raw = fs.readFileSync(statusPath, 'utf-8');
+      const status = JSON.parse(raw) as { brainModes?: Record<string, { mode: string; model: string }> };
+      if (!status.brainModes) {
+        return {
+          content: [{ type: 'text' as const, text: 'Brain modes not available in status snapshot. Host may need restart.' }],
+        };
+      }
+      const lines = Object.entries(status.brainModes).map(
+        ([bot, info]) => `${bot}: ${info.mode} (${info.model || 'no model'})`,
+      );
+      return {
+        content: [{ type: 'text' as const, text: lines.join('\n') }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to read brain modes: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }
