@@ -927,6 +927,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
   const agentResponses: string[] = [];
   let lastResponseBody: string | undefined;
+  let lastSentResultText = '';
+  let consecutiveDupSent = 0;
   let lastRunOutputAt = Date.now();
   let lastRunProgressNudgeAt = 0;
   let runProgressNudgeTimer: ReturnType<typeof setInterval> | null = null;
@@ -994,16 +996,27 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             }
           }
         } else {
-          // Final result: deliver to chat
-          markProgress(chatJid, text);
-          lastResponseBody = text;
-          const ch = findChannel(channels, chatJid);
-          if (ch) {
-            await ch.sendMessage(chatJid, formatMainMessage(text), replyThreadId);
+          // Final result: deliver to chat (with dedup for stuck agents)
+          const dedupKey = text.replace(/\s+/g, ' ').trim();
+          if (dedupKey === lastSentResultText) {
+            consecutiveDupSent++;
+          } else {
+            consecutiveDupSent = 0;
+            lastSentResultText = dedupKey;
           }
-          await maybeCrossBotForward(chatJid, text);
-          outputSentToUser = true;
-          agentResponses.push(formatMainMessage(text));
+          if (consecutiveDupSent >= 2) {
+            logger.warn({ group: group.name, dupCount: consecutiveDupSent }, 'Suppressed duplicate result to chat');
+          } else {
+            markProgress(chatJid, text);
+            lastResponseBody = text;
+            const ch = findChannel(channels, chatJid);
+            if (ch) {
+              await ch.sendMessage(chatJid, formatMainMessage(text), replyThreadId);
+            }
+            await maybeCrossBotForward(chatJid, text);
+            outputSentToUser = true;
+            agentResponses.push(formatMainMessage(text));
+          }
         }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)

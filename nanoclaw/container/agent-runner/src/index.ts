@@ -714,6 +714,8 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let consecutiveDupResults = 0;
+  let lastResultText = '';
   const lastToolProgressAt = new Map<string, number>();
   let lastProgressText = '';
   let lastProgressAt = 0;
@@ -929,7 +931,20 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      // Always emit the result faithfully — the host decides formatting.
+
+      // Dedup consecutive identical results (e.g. agent stuck repeating "Done. Awaiting orders.")
+      const normalized = (textResult || '').replace(/\s+/g, ' ').trim();
+      if (normalized && normalized === lastResultText) {
+        consecutiveDupResults++;
+        if (consecutiveDupResults >= 3) {
+          log(`Suppressed duplicate result #${consecutiveDupResults}: ${normalized.slice(0, 100)}`);
+          continue;
+        }
+      } else {
+        consecutiveDupResults = 0;
+        if (normalized) lastResultText = normalized;
+      }
+
       writeOutput({
         status: 'success',
         result: textResult || null,
