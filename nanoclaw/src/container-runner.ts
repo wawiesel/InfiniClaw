@@ -359,7 +359,9 @@ function buildVolumeMounts(
     const personaMcpDir = path.join(rootDir, 'bots', 'personas', personaName, 'mcp-servers');
     const sessionMcpDir = path.join(groupSessionsDir, 'mcp-servers');
     const containerMcpPath = '/home/node/.claude/mcp-servers';
-    saveMcpServersToPersona(settingsFile, personaMcpDir, sessionMcpDir);
+    // Skip save-back for MCP servers declared in container-config.json (managed declaratively)
+    const configMcpNames = new Set(Object.keys((personaConfig.mcpServers as Record<string, unknown>) || {}));
+    saveMcpServersToPersona(settingsFile, personaMcpDir, sessionMcpDir, configMcpNames);
     loadMcpServersToSettings(settingsFile, personaMcpDir, sessionMcpDir, containerMcpPath);
   }
 

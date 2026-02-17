@@ -8,10 +8,11 @@ import fs from 'fs';
 import path from 'path';
 
 interface McpServerConfig {
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
   cwd?: string;
+  url?: string;
 }
 
 function copyDirRecursive(src: string, dst: string): void {
@@ -119,6 +120,7 @@ export function saveMcpServersToPersona(
   settingsPath: string,
   personaMcpDir: string,
   sessionMcpDir: string,
+  skipNames?: Set<string>,
 ): void {
   if (!fs.existsSync(settingsPath)) return;
 
@@ -132,7 +134,7 @@ export function saveMcpServersToPersona(
   const mcpServers =
     (settings.mcpServers as Record<string, McpServerConfig> | undefined) || {};
   const serverNames = Object.keys(mcpServers).filter(
-    (name) => name !== 'nanoclaw',
+    (name) => name !== 'nanoclaw' && !(skipNames?.has(name)),
   );
 
   if (serverNames.length === 0) return;
