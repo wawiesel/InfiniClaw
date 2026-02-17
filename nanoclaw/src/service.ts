@@ -581,8 +581,28 @@ export function holodeckCreate(root: string, branch: string): void {
   console.log('holodeck: building...');
   execSync('npm run build', { cwd: instance, stdio: 'inherit' });
 
-  // Use engineer's persona but for the holodeck group
-  restorePersona(root, 'engineer');
+  // Restore engineer-dev persona into the holodeck instance
+  const persona = personaDir(root, 'engineer-dev');
+  if (fs.existsSync(persona)) {
+    const personaClaude = path.join(persona, 'CLAUDE.md');
+    if (fs.existsSync(personaClaude)) {
+      const content = fs.readFileSync(personaClaude, 'utf-8');
+      fs.appendFileSync(path.join(instance, 'CLAUDE.md'), '\n' + content);
+    }
+    const personaGroups = path.join(persona, 'groups');
+    if (fs.existsSync(personaGroups)) {
+      for (const gname of fs.readdirSync(personaGroups)) {
+        const gdir = path.join(personaGroups, gname);
+        if (!fs.statSync(gdir).isDirectory()) continue;
+        const dst = path.join(instance, 'groups', gname);
+        fs.mkdirSync(dst, { recursive: true });
+        for (const file of fs.readdirSync(gdir)) {
+          if (!file.endsWith('.md')) continue;
+          fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
+        }
+      }
+    }
+  }
 
   // Launch as launchd service
   const nodeBin = process.execPath;
@@ -594,7 +614,7 @@ export function holodeckCreate(root: string, branch: string): void {
   env.PATH = `${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`;
   env.HOME = os.homedir();
   env.INFINICLAW_ROOT = root;
-  env.PERSONA_NAME = 'engineer';
+  env.PERSONA_NAME = 'engineer-dev';
   env.ASSISTANT_NAME = 'Cid+';
   env.MAIN_GROUP_FOLDER = 'holodeck';
 

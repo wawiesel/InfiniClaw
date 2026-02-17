@@ -77,8 +77,54 @@ Compiles TypeScript from `src/` -> `dist/`. The host runs `node dist/cli.js star
 | Bug fixes, core infra | `nanoclaw/src/` | Captain approval needed |
 | Container image | `nanoclaw/container/` + `bots/container/` | Rebuild via podman-container skill |
 
+## Git branching strategy
+
+The InfiniClaw repo uses a **snapshot branch** pattern for releases:
+
+### Working on main
+
+All development happens on `main`. Commits are work-in-progress and may be messy. Periodically, rewrite history on main for optimal, logical commits (interactive rebase to squash/reorder/reword). This is a **low-priority background job** — always available as filler work.
+
+### Creating snapshot branches
+
+When you reach a good, stable state:
+
+1. **Commit all changes** on `main`
+2. **Create a snapshot branch** (e.g., `snapshot-YYYY-MM-DD` or `snapshot-v1`) that contains a **single squashed commit on top of upstream nanoclaw**:
+   ```bash
+   # From the InfiniClaw repo root
+   git checkout -b snapshot-YYYY-MM-DD
+   # Soft-reset to the upstream nanoclaw merge base, then recommit as one
+   git reset --soft $(git merge-base HEAD <upstream-nanoclaw-commit>)
+   git commit -m "InfiniClaw snapshot YYYY-MM-DD: <summary of state>"
+   ```
+3. **Switch back to main** and continue development
+   ```bash
+   git checkout main
+   ```
+
+### History rewriting on main (background job)
+
+Between snapshots, clean up main's history:
+- Squash related commits together
+- Reorder for logical flow (e.g., all nanoclaw changes together, all bot changes together)
+- Write clear commit messages explaining the "why"
+- Keep nanoclaw-only commits separate from InfiniClaw-level commits (enables clean subtree push)
+
+This is ongoing, low-priority work. Any time there's nothing else to do, work on improving commit history.
+
+## Host access limitation
+
+**Important**: The InfiniClaw git repo lives on the **host** filesystem (not inside containers). Bot containers do NOT have the repo mounted. Git operations must be performed:
+- By the Captain via host CLI
+- Via the `contact-ready-room` skill to request the Captain perform git operations
+- On the host directly by the operator
+
+When you need git operations done, send the specific commands to the Captain via the Ready Room and explain what you need.
+
 ## Rules
 
 - **Skills over code** for bot capabilities. Only touch `nanoclaw/src/` for bug fixes or core infrastructure with Captain approval.
 - **Commit separately**: keep nanoclaw source changes in their own commits, separate from bots/docs changes. This makes subtree push possible.
 - **Build after changes**: always run `npm run build` in `nanoclaw/` after modifying source.
+- **Snapshot before big changes**: create a snapshot branch before risky refactors so there's always a known-good state to return to.
