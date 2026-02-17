@@ -33,6 +33,7 @@ export interface IpcDeps {
   defaultSenderForGroup: (sourceGroup: string) => string;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
+  unregisterGroup: (jid: string) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -544,6 +545,13 @@ export async function processTaskIpc(
         break;
       }
       if (data.jid && data.name && data.folder && data.trigger) {
+        // Remove any existing group with the same folder but different JID
+        const existing = Object.entries(registeredGroups)
+          .find(([jid, g]) => g.folder === data.folder && jid !== data.jid);
+        if (existing) {
+          deps.unregisterGroup(existing[0]);
+          logger.info({ oldJid: existing[0], newJid: data.jid, folder: data.folder }, 'Replaced existing group with same folder');
+        }
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
