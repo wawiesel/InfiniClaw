@@ -17,6 +17,7 @@ import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { logger } from './logger.js';
 import {
   validateDeploy as serviceValidateDeploy,
+  BOTS,
   deployBot as serviceDeployBot,
   rebuildImage as serviceRebuildImage,
   holodeckCreate as serviceHolodeckCreate,
@@ -606,7 +607,7 @@ export async function processTaskIpc(
         logger.warn({ sourceGroup }, 'Unauthorized restart_bot attempt blocked');
         break;
       }
-      const bot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
+      const bot = typeof data.bot === 'string' && (BOTS as readonly string[]).includes(data.bot)
         ? data.bot
         : 'engineer';
       logger.info({ bot }, 'Restart requested via IPC — validating deploy');
@@ -678,7 +679,7 @@ export async function processTaskIpc(
         logger.warn({ sourceGroup }, 'Unauthorized rebuild_image attempt blocked');
         break;
       }
-      const imgBot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
+      const imgBot = typeof data.bot === 'string' && (BOTS as readonly string[]).includes(data.bot)
         ? data.bot
         : 'commander';
       const imgChatJid = typeof data.chatJid === 'string' && data.chatJid.trim().length > 0

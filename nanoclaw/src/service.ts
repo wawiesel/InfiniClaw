@@ -15,7 +15,7 @@ import { saveSkillsToPersona } from './skill-sync.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-export const BOTS = ['engineer', 'commander'] as const;
+export const BOTS = ['engineer', 'commander', 'hologram'] as const;
 const LAUNCH_AGENTS_DIR = path.join(os.homedir(), 'Library', 'LaunchAgents');
 
 const RSYNC_EXCLUDES = [
