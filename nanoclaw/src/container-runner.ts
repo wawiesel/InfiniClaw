@@ -337,6 +337,19 @@ function buildVolumeMounts(
   const personaName = process.env.PERSONA_NAME;
   const sharedSkillsSrc = path.join(process.cwd(), 'container', 'skills');
 
+  // Load persona container config (version-controlled alongside env/skills)
+  let personaConfig: Record<string, unknown> = {};
+  if (rootDir && personaName) {
+    const personaConfigPath = path.join(rootDir, 'bots', 'personas', personaName, 'container-config.json');
+    try {
+      if (fs.existsSync(personaConfigPath)) {
+        personaConfig = JSON.parse(fs.readFileSync(personaConfigPath, 'utf-8'));
+      }
+    } catch (err) {
+      logger.warn({ personaConfigPath, error: err }, 'Failed to load persona container config');
+    }
+  }
+
   if (rootDir && personaName) {
     const personaSkillsDir = path.join(rootDir, 'bots', 'personas', personaName, 'skills');
     saveSkillsToPersona(skillsDst, personaSkillsDir, sharedSkillsSrc);
@@ -348,6 +361,18 @@ function buildVolumeMounts(
     const containerMcpPath = '/home/node/.claude/mcp-servers';
     saveMcpServersToPersona(settingsFile, personaMcpDir, sessionMcpDir);
     loadMcpServersToSettings(settingsFile, personaMcpDir, sessionMcpDir, containerMcpPath);
+  }
+
+  // Merge persona container-config mcpServers into settings.json (for servers on mounted volumes)
+  const personaMcpServers = personaConfig.mcpServers as Record<string, unknown> | undefined;
+  if (personaMcpServers && Object.keys(personaMcpServers).length > 0) {
+    let settings: Record<string, unknown> = {};
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+    } catch { /* empty */ }
+    const existing = (settings.mcpServers as Record<string, unknown>) || {};
+    settings.mcpServers = { ...existing, ...personaMcpServers };
+    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
   }
 
   mounts.push({
@@ -424,10 +449,14 @@ function buildVolumeMounts(
     readonly: true,
   });
 
-  // Additional mounts validated against external allowlist (tamper-proof from containers)
-  if (group.containerConfig?.additionalMounts) {
+  // Additional mounts: merge persona container-config.json with group DB config.
+  const allAdditionalMounts = [
+    ...(group.containerConfig?.additionalMounts || []),
+    ...((personaConfig.additionalMounts as Array<{hostPath: string; containerPath?: string; readonly?: boolean}>) || []),
+  ];
+  if (allAdditionalMounts.length > 0) {
     const validatedMounts = validateAdditionalMounts(
-      group.containerConfig.additionalMounts,
+      allAdditionalMounts,
       group.name,
       isMain,
     );

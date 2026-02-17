@@ -1,0 +1,9 @@
+{
+  "additionalMounts": [
+    {
+      "hostPath": "~",
+      "containerPath": "home",
+      "readonly": true
+    }
+  ]
+}
