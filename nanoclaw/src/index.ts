@@ -414,70 +414,11 @@ function defaultSenderForGroup(sourceGroup: string): string {
   return groupName?.trim() || sourceGroup;
 }
 
-function deriveFolderFromChatJid(chatJid: string): string {
-  const base = chatJid
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  const short = base.slice(0, 48) || 'chat';
-  return `chat-${short}`;
-}
-
-function ensureGroupForIncomingChat(
-  chatJid: string,
-  chatName?: string,
-): void {
-  // Never auto-register the cross-bot room — we only send there, never listen
-  if (CROSS_BOT_ROOM_JID && chatJid === CROSS_BOT_ROOM_JID) return;
-
-  if (registeredGroups[chatJid]) {
-    if (
-      LOCAL_CHANNEL_ENABLED &&
-      chatJid === LOCAL_CHAT_JID &&
-      registeredGroups[chatJid].requiresTrigger !== false
-    ) {
-      const updated: RegisteredGroup = {
-        ...registeredGroups[chatJid],
-        requiresTrigger: false,
-      };
-      registerGroup(chatJid, updated);
-      logger.info(
-        { chatJid },
-        'Terminal local-chat group set to direct mode (requiresTrigger=false)',
-      );
-    }
-    return;
+function ensureGroupForIncomingChat(chatJid: string): void {
+  // Only log metadata for known groups — no auto-registration
+  if (!registeredGroups[chatJid]) {
+    logger.debug({ chatJid }, 'Ignored message from unregistered chat');
   }
-
-  const hasMain = Object.values(registeredGroups).some(
-    (g) => g.folder === MAIN_GROUP_FOLDER,
-  );
-
-  const name = (chatName || chatJid).trim() || chatJid;
-  const addedAt = new Date().toISOString();
-  const defaultTrigger = `@${ASSISTANT_TRIGGER}`;
-  const localDirectMode = LOCAL_CHANNEL_ENABLED && chatJid === LOCAL_CHAT_JID;
-  const group: RegisteredGroup = hasMain
-    ? {
-        name,
-        folder: deriveFolderFromChatJid(chatJid),
-        trigger: defaultTrigger,
-        added_at: addedAt,
-        requiresTrigger: true,
-      }
-    : {
-        name,
-        folder: MAIN_GROUP_FOLDER,
-        trigger: defaultTrigger,
-        added_at: addedAt,
-        requiresTrigger: false,
-      };
-
-  registerGroup(chatJid, group);
-  logger.info(
-    { chatJid, folder: group.folder, requiresTrigger: group.requiresTrigger },
-    'Auto-registered group for incoming chat',
-  );
 }
 
 function getMainChatJid(): string | undefined {
@@ -1693,11 +1634,11 @@ async function main(): Promise<void> {
   ) {
     matrix = new MatrixChannel({
       onMessage: (_chatJid, msg) => {
-        ensureGroupForIncomingChat(msg.chat_jid, msg.chat_name);
+        ensureGroupForIncomingChat(msg.chat_jid);
         storeMessage(msg);
       },
       onChatMetadata: (chatJid, timestamp, name) => {
-        ensureGroupForIncomingChat(chatJid, name);
+        ensureGroupForIncomingChat(chatJid);
         storeChatMetadata(chatJid, timestamp, name);
       },
       registeredGroups: () => registeredGroups,
@@ -1708,7 +1649,7 @@ async function main(): Promise<void> {
   if (LOCAL_CHANNEL_ENABLED) {
     localCli = new LocalCliChannel({
       onMessage: (_chatJid, msg) => {
-        ensureGroupForIncomingChat(msg.chat_jid, msg.chat_name);
+        ensureGroupForIncomingChat(msg.chat_jid);
         storeMessage(msg);
       },
       onChatMetadata: (chatJid, timestamp, name) =>
