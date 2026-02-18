@@ -2,6 +2,8 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import { upsertEnvLine } from './env-utils.js';
+
 import { CronExpressionParser } from 'cron-parser';
 
 import {
@@ -88,22 +90,7 @@ function rebuildImage(bot: string): Promise<{ ok: boolean; output: string }> {
   });
 }
 
-function upsertEnvValue(envFile: string, key: string, value: string): void {
-  const lines = fs.existsSync(envFile)
-    ? fs.readFileSync(envFile, 'utf-8').split('\n')
-    : [];
-  const next = `${key}=${value}`;
-  let updated = false;
-  const out = lines.map((line) => {
-    if (line.startsWith(`${key}=`)) {
-      updated = true;
-      return next;
-    }
-    return line;
-  });
-  if (!updated) out.push(next);
-  fs.writeFileSync(envFile, `${out.join('\n').replace(/\n*$/, '\n')}`);
-}
+// upsertEnvLine imported from env-utils.ts (was upsertEnvValue)
 
 function applyBrainMode(
   bot: string,
@@ -117,24 +104,24 @@ function applyBrainMode(
   }
 
   if (mode === 'anthropic') {
-    upsertEnvValue(envFile, 'BRAIN_MODEL', model || 'claude-sonnet-4-5');
-    upsertEnvValue(envFile, 'BRAIN_BASE_URL', '');
-    upsertEnvValue(envFile, 'BRAIN_AUTH_TOKEN', '');
-    upsertEnvValue(envFile, 'BRAIN_API_KEY', '');
+    upsertEnvLine(envFile, 'BRAIN_MODEL', model || 'claude-sonnet-4-5');
+    upsertEnvLine(envFile, 'BRAIN_BASE_URL', '');
+    upsertEnvLine(envFile, 'BRAIN_AUTH_TOKEN', '');
+    upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
     const effectiveModel = model || 'claude-sonnet-4-5';
     return `Updated ${bot} to anthropic/${effectiveModel}. Restart required.`;
   }
 
   const effectiveModel = model || 'devstral-small-2-fast:latest';
-  upsertEnvValue(envFile, 'BRAIN_MODEL', effectiveModel);
-  upsertEnvValue(
+  upsertEnvLine(envFile, 'BRAIN_MODEL', effectiveModel);
+  upsertEnvLine(
     envFile,
     'BRAIN_BASE_URL',
     'http://host.containers.internal:11434',
   );
-  upsertEnvValue(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
-  upsertEnvValue(envFile, 'BRAIN_API_KEY', '');
-  upsertEnvValue(envFile, 'BRAIN_OAUTH_TOKEN', '');
+  upsertEnvLine(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
+  upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
+  upsertEnvLine(envFile, 'BRAIN_OAUTH_TOKEN', '');
   return `Updated ${bot} to ollama/${effectiveModel}. Restart required.`;
 }
 

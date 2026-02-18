@@ -10,6 +10,8 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
+import { parseEnvFile } from './env-utils.js';
+import { stopContainersByPrefix } from './podman-utils.js';
 import { saveMcpServersToPersona } from './mcp-sync.js';
 import { saveSkillsToPersona } from './skill-sync.js';
 
@@ -70,20 +72,7 @@ export function loadProfileEnv(root: string, bot: string): Record<string, string
   if (!fs.existsSync(envFile)) {
     throw new Error(`Missing profile env: ${envFile}\nCopy from: ${envFile}.example`);
   }
-  const env: Record<string, string> = {};
-  for (const line of fs.readFileSync(envFile, 'utf-8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq < 1) continue;
-    const key = trimmed.slice(0, eq);
-    let value = trimmed.slice(eq + 1);
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    env[key] = value;
-  }
-  return env;
+  return parseEnvFile(envFile);
 }
 
 export function applyBrainEnv(env: Record<string, string>): Record<string, string> {
@@ -182,17 +171,9 @@ export function ensurePodmanReady(): void {
 }
 
 export function killStaleContainers(): void {
-  try {
-    const output = execSync("podman ps --format '{{.Names}}'", {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    for (const name of output.split('\n').filter((n) => n.startsWith('nanoclaw-'))) {
-      console.log(`Stopping stale container: ${name}`);
-      try { execSync(`podman stop -t 5 "${name}"`, { stdio: 'pipe' }); } catch { /* best effort */ }
-    }
-  } catch {
-    // podman not available or no containers
+  const stopped = stopContainersByPrefix('nanoclaw-', 5);
+  for (const name of stopped) {
+    console.log(`Stopping stale container: ${name}`);
   }
 }
 
@@ -302,12 +283,7 @@ export function deployBot(root: string, bot: string): void {
   fs.mkdirSync(instance, { recursive: true });
 
   syncPersona(root, bot);
-
-  // Rsync vendored code to instance
-  const excludeArgs = RSYNC_EXCLUDES.flatMap((e) => ['--exclude', e]);
-  execFileSync('rsync', ['-a', '--delete', ...excludeArgs, `${base}/`, `${instance}/`], {
-    stdio: 'inherit',
-  });
+  rsyncNanoclaw(base, instance);
 
   // Install deps if lockfile differs
   const lockSrc = path.join(base, 'package-lock.json');
@@ -362,10 +338,7 @@ export function validateDeploy(root: string, bot: string): { ok: boolean; errors
   const staging = path.join(root, '_runtime', 'staging', bot, 'nanoclaw');
   fs.mkdirSync(staging, { recursive: true });
 
-  const excludeArgs = RSYNC_EXCLUDES.flatMap((e) => ['--exclude', e]);
-  execFileSync('rsync', ['-a', '--delete', ...excludeArgs, `${base}/`, `${staging}/`], {
-    stdio: 'pipe',
-  });
+  rsyncNanoclaw(base, staging, 'pipe');
 
   // Symlink node_modules from live instance (fall back to any bot's instance for new bots)
   let instanceModules = path.join(instance, 'node_modules');
@@ -396,7 +369,46 @@ export function rebuildImage(root: string, bot: string): void {
   execFileSync(script, [bot], { stdio: 'inherit' });
 }
 
-// ── Launchd plist ──────────────────────────────────────────────────────
+// ── Launchd helpers ─────────────────────────────────────────────────────
+
+function plistPath(bot: string): string {
+  return path.join(LAUNCH_AGENTS_DIR, `com.infiniclaw.${bot}.plist`);
+}
+
+function unloadPlist(plistFile: string): void {
+  try { execSync(`launchctl unload "${plistFile}"`, { stdio: 'pipe' }); } catch { /* ok */ }
+}
+
+function rsyncNanoclaw(src: string, dst: string, stdio: 'inherit' | 'pipe' = 'inherit'): void {
+  const excludeArgs = RSYNC_EXCLUDES.flatMap((e) => ['--exclude', e]);
+  execFileSync('rsync', ['-a', '--delete', ...excludeArgs, `${src}/`, `${dst}/`], { stdio });
+}
+
+function buildLaunchdEnv(root: string, bot: string): Record<string, string> {
+  const env = applyBrainEnv(loadProfileEnv(root, bot));
+  env.PATH = `${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`;
+  env.HOME = os.homedir();
+  env.INFINICLAW_ROOT = root;
+  env.PERSONA_NAME = bot;
+  return env;
+}
+
+function installPlistAndLoad(bot: string, nodeBin: string, instance: string, logs: string, env: Record<string, string>): void {
+  const pp = plistPath(bot);
+  unloadPlist(pp);
+  const plist = generatePlist(`com.infiniclaw.${bot}`, nodeBin, instance, logs, bot, env);
+  fs.writeFileSync(pp, plist);
+  execSync(`launchctl load "${pp}"`, { stdio: 'inherit' });
+}
+
+function removeLegacyPlist(): void {
+  const legacyPlist = path.join(LAUNCH_AGENTS_DIR, 'com.nanoclaw.plist');
+  if (fs.existsSync(legacyPlist)) {
+    unloadPlist(legacyPlist);
+    fs.unlinkSync(legacyPlist);
+    console.log('Removed legacy com.nanoclaw.plist');
+  }
+}
 
 function generatePlist(
   label: string,
@@ -450,33 +462,16 @@ function escapeXml(s: string): string {
  */
 export function bootstrapBot(root: string, bot: string): void {
   const instance = instanceDir(root, bot);
-  deployBot(root, bot);
-
-  const profileEnv = loadProfileEnv(root, bot);
-  const env = applyBrainEnv(profileEnv);
-  env.PATH = `${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`;
-  env.HOME = os.homedir();
-  env.INFINICLAW_ROOT = root;
-  env.PERSONA_NAME = bot;
-
-  const nodeBin = process.execPath;
-  const logs = path.join(root, '_runtime', 'logs');
+  const logs = logDir(root);
   fs.mkdirSync(logs, { recursive: true });
 
-  const label = `com.infiniclaw.${bot}`;
-  const plistPath = path.join(LAUNCH_AGENTS_DIR, `${label}.plist`);
-  try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
-
-  const plist = generatePlist(label, nodeBin, instance, logs, bot, env);
-  fs.writeFileSync(plistPath, plist);
-  execSync(`launchctl load "${plistPath}"`, { stdio: 'inherit' });
+  deployBot(root, bot);
+  installPlistAndLoad(bot, process.execPath, instance, logs, buildLaunchdEnv(root, bot));
 }
 
 /** Stop a bot by unloading its launchd plist. Does not deploy or restart. */
 export function stopBot(bot: string): void {
-  const label = `com.infiniclaw.${bot}`;
-  const plistPath = path.join(LAUNCH_AGENTS_DIR, `${label}.plist`);
-  try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
+  unloadPlist(plistPath(bot));
 }
 
 export function installAllowlist(root: string): void {
@@ -492,7 +487,6 @@ export function installAllowlist(root: string): void {
 
 export function start(): void {
   const root = resolveRoot();
-  const nodeBin = process.execPath;
   const logs = logDir(root);
   fs.mkdirSync(LAUNCH_AGENTS_DIR, { recursive: true });
   fs.mkdirSync(logs, { recursive: true });
@@ -501,19 +495,8 @@ export function start(): void {
   installAllowlist(root);
 
   // Unload all services first so old code stops before we build
-  for (const bot of BOTS) {
-    const label = `com.infiniclaw.${bot}`;
-    const plistPath = path.join(LAUNCH_AGENTS_DIR, `${label}.plist`);
-    try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
-  }
-
-  // Remove legacy single-bot plist
-  const legacyPlist = path.join(LAUNCH_AGENTS_DIR, 'com.nanoclaw.plist');
-  if (fs.existsSync(legacyPlist)) {
-    try { execSync(`launchctl unload "${legacyPlist}"`, { stdio: 'pipe' }); } catch { /* ok */ }
-    fs.unlinkSync(legacyPlist);
-    console.log('Removed legacy com.nanoclaw.plist');
-  }
+  for (const bot of BOTS) { unloadPlist(plistPath(bot)); }
+  removeLegacyPlist();
 
   killRogueProcesses();
   spawnSync('sleep', ['1']);
@@ -526,29 +509,9 @@ export function start(): void {
   for (const bot of BOTS) {
     try {
       const instance = instanceDir(root, bot);
-
       deployBot(root, bot);
-
-      const profileEnv = loadProfileEnv(root, bot);
-      const env = applyBrainEnv(profileEnv);
-
-      // Add static vars
-      env.PATH = `${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`;
-      env.HOME = os.homedir();
-      env.INFINICLAW_ROOT = root;
-      env.PERSONA_NAME = bot;
-
-      const label = `com.infiniclaw.${bot}`;
-      const plistPath = path.join(LAUNCH_AGENTS_DIR, `${label}.plist`);
-
-      // Unload if already loaded
-      try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
-
-      const plist = generatePlist(label, nodeBin, instance, logs, bot, env);
-      fs.writeFileSync(plistPath, plist);
-
-      execSync(`launchctl load "${plistPath}"`, { stdio: 'inherit' });
-      console.log(`${bot}: started (${label})`);
+      installPlistAndLoad(bot, process.execPath, instance, logs, buildLaunchdEnv(root, bot));
+      console.log(`${bot}: started (com.infiniclaw.${bot})`);
     } catch (err) {
       console.error(`${bot}: failed to start -`, err);
     }
@@ -561,27 +524,18 @@ export function stop(): void {
   const root = resolveRoot();
 
   for (const bot of BOTS) {
-    const label = `com.infiniclaw.${bot}`;
-    const plistPath = path.join(LAUNCH_AGENTS_DIR, `${label}.plist`);
-    if (fs.existsSync(plistPath)) {
-      // Save persona data before stopping — only for running bots
+    const pp = plistPath(bot);
+    if (fs.existsSync(pp)) {
       try { syncPersona(root, bot); } catch { /* best effort */ }
-      try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
-      fs.unlinkSync(plistPath);
+      unloadPlist(pp);
+      fs.unlinkSync(pp);
       console.log(`${bot}: stopped and uninstalled`);
     } else {
       console.log(`${bot}: not installed`);
     }
   }
 
-  // Remove legacy single-bot plist
-  const legacyPlist = path.join(LAUNCH_AGENTS_DIR, 'com.nanoclaw.plist');
-  if (fs.existsSync(legacyPlist)) {
-    try { execSync(`launchctl unload "${legacyPlist}"`, { stdio: 'pipe' }); } catch { /* ok */ }
-    fs.unlinkSync(legacyPlist);
-    console.log('Removed legacy com.nanoclaw.plist');
-  }
-
+  removeLegacyPlist();
   killRogueProcesses();
   killStaleContainers();
 
@@ -597,11 +551,7 @@ export function chat(bot: string): void {
     throw new Error(`Missing instance for ${bot}. Run 'start' first.`);
   }
 
-  // Sync code from vendored nanoclaw
-  const excludeArgs = RSYNC_EXCLUDES.flatMap((e) => ['--exclude', e]);
-  execFileSync('rsync', ['-a', '--delete', ...excludeArgs, `${base}/`, `${instance}/`], {
-    stdio: 'inherit',
-  });
+  rsyncNanoclaw(base, instance);
 
   // Build if needed
   const distIndex = path.join(instance, 'dist', 'index.js');

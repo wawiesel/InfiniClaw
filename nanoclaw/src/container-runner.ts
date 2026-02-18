@@ -7,6 +7,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import { isOllamaBaseUrl, parseEnvLine } from './env-utils.js';
+import { stopContainersByPrefix } from './podman-utils.js';
+
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
@@ -101,21 +104,7 @@ const CERT_PATH_ENV_VARS = [
   'GIT_SSL_CAINFO',
 ] as const;
 
-function parseEnvLine(line: string): [string, string] | null {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith('#')) return null;
-  const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-  if (!match) return null;
-  const key = match[1];
-  let value = match[2];
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    value = value.slice(1, -1);
-  }
-  return [key, value];
-}
+// parseEnvLine imported from env-utils.ts
 
 function collectContainerSecrets(projectRoot: string): Record<string, string> {
   const secrets: Record<string, string> = {};
@@ -146,29 +135,12 @@ function collectContainerSecrets(projectRoot: string): Record<string, string> {
   return secrets;
 }
 
-function isOllamaAnthropicBaseUrl(baseUrl: string | undefined): boolean {
-  const trimmed = baseUrl?.trim();
-  if (!trimmed) return false;
-
-  const normalized = trimmed.toLowerCase();
-  if (normalized.includes('ollama')) return true;
-
-  try {
-    const parsed = new URL(trimmed);
-    const port =
-      parsed.port ||
-      (parsed.protocol === 'https:' ? '443' : parsed.protocol === 'http:' ? '80' : '');
-    return port === '11434';
-  } catch {
-    return false;
-  }
-}
 
 function normalizeProviderSecrets(
   secrets: Record<string, string>,
 ): Record<string, string> {
   const normalized = { ...secrets };
-  if (!isOllamaAnthropicBaseUrl(normalized.ANTHROPIC_BASE_URL)) {
+  if (!isOllamaBaseUrl(normalized.ANTHROPIC_BASE_URL)) {
     return normalized;
   }
 
@@ -490,23 +462,10 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
 
 function killExistingContainersForGroup(botTag: string, safeName: string): void {
   const prefix = `nanoclaw-${botTag}-${safeName}-`;
-  try {
-    const output = execSync('podman ps --format json', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-      timeout: 5000,
-    });
-    const containers: Array<{ Names?: string[] | string }> = JSON.parse(output || '[]');
-    const names = containers.flatMap((c) => {
-      if (Array.isArray(c.Names)) return c.Names;
-      return c.Names ? [c.Names] : [];
-    });
-    const stale = names.filter((n) => n.startsWith(prefix));
-    for (const name of stale) {
-      logger.info({ name }, 'Killing stale container for same bot/group before spawn');
-      try { execSync(`podman stop -t 1 "${name}"`, { stdio: 'pipe', timeout: 10000 }); } catch { /* best effort */ }
-    }
-  } catch { /* podman unavailable or no containers */ }
+  const stopped = stopContainersByPrefix(prefix);
+  for (const name of stopped) {
+    logger.info({ name }, 'Killed stale container for same bot/group before spawn');
+  }
 }
 
 export async function runContainerAgent(
@@ -681,7 +640,7 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      exec(`podman stop ${containerName}`, { timeout: 15000 }, (err) => {
+      exec(`podman stop "${containerName}"`, { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');

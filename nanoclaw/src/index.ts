@@ -2,6 +2,9 @@ import { execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from './env-utils.js';
+import { stopContainersByPrefix } from './podman-utils.js';
+
 import {
   ASSISTANT_NAME,
   ASSISTANT_ROLE,
@@ -115,21 +118,7 @@ function firstSet(...values: Array<string | undefined>): string | undefined {
   return undefined;
 }
 
-function parseEnvLine(line: string): [string, string] | null {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith('#')) return null;
-  const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-  if (!match) return null;
-  const key = match[1];
-  let value = match[2];
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    value = value.slice(1, -1);
-  }
-  return [key, value];
-}
+// parseEnvLine imported from env-utils.ts
 
 function loadProjectEnv(): Record<string, string> {
   const values: Record<string, string> = {};
@@ -156,26 +145,8 @@ function getConfiguredEnv(key: string): string | undefined {
   return firstSet(process.env[key], PROJECT_ENV[key]);
 }
 
-function isOllamaAnthropicBaseUrl(baseUrl: string | undefined): boolean {
-  const trimmed = baseUrl?.trim();
-  if (!trimmed) return false;
-
-  const normalized = trimmed.toLowerCase();
-  if (normalized.includes('ollama')) return true;
-
-  try {
-    const parsed = new URL(trimmed);
-    const port =
-      parsed.port ||
-      (parsed.protocol === 'https:' ? '443' : parsed.protocol === 'http:' ? '80' : '');
-    return port === '11434';
-  } catch {
-    return false;
-  }
-}
-
 function isMainConfiguredForOllama(): boolean {
-  return isOllamaAnthropicBaseUrl(getConfiguredEnv('ANTHROPIC_BASE_URL'));
+  return isOllamaBaseUrl(getConfiguredEnv('ANTHROPIC_BASE_URL'));
 }
 
 function resolveConfiguredMainModel(): string | undefined {
@@ -303,22 +274,7 @@ function normalizeMainLlm(model: string | undefined): string | undefined {
   return undefined;
 }
 
-function upsertEnvLine(envFile: string, key: string, value: string): void {
-  const lines = fs.existsSync(envFile)
-    ? fs.readFileSync(envFile, 'utf-8').split('\n')
-    : [];
-  const next = `${key}=${value}`;
-  let replaced = false;
-  const updated = lines.map((line) => {
-    if (line.startsWith(`${key}=`)) {
-      replaced = true;
-      return next;
-    }
-    return line;
-  });
-  if (!replaced) updated.push(next);
-  fs.writeFileSync(envFile, `${updated.join('\n').replace(/\n*$/, '\n')}`);
-}
+// upsertEnvLine imported from env-utils.ts
 
 function applyOllamaFallbackToProfile(envFile: string): void {
   upsertEnvLine(envFile, 'BRAIN_MODEL', 'devstral-small-2-fast:latest');
@@ -1521,33 +1477,10 @@ async function ensurePodmanRuntimeAvailable(): Promise<void> {
 }
 
 function cleanupOrphanedPodmanContainers(): void {
-  try {
-    const output = execSync('podman ps --format json', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const containers: Array<{ Names?: string[] | string }> = JSON.parse(
-      output || '[]',
-    );
-    const names = containers.flatMap((c) => {
-      if (Array.isArray(c.Names)) return c.Names;
-      return c.Names ? [c.Names] : [];
-    });
-    const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-    const ownPrefix = `nanoclaw-${botTag}-`;
-    const orphans = names.filter((n) => n.startsWith(ownPrefix));
-    for (const name of orphans) {
-      try {
-        execSync(`podman stop -t 1 ${name}`, { stdio: 'pipe' });
-      } catch {
-        // Best-effort cleanup
-      }
-    }
-    if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned podman containers');
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Failed to clean up orphaned podman containers');
+  const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const stopped = stopContainersByPrefix(`nanoclaw-${botTag}-`);
+  if (stopped.length > 0) {
+    logger.info({ count: stopped.length, names: stopped }, 'Stopped orphaned podman containers');
   }
 }
 
