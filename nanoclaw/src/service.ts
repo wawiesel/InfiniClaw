@@ -519,15 +519,12 @@ export function start(): void {
 export function stop(): void {
   const root = resolveRoot();
 
-  // Save persona group memory before stopping
-  for (const bot of BOTS) {
-    try { syncPersona(root, bot); } catch { /* best effort */ }
-  }
-
   for (const bot of BOTS) {
     const label = `com.infiniclaw.${bot}`;
     const plistPath = path.join(LAUNCH_AGENTS_DIR, `${label}.plist`);
     if (fs.existsSync(plistPath)) {
+      // Save persona data before stopping — only for running bots
+      try { syncPersona(root, bot); } catch { /* best effort */ }
       try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
       fs.unlinkSync(plistPath);
       console.log(`${bot}: stopped and uninstalled`);
