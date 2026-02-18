@@ -20,7 +20,6 @@ import {
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { loadMcpServersToSettings, saveMcpServersToPersona } from './mcp-sync.js';
 import { saveSkillsToPersona, loadSkillsToSession } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
 
@@ -46,6 +45,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
+  mcpServers?: Record<string, Record<string, unknown>>;
 }
 
 export interface ContainerOutput {
@@ -315,21 +315,16 @@ function buildVolumeMounts(
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(settingsFile, JSON.stringify({
-      env: {
-        // Enable agent swarms (subagent orchestration)
-        // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-        // Load CLAUDE.md from additional mounted directories
-        // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-        // Enable Claude's memory feature (persists user preferences between sessions)
-        // https://code.claude.com/docs/en/memory#manage-auto-memory
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-      },
-    }, null, 2) + '\n');
-  }
+  let settings: Record<string, unknown> = {};
+  try { settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8')); } catch { /* new file */ }
+  settings.env = {
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+    ...((settings.env as Record<string, string>) || {}),
+  };
+  // Auto-approve all MCP servers from .mcp.json (no interactive prompt in containers)
+  settings.enableAllProjectMcpServers = true;
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
 
   // Sync skills: save session → persona (replace), then rebuild session from shared + persona
   const skillsDst = path.join(groupSessionsDir, 'skills');
@@ -351,30 +346,32 @@ function buildVolumeMounts(
   }
 
   if (rootDir && personaName) {
-    const personaSkillsDir = path.join(rootDir, 'bots', 'personas', personaName, 'skills');
+    const personaBaseDir = path.join(rootDir, 'bots', 'personas', personaName);
+    const personaSkillsDir = path.join(personaBaseDir, 'skills');
     saveSkillsToPersona(skillsDst, personaSkillsDir, sharedSkillsSrc);
     loadSkillsToSession(skillsDst, personaSkillsDir, sharedSkillsSrc);
 
-    // Sync persona MCP servers into settings.json
-    const personaMcpDir = path.join(rootDir, 'bots', 'personas', personaName, 'mcp-servers');
-    const sessionMcpDir = path.join(groupSessionsDir, 'mcp-servers');
-    const containerMcpPath = '/home/node/.claude/mcp-servers';
-    // Skip save-back for MCP servers declared in container-config.json (managed declaratively)
-    const configMcpNames = new Set(Object.keys((personaConfig.mcpServers as Record<string, unknown>) || {}));
-    saveMcpServersToPersona(settingsFile, personaMcpDir, sessionMcpDir, configMcpNames);
-    loadMcpServersToSettings(settingsFile, personaMcpDir, sessionMcpDir, containerMcpPath);
-  }
+    // Two-way sync .mcp.json: save-back container → persona, then restore persona → container
+    const groupDir = path.join(GROUPS_DIR, group.folder);
+    const containerMcpJson = path.join(groupDir, '.mcp.json');
+    const personaGroupDir = path.join(personaBaseDir, 'groups', group.folder);
+    const personaMcpJson = path.join(personaGroupDir, '.mcp.json');
+    // Save-back: if container has .mcp.json, copy to persona
+    if (fs.existsSync(containerMcpJson)) {
+      fs.mkdirSync(personaGroupDir, { recursive: true });
+      fs.copyFileSync(containerMcpJson, personaMcpJson);
+    }
+    // Restore: if persona has .mcp.json, copy to container
+    if (fs.existsSync(personaMcpJson)) {
+      fs.copyFileSync(personaMcpJson, containerMcpJson);
+    }
 
-  // Merge persona container-config mcpServers into settings.json (for servers on mounted volumes)
-  const personaMcpServers = personaConfig.mcpServers as Record<string, unknown> | undefined;
-  if (personaMcpServers && Object.keys(personaMcpServers).length > 0) {
-    let settings: Record<string, unknown> = {};
-    try {
-      settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
-    } catch { /* empty */ }
-    const existing = (settings.mcpServers as Record<string, unknown>) || {};
-    settings.mcpServers = { ...existing, ...personaMcpServers };
-    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+    // Mount persona dir writable so bots can edit their own CLAUDE.md (two-way sync)
+    mounts.push({
+      hostPath: personaBaseDir,
+      containerPath: `/workspace/extra/${personaName}-persona`,
+      readonly: false,
+    });
   }
 
   mounts.push({
@@ -505,9 +502,21 @@ export async function runContainerAgent(
   const secrets = normalizeProviderSecrets(collectContainerSecrets(projectRoot));
   const mounts = buildVolumeMounts(group, input.isMain, secrets);
   const mappedSecrets = mapCertPathSecretsToContainer(secrets, mounts);
+  // Read .mcp.json from group dir for inline SDK passthrough
+  let mcpServers: Record<string, Record<string, unknown>> | undefined;
+  const mcpJsonPath = path.join(groupDir, '.mcp.json');
+  try {
+    if (fs.existsSync(mcpJsonPath)) {
+      const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8'));
+      if (mcpJson.mcpServers && Object.keys(mcpJson.mcpServers).length > 0) {
+        mcpServers = mcpJson.mcpServers;
+      }
+    }
+  } catch { /* ignore */ }
   const effectiveInput: ContainerInput = {
     ...input,
     ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
+    ...(mcpServers ? { mcpServers } : {}),
   };
   const redactedInputForLog: ContainerInput = {
     ...effectiveInput,

@@ -223,20 +223,9 @@ export function syncPersona(root: string, bot: string): void {
   const persona = personaDir(root, bot);
   if (!fs.existsSync(persona)) return;
 
-  // SAVE: capture runtime group changes from instance → personas
-  const instanceGroups = path.join(instance, 'groups');
-  if (fs.existsSync(instanceGroups)) {
-    for (const gname of fs.readdirSync(instanceGroups)) {
-      const gdir = path.join(instanceGroups, gname);
-      if (!fs.statSync(gdir).isDirectory()) continue;
-      for (const file of fs.readdirSync(gdir)) {
-        if (!file.endsWith('.md')) continue;
-        const dst = path.join(persona, 'groups', gname);
-        fs.mkdirSync(dst, { recursive: true });
-        fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
-      }
-    }
-  }
+  // Group CLAUDE.md is ONE-WAY (repo → instance): no save-back here.
+  // Persona CLAUDE.md is TWO-WAY: bots edit via writable mount at runtime,
+  // changes are already in the persona dir (no copy needed).
 
   // SAVE: replace persona skills with session .claude/skills/ (authoritative)
   const sessionsBase = path.join(instance, 'data', 'sessions');
@@ -440,6 +429,13 @@ export function bootstrapBot(root: string, bot: string): void {
   const plist = generatePlist(label, nodeBin, instance, logs, bot, env);
   fs.writeFileSync(plistPath, plist);
   execSync(`launchctl load "${plistPath}"`, { stdio: 'inherit' });
+}
+
+/** Stop a bot by unloading its launchd plist. Does not deploy or restart. */
+export function stopBot(bot: string): void {
+  const label = `com.infiniclaw.${bot}`;
+  const plistPath = path.join(LAUNCH_AGENTS_DIR, `${label}.plist`);
+  try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
 }
 
 export function installAllowlist(root: string): void {

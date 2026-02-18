@@ -5,10 +5,5 @@
       "containerPath": "home",
       "readonly": true
     }
-  ],
-  "mcpServers": {
-    "wksm": {
-      "url": "http://host.containers.internal:8765/sse"
-    }
-  }
+  ]
 }

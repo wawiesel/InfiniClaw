@@ -23,23 +23,22 @@ You have skills in your persona directory. Use `/skill-name` to invoke them. You
 
 Edit skills directly in your container at `/home/node/.claude/skills/`. No restart needed — changes take effect immediately in the current session.
 
-On restart, container skills sync back to the persona repo at `/workspace/extra/commander-persona/skills/`, overwriting what's there. So: **edit in container, restart to persist to repo.**
+On restart, container skills sync back to the persona repo at `$INFINICLAW/bots/personas/commander/skills/`, overwriting what's there. So: **edit in container, restart to persist to repo.**
 
 ```
-/home/node/.claude/skills/{skill-name}/SKILL.md   ← edit here (live)
-/workspace/extra/commander-persona/skills/         ← overwritten on restart
+/home/node/.claude/skills/{skill-name}/SKILL.md            ← edit here (live)
+$INFINICLAW/bots/personas/commander/skills/                 ← overwritten on restart
 ```
 
 ### Editing your instructions
 
-You can modify your own CLAUDE.md and your Bridge group CLAUDE.md:
+You can modify your own persona CLAUDE.md (two-way sync — persists across restarts):
 
 ```
-/workspace/extra/commander-persona/CLAUDE.md               ← your persona
-/workspace/extra/commander-persona/groups/ready-room/CLAUDE.md  ← Bridge memory
+$INFINICLAW/bots/personas/commander/CLAUDE.md      ← your identity and rules
 ```
 
-You cannot modify other bots' CLAUDE.md files or other rooms.
+Group CLAUDE.md files (`/workspace/group/CLAUDE.md`) are **read-only** — managed by Cid in the repo.
 
 ## Threads
 
@@ -49,10 +48,37 @@ When a user's message arrives in a thread (`thread_id` attribute on `<message>`)
 
 - **Restart yourself** using `mcp__nanoclaw__restart_self` directly. Do not ask Cid to restart you.
 - **Brain mode**: Use `mcp__nanoclaw__set_brain_mode` + `restart_self` to switch models. Default to Opus for complex/iterative work. Only demote to Sonnet when the Captain explicitly says to.
+- **After a restart**, you resume with conversation history. Do NOT re-execute actions from earlier messages — they already happened. Look at the most recent user message and respond to that. If you just restarted, say so briefly and wait for new instructions.
 
 ## Adding MCP servers
 
-To add a new MCP server, create `/home/node/.claude/mcp-servers/{name}/mcp.json` with the config, then restart. The bidirectional sync persists it to your persona repo. For URL-based (SSE) servers, use `{"url": "http://host.containers.internal:PORT/sse"}`. MCP servers only take effect after a restart.
+Edit `/workspace/group/.mcp.json` to add or remove MCP servers:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "type": "sse",
+      "url": "http://host.containers.internal:PORT/sse"
+    }
+  }
+}
+```
+
+For command-based (stdio) servers running inside the container:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "node",
+      "args": ["/path/to/server.js"]
+    }
+  }
+}
+```
+
+Changes are two-way synced (container <-> persona repo) and take effect on next restart. SSE servers **must** include `"type": "sse"`. New servers do NOT take effect in the current session — restart to activate them.
 
 ## What NOT to do
 

@@ -27,6 +27,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
+  mcpServers?: Record<string, Record<string, unknown>>;
 }
 
 interface ContainerOutput {
@@ -167,7 +168,7 @@ const DEFAULT_ALLOWED_TOOLS = [
   'ToolSearch',
   'Skill',
   'NotebookEdit',
-  'mcp__nanoclaw__*',
+  'mcp__*',
 ] as const;
 
 // MAIN can do direct exploratory work, then delegate scale-out.
@@ -656,13 +657,15 @@ function drainIpcInput(): string[] {
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     const poll = () => {
-      if (shouldClose()) {
-        resolve(null);
-        return;
-      }
+      // Drain messages BEFORE checking close sentinel so pre-close
+      // injected messages (e.g. memory-save prompts) are not lost.
       const messages = drainIpcInput();
       if (messages.length > 0) {
         resolve(messages.join('\n'));
+        return;
+      }
+      if (shouldClose()) {
+        resolve(null);
         return;
       }
       setTimeout(poll, IPC_POLL_MS);
@@ -763,21 +766,8 @@ async function runQuery(
     .filter((x): x is string => !!x && x.trim().length > 0)
     .join('\n\n');
 
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
-  const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
-    for (const entry of fs.readdirSync(extraBase)) {
-      const fullPath = path.join(extraBase, entry);
-      if (fs.statSync(fullPath).isDirectory()) {
-        extraDirs.push(fullPath);
-      }
-    }
-  }
-  if (extraDirs.length > 0) {
-    log(`Additional directories: ${extraDirs.join(', ')}`);
-  }
+  // Extra directories under /workspace/extra/ are mounted for file access only.
+  // CLAUDE.md is loaded exclusively from /workspace/group/ — no additional directories.
 
   const anthropicBaseUrl = sdkEnv.ANTHROPIC_BASE_URL;
   const configuredMainModel = getRequestedMainModel(sdkEnv);
@@ -790,13 +780,26 @@ async function runQuery(
   }
   const mainModel = mainIsClaude ? configuredMainModel : undefined;
 
+  // Debug: write MCP config to file for diagnosis
+  try {
+    const debugInfo = {
+      hasMcpServers: !!containerInput.mcpServers,
+      mcpServerKeys: containerInput.mcpServers ? Object.keys(containerInput.mcpServers) : [],
+      mcpServersRaw: containerInput.mcpServers || {},
+    };
+    fs.writeFileSync('/workspace/group/mcp-debug.json', JSON.stringify(debugInfo, null, 2));
+    log(`MCP debug written: ${JSON.stringify(debugInfo.mcpServerKeys)}`);
+  } catch (e) {
+    log(`Failed to write MCP debug: ${e}`);
+  }
+
   const restoreSdkProcessEnv = applySdkProcessEnv(sdkEnv);
   try {
     for await (const message of query({
       prompt: stream,
       options: {
         cwd: '/workspace/group',
-        additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+        additionalDirectories: undefined,
         resume: sessionId,
         resumeSessionAt: resumeAt,
         systemPrompt: systemPromptAppend
@@ -809,6 +812,7 @@ async function runQuery(
         allowDangerouslySkipPermissions: true,
         settingSources: ['project', 'user'],
         mcpServers: {
+          ...(containerInput.mcpServers || {}),
           nanoclaw: {
             command: 'node',
             args: [mcpServerPath],

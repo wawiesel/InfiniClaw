@@ -20,6 +20,7 @@ import {
   BOTS,
   bootstrapBot as serviceBootstrapBot,
   deployBot as serviceDeployBot,
+  stopBot as serviceStopBot,
   rebuildImage as serviceRebuildImage,
   holodeckCreate as serviceHolodeckCreate,
   holodeckTeardown as serviceHolodeckTeardown,
@@ -669,6 +670,46 @@ export async function processTaskIpc(
               await deps.sendMessage(chatJid, `⛔ bootstrap failed for ${bot}: ${(err as Error).message}`);
             } catch {}
           }
+        }
+      }
+      break;
+    }
+
+    case 'stop_bot': {
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized stop_bot attempt blocked');
+        break;
+      }
+      const bot = typeof data.bot === 'string' && (BOTS as readonly string[]).includes(data.bot)
+        ? data.bot
+        : null;
+      if (!bot) {
+        logger.warn({ data }, 'Invalid stop_bot request — missing or invalid bot name');
+        break;
+      }
+      const selfBot = ASSISTANT_ROLE.toLowerCase();
+      if (bot === selfBot) {
+        logger.warn({ bot }, 'Cannot stop self via stop_bot — use restart_self instead');
+        break;
+      }
+      const chatJid = typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
+        ? data.chatJid
+        : null;
+      logger.info({ bot }, 'Stop requested via IPC');
+      try {
+        serviceStopBot(bot);
+        logger.info({ bot }, 'Bot stopped');
+        if (chatJid) {
+          try {
+            await deps.sendMessage(chatJid, `<font color="#555555">🛑 ${bot} stopped.</font>`);
+          } catch {}
+        }
+      } catch (err) {
+        logger.error({ bot, err }, 'Failed to stop bot');
+        if (chatJid) {
+          try {
+            await deps.sendMessage(chatJid, `⛔ failed to stop ${bot}: ${(err as Error).message}`);
+          } catch {}
         }
       }
       break;

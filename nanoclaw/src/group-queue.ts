@@ -151,6 +151,16 @@ export class GroupQueue {
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
+      // Inject a memory-save prompt before close so the agent can persist learnings.
+      // File sorts before _close alphabetically (0 < _).
+      const saveFile = path.join(inputDir, `0-memory-save.json`);
+      const saveMsg = JSON.stringify({
+        type: 'message',
+        text: '[System] Session ending. If you learned anything important this session, save it to memory now. Be concise — only record genuinely new insights.',
+      });
+      const tmpSave = `${saveFile}.tmp`;
+      fs.writeFileSync(tmpSave, saveMsg);
+      fs.renameSync(tmpSave, saveFile);
       fs.writeFileSync(path.join(inputDir, '_close'), '');
     } catch {
       // ignore

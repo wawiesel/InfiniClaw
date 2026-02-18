@@ -2,177 +2,210 @@
 
 ## Purpose
 
-InfiniClaw is a multi-bot orchestration layer built on top of a maintained NanoClaw fork.
-It provides cooperating bots on Matrix:
+InfiniClaw is a multi-bot orchestration layer built on top of a maintained NanoClaw fork. It provides cooperating bots on Matrix:
 
 - `engineer` aka **Cid** — chief engineer, infra + operations + lifecycle control
-- `commander` aka **Johnny5** — right-hand commander, takes orders and executes tasks
+- `commander` aka **Johnny5** — commander, takes orders and executes tasks
+- `hologram` aka **Albert** — test entity, lives in the Holodeck for validation
 
-The operator (Captain) gives orders to Johnny5 in the Ready Room. Cid works in Engineering, responding when addressed with `@Cid`. Cid can proactively improve Johnny5's code and restart him.
+The operator (Captain) gives orders to Johnny5 in the Bridge. Cid works in Engineering, responding when addressed with `@Cid`. Albert runs in the Holodeck for testing new features before promotion to production.
 
 ## Roles
 
 ### Operator (Captain)
-- Gives orders in the Ready Room and Engineering
+- Gives orders in the Bridge and Engineering
 - Addresses Johnny5 directly for task execution
 - Addresses Cid with `@Cid` for infrastructure work
+- Tests new features with Albert in the Holodeck
 
 ### Commander — Johnny5 (`@Johnny5`)
-- Takes orders in the Ready Room — responds to everything except `@Cid` callouts
-- The Ready Room is Johnny5's main room (`requiresTrigger: false`)
+- Takes orders in the Bridge — responds to everything except `@Cid` callouts
+- The Bridge is Johnny5's main room (`requiresTrigger: false`)
 - Sees ALL messages (no code-level filtering) — decides what to respond to via CLAUDE.md
-- Cannot modify his own code — requests changes from Cid
-- Only `~/_vault` is mounted (read-write). No home directory, no dotfiles, no InfiniClaw.
+- Can modify his own persona CLAUDE.md and skills (two-way sync)
+- `$HOME` mounted read-only; `$HOME/_vault` mounted read-write
 
 ### Engineer — Cid (`@Cid`)
 - Works in Engineering, responds when addressed with `@Cid`
-- Can modify and restart Johnny5 to improve him
+- Can modify all bots' personas, skills, and source code
 - Manages infrastructure, builds, and deployments
-- Containers get InfiniClaw mounted read-write
+- InfiniClaw repo mounted read-write
+
+### Hologram — Albert (`@Albert`)
+- Lives in the Holodeck — isolated testing environment
+- Uses engineer's container image with Ollama brain (local models)
+- Can modify his own persona CLAUDE.md and skills (two-way sync)
 
 ## Core Principles
 
-1. Single platform, separate product
-- Platform/runtime changes live in the NanoClaw fork.
-- Product-specific policy/orchestration and per-bot container build/packaging live in InfiniClaw.
+1. **Single platform, separate product** — Runtime changes live in the NanoClaw fork. Product-specific policy and per-bot packaging live in InfiniClaw.
 
-2. Script-first operations
-- Setup and runtime must be executable from scripts.
-- LLM/skills are wrappers over deterministic scripts, not the source of truth.
+2. **Script-first operations** — Setup and runtime must be executable from scripts. LLM/skills are wrappers over deterministic scripts.
 
-3. Runtime state isolation
-- Code is versioned; runtime state is not.
-- Bot state is isolated per instance under `_runtime/instances/`.
+3. **Runtime state isolation** — Code is versioned; runtime state is not. Bot state is isolated per instance under `_runtime/instances/`.
 
-4. Explicit ownership and boundaries
-- Cid can manage container/runtime and may patch Johnny5's code.
-- Johnny5 does not perform container lifecycle operations or modify his own code.
+4. **Explicit ownership and boundaries** — Cid manages container/runtime and can patch any bot. Other bots manage their own persona and skills.
 
 ## Architecture
 
 ### Runtime model
 
-- Sibling NanoClaw host processes managed by launchd:
-  - `com.infiniclaw.engineer` → `_runtime/instances/engineer/nanoclaw/`
-  - `com.infiniclaw.commander` → `_runtime/instances/commander/nanoclaw/`
+Sibling NanoClaw host processes managed by launchd:
+- `com.infiniclaw.engineer` → `$INFINICLAW/_runtime/instances/engineer/nanoclaw/`
+- `com.infiniclaw.commander` → `$INFINICLAW/_runtime/instances/commander/nanoclaw/`
+- `com.infiniclaw.hologram` → `$INFINICLAW/_runtime/instances/hologram/nanoclaw/`
 
-- Each host process spawns agent-runner containers (via podman) for task execution:
-  - Engineer containers: `nanoclaw-engineer:latest` (lean)
-  - Commander containers: `nanoclaw-commander:latest` (full-featured, grows over time)
+Each host process spawns agent-runner containers (via Podman) for task execution.
 
 ### Persona system (three-layer CLAUDE.md)
 
 Bot identity is version-controlled in `bots/personas/`:
 
-1. **Base** (`nanoclaw/CLAUDE.md`) — Framework: how NanoClaw works, IPC, status messages. All bots get this.
-2. **Persona** (`bots/personas/{bot}/CLAUDE.md`) — Identity: who you are, your rules, your style.
-3. **Group** (`bots/personas/{bot}/groups/{group}/CLAUDE.md`) — Room context: capabilities, accumulated memory.
+1. **Base** (`$INFINICLAW/nanoclaw/CLAUDE.md`) — Framework: how NanoClaw works, IPC, status messages. All bots get this.
+2. **Persona** (`$INFINICLAW/bots/personas/{bot}/CLAUDE.md`) — Identity: who you are, your rules, your style. **Two-way sync**: bots can edit their own persona CLAUDE.md via writable mount.
+3. **Group** (`$INFINICLAW/groups/{group}/CLAUDE.md`) — Room context: capabilities, accumulated memory. **One-way sync**: repo → bot, read-only in containers.
 
-On `scripts/start`, persona CLAUDE.md is appended to the instance's base CLAUDE.md. Group files are synced bidirectionally (save runtime changes, then restore from personas/).
+On deploy, persona CLAUDE.md is appended to the instance's base CLAUDE.md. Group files are seeded from the persona to the instance. Skills and MCP servers sync bidirectionally on every container spawn.
+
+### Sync directions
+
+| Artifact | Direction | Bot can edit? | Persists across restart? |
+|----------|-----------|---------------|--------------------------|
+| Group CLAUDE.md | Repo → bot | No | N/A (read-only) |
+| Persona CLAUDE.md | Two-way | Yes | Yes (writable mount) |
+| Skills | Two-way | Yes | Yes (sync on spawn) |
+| MCP servers | Two-way | Yes | Yes (sync on spawn) |
+
+To update a bot's persona CLAUDE.md externally: stop the bot, edit the file in the repo, restart. Otherwise the bot's runtime version takes precedence.
 
 ### Container images
 
-| Image | Bot | Purpose |
-|-------|-----|---------|
-| `nanoclaw-engineer:latest` | Cid | Lean — git, ripgrep, Python3, Claude Code. No browser. |
-| `nanoclaw-commander:latest` | Johnny5 | Full — browser, Python, build tools. Grows as needed. |
+| Image | Bots | Purpose |
+|-------|------|---------|
+| `nanoclaw-engineer:latest` | Cid, Albert | Lean — git, ripgrep, Python3, Claude Code |
+| `nanoclaw-commander:latest` | Johnny5 | Full — browser, Python, OCR, build tools, data analysis |
 
-### Container mount policy
+### Container mounts
 
-| Bot | Mount | Container path | Access |
-|-----|-------|---------------|--------|
-| Cid | `/home/2026-Nanoclaw/InfiniClaw` | `/workspace/extra/InfiniClaw` | read-write |
-| Johnny5 | `/home/_vault` | `/workspace/extra/home/_vault` | read-write |
+| Mount | Container path | Access | Notes |
+|-------|---------------|--------|-------|
+| Group folder | `/workspace/group` | read-write | Working directory |
+| Claude sessions | `/home/node/.claude` | read-write | Settings, skills, MCP, memory |
+| Persona dir | `/workspace/extra/{bot}-persona` | read-write | Persona CLAUDE.md, skills, MCP |
+| Project root | `/workspace/project` | read-write | Main group only (Cid) |
+| IPC namespace | `/workspace/ipc` | read-write | Per-group isolated |
+| Additional mounts | `/workspace/extra/*` | varies | From container-config.json |
 
-**Hard rules:**
-- No home directory mount (`~/`). Only specific subdirectories.
-- No dotfiles/dotdirs (`~/.ssh`, `~/.config`, etc.) ever accessible from containers.
-- Johnny5 has NO access to InfiniClaw code.
-- Cid has NO access to the Captain's home directory beyond InfiniClaw.
+Mount security is enforced by `$HOME/.config/nanoclaw/mount-allowlist.json` (host-side, tamper-proof from containers).
 
-Mount security is enforced by `~/.config/nanoclaw/mount-allowlist.json` (host-side, tamper-proof from containers).
+### Cross-bot communication
+
+Bots communicate across rooms using trigger-based forwarding:
+- `@Johnny5 <message>` in Engineering → forwarded to Bridge
+- `@Cid <message>` in Bridge → forwarded to Engineering
+- Messages appear as `[From {Room}] sender: content`
+
+Configured via `CROSS_BOT_TRIGGER` / `CROSS_BOT_ROOM_JID` in profile env.
+
+### Lobes (delegate agents)
+
+Bots can spawn delegate "lobes" for parallel execution:
+- `delegate_codex` — OpenAI Codex for scoped file operations
+- `delegate_gemini` — Google Gemini for research and analysis
+- `delegate_ollama` — Local Ollama models for lightweight tasks
+
+Lobe output is streamed to chat and returned to the main brain for integration.
 
 ### Process topology
 
 ```
 Mac Host (launchd)
-├── com.infiniclaw.engineer → node _runtime/instances/engineer/nanoclaw/dist/index.js
+├── com.infiniclaw.engineer → node $INFINICLAW/_runtime/instances/engineer/nanoclaw/dist/index.js
 │   ├── Connects to Matrix as @cidolfus-bot (Cid)
 │   ├── Responds to @Cid in Engineering
 │   ├── Spawns nanoclaw-engineer containers for tasks
-│   └── Can restart commander via IPC (restart_bot)
+│   └── Can restart any bot via IPC
 │
-├── com.infiniclaw.commander → node _runtime/instances/commander/nanoclaw/dist/index.js
+├── com.infiniclaw.commander → node $INFINICLAW/_runtime/instances/commander/nanoclaw/dist/index.js
 │   ├── Connects to Matrix as @johnny5-bot (Johnny5)
-│   ├── Takes orders in the Ready Room
+│   ├── Takes orders in the Bridge
 │   └── Spawns nanoclaw-commander containers for tasks
 │
-└── ~/.config/nanoclaw/mount-allowlist.json (shared, host-side)
+├── com.infiniclaw.hologram → node $INFINICLAW/_runtime/instances/hologram/nanoclaw/dist/index.js
+│   ├── Connects to Matrix as @albert-bot (Albert)
+│   ├── Tests features in the Holodeck
+│   └── Spawns nanoclaw-engineer containers (Ollama brain)
+│
+└── $HOME/.config/nanoclaw/mount-allowlist.json (shared, host-side)
 ```
 
 ## Directory structure
 
 ```text
-InfiniClaw/
+$INFINICLAW/
   README.md
   .gitignore
-  nanoclaw/                   # NanoClaw fork (git subtree from wawiesel/nanoclaw)
-    src/cli.ts                # Entry point: start|stop|chat
-    src/service.ts            # All start/stop/chat/deploy logic
+  nanoclaw/                   NanoClaw fork (git subtree from wawiesel/nanoclaw)
+    src/                      Platform source (TypeScript)
+    container/
+      agent-runner/           In-container agent runner
+      skills/                 Shared skills (all bots)
   bots/
     personas/
-      {bot}/CLAUDE.md         # Bot identity and rules
-      {bot}/groups/{group}/   # Room context and accumulated memory
-      {bot}/skills/           # Bot-specific skills (Python scripts, etc.)
+      {bot}/CLAUDE.md         Bot identity and rules (two-way sync)
+      {bot}/skills/           Bot-specific skills (two-way sync)
+      {bot}/mcp-servers/      Bot-specific MCP servers (two-way sync)
+      {bot}/container-config.json  Additional mounts + declarative MCP
+      {bot}/groups/{group}/   Room context (one-way: repo → bot)
     profiles/
-      {bot}/env               # Bot env config (gitignored)
+      {bot}/env               Bot env config (gitignored)
     container/
-      {bot}/Dockerfile        # Per-bot agent container image
-      build.sh                # Build one or all container images
+      {bot}/Dockerfile        Per-bot agent container image
+      build.sh                Build one or all container images
     config/
-      mount-allowlist.json    # Template for ~/.config/nanoclaw/
+      mount-allowlist.json    Template for $HOME/.config/nanoclaw/
+  groups/                     Group working directories
   docs/
-    DESIGN.md                 # This file
-    assets/                   # Images, banners
-  _runtime/                   # Gitignored runtime state
-    instances/                # Per-bot runtime instances (synced from nanoclaw/)
-    data/                     # SQLite, sessions, IPC
-    logs/                     # Bot stdout/stderr logs
-    run/                      # PID files
-    staging/                  # Deploy validation staging area
+    DESIGN.md                 This file
+    assets/                   Images, banners
+  _runtime/                   Gitignored runtime state
+    instances/                Per-bot runtime instances (synced from nanoclaw/)
+    data/                     SQLite, sessions, IPC, cache
+    logs/                     Bot stdout/stderr logs
+    staging/                  Deploy validation staging area
 ```
 
 ## Operations
 
 ### First-time setup
 
-1. Configure profiles: `bots/profiles/{bot}/env`
-2. Build container images: `./bots/container/build.sh`
-3. Start: `./scripts/start`
+1. Configure profiles: `$INFINICLAW/bots/profiles/{bot}/env`
+2. Build container images: `$INFINICLAW/bots/container/build.sh all`
+3. Start: `cd $INFINICLAW/nanoclaw && npm run cli start`
 
 ### Start / Stop
 
-- `cd nanoclaw && npm run cli start` — syncs code, builds TS, installs launchd plists, starts all bots
-- `cd nanoclaw && npm run cli stop` — syncs personas, unloads launchd plists, stops orphan containers
+- `cd $INFINICLAW/nanoclaw && npm run cli start` — deploys code, installs launchd plists, starts all bots
+- `cd $INFINICLAW/nanoclaw && npm run cli stop` — syncs personas, unloads launchd plists, stops containers
 
 ### Interactive chat
 
-- `cd nanoclaw && npm run cli chat <bot>` — terminal chat with any bot (mirrors to Matrix)
+- `cd $INFINICLAW/nanoclaw && npm run cli chat <bot>` — terminal chat with any bot (mirrors to Matrix)
 
-### IPC commands (from engineer agent containers)
+### IPC commands (from engineer containers)
 
 | Command | Effect |
 |---------|--------|
 | `restart_bot` (self) | Validate TS → exit → launchd restarts |
-| `restart_bot` (other) | Validate TS → sync + build instance → launchctl kickstart |
-| `rebuild_image` | Run `bots/container/build.sh {bot}` to rebuild container image |
+| `restart_bot` (other) | Deploy instance → launchctl kickstart |
+| `rebuild_image` | Run `bots/container/build.sh {bot}` |
 | `bot_status` | Return launchctl status + recent error log |
 
 ### Deployment workflow (Cid)
 
-1. **Code changes**: Edit `nanoclaw/src/`, then IPC `restart_bot` with `bot: "commander"`.
-2. **Container image changes**: Edit `bots/container/commander/Dockerfile`, then IPC `rebuild_image`.
-3. **Both**: `rebuild_image` first, then `restart_bot`.
+1. **Code changes**: Edit `$INFINICLAW/nanoclaw/src/`, then `restart_bot`.
+2. **Container image changes**: Edit Dockerfile, then `restart_bot` (deploys first, then rebuilds image).
+3. **Persona/skill changes**: Edit in persona dir, then `restart_bot` for the target bot.
 
 ## Security posture
 
@@ -180,5 +213,5 @@ InfiniClaw/
 - Runtime secrets sourced from env and local secure stores.
 - `_runtime/` excluded from version control.
 - Mount allowlist stored outside project root (tamper-proof from containers).
-- Johnny5 cannot access InfiniClaw code from inside containers.
+- Per-group IPC namespaces prevent cross-group privilege escalation.
 - Least-privilege execution by role.
