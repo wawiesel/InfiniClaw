@@ -98,24 +98,11 @@ This gives a clean single-commit diff against upstream nanoclaw for each version
 
 ### Current branches
 
-- `aqua` — first checkpoint (mount security, holodeck, lobes, resume, skills, NEXT.md)
+- `aqua` — first checkpoint (mount security, lobes, resume, skills, NEXT.md)
 
 ### Background task: history rewriting
 
 Ongoing low-priority work: rewrite the main branch history for optimal commit separation. Goal is clean, logical commits that could each be cherry-picked independently. This is the default background task when no higher-priority work exists.
-
-## Holodeck (blue-green testing)
-
-Test nanoclaw changes safely before promoting to production:
-
-1. Create a feature branch: `git checkout -b feature-xyz`
-2. Make changes, commit
-3. Launch holodeck: IPC `holodeck_create` with `branch: "feature-xyz"`
-4. Test in the Holodeck Matrix room — Cid+ runs the new code
-5. If good: IPC `holodeck_promote` (merges to main, tears down)
-6. If bad: IPC `holodeck_teardown` (kills instance, removes worktree)
-
-The holodeck runs as a separate launchd service (`com.infiniclaw.holodeck`) with its own instance dir, data, and containers.
 
 ## Rules
 

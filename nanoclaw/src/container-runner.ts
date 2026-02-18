@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in the configured container runtime and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -488,6 +488,27 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   return args;
 }
 
+function killExistingContainersForGroup(botTag: string, safeName: string): void {
+  const prefix = `nanoclaw-${botTag}-${safeName}-`;
+  try {
+    const output = execSync('podman ps --format json', {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const containers: Array<{ Names?: string[] | string }> = JSON.parse(output || '[]');
+    const names = containers.flatMap((c) => {
+      if (Array.isArray(c.Names)) return c.Names;
+      return c.Names ? [c.Names] : [];
+    });
+    const stale = names.filter((n) => n.startsWith(prefix));
+    for (const name of stale) {
+      logger.info({ name }, 'Killing stale container for same bot/group before spawn');
+      try { execSync(`podman stop -t 1 "${name}"`, { stdio: 'pipe', timeout: 10000 }); } catch { /* best effort */ }
+    }
+  } catch { /* podman unavailable or no containers */ }
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -525,6 +546,7 @@ export async function runContainerAgent(
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   const containerName = `nanoclaw-${botTag}-${safeName}-${Date.now()}`;
+  killExistingContainersForGroup(botTag, safeName);
   const containerArgs = buildContainerArgs(mounts, containerName);
 
   logger.debug(

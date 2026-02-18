@@ -15,7 +15,7 @@ import { saveSkillsToPersona } from './skill-sync.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-export const BOTS = ['engineer', 'commander', 'hologram'] as const;
+export const BOTS = ['engineer', 'commander'] as const;
 const LAUNCH_AGENTS_DIR = path.join(os.homedir(), 'Library', 'LaunchAgents');
 
 const RSYNC_EXCLUDES = [
@@ -223,6 +223,20 @@ export function syncPersona(root: string, bot: string): void {
   const persona = personaDir(root, bot);
   if (!fs.existsSync(persona)) return;
 
+  // Guard: only sync if instance data belongs to a recent run
+  const runIdPath = path.join(instance, 'data', 'run-id');
+  if (!fs.existsSync(runIdPath)) {
+    console.log(`${bot}: skipping syncPersona (no run-id, instance data may be stale)`);
+    return;
+  }
+  try {
+    const ageMs = Date.now() - fs.statSync(runIdPath).mtimeMs;
+    if (ageMs > 24 * 60 * 60 * 1000) {
+      console.log(`${bot}: skipping syncPersona (run-id is ${Math.round(ageMs / 3600000)}h old)`);
+      return;
+    }
+  } catch { return; }
+
   // Group CLAUDE.md is ONE-WAY (repo → instance): no save-back here.
   // Persona CLAUDE.md is TWO-WAY: bots edit via writable mount at runtime,
   // changes are already in the persona dir (no copy needed).
@@ -309,6 +323,33 @@ export function deployBot(root: string, bot: string): void {
   execSync('npm run build', { cwd: instance, stdio: 'inherit' });
 
   restorePersona(root, bot);
+
+  // Pre-register main room from profile env
+  const profileEnv = loadProfileEnv(root, bot);
+  const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
+  const mainGroupName = profileEnv.MAIN_GROUP_NAME;
+  const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+  if (mainJid && mainGroupName) {
+    const storeDir = path.join(instance, 'store');
+    fs.mkdirSync(storeDir, { recursive: true });
+    const seedDb = new Database(path.join(storeDir, 'messages.db'));
+    seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
+      jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
+      trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
+      container_config TEXT, requires_trigger INTEGER DEFAULT 1
+    )`);
+    seedDb.prepare(
+      `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), 0);
+    seedDb.close();
+    console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
+  }
+
+  // Mark instance as fresh so syncPersona knows data is current
+  const dataDir = path.join(instance, 'data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'run-id'), `${Date.now()}`);
 }
 
 /**
@@ -604,181 +645,6 @@ export function chat(bot: string): void {
     stdio: 'inherit',
   });
   process.exit(result.status ?? 1);
-}
-
-// ── Holodeck (blue-green test instance) ────────────────────────────────
-
-const HOLODECK_BOT = 'holodeck';
-const HOLODECK_LABEL = 'com.infiniclaw.holodeck';
-const HOLODECK_WORKTREE = '_holodeck';
-
-function holodeckWorktreePath(root: string): string {
-  return path.join(root, HOLODECK_WORKTREE);
-}
-
-/**
- * Create a holodeck test instance from a feature branch.
- * 1. Creates a git worktree at _holodeck/
- * 2. Deploys nanoclaw from the worktree to _runtime/instances/holodeck/
- * 3. Launches as a launchd service using engineer's profile
- */
-export function holodeckCreate(root: string, branch: string, holodeckJid?: string): void {
-  const worktree = holodeckWorktreePath(root);
-  const instance = instanceDir(root, HOLODECK_BOT);
-
-  // Create worktree from branch
-  if (fs.existsSync(worktree)) {
-    throw new Error(`Holodeck worktree already exists at ${worktree}. Tear down first.`);
-  }
-  execSync(`git worktree add --detach "${worktree}" "${branch}"`, { cwd: root, stdio: 'inherit' });
-
-  // Deploy: rsync from worktree's nanoclaw → holodeck instance
-  const worktreeNanoclaw = path.join(worktree, 'nanoclaw');
-  fs.mkdirSync(instance, { recursive: true });
-
-  const excludeArgs = RSYNC_EXCLUDES.flatMap((e) => ['--exclude', e]);
-  execFileSync('rsync', ['-a', '--delete', ...excludeArgs, `${worktreeNanoclaw}/`, `${instance}/`], {
-    stdio: 'inherit',
-  });
-
-  // Install deps + build
-  if (!fs.existsSync(path.join(instance, 'node_modules'))) {
-    console.log('holodeck: installing dependencies...');
-    execSync('npm ci', { cwd: instance, stdio: 'inherit' });
-  }
-  console.log('holodeck: building...');
-  execSync('npm run build', { cwd: instance, stdio: 'inherit' });
-
-  // Restore engineer-dev persona into the holodeck instance
-  const persona = personaDir(root, 'engineer-dev');
-  if (fs.existsSync(persona)) {
-    const personaClaude = path.join(persona, 'CLAUDE.md');
-    if (fs.existsSync(personaClaude)) {
-      const content = fs.readFileSync(personaClaude, 'utf-8');
-      fs.appendFileSync(path.join(instance, 'CLAUDE.md'), '\n' + content);
-    }
-    const personaGroups = path.join(persona, 'groups');
-    if (fs.existsSync(personaGroups)) {
-      for (const gname of fs.readdirSync(personaGroups)) {
-        const gdir = path.join(personaGroups, gname);
-        if (!fs.statSync(gdir).isDirectory()) continue;
-        const dst = path.join(instance, 'groups', gname);
-        fs.mkdirSync(dst, { recursive: true });
-        for (const file of fs.readdirSync(gdir)) {
-          if (!file.endsWith('.md')) continue;
-          fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
-        }
-      }
-    }
-  }
-
-  // Pre-register the Holodeck room so Cid+ doesn't auto-register Engineering as main
-  if (holodeckJid) {
-    const storeDir = path.join(instance, 'store');
-    fs.mkdirSync(storeDir, { recursive: true });
-    const seedDb = new Database(path.join(storeDir, 'messages.db'));
-    seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-      jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
-      trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
-      container_config TEXT, requires_trigger INTEGER DEFAULT 1
-    )`);
-    seedDb.prepare(
-      `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(holodeckJid, 'Holodeck', 'holodeck', '@Cid+', new Date().toISOString(), 0);
-    seedDb.close();
-    console.log(`holodeck: pre-registered ${holodeckJid} as main group`);
-  }
-
-  // Launch as launchd service
-  const nodeBin = process.execPath;
-  const logs = logDir(root);
-  fs.mkdirSync(logs, { recursive: true });
-
-  const profileEnv = loadProfileEnv(root, 'engineer');
-  const env = applyBrainEnv(profileEnv);
-  env.PATH = `${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`;
-  env.HOME = os.homedir();
-  env.INFINICLAW_ROOT = root;
-  env.PERSONA_NAME = 'engineer-dev';
-  env.ASSISTANT_NAME = 'Cid+';
-  env.MAIN_GROUP_FOLDER = 'holodeck';
-
-  const plistPath = path.join(LAUNCH_AGENTS_DIR, `${HOLODECK_LABEL}.plist`);
-  try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
-
-  const plist = generatePlist(HOLODECK_LABEL, nodeBin, instance, logs, HOLODECK_BOT, env);
-  fs.writeFileSync(plistPath, plist);
-  execSync(`launchctl load "${plistPath}"`, { stdio: 'inherit' });
-
-  console.log(`holodeck: started from branch "${branch}" (${HOLODECK_LABEL})`);
-}
-
-/**
- * Tear down the holodeck instance.
- * Stops the service, removes the instance dir and worktree.
- */
-export function holodeckTeardown(root: string): void {
-  const worktree = holodeckWorktreePath(root);
-  const instance = instanceDir(root, HOLODECK_BOT);
-
-  // Stop launchd service
-  const plistPath = path.join(LAUNCH_AGENTS_DIR, `${HOLODECK_LABEL}.plist`);
-  if (fs.existsSync(plistPath)) {
-    try { execSync(`launchctl unload "${plistPath}"`, { stdio: 'pipe' }); } catch { /* ok */ }
-    fs.unlinkSync(plistPath);
-    console.log('holodeck: service stopped');
-  }
-
-  // Kill any stale holodeck containers
-  try {
-    const output = execSync("podman ps --format '{{.Names}}'", {
-      stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8',
-    });
-    for (const name of output.split('\n').filter((n) => n.startsWith('nanoclaw-holodeck-') || n.startsWith('nanoclaw-cid+-'))) {
-      try { execSync(`podman stop -t 5 "${name}"`, { stdio: 'pipe' }); } catch { /* ok */ }
-    }
-  } catch { /* ok */ }
-
-  // Remove instance dir
-  if (fs.existsSync(instance)) {
-    fs.rmSync(instance, { recursive: true });
-    console.log('holodeck: instance removed');
-  }
-
-  // Remove worktree
-  if (fs.existsSync(worktree)) {
-    execSync(`git worktree remove --force "${worktree}"`, { cwd: root, stdio: 'inherit' });
-    console.log('holodeck: worktree removed');
-  }
-
-  console.log('holodeck: teardown complete');
-}
-
-/**
- * Promote holodeck branch to main.
- * Merges the worktree's branch into main, then tears down holodeck.
- */
-export function holodeckPromote(root: string): void {
-  const worktree = holodeckWorktreePath(root);
-  if (!fs.existsSync(worktree)) {
-    throw new Error('No holodeck worktree found. Nothing to promote.');
-  }
-
-  // Get the branch name from the worktree
-  const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-    cwd: worktree, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
-
-  // Merge into main
-  console.log(`holodeck: merging branch "${branch}" into main...`);
-  execSync(`git checkout main`, { cwd: root, stdio: 'inherit' });
-  execSync(`git merge "${branch}"`, { cwd: root, stdio: 'inherit' });
-
-  // Teardown
-  holodeckTeardown(root);
-
-  console.log(`holodeck: promoted "${branch}" to main. Restart engineer to pick up changes.`);
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────
