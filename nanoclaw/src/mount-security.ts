@@ -494,7 +494,14 @@ export function validateAdditionalMounts(
     (a, b) => a.hostPath.split(path.sep).length - b.hostPath.split(path.sep).length,
   );
 
-  return validatedMounts;
+  // Deduplicate by hostPath, keeping the last entry. Explicit mounts are
+  // pushed after child overrides so they win when both cover the same path.
+  const seen = new Map<string, (typeof validatedMounts)[0]>();
+  for (const m of validatedMounts) {
+    seen.set(m.hostPath, m);
+  }
+
+  return [...seen.values()];
 }
 
 /**
