@@ -20,8 +20,6 @@ import {
   MATRIX_PASSWORD,
   MATRIX_RECONNECT_INTERVAL,
   MATRIX_USERNAME,
-  CROSS_BOT_PATTERN,
-  CROSS_BOT_ROOM_JID,
   LOCAL_CHANNEL_ENABLED,
   LOCAL_CHAT_JID,
   LOCAL_MIRROR_MATRIX_JID,
@@ -587,28 +585,6 @@ function syncPersonas(): void {
 let channels: Channel[] = [];
 const queue = new GroupQueue();
 
-/**
- * Check if outbound bot text matches the cross-bot pattern and forward it.
- * This enables bot-to-bot communication: when a bot says "@OtherBot <msg>",
- * the host forwards it to the other bot's room.
- */
-async function maybeCrossBotForward(chatJid: string, text: string): Promise<void> {
-  if (!CROSS_BOT_PATTERN || !CROSS_BOT_ROOM_JID) return;
-  // Use non-anchored pattern — bot output may have preamble before the @mention
-  const unanchored = new RegExp(CROSS_BOT_PATTERN.source.replace(/^\^/, ''), CROSS_BOT_PATTERN.flags);
-  if (!unanchored.test(text)) return;
-  const ch = findChannel(channels, CROSS_BOT_ROOM_JID);
-  if (!ch) return;
-  const group = registeredGroups[chatJid];
-  const sourceName = group?.name || chatJid;
-  const forwarded = `[From ${sourceName}] ${ASSISTANT_NAME}: ${text}`;
-  try {
-    await ch.sendMessage(CROSS_BOT_ROOM_JID, forwarded);
-    logger.info({ chatJid, target: CROSS_BOT_ROOM_JID }, 'Forwarded cross-bot outbound message');
-  } catch (err) {
-    logger.warn({ chatJid, err }, 'Failed to forward cross-bot outbound message');
-  }
-}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -920,7 +896,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             if (ch) {
               await ch.sendMessage(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
             }
-            await maybeCrossBotForward(chatJid, text);
             outputSentToUser = true;
             agentResponses.push(formatMainMessage(text));
           }
@@ -1139,41 +1114,6 @@ async function startMessageLoop(): Promise<void> {
               lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
               saveState();
               continue;
-            }
-          }
-
-          // --- Cross-bot @mention forwarding ---
-          // Messages matching @OtherBot get forwarded to the other bot's room
-          if (CROSS_BOT_PATTERN && CROSS_BOT_ROOM_JID) {
-            const forOtherBot = filtered.filter((m) => CROSS_BOT_PATTERN!.test(m.content.trim()));
-            if (forOtherBot.length > 0) {
-              const ch = findChannel(channels, CROSS_BOT_ROOM_JID);
-              if (ch) {
-                for (const msg of forOtherBot) {
-                  const forwarded = `[From ${group.name}] ${msg.sender_name}: ${msg.content}`;
-                  try {
-                    await ch.sendMessage(CROSS_BOT_ROOM_JID, forwarded);
-                  } catch (err) {
-                    logger.warn({ chatJid, err }, 'Failed to forward cross-bot message');
-                  }
-                }
-                logger.info(
-                  { chatJid, target: CROSS_BOT_ROOM_JID, count: forOtherBot.length },
-                  'Forwarded cross-bot messages',
-                );
-              }
-              // Remove forwarded messages from the set to process locally
-              const forwardedIds = new Set(forOtherBot.map((m) => m.id));
-              const forThisBot = filtered.filter((m) => !forwardedIds.has(m.id));
-              if (forThisBot.length === 0) {
-                // All messages were for other bot — advance cursor and skip
-                lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
-                saveState();
-                continue;
-              }
-              // Replace filtered with only this-bot messages for further processing
-              filtered.length = 0;
-              filtered.push(...forThisBot);
             }
           }
 
@@ -1799,7 +1739,7 @@ async function main(): Promise<void> {
       const text = stripInternalTags(rawText);
       if (text) {
         await ch.sendMessage(jid, formatMainMessage(text));
-        await maybeCrossBotForward(jid, text);
+
       }
     },
   });
@@ -1811,7 +1751,6 @@ async function main(): Promise<void> {
         return;
       }
       await ch.sendMessage(jid, text, threadId);
-      await maybeCrossBotForward(jid, text);
     },
     defaultSenderForGroup,
     sendImage: (jid, buffer, filename, mimetype, caption) => {
