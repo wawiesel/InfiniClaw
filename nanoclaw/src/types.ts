@@ -27,6 +27,8 @@ export interface AllowedRoot {
   description?: string;
   // If set, this entry expires at this ISO timestamp (for temporary grants)
   expiresAt?: string;
+  // If set, only these bots (by PERSONA_NAME) can use this entry
+  bots?: string[];
 }
 
 export interface ContainerConfig {

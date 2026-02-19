@@ -407,6 +407,25 @@ function createToolProgressHook(emitFn: (text: string) => void): HookCallback {
   };
 }
 
+const BLOCKED_TOOLS = new Set(['SendMessage', 'TeamCreate', 'TeamDelete']);
+
+function createBlockBuiltinToolsHook(): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const toolName = preInput.tool_name;
+    if (BLOCKED_TOOLS.has(toolName)) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          decision: 'block',
+          reason: `${toolName} is disabled. Use mcp__nanoclaw__send_message with the recipient parameter instead.`,
+        },
+      };
+    }
+    return {};
+  };
+}
+
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preInput = input as PreToolUseHookInput;
@@ -860,7 +879,10 @@ async function runQuery(
         },
         hooks: {
           PreCompact: [{ hooks: [createPreCompactHook()] }],
-          PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+          PreToolUse: [
+            { hooks: [createBlockBuiltinToolsHook()] },
+            { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
+          ],
           PostToolUse: [{ hooks: [createToolProgressHook(emitProgress)] }],
         },
       }

@@ -1569,7 +1569,7 @@ async function main(): Promise<void> {
       logger.info({ hostPath, duration }, 'grant-mount command');
       void (async () => {
         try {
-          grantTemporaryMount(hostPath, true, duration);
+          grantTemporaryMount(hostPath, true, duration, undefined, process.env.PERSONA_NAME);
           const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
           if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `✅ Mount granted: ${hostPath} (read-write, expires ~${expiry})\nRestart required to pick up new mount.`);
         } catch (err) {

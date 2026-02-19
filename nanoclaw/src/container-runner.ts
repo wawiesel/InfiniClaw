@@ -27,6 +27,32 @@ import { validateAdditionalMounts } from './mount-security.js';
 import { saveSkillsToPersona, loadSkillsToSession } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
 
+/** Build a directory of all bots: name → main room JID. */
+function buildBotDirectory(): Record<string, string> {
+  const rootDir = process.env.INFINICLAW_ROOT;
+  if (!rootDir) return {};
+  const profilesDir = path.join(rootDir, 'bots', 'profiles');
+  if (!fs.existsSync(profilesDir)) return {};
+  const directory: Record<string, string> = {};
+  try {
+    for (const bot of fs.readdirSync(profilesDir)) {
+      const envFile = path.join(profilesDir, bot, 'env');
+      if (!fs.existsSync(envFile)) continue;
+      const lines = fs.readFileSync(envFile, 'utf-8').split('\n');
+      let name = '';
+      let roomJid = '';
+      for (const line of lines) {
+        const parsed = parseEnvLine(line);
+        if (!parsed) continue;
+        if (parsed[0] === 'ASSISTANT_NAME') name = parsed[1];
+        if (parsed[0] === 'LOCAL_MIRROR_MATRIX_JID') roomJid = parsed[1];
+      }
+      if (name && roomJid) directory[name] = roomJid;
+    }
+  } catch { /* best effort */ }
+  return directory;
+}
+
 /** Attempt to recover a dead podman socket by restarting the machine. */
 function recoverPodman(): boolean {
   logger.warn('Podman socket dead, attempting recovery...');
@@ -450,6 +476,7 @@ function buildVolumeMounts(
       allAdditionalMounts,
       group.name,
       isMain,
+      process.env.PERSONA_NAME,
     );
     mounts.push(...validatedMounts);
   }
@@ -518,6 +545,14 @@ export async function runContainerAgent(
   const secrets = normalizeProviderSecrets(collectContainerSecrets(projectRoot));
   const mounts = buildVolumeMounts(group, input.isMain, secrets);
   const mappedSecrets = mapCertPathSecretsToContainer(secrets, mounts);
+  // Write bot directory to IPC dir so the MCP server can resolve recipients
+  const groupIpcDir = path.join(DATA_DIR, 'ipc', input.groupFolder);
+  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
+  try {
+    const botDir = buildBotDirectory();
+    fs.writeFileSync(path.join(groupIpcDir, 'bot_directory.json'), JSON.stringify(botDir));
+  } catch { /* best effort */ }
+
   // Read .mcp.json from group dir for inline SDK passthrough
   let mcpServers: Record<string, Record<string, unknown>> | undefined;
   const mcpJsonPath = path.join(groupDir, '.mcp.json');

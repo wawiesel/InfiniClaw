@@ -21,6 +21,29 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+
+// Bot directory: name → room JID (written by host to IPC dir)
+const BOT_DIRECTORY_FILE = path.join(IPC_DIR, 'bot_directory.json');
+function loadBotDirectory(): Record<string, string> {
+  try {
+    if (fs.existsSync(BOT_DIRECTORY_FILE)) {
+      return JSON.parse(fs.readFileSync(BOT_DIRECTORY_FILE, 'utf-8'));
+    }
+  } catch { /* best effort */ }
+  return {};
+}
+
+function resolveRecipientJid(recipient: string): string | null {
+  const dir = loadBotDirectory();
+  // Exact match first
+  if (dir[recipient]) return dir[recipient];
+  // Case-insensitive match
+  const lower = recipient.toLowerCase();
+  for (const [name, jid] of Object.entries(dir)) {
+    if (name.toLowerCase() === lower) return jid;
+  }
+  return null;
+}
 const DEFAULT_DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_DELEGATE_TIMEOUT_MS = 60 * 60 * 1000;
 const DELEGATE_CWD_ROOTS = ['/workspace', '/workspace/group', '/workspace/extra'];
@@ -297,15 +320,45 @@ const server = new McpServer({
 });
 
 server.tool(
+  'list_recipients',
+  'List available message recipients (other bots you can send messages to).',
+  {},
+  async () => {
+    const dir = loadBotDirectory();
+    const selfName = process.env.NANOCLAW_ASSISTANT_NAME || '';
+    const recipients = Object.keys(dir).filter((name) => name !== selfName);
+    if (recipients.length === 0) {
+      return { content: [{ type: 'text' as const, text: 'No other bots available.' }] };
+    }
+    const lines = recipients.map((name) => `- ${name}`);
+    return { content: [{ type: 'text' as const, text: `Available recipients:\n${lines.join('\n')}` }] };
+  },
+);
+
+server.tool(
   'send_message',
-  'Send a text message to the chat, optionally in a Matrix thread. Use thread_id to reply within an existing thread, or omit it for the main timeline.',
+  'Send a text message. Defaults to the current chat room. Use recipient to send to another bot by name (e.g., "Johnny5" or "Cid"). Use thread_id to reply within a Matrix thread.',
   {
     text: z.string().describe('The message text to send'),
+    recipient: z.string().optional().describe('Bot name to send to (e.g., "Johnny5", "Cid"). Omit to send to current chat.'),
     thread_id: z.string().optional().describe('Matrix thread root event ID to reply in a thread (MSC3440)'),
   },
   async (args) => {
-    emitChatMessageTo(chatJid, args.text, undefined, args.thread_id);
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    let targetJid = chatJid;
+    if (args.recipient) {
+      const resolved = resolveRecipientJid(args.recipient);
+      if (!resolved) {
+        const dir = loadBotDirectory();
+        const available = Object.keys(dir).join(', ') || 'none';
+        return {
+          content: [{ type: 'text' as const, text: `Unknown recipient "${args.recipient}". Available: ${available}` }],
+          isError: true,
+        };
+      }
+      targetJid = resolved;
+    }
+    emitChatMessageTo(targetJid, args.text, undefined, args.thread_id);
+    return { content: [{ type: 'text' as const, text: args.recipient ? `Message sent to ${args.recipient}.` : 'Message sent.' }] };
   },
 );
 

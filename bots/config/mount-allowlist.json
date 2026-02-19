@@ -8,6 +8,7 @@
     {
       "path": "~/_vault",
       "allowReadWrite": true,
+      "bots": ["commander"],
       "description": "Vault — Johnny5's read-write workspace"
     },
     {

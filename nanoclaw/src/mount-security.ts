@@ -194,11 +194,15 @@ function matchesBlockedPattern(
 function findAllowedRoot(
   realPath: string,
   allowedRoots: AllowedRoot[],
+  botName?: string,
 ): AllowedRoot | null {
   let bestRoot: AllowedRoot | null = null;
   let bestRealRoot = '';
 
   for (const root of allowedRoots) {
+    // Skip entries restricted to specific bots if this bot isn't listed
+    if (root.bots && botName && !root.bots.includes(botName)) continue;
+
     const expandedRoot = expandPath(root.path);
     const realRoot = getRealPath(expandedRoot);
 
@@ -258,6 +262,7 @@ export interface MountValidationResult {
 export function validateMount(
   mount: AdditionalMount,
   isMain: boolean,
+  botName?: string,
 ): MountValidationResult {
   const allowlist = loadMountAllowlist();
 
@@ -304,7 +309,7 @@ export function validateMount(
   }
 
   // Check if under an allowed root
-  const allowedRoot = findAllowedRoot(realPath, allowlist.allowedRoots);
+  const allowedRoot = findAllowedRoot(realPath, allowlist.allowedRoots, botName);
   if (allowedRoot === null) {
     return {
       allowed: false,
@@ -368,6 +373,7 @@ function findChildOverrides(
   allowedRoots: AllowedRoot[],
   isMain: boolean,
   nonMainReadOnly: boolean,
+  botName?: string,
 ): Array<{ hostPath: string; containerPath: string; readonly: boolean }> {
   const overrides: Array<{
     hostPath: string;
@@ -376,6 +382,9 @@ function findChildOverrides(
   }> = [];
 
   for (const root of allowedRoots) {
+    // Skip entries restricted to specific bots if this bot isn't listed
+    if (root.bots && botName && !root.bots.includes(botName)) continue;
+
     const expandedRoot = expandPath(root.path);
     const realRoot = getRealPath(expandedRoot);
     if (realRoot === null) continue;
@@ -429,6 +438,7 @@ export function validateAdditionalMounts(
   mounts: AdditionalMount[],
   groupName: string,
   isMain: boolean,
+  botName?: string,
 ): Array<{
   hostPath: string;
   containerPath: string;
@@ -442,7 +452,7 @@ export function validateAdditionalMounts(
   }> = [];
 
   for (const mount of mounts) {
-    const result = validateMount(mount, isMain);
+    const result = validateMount(mount, isMain, botName);
 
     if (result.allowed) {
       const containerPath = `/workspace/extra/${result.resolvedContainerPath}`;
@@ -472,6 +482,7 @@ export function validateAdditionalMounts(
           allowlist.allowedRoots,
           isMain,
           allowlist.nonMainReadOnly,
+          botName,
         );
         validatedMounts.push(...overrides);
       }
@@ -494,14 +505,7 @@ export function validateAdditionalMounts(
     (a, b) => a.hostPath.split(path.sep).length - b.hostPath.split(path.sep).length,
   );
 
-  // Deduplicate by hostPath, keeping the last entry. Explicit mounts are
-  // pushed after child overrides so they win when both cover the same path.
-  const seen = new Map<string, (typeof validatedMounts)[0]>();
-  for (const m of validatedMounts) {
-    seen.set(m.hostPath, m);
-  }
-
-  return [...seen.values()];
+  return validatedMounts;
 }
 
 /**
@@ -547,6 +551,7 @@ export function grantTemporaryMount(
   allowReadWrite: boolean,
   durationMinutes: number,
   description?: string,
+  bot?: string,
 ): void {
   const raw = fs.existsSync(MOUNT_ALLOWLIST_PATH)
     ? (JSON.parse(fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8')) as MountAllowlist)
@@ -554,9 +559,17 @@ export function grantTemporaryMount(
 
   const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
 
-  // Remove any existing entry for this path (permanent or expired)
-  raw.allowedRoots = raw.allowedRoots.filter((r) => r.path !== hostPath);
-  raw.allowedRoots.push({ path: hostPath, allowReadWrite, description, expiresAt });
+  // Remove any existing temporary entry for this path+bot combo
+  raw.allowedRoots = raw.allowedRoots.filter((r) => {
+    if (r.path !== hostPath) return true;
+    if (!r.expiresAt) return true; // keep permanent entries
+    // Remove temporary entry if same bot scope
+    const sameScope = bot ? r.bots?.includes(bot) : !r.bots;
+    return !sameScope;
+  });
+  const entry: AllowedRoot = { path: hostPath, allowReadWrite, description, expiresAt };
+  if (bot) entry.bots = [bot];
+  raw.allowedRoots.push(entry);
 
   fs.writeFileSync(MOUNT_ALLOWLIST_PATH, JSON.stringify(raw, null, 2));
   invalidateCache();

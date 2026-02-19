@@ -1,20 +1,19 @@
 ---
 name: contact-ready-room
-description: Send a message to Johnny5 in the Ready Room. Use when you need to report status, request decisions, or coordinate with the commander.
+description: Send a message to Johnny5 in the Bridge. Use when you need to report status, request decisions, or coordinate with the commander.
 ---
 
-# Contact Ready Room
+# Contact Bridge
 
-Start your response with `@Johnny5` followed by your message. The host automatically forwards it to the Ready Room.
+Use `mcp__nanoclaw__send_message` with `recipient: "Johnny5"` to send a message to Johnny5 in the Bridge.
 
 ## Example
 
 ```
-@Johnny5 deployment complete — all services are green.
+mcp__nanoclaw__send_message(text: "Deployment complete — all services are green.", recipient: "Johnny5")
 ```
 
 ## Rules
 
-- `@Johnny5` at the start triggers forwarding — this is required.
 - Be concise. Give status, results, and decisions needed.
-- Your message appears as: `[From Engineering] Cid: @Johnny5 <your message>`
+- Do not duplicate your final response as a send_message — only use this for explicit cross-bot communication.
