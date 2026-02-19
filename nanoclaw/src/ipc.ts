@@ -9,7 +9,6 @@ import { CronExpressionParser } from 'cron-parser';
 import {
   ASSISTANT_NAME,
   ASSISTANT_ROLE,
-  CAPTAIN_USER_ID,
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
@@ -18,7 +17,6 @@ import {
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { logger } from './logger.js';
-import { grantTemporaryMount, revokeMount } from './mount-security.js';
 import {
   validateDeploy as serviceValidateDeploy,
   BOTS,
@@ -345,12 +343,6 @@ export async function processTaskIpc(
     branches?: string[];
     // For set_thread
     threadId?: string;
-    // For grant_mount / revoke_mount
-    hostPath?: string;
-    allowReadWrite?: boolean;
-    durationMinutes?: number;
-    description?: string;
-    sender?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -828,59 +820,6 @@ export async function processTaskIpc(
           await deps.sendMessage(gpChatJid, `⛔ git_push failed: ${msg}`);
         }
       }
-      break;
-    }
-
-    case 'grant_mount': {
-      if (!isMain) {
-        logger.warn({ sourceGroup }, 'Unauthorized grant_mount attempt blocked');
-        break;
-      }
-      const gmChatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
-      const gmSender = typeof data.sender === 'string' ? data.sender.trim() : '';
-      if (CAPTAIN_USER_ID && gmSender !== CAPTAIN_USER_ID) {
-        logger.warn({ sender: gmSender }, 'grant_mount blocked: sender is not the Captain');
-        if (gmChatJid) await deps.sendMessage(gmChatJid, '⛔ grant_mount: unauthorized sender');
-        break;
-      }
-      const gmPath = typeof data.hostPath === 'string' ? data.hostPath.trim() : '';
-      const gmRw = data.allowReadWrite === true;
-      const gmDuration = typeof data.durationMinutes === 'number' && data.durationMinutes > 0
-        ? Math.min(data.durationMinutes, 480) // cap at 8 hours
-        : 30;
-      if (!gmPath) {
-        if (gmChatJid) await deps.sendMessage(gmChatJid, '⛔ grant_mount: hostPath required');
-        break;
-      }
-      try {
-        grantTemporaryMount(gmPath, gmRw, gmDuration, typeof data.description === 'string' ? data.description : undefined);
-        const expiry = new Date(Date.now() + gmDuration * 60 * 1000).toLocaleTimeString();
-        if (gmChatJid) await deps.sendMessage(gmChatJid, `✅ Mount granted: \`${gmPath}\` (${gmRw ? 'read-write' : 'read-only'}, expires ~${expiry})`);
-      } catch (err) {
-        logger.error({ err, gmPath }, 'grant_mount failed');
-        if (gmChatJid) await deps.sendMessage(gmChatJid, `⛔ grant_mount failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      break;
-    }
-
-    case 'revoke_mount': {
-      if (!isMain) {
-        logger.warn({ sourceGroup }, 'Unauthorized revoke_mount attempt blocked');
-        break;
-      }
-      const rmChatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
-      const rmSender = typeof data.sender === 'string' ? data.sender.trim() : '';
-      if (CAPTAIN_USER_ID && rmSender !== CAPTAIN_USER_ID) {
-        logger.warn({ sender: rmSender }, 'revoke_mount blocked: sender is not the Captain');
-        break;
-      }
-      const rmPath = typeof data.hostPath === 'string' ? data.hostPath.trim() : '';
-      if (!rmPath) {
-        if (rmChatJid) await deps.sendMessage(rmChatJid, '⛔ revoke_mount: hostPath required');
-        break;
-      }
-      const revoked = revokeMount(rmPath);
-      if (rmChatJid) await deps.sendMessage(rmChatJid, revoked ? `✅ Mount revoked: \`${rmPath}\`` : `ℹ️ No mount found for \`${rmPath}\``);
       break;
     }
 

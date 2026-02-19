@@ -1490,52 +1490,6 @@ server.tool(
   },
 );
 
-server.tool(
-  'grant_mount',
-  'Request the Captain to temporarily grant write access to a host directory. Requires CAPTAIN_USER_ID to be set and the current user to be the Captain. The grant expires automatically.',
-  {
-    hostPath: z.string().describe('Host path to grant access to (e.g. "~/2025-WKS")'),
-    allowReadWrite: z.boolean().default(true).describe('Whether to allow read-write (true) or read-only (false)'),
-    durationMinutes: z.number().default(30).describe('How long to grant access in minutes (max 480)'),
-    description: z.string().optional().describe('Optional description for the grant'),
-  },
-  async (args) => {
-    if (!isMain) {
-      return { content: [{ type: 'text' as const, text: 'Only MAIN group can grant mounts.' }], isError: true };
-    }
-    writeIpcFile(TASKS_DIR, {
-      type: 'grant_mount',
-      hostPath: args.hostPath,
-      allowReadWrite: args.allowReadWrite,
-      durationMinutes: args.durationMinutes,
-      description: args.description,
-      chatJid,
-      timestamp: new Date().toISOString(),
-    });
-    return { content: [{ type: 'text' as const, text: `Mount grant requested for ${args.hostPath}.` }] };
-  },
-);
-
-server.tool(
-  'revoke_mount',
-  'Revoke a previously granted temporary mount access.',
-  {
-    hostPath: z.string().describe('Host path to revoke access for'),
-  },
-  async (args) => {
-    if (!isMain) {
-      return { content: [{ type: 'text' as const, text: 'Only MAIN group can revoke mounts.' }], isError: true };
-    }
-    writeIpcFile(TASKS_DIR, {
-      type: 'revoke_mount',
-      hostPath: args.hostPath,
-      chatJid,
-      timestamp: new Date().toISOString(),
-    });
-    return { content: [{ type: 'text' as const, text: `Mount revoke requested for ${args.hostPath}.` }] };
-  },
-);
-
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

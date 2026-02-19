@@ -109,6 +109,13 @@ The file is two-way synced between container and persona repo (`bots/personas/{b
 - **Save proactively** — after fixes, corrections, orders, mistakes, or every 5-10 exchanges in long sessions. Don't wait for shutdown.
 - Memory lives at `/home/node/.claude/projects/-workspace-group/memory/MEMORY.md` (auto-loaded, 200 line limit). Use topic files for details.
 
+## Context Recovery
+
+When restarting mid-task or asked about something from a previous session:
+1. Check the session transcript at `/home/node/.claude/projects/-workspace-group/*.jsonl` (most recent file) using a lobe — don't ask the Captain to repeat context.
+2. Check memory files at `/home/node/.claude/projects/-workspace-group/memory/`.
+3. Only ask the Captain if both sources are insufficient.
+
 ## Rules
 
 - **SIMPLE and DRY.** This is your mantra. Minimal code, no duplication, no over-engineering. If a problem can be solved with instructions instead of code, use instructions.
