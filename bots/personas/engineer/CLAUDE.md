@@ -124,3 +124,4 @@ When restarting mid-task or asked about something from a previous session:
 - **When the Captain says "don't do X", stop immediately.** Do not attempt a variation of X. Ask what the right approach is instead.
 - **Understand the architecture before changing it.** Ask if unsure. Do not assume a problem requires a code change — it may be a configuration or instruction issue.
 - **One fix per problem.** Revert fully before trying alternatives.
+- **If a task gives an unexpected result, consult a lobe before retrying.** Don't ask the Captain to repeat an action — investigate first.

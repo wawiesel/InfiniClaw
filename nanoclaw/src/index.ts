@@ -1654,12 +1654,17 @@ async function main(): Promise<void> {
         try {
           if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, '🔄 Restarting wksm...');
           const { execSync } = await import('child_process');
-          execSync('pkill -f "wks.mcp.sse_proxy" 2>/dev/null || kill $(cat ~/.wks/mcp-proxy.pid) 2>/dev/null || true', { shell: '/bin/bash' });
+          const home = process.env.HOME || '/Users/ww5';
+          const wksc = `${home}/2025-WKS/main/venv/bin/wksc`;
+          // Kill whatever is on port 8765 using full path to lsof (macOS)
+          const killOut = execSync(`/usr/sbin/lsof -ti:8765 | xargs kill -9 2>&1 || echo "no process on 8765"`, { shell: '/bin/bash' }).toString().trim();
+          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `kill: ${killOut}`);
           await new Promise(r => setTimeout(r, 2000));
-          execSync('~/2025-WKS/main/venv/bin/wksc mcp proxy start', { shell: '/bin/bash' });
-          await new Promise(r => setTimeout(r, 1000));
-          const health = execSync('curl -s http://localhost:8765/health', { shell: '/bin/bash' }).toString();
-          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `✅ wksm restarted: ${health}`);
+          const startOut = execSync(`${wksc} mcp proxy start 2>&1`, { shell: '/bin/bash' }).toString().trim();
+          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `start: ${startOut}`);
+          await new Promise(r => setTimeout(r, 2000));
+          const health = execSync('curl -s http://localhost:8765/health', { shell: '/bin/bash' }).toString().trim();
+          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `health: ${health}`);
         } catch (err) {
           if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `⛔ restart-wksm failed: ${err instanceof Error ? err.message : String(err)}`);
         }
