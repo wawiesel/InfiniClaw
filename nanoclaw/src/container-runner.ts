@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in the configured container runtime and handles IPC
  */
-import { ChildProcess, exec, execSync, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -26,6 +26,24 @@ import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { saveSkillsToPersona, loadSkillsToSession } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
+
+/** Attempt to recover a dead podman socket by restarting the machine. */
+function recoverPodman(): boolean {
+  logger.warn('Podman socket dead, attempting recovery...');
+  try { execSync('podman machine stop podman-machine-default', { stdio: 'pipe', timeout: 30_000 }); } catch { /* best effort */ }
+  try { execSync('podman machine start podman-machine-default', { stdio: 'pipe', timeout: 180_000 }); } catch { /* best effort */ }
+  for (let i = 0; i < 10; i++) {
+    try {
+      execSync('podman info', { stdio: 'pipe' });
+      logger.info('Podman recovered');
+      return true;
+    } catch {
+      spawnSync('sleep', ['1']);
+    }
+  }
+  logger.error('Podman recovery failed');
+  return false;
+}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -476,6 +494,15 @@ export async function runContainerAgent(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
+  // Pre-flight: verify podman is reachable, recover if not
+  try {
+    execSync('podman info', { stdio: 'pipe', timeout: 5000 });
+  } catch {
+    if (!recoverPodman()) {
+      return { status: 'error', result: null, error: 'Podman unavailable and recovery failed' };
+    }
+  }
+
   const startTime = Date.now();
 
   const groupDir = path.join(GROUPS_DIR, group.folder);
