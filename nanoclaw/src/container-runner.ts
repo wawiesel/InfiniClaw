@@ -18,6 +18,7 @@ import {
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
+  STORE_DIR,
   IDLE_TIMEOUT,
   ASSISTANT_NAME,
 } from './config.js';
@@ -78,6 +79,7 @@ const ALLOWED_ENV_VARS = [
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
   'NANOCLAW_SKIP_TOKEN_COUNTING',
   'NANOCLAW_CONTEXT_WINDOW',
+  'NANOCLAW_DB_PATH',
   'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
   'OLLAMA_HOST',
   'OPENAI_API_KEY',
@@ -479,6 +481,13 @@ export async function runContainerAgent(
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
   const projectRoot = process.cwd();
+  // Expose DB path (as container-side path) so the in-container MCP server can do direct DB lookups
+  const hostDbPath = path.join(STORE_DIR, 'messages.db');
+  const homeDir = os.homedir();
+  const containerDbPath = hostDbPath.startsWith(homeDir + path.sep)
+    ? path.join('/workspace/extra/home', hostDbPath.slice(homeDir.length + 1))
+    : hostDbPath;
+  process.env.NANOCLAW_DB_PATH = containerDbPath;
   const secrets = normalizeProviderSecrets(collectContainerSecrets(projectRoot));
   const mounts = buildVolumeMounts(group, input.isMain, secrets);
   const mappedSecrets = mapCertPathSecretsToContainer(secrets, mounts);

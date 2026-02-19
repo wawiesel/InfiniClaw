@@ -14,6 +14,9 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || '/Users/user';
 
+// Captain: Matrix user ID authorized to grant/revoke temporary mounts
+export const CAPTAIN_USER_ID = (process.env.CAPTAIN_USER_ID || '').trim();
+
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(
   HOME_DIR,
@@ -38,9 +41,9 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   10,
 ); // 10MB default
 export const CONTAINER_MEMORY_MB = parseInt(
-  process.env.CONTAINER_MEMORY_MB || '0',
+  process.env.CONTAINER_MEMORY_MB || '4096',
   10,
-); // 0 = runtime default (no explicit limit)
+); // Per-container memory cap (prevents one bot from starving the VM)
 export const CONTAINER_CPUS = parseFloat(
   process.env.CONTAINER_CPUS || '0',
 ); // 0 = runtime default (no explicit limit)

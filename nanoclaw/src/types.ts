@@ -25,6 +25,8 @@ export interface AllowedRoot {
   allowReadWrite: boolean;
   // Optional description for documentation
   description?: string;
+  // If set, this entry expires at this ISO timestamp (for temporary grants)
+  expiresAt?: string;
 }
 
 export interface ContainerConfig {

@@ -4,6 +4,11 @@
       "hostPath": "~",
       "containerPath": "home",
       "readonly": true
+    },
+    {
+      "hostPath": "~/_vault",
+      "containerPath": "home/_vault",
+      "readonly": false
     }
   ]
 }

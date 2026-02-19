@@ -1,4 +1,3 @@
-import fs from 'fs';
 import {
   MatrixClient,
   MatrixAuth,
@@ -363,41 +362,10 @@ export class MatrixChannel implements Channel {
   private opts: MatrixChannelOpts;
   private lastMessageEventId = new Map<string, string>();
   private lastBotEventId = new Map<string, string>();
-  private lastPipReactionId = new Map<string, string>();
-  private pipStatePath: string;
 
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
     configureMatrixSdkLogger();
-    this.pipStatePath = `${STORE_DIR}/matrix-pip-state.json`;
-    this.loadPipState();
-  }
-
-  private loadPipState(): void {
-    try {
-      if (!fs.existsSync(this.pipStatePath)) return;
-      const data = JSON.parse(fs.readFileSync(this.pipStatePath, 'utf-8'));
-      if (data.lastBotEventId) {
-        for (const [k, v] of Object.entries(data.lastBotEventId)) {
-          this.lastBotEventId.set(k, v as string);
-        }
-      }
-      if (data.lastPipReactionId) {
-        for (const [k, v] of Object.entries(data.lastPipReactionId)) {
-          this.lastPipReactionId.set(k, v as string);
-        }
-      }
-    } catch { /* non-critical */ }
-  }
-
-  private savePipState(): void {
-    try {
-      const data = {
-        lastBotEventId: Object.fromEntries(this.lastBotEventId),
-        lastPipReactionId: Object.fromEntries(this.lastPipReactionId),
-      };
-      fs.writeFileSync(this.pipStatePath, JSON.stringify(data));
-    } catch { /* non-critical */ }
   }
 
   private readStored(
@@ -672,6 +640,40 @@ export class MatrixChannel implements Channel {
       }
     });
 
+    // Listen for reactions (m.reaction events)
+    client.on('room.event', async (roomId: string, event: Record<string, unknown>) => {
+      if (event.type !== 'm.reaction') return;
+      if (event.sender === this.botUserId) return;
+      const content = event.content as Record<string, unknown> | undefined;
+      const relatesTo = content?.['m.relates_to'] as Record<string, unknown> | undefined;
+      const emoji = relatesTo?.key as string | undefined;
+      const reactedToId = relatesTo?.event_id as string | undefined;
+      if (!emoji || !reactedToId) return;
+
+      const matrixJid = toJid(roomId);
+      const groups = this.opts.registeredGroups();
+      if (!groups[matrixJid]) return;
+
+      // Only deliver reactions to the bot's own messages to avoid flooding
+      const lastBotEvent = this.lastBotEventId.get(roomId);
+      if (reactedToId !== lastBotEvent) return;
+
+      const timestamp = new Date(event.origin_server_ts as number).toISOString();
+      const senderName = await this.getSenderName(event.sender as string);
+
+      const msg: NewMessage = {
+        id: `reaction-${event.event_id as string}`,
+        chat_jid: matrixJid,
+        sender: event.sender as string,
+        sender_name: senderName,
+        content: `[reaction: ${emoji} to message ${reactedToId}]`,
+        timestamp,
+      };
+
+      logger.debug({ matrixJid, emoji, reactedToId }, 'Matrix reaction delivered to onMessage');
+      this.opts.onMessage(matrixJid, msg);
+    });
+
     // Listen for messages
     client.on('room.message', async (roomId: string, event: Record<string, unknown>) => {
       if (event.event_id && typeof event.event_id === 'string') {
@@ -727,23 +729,6 @@ export class MatrixChannel implements Channel {
       throw err;
     }
 
-    // Clean up stale pips from previous sessions
-    this.cleanupStalePips().catch(() => {});
-  }
-
-  private async cleanupStalePips(): Promise<void> {
-    for (const [roomId, pipId] of this.lastPipReactionId) {
-      try {
-        await withTimeout(
-          this.client!.redactEvent(roomId, pipId),
-          MATRIX_SEND_TIMEOUT_MS,
-          'cleanupStalePip',
-        );
-        logger.debug({ roomId }, 'Cleaned up stale pip from previous session');
-      } catch { /* non-critical */ }
-    }
-    this.lastPipReactionId.clear();
-    this.savePipState();
   }
 
   async sendMessage(jid: string, text: string, threadId?: string): Promise<void> {
@@ -778,8 +763,15 @@ export class MatrixChannel implements Channel {
           return mathPlaceholder(`<span data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></span>`);
         });
 
-        // Apply markdown
-        html = await marked(working, { breaks: true, gfm: true });
+        // Apply markdown with custom renderer to strip <p> tags inside list items
+        // (marked generates "loose" lists with <p> when items are separated by blank lines)
+        const renderer = new marked.Renderer();
+        const origListitem = renderer.listitem.bind(renderer);
+        renderer.listitem = (item) => {
+          const result = origListitem(item);
+          return result.replace(/<p>([\s\S]*?)<\/p>/g, '$1');
+        };
+        html = await marked(working, { breaks: true, gfm: true, renderer });
 
         // Restore math placeholders
         html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
@@ -806,10 +798,7 @@ export class MatrixChannel implements Channel {
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage',
       );
-      if (eventId) {
-        this.lastBotEventId.set(roomId, eventId);
-        this.savePipState();
-      }
+      if (eventId) this.lastBotEventId.set(roomId, eventId);
     } catch (err) {
       if (this.isAuthFailure(err)) {
         this.markDisconnected('Matrix auth failed while sending message', err);
@@ -986,38 +975,8 @@ export class MatrixChannel implements Channel {
     }
   }
 
-  async setStatusPip(jid: string, emoji: string): Promise<void> {
-    if (!this.client || !this._connected) return;
-    const roomId = toRoomId(jid);
-    const targetEventId = this.lastBotEventId.get(roomId);
-    if (!targetEventId) return;
-
-    // Redact old pip
-    const oldId = this.lastPipReactionId.get(roomId);
-    if (oldId) {
-      try {
-        await withTimeout(this.client.redactEvent(roomId, oldId), MATRIX_SEND_TIMEOUT_MS, 'redactPip');
-      } catch { /* non-critical */ }
-      this.lastPipReactionId.delete(roomId);
-    }
-
-    // Add new pip
-    try {
-      const reactionId = await withTimeout(
-        this.client.sendEvent(roomId, 'm.reaction', {
-          'm.relates_to': { rel_type: 'm.annotation', event_id: targetEventId, key: emoji },
-        }),
-        MATRIX_SEND_TIMEOUT_MS,
-        'setStatusPip',
-      );
-      if (reactionId) {
-        this.lastPipReactionId.set(roomId, reactionId);
-        this.savePipState();
-      }
-    } catch (err) {
-      if (this.isAuthFailure(err)) this.markDisconnected('Matrix auth failed setting pip', err);
-      logger.warn({ jid, emoji, err }, 'Failed to set status pip');
-    }
+  async setStatusPip(_jid: string, _emoji: string): Promise<void> {
+    // Pip reactions disabled
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {

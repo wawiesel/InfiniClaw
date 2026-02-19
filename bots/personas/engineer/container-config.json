@@ -4,6 +4,11 @@
       "hostPath": "~",
       "containerPath": "home",
       "readonly": true
+    },
+    {
+      "hostPath": "~/2026-Nanoclaw/InfiniClaw",
+      "containerPath": "home/2026-Nanoclaw/InfiniClaw",
+      "readonly": false
     }
   ]
 }

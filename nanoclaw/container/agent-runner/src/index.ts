@@ -855,6 +855,9 @@ async function runQuery(
                       sdkEnv.NODE_TLS_REJECT_UNAUTHORIZED,
                   }
                 : {}),
+              ...(sdkEnv.NANOCLAW_DB_PATH
+                ? { NANOCLAW_DB_PATH: sdkEnv.NANOCLAW_DB_PATH }
+                : {}),
             },
           },
         },

@@ -105,7 +105,8 @@ The file is two-way synced between container and persona repo (`bots/personas/{b
 
 ## Memory
 
-- **Save memory periodically** — after fixing bugs, learning architecture, receiving orders, or making mistakes. Don't wait for shutdown. Write it down while the context is fresh.
+- **Save memory using a lobe** — don't burn main brain context on file I/O. Use `/save-memory` skill: delegate to codex/gemini with a summary of what to save.
+- **Save proactively** — after fixes, corrections, orders, mistakes, or every 5-10 exchanges in long sessions. Don't wait for shutdown.
 - Memory lives at `/home/node/.claude/projects/-workspace-group/memory/MEMORY.md` (auto-loaded, 200 line limit). Use topic files for details.
 
 ## Rules

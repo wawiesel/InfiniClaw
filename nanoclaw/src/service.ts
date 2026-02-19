@@ -3,6 +3,7 @@
  * Replaces scripts/start, scripts/stop, scripts/chat, scripts/common.sh, scripts/validate-deploy.sh.
  * All operations are synchronous (CLI tool, not async server).
  */
+import crypto from 'crypto';
 import { execFileSync, execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
@@ -282,6 +283,7 @@ export function deployBot(root: string, bot: string): void {
   const base = baseNanoclawDir(root);
   fs.mkdirSync(instance, { recursive: true });
 
+  rebuildImageIfChanged(root, bot);
   syncPersona(root, bot);
   rsyncNanoclaw(base, instance);
 
@@ -369,6 +371,45 @@ export function rebuildImage(root: string, bot: string): void {
   execFileSync(script, [bot], { stdio: 'inherit' });
 }
 
+/** Hash all files that contribute to a bot's container image. */
+function computeBuildContextHash(root: string, bot: string): string {
+  const hash = crypto.createHash('sha256');
+  // Bot-specific Dockerfile
+  const dockerfile = path.join(root, 'bots', 'container', bot, 'Dockerfile');
+  if (fs.existsSync(dockerfile)) hash.update(fs.readFileSync(dockerfile));
+  // Shared build context: nanoclaw/container/agent-runner/
+  const agentRunner = path.join(root, 'nanoclaw', 'container', 'agent-runner');
+  if (fs.existsSync(agentRunner)) {
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules') continue;
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else hash.update(fs.readFileSync(full));
+      }
+    };
+    walk(agentRunner);
+  }
+  return hash.digest('hex');
+}
+
+/** Rebuild the container image for a bot only if the build context changed. */
+function rebuildImageIfChanged(root: string, bot: string): void {
+  const hashDir = path.join(root, '_runtime', 'data');
+  fs.mkdirSync(hashDir, { recursive: true });
+  const hashFile = path.join(hashDir, `image-hash-${bot}`);
+  const currentHash = computeBuildContextHash(root, bot);
+  let storedHash = '';
+  try { storedHash = fs.readFileSync(hashFile, 'utf8').trim(); } catch { /* first run */ }
+  if (currentHash === storedHash) {
+    console.log(`${bot}: container image up to date`);
+    return;
+  }
+  console.log(`${bot}: build context changed, rebuilding image...`);
+  rebuildImage(root, bot);
+  fs.writeFileSync(hashFile, currentHash);
+}
+
 // ── Launchd helpers ─────────────────────────────────────────────────────
 
 function plistPath(bot: string): string {
@@ -401,13 +442,27 @@ function installPlistAndLoad(bot: string, nodeBin: string, instance: string, log
   execSync(`launchctl load "${pp}"`, { stdio: 'inherit' });
 }
 
-function removeLegacyPlist(): void {
+function removeStalePlists(): void {
+  // Remove legacy single-bot plist
   const legacyPlist = path.join(LAUNCH_AGENTS_DIR, 'com.nanoclaw.plist');
   if (fs.existsSync(legacyPlist)) {
     unloadPlist(legacyPlist);
     fs.unlinkSync(legacyPlist);
     console.log('Removed legacy com.nanoclaw.plist');
   }
+
+  // Remove plists for bots no longer in BOTS list
+  const validLabels = new Set(BOTS.map((b) => `com.infiniclaw.${b}.plist`));
+  try {
+    for (const file of fs.readdirSync(LAUNCH_AGENTS_DIR)) {
+      if (file.startsWith('com.infiniclaw.') && file.endsWith('.plist') && !validLabels.has(file)) {
+        const pp = path.join(LAUNCH_AGENTS_DIR, file);
+        unloadPlist(pp);
+        fs.unlinkSync(pp);
+        console.log(`Removed stale plist: ${file}`);
+      }
+    }
+  } catch { /* best effort */ }
 }
 
 function generatePlist(
@@ -496,15 +551,11 @@ export function start(): void {
 
   // Unload all services first so old code stops before we build
   for (const bot of BOTS) { unloadPlist(plistPath(bot)); }
-  removeLegacyPlist();
+  removeStalePlists();
 
   killRogueProcesses();
   spawnSync('sleep', ['1']);
   killStaleContainers();
-
-  // Rebuild container images
-  console.log('Rebuilding container images...');
-  rebuildImage(root, 'all');
 
   for (const bot of BOTS) {
     try {
@@ -535,7 +586,7 @@ export function stop(): void {
     }
   }
 
-  removeLegacyPlist();
+  removeStalePlists();
   killRogueProcesses();
   killStaleContainers();
 

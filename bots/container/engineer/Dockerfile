@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
+# Cap Node.js heap so processes GC instead of growing until VM OOM.
+# Applies to main brain, MCP server, and lobe spawns.
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+
 # Install global CLIs used by delegates/runners
 RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex
 

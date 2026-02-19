@@ -18,9 +18,14 @@ const logger = pino({
   transport: { target: 'pino-pretty', options: { colorize: true } },
 });
 
-// Cache the allowlist in memory - only reloads on process restart
+// Cache the allowlist in memory - invalidated on grant/revoke
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
+
+function invalidateCache(): void {
+  cachedAllowlist = null;
+  allowlistLoadError = null;
+}
 
 /**
  * Default blocked patterns - always merged with allowlist patterns.
@@ -64,6 +69,20 @@ export function loadMountAllowlist(): MountAllowlist | null {
     // Validate structure
     if (!Array.isArray(allowlist.allowedRoots)) {
       throw new Error('allowedRoots must be an array');
+    }
+
+    // Prune expired temporary grants
+    const now = Date.now();
+    const before = allowlist.allowedRoots.length;
+    allowlist.allowedRoots = allowlist.allowedRoots.filter((r) => {
+      if (r.expiresAt && new Date(r.expiresAt).getTime() <= now) {
+        logger.info({ path: r.path, expiresAt: r.expiresAt }, 'Pruned expired mount grant');
+        return false;
+      }
+      return true;
+    });
+    if (allowlist.allowedRoots.length < before) {
+      fs.writeFileSync(MOUNT_ALLOWLIST_PATH, JSON.stringify(allowlist, null, 2));
     }
 
     if (!Array.isArray(allowlist.blockedPatterns)) {
@@ -510,4 +529,47 @@ export function generateAllowlistTemplate(): string {
   };
 
   return JSON.stringify(template, null, 2);
+}
+
+/**
+ * Temporarily add a path to the mount allowlist.
+ * The entry expires after durationMinutes and is pruned on next load.
+ */
+export function grantTemporaryMount(
+  hostPath: string,
+  allowReadWrite: boolean,
+  durationMinutes: number,
+  description?: string,
+): void {
+  const raw = fs.existsSync(MOUNT_ALLOWLIST_PATH)
+    ? (JSON.parse(fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8')) as MountAllowlist)
+    : { allowedRoots: [], blockedPatterns: [], nonMainReadOnly: false };
+
+  const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
+
+  // Remove any existing entry for this path (permanent or expired)
+  raw.allowedRoots = raw.allowedRoots.filter((r) => r.path !== hostPath);
+  raw.allowedRoots.push({ path: hostPath, allowReadWrite, description, expiresAt });
+
+  fs.writeFileSync(MOUNT_ALLOWLIST_PATH, JSON.stringify(raw, null, 2));
+  invalidateCache();
+  logger.info({ hostPath, allowReadWrite, durationMinutes, expiresAt }, 'Temporary mount grant added');
+}
+
+/**
+ * Remove a path from the mount allowlist (revoke access).
+ */
+export function revokeMount(hostPath: string): boolean {
+  if (!fs.existsSync(MOUNT_ALLOWLIST_PATH)) return false;
+
+  const raw = JSON.parse(fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8')) as MountAllowlist;
+  const before = raw.allowedRoots.length;
+  raw.allowedRoots = raw.allowedRoots.filter((r) => r.path !== hostPath);
+
+  if (raw.allowedRoots.length === before) return false;
+
+  fs.writeFileSync(MOUNT_ALLOWLIST_PATH, JSON.stringify(raw, null, 2));
+  invalidateCache();
+  logger.info({ hostPath }, 'Mount grant revoked');
+  return true;
 }
