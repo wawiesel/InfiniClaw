@@ -641,6 +641,82 @@ export function chat(bot: string): void {
   process.exit(result.status ?? 1);
 }
 
+// ── Send (operator message to bot room) ─────────────────────────────
+
+const ROOM_MAP: Record<string, { bot: string; roomId: string; jid: string }> = {
+  engineering: {
+    bot: 'engineer',
+    roomId: '!CYhZuByvtbJnpVlcUY:matrix.org',
+    jid: 'matrix:!CYhZuByvtbJnpVlcUY:matrix.org',
+  },
+  bridge: {
+    bot: 'commander',
+    roomId: '!TZLtrIZdHWVhmwSqzI:matrix.org',
+    jid: 'matrix:!TZLtrIZdHWVhmwSqzI:matrix.org',
+  },
+};
+
+export async function send(room: string, message: string): Promise<void> {
+  const root = resolveRoot();
+  const target = ROOM_MAP[room.toLowerCase()];
+  if (!target) {
+    throw new Error(`Unknown room: ${room}. Valid rooms: ${Object.keys(ROOM_MAP).join(', ')}`);
+  }
+
+  const instance = instanceDir(root, target.bot);
+  const dbPath = path.join(instance, 'store', 'messages.db');
+  if (!fs.existsSync(dbPath)) {
+    throw new Error(`No message DB for ${target.bot}. Run 'start' first.`);
+  }
+
+  // Load bot profile for Matrix credentials
+  const profileEnv = loadProfileEnv(root, target.bot);
+  const homeserver = profileEnv.MATRIX_HOMESERVER;
+  if (!homeserver) throw new Error(`No MATRIX_HOMESERVER in ${target.bot} profile`);
+
+  // Read stored Matrix access token
+  const storageFile = path.join(instance, 'store', 'matrix-bot.json');
+  let accessToken: string | undefined;
+  if (fs.existsSync(storageFile)) {
+    const storage = JSON.parse(fs.readFileSync(storageFile, 'utf-8'));
+    accessToken = storage.kvStore?.matrix_access_token;
+  }
+  if (!accessToken) throw new Error(`No stored Matrix access token for ${target.bot}. Bot must have connected to Matrix at least once.`);
+
+  // 1. Insert into DB so bot processes it
+  const db = new Database(dbPath);
+  const msgId = `op-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+  const timestamp = new Date().toISOString();
+  db.prepare(
+    'INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, 0)',
+  ).run(msgId, target.jid, 'operator', 'Captain', message, timestamp);
+  db.close();
+  console.log(`DB: injected message to ${target.bot} (${room})`);
+
+  // 2. Send to Matrix so it's visible in the room
+  const txnId = `op-${Date.now()}`;
+  const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(target.roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`;
+  const resp = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      msgtype: 'm.text',
+      body: `[Operator]: ${message}`,
+    }),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    console.error(`Matrix send failed (${resp.status}): ${body}`);
+    console.log('Message was still injected into DB — bot will process it.');
+  } else {
+    console.log(`Matrix: sent to ${room}`);
+  }
+}
+
 // ── Utilities ──────────────────────────────────────────────────────────
 
 function filesEqual(a: string, b: string): boolean {
