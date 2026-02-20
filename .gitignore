@@ -1,4 +1,4 @@
 /_runtime/
 /_holodeck/
 .claude/
-bots/profiles/*/env
+bots/profiles/*/

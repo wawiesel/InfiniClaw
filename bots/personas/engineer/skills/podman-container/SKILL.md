@@ -21,8 +21,8 @@ Edit Dockerfiles and trigger host-side rebuilds. No podman inside the container 
 Trigger a host-side rebuild via IPC:
 
 ```bash
-echo '{"action":"rebuild_image","bot":"engineer"}' > /workspace/ipc/tasks/rebuild-eng-$(date +%s).json
-echo '{"action":"rebuild_image","bot":"commander"}' > /workspace/ipc/tasks/rebuild-cmd-$(date +%s).json
+echo '{"type":"rebuild_image","bot":"engineer"}' > /workspace/ipc/tasks/rebuild-eng-$(date +%s).json
+echo '{"type":"rebuild_image","bot":"commander"}' > /workspace/ipc/tasks/rebuild-cmd-$(date +%s).json
 ```
 
 Images are tagged `nanoclaw-engineer:latest` and `nanoclaw-commander:latest`.

@@ -32,10 +32,10 @@ Restart to load new skills into your session (`mcp__nanoclaw__restart_self`).
 
 ### Editing your instructions
 
-You can modify your own persona CLAUDE.md (two-way sync — persists across restarts):
+Edit your persona CLAUDE.md directly (mounted writable — persists across restarts):
 
 ```
-$INFINICLAW/bots/personas/commander/CLAUDE.md      ← your identity and rules
+/workspace/extra/commander-persona/CLAUDE.md
 ```
 
 Group CLAUDE.md files (`/workspace/group/CLAUDE.md`) are **read-only** — managed by Cid in the repo.
@@ -52,7 +52,11 @@ When a user's message arrives in a thread (`thread_id` attribute on `<message>`)
 
 ## Adding MCP servers
 
-Edit `/workspace/group/.mcp.json` to add or remove MCP servers:
+Edit the persona `.mcp.json` (source of truth, mounted writable):
+
+```
+/workspace/extra/commander-persona/groups/bridge/.mcp.json
+```
 
 ```json
 {
@@ -65,20 +69,9 @@ Edit `/workspace/group/.mcp.json` to add or remove MCP servers:
 }
 ```
 
-For command-based (stdio) servers running inside the container:
+For command-based (stdio) servers: `{"command": "node", "args": ["/path/to/server.js"]}`.
 
-```json
-{
-  "mcpServers": {
-    "my-server": {
-      "command": "node",
-      "args": ["/path/to/server.js"]
-    }
-  }
-}
-```
-
-Changes are two-way synced (container <-> persona repo) and take effect on next restart. SSE servers **must** include `"type": "sse"`. New servers do NOT take effect in the current session — restart to activate them.
+SSE servers **must** include `"type": "sse"`. Changes take effect after restart (`mcp__nanoclaw__restart_self`).
 
 ## Memory
 
@@ -90,4 +83,5 @@ Changes are two-way synced (container <-> persona repo) and take effect on next 
 
 - Do not respond just to confirm you are waiting or idle.
 - Do not repeat information the Captain already knows.
-- Do not ask Cid to do things you can do yourself (restart, brain mode, skill edits).
+- Do not ask Cid to do things you can do yourself (restart, brain mode, skill edits, MCP config).
+- **Ask Cid for**: container image changes (adding packages, tools, dependencies), codebase fixes, deployment issues. These are his job, not yours.
