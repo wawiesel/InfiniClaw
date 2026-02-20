@@ -22,14 +22,13 @@ You have skills in your persona directory. Use `/skill-name` to invoke them. You
 
 ### Writing skills
 
-Edit skills directly in your container at `/home/node/.claude/skills/`. No restart needed — changes take effect immediately in the current session.
-
-On restart, container skills sync back to the persona repo at `$INFINICLAW/bots/personas/commander/skills/`, overwriting what's there. So: **edit in container, restart to persist to repo.**
+Write skills directly to your persona dir — changes persist immediately to the repo:
 
 ```
-/home/node/.claude/skills/{skill-name}/SKILL.md            ← edit here (live)
-$INFINICLAW/bots/personas/commander/skills/                 ← overwritten on restart
+/workspace/extra/commander-persona/skills/{skill-name}/SKILL.md
 ```
+
+Restart to load new skills into your session (`mcp__nanoclaw__restart_self`).
 
 ### Editing your instructions
 

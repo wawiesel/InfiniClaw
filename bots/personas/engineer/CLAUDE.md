@@ -52,6 +52,8 @@ $INFINICLAW/bots/personas/{bot}/skills/{skill-name}/
 
 ### Where to write from inside your container
 
+Write skills directly to the persona dir — changes persist immediately to the repo. Restart the target bot to load new skills.
+
 ```
 $INFINICLAW/bots/personas/engineer/skills/   ← your skills
 $INFINICLAW/bots/personas/commander/skills/  ← skills for Johnny5

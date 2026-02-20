@@ -14,7 +14,6 @@ import Database from 'better-sqlite3';
 import { parseEnvFile } from './env-utils.js';
 import { stopContainersByPrefix } from './podman-utils.js';
 import { saveMcpServersToPersona } from './mcp-sync.js';
-import { saveSkillsToPersona } from './skill-sync.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -223,16 +222,10 @@ export function syncPersona(root: string, bot: string): void {
   // Persona CLAUDE.md is TWO-WAY: bots edit via writable mount at runtime,
   // changes are already in the persona dir (no copy needed).
 
-  // SAVE: replace persona skills with session .claude/skills/ (authoritative)
+  // Save MCP server changes back to persona (skills sync is one-way: persona → session)
   const sessionsBase = path.join(instance, 'data', 'sessions');
   if (fs.existsSync(sessionsBase)) {
-    const sharedSkillsSrc = path.join(instance, 'container', 'skills');
     for (const folder of fs.readdirSync(sessionsBase)) {
-      const skillsDir = path.join(sessionsBase, folder, '.claude', 'skills');
-      if (!fs.existsSync(skillsDir)) continue;
-      saveSkillsToPersona(skillsDir, path.join(persona, 'skills'), sharedSkillsSrc);
-
-      // Also save MCP server changes back to persona
       const settingsFile = path.join(sessionsBase, folder, '.claude', 'settings.json');
       const sessionMcpDir = path.join(sessionsBase, folder, '.claude', 'mcp-servers');
       const personaMcpDir = path.join(persona, 'mcp-servers');

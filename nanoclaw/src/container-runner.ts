@@ -24,7 +24,7 @@ import {
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { saveSkillsToPersona, loadSkillsToSession } from './skill-sync.js';
+import { loadSkillsToSession } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
 
 /** Build a directory of all bots: name → main room JID. */
@@ -366,7 +366,6 @@ function buildVolumeMounts(
   if (rootDir && personaName) {
     const personaBaseDir = path.join(rootDir, 'bots', 'personas', personaName);
     const personaSkillsDir = path.join(personaBaseDir, 'skills');
-    saveSkillsToPersona(skillsDst, personaSkillsDir, sharedSkillsSrc);
     loadSkillsToSession(skillsDst, personaSkillsDir, sharedSkillsSrc);
 
     // Two-way sync .mcp.json: save-back container → persona, then restore persona → container

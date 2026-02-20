@@ -72,21 +72,24 @@ The description field is the only thing Claude always sees. Body is loaded *afte
 
 ### Creating skills
 
-**Always create skills in your container session at `/home/node/.claude/skills/`.** The bidirectional skill sync automatically copies them out to your persona source. Do not write directly to persona source.
+Write skills directly to the persona dir (mounted writable). Changes persist immediately to the repo.
 
-To create a skill for another bot (e.g. commander), send them a message asking them to create it themselves. You cannot create skills for other bots.
+```
+$INFINICLAW/bots/personas/engineer/skills/{name}/   ← your skills
+$INFINICLAW/bots/personas/commander/skills/{name}/  ← skills for Johnny5
+```
 
-After finishing all skill edits, reboot so changes persist to persona source. Do not reboot mid-edit.
+Restart the target bot to load new skills into its session.
 
 ### Skill locations (reference)
 
 | Path | Scope |
 |------|-------|
-| `/home/node/.claude/skills/{name}/` | Where you create skills (container session) |
-| `bots/personas/{bot}/skills/{name}/` | Persona source (auto-synced from session) |
-| `nanoclaw/container/skills/{name}/` | All bots (shared) |
+| `bots/personas/{bot}/skills/{name}/` | Persona skills (source of truth) |
+| `nanoclaw/container/skills/{name}/` | Shared skills (all bots) |
+| `/home/node/.claude/skills/{name}/` | Session copy (rebuilt from persona + shared on each spawn) |
 
-Persona skills override shared skills with the same name. Skills sync bidirectionally on every spawn — new skills in session get copied to source, skills missing from source get deleted from session.
+Persona skills override shared skills with the same name.
 
 ### Naming
 
