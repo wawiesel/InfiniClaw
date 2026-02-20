@@ -388,6 +388,23 @@ function formatMainMessage(body: string): string {
   return body.trim();
 }
 
+let outgoingSeq = 0;
+
+/** Store an outgoing bot message in the DB for monitoring/audit. */
+function storeOutgoing(chatJid: string, text: string, threadId?: string): void {
+  const id = `out-${Date.now()}-${++outgoingSeq}`;
+  storeMessage({
+    id,
+    chat_jid: chatJid,
+    sender: ASSISTANT_NAME,
+    sender_name: ASSISTANT_NAME,
+    content: text,
+    timestamp: new Date().toISOString(),
+    is_from_me: true,
+    thread_id: threadId,
+  });
+}
+
 function chatActivityStateKey(chatJid: string): string {
   return `${CHAT_ACTIVITY_STATE_PREFIX}${encodeURIComponent(chatJid)}`;
 }
@@ -856,15 +873,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         lastRunOutputAt = Date.now();
         if (result.isProgress) {
           markProgress(chatJid, text);
-          // Forward progress to chat with rate limiting
+          // Forward progress to chat; rate-limit plain text but always show tool calls
+          const isToolCall = text.includes('<details>');
           const now = Date.now();
-          if (!lastProgressChatAt[chatJid] || now - lastProgressChatAt[chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
-            lastProgressChatAt[chatJid] = now;
+          if (isToolCall || !lastProgressChatAt[chatJid] || now - lastProgressChatAt[chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
+            if (!isToolCall) lastProgressChatAt[chatJid] = now;
             const ch = findChannel(channels, chatJid);
             if (ch) {
-              // Tool calls already have <small><details> formatting from agent-runner;
+              // Tool calls have <details> formatting from agent-runner;
               // plain thinking text gets dimmed small italic
-              const formatted = text.includes('<details>')
+              const formatted = isToolCall
                 ? text
                 : `<small><em>${text}</em></small>`;
               void ch.sendMessage(chatJid, formatted, activeReplyThreadIds[chatJid]).catch((err) => {
@@ -895,6 +913,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             const ch = findChannel(channels, chatJid);
             if (ch) {
               await ch.sendMessage(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
+              storeOutgoing(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
             }
             outputSentToUser = true;
             agentResponses.push(formatMainMessage(text));
@@ -937,6 +956,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         );
       try {
         await channel.sendMessage(chatJid, errorReply, activeReplyThreadIds[chatJid]);
+        storeOutgoing(chatJid, errorReply, activeReplyThreadIds[chatJid]);
         outputSentToUser = true;
         agentResponses.push(errorReply);
       } catch (sendErr) {
@@ -1739,7 +1759,7 @@ async function main(): Promise<void> {
       const text = stripInternalTags(rawText);
       if (text) {
         await ch.sendMessage(jid, formatMainMessage(text));
-
+        storeOutgoing(jid, formatMainMessage(text));
       }
     },
   });
@@ -1751,6 +1771,7 @@ async function main(): Promise<void> {
         return;
       }
       await ch.sendMessage(jid, text, threadId);
+      storeOutgoing(jid, text, threadId);
     },
     defaultSenderForGroup,
     sendImage: (jid, buffer, filename, mimetype, caption) => {

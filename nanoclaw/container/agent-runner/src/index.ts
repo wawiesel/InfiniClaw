@@ -1051,7 +1051,21 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      let queryResult;
+      try {
+        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      } catch (resumeErr) {
+        // If resuming an existing session fails (e.g. missing transcript), start fresh
+        if (sessionId) {
+          const msg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
+          log(`Session resume failed (${msg}), retrying with fresh session...`);
+          sessionId = undefined;
+          resumeAt = undefined;
+          queryResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, sdkEnv, undefined);
+        } else {
+          throw resumeErr;
+        }
+      }
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
