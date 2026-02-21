@@ -16,8 +16,23 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, PostToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+
+import {
+  MAIN_MODEL_ENV_KEY,
+  MAIN_DELEGATE_POLICY,
+  getRequestedMainModel,
+  modelMatchesRequest,
+  isOllamaAnthropicBaseUrl,
+} from './infiniclaw/model-selection.js';
+import {
+  SANITIZE_PREFIX,
+  TOOL_PROGRESS_EMIT_MS,
+  GENERAL_PROGRESS_DEDUPE_MS,
+  createToolProgressHook,
+  createBlockBuiltinToolsHook,
+} from './infiniclaw/progress.js';
 
 interface ContainerInput {
   prompt: string;
@@ -62,10 +77,6 @@ const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_SENT_TEXTS_FILE = '/workspace/ipc/.sent_texts'; // Legacy — kept for file cleanup only
 const IPC_POLL_MS = 500;
 const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
-const CAPABILITY_STATE_FILE = '/workspace/cache/capability-budget-state.json';
-const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
-const TOOL_PROGRESS_EMIT_MS = 15_000;
-const GENERAL_PROGRESS_DEDUPE_MS = 5_000;
 const SDK_PROCESS_ENV_KEYS = [
   'ASSISTANT_NAME',
   'CLAUDE_CODE_OAUTH_TOKEN',
@@ -90,65 +101,6 @@ const SDK_PROCESS_ENV_KEYS = [
   'GIT_SSL_CAINFO',
   'NODE_TLS_REJECT_UNAUTHORIZED',
 ] as const;
-const MAIN_DELEGATE_POLICY = `Main brain / lobe policy:
-- You are one brain identity operating multiple lobes.
-- Delegation means lobe cloning, not autonomous handoff.
-- Each lobe gets a tightly-scoped objective with acceptance criteria and reports back for integration.
-- MAIN brain stays user-responsive while lobes execute.
-- For multi-step or long-running execution, launch lobes via mcp__nanoclaw__delegate_codex, mcp__nanoclaw__delegate_gemini, or mcp__nanoclaw__delegate_ollama.
-- Lobe outputs are intermediate cognition. Collapse and integrate results back into one coherent MAIN response.
-- Own final quality: verify lobe outputs, correct drift, and take responsibility for final results.
-- Keep lobe control explicit: use delegate_list/delegate_status/delegate_cancel/delegate_amend to monitor and correct active runs.
-- If user asks "what are you doing" during active work, provide concrete state (completed, running, next) immediately.
-- Your final response text is delivered to the user automatically by the host.`;
-
-type CapabilityState = {
-  budgets: Record<string, number>;
-  used: Record<string, number>;
-};
-
-function capabilityKey(provider: string, model: string): string {
-  return `${provider.trim().toLowerCase()}:${model.trim()}`;
-}
-
-function estimateTokens(text: string): number {
-  const normalized = (text || '').trim();
-  if (!normalized) return 0;
-  return Math.max(1, Math.ceil(normalized.length / 4));
-}
-
-function loadCapabilityState(): CapabilityState {
-  try {
-    if (!fs.existsSync(CAPABILITY_STATE_FILE)) {
-      return { budgets: {}, used: {} };
-    }
-    const parsed = JSON.parse(
-      fs.readFileSync(CAPABILITY_STATE_FILE, 'utf-8'),
-    ) as Partial<CapabilityState>;
-    return {
-      budgets: parsed.budgets || {},
-      used: parsed.used || {},
-    };
-  } catch {
-    return { budgets: {}, used: {} };
-  }
-}
-
-function saveCapabilityState(state: CapabilityState): void {
-  fs.mkdirSync(path.dirname(CAPABILITY_STATE_FILE), { recursive: true });
-  const tmp = `${CAPABILITY_STATE_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-  fs.renameSync(tmp, CAPABILITY_STATE_FILE);
-}
-
-function recordCapabilityUsage(provider: string, model: string, tokens: number): void {
-  if (!model || tokens <= 0) return;
-  const key = capabilityKey(provider, model);
-  const state = loadCapabilityState();
-  state.used[key] = (state.used[key] || 0) + tokens;
-  saveCapabilityState(state);
-}
-
 const DEFAULT_ALLOWED_TOOLS = [
   'Bash',
   'Read',
@@ -173,60 +125,6 @@ const MAIN_ALLOWED_TOOLS = DEFAULT_ALLOWED_TOOLS;
 
 function getAllowedTools(isMainGroup: boolean): readonly string[] {
   return isMainGroup ? MAIN_ALLOWED_TOOLS : DEFAULT_ALLOWED_TOOLS;
-}
-
-function firstSet(...values: Array<string | undefined>): string | undefined {
-  for (const v of values) {
-    const s = v?.trim();
-    if (s) return s;
-  }
-  return undefined;
-}
-
-function getRequestedMainModel(env: Record<string, string | undefined>): string | undefined {
-  return firstSet(env[MAIN_MODEL_ENV_KEY]);
-}
-
-function claudeModelFamily(model: string): 'opus' | 'sonnet' | 'haiku' | 'unknown' {
-  const normalized = model.trim().toLowerCase();
-  if (normalized.includes('opus')) return 'opus';
-  if (normalized.includes('sonnet')) return 'sonnet';
-  if (normalized.includes('haiku')) return 'haiku';
-  return 'unknown';
-}
-
-function modelMatchesRequest(requested: string, actual: string): boolean {
-  const req = requested.trim().toLowerCase();
-  const act = actual.trim().toLowerCase();
-  if (!req || !act) return false;
-  if (req === act) return true;
-
-  // Allow family aliases (opus/sonnet/haiku) to match concrete dated models.
-  const reqFamily = claudeModelFamily(req);
-  const actFamily = claudeModelFamily(act);
-  if (reqFamily !== 'unknown' && actFamily !== 'unknown' && reqFamily === actFamily) {
-    return true;
-  }
-
-  return false;
-}
-
-function isOllamaAnthropicBaseUrl(baseUrl: string | undefined): boolean {
-  const trimmed = baseUrl?.trim();
-  if (!trimmed) return false;
-
-  const normalized = trimmed.toLowerCase();
-  if (normalized.includes('ollama')) return true;
-
-  try {
-    const parsed = new URL(trimmed);
-    const port =
-      parsed.port ||
-      (parsed.protocol === 'https:' ? '443' : parsed.protocol === 'http:' ? '80' : '');
-    return port === '11434';
-  } catch {
-    return false;
-  }
 }
 
 function prependToPath(currentPath: string | undefined, prefix: string): string {
@@ -388,44 +286,6 @@ function createPreCompactHook(): HookCallback {
   };
 }
 
-// Secrets to strip from Bash tool subprocess environments.
-// These are needed by claude-code for API auth but should never
-// be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
-const SANITIZE_PREFIX = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
-
-function createToolProgressHook(emitFn: (text: string) => void): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const postInput = input as PostToolUseHookInput;
-    const formatted = formatToolCallWithOutput(
-      postInput.tool_name,
-      postInput.tool_input,
-      postInput.tool_response,
-    );
-    emitFn(formatted);
-    return {};
-  };
-}
-
-const BLOCKED_TOOLS = new Set(['SendMessage', 'TeamCreate', 'TeamDelete']);
-
-function createBlockBuiltinToolsHook(): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const preInput = input as PreToolUseHookInput;
-    const toolName = preInput.tool_name;
-    if (BLOCKED_TOOLS.has(toolName)) {
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          decision: 'block',
-          reason: `${toolName} is disabled. Use mcp__nanoclaw__send_message with the recipient parameter instead.`,
-        },
-      };
-    }
-    return {};
-  };
-}
-
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preInput = input as PreToolUseHookInput;
@@ -486,111 +346,6 @@ function parseTranscript(content: string): ParsedMessage[] {
   }
 
   return messages;
-}
-
-function extractAssistantText(message: unknown): string {
-  if (!message || typeof message !== 'object') return '';
-
-  const record = message as Record<string, unknown>;
-  const fromEnvelope = record.message;
-  const payload =
-    fromEnvelope && typeof fromEnvelope === 'object'
-      ? (fromEnvelope as Record<string, unknown>).content
-      : record.content;
-
-  if (typeof payload === 'string') {
-    return payload.trim();
-  }
-
-  if (!Array.isArray(payload)) return '';
-
-  const parts: string[] = [];
-  for (const item of payload) {
-    if (!item || typeof item !== 'object') continue;
-    const chunk = item as Record<string, unknown>;
-    if (chunk.type !== 'text') continue;
-    if (typeof chunk.text === 'string' && chunk.text.trim()) {
-      parts.push(chunk.text.trim());
-    }
-  }
-
-  return parts.join('\n').trim();
-}
-
-function formatToolInput(name: string, input: unknown): string {
-  if (input && typeof input === 'object') {
-    const obj = input as Record<string, unknown>;
-    if (name === 'Bash' && typeof obj.command === 'string') {
-      const cmd = obj.command;
-      return cmd.startsWith(SANITIZE_PREFIX) ? cmd.slice(SANITIZE_PREFIX.length) : cmd;
-    }
-    if (name === 'Read' && typeof obj.file_path === 'string') return obj.file_path;
-    if ((name === 'Edit' || name === 'Write') && typeof obj.file_path === 'string') return obj.file_path;
-    if ((name === 'Grep' || name === 'Glob') && typeof obj.pattern === 'string') return obj.pattern;
-    if (name === 'WebFetch' && typeof obj.url === 'string') return obj.url;
-    if (name === 'WebSearch' && typeof obj.query === 'string') return obj.query;
-    if (name === 'Task' && typeof obj.prompt === 'string') return obj.prompt;
-    return expandMultilineJson(JSON.stringify(input, null, 2));
-  }
-  return String(input || '');
-}
-
-function formatToolResponse(response: unknown): string {
-  if (typeof response === 'string') return response;
-  if (response && typeof response === 'object') return expandMultilineJson(JSON.stringify(response, null, 2));
-  return String(response || '');
-}
-
-/** Expand escaped newlines in JSON string values into real newlines for readability. */
-function expandMultilineJson(json: string): string {
-  return json.replace(/"((?:[^"\\]|\\.)*)"/g, (_match, inner: string) => {
-    if (!inner.includes('\\n')) return _match;
-    return '"' + inner.replace(/\\n/g, '\n') + '"';
-  });
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function describeToolCall(name: string, input: unknown): string {
-  if (!input || typeof input !== 'object') return name;
-  const obj = input as Record<string, unknown>;
-
-  // Tools with an explicit description field
-  if (typeof obj.description === 'string' && obj.description.trim()) {
-    return `${name} - ${obj.description.trim()}`;
-  }
-
-  // Derive from input for other tools
-  if (typeof obj.file_path === 'string') {
-    const basename = obj.file_path.split('/').pop() || obj.file_path;
-    return `${name} - ${basename}`;
-  }
-  if (typeof obj.pattern === 'string') return `${name} - ${obj.pattern}`;
-  if (typeof obj.query === 'string') return `${name} - ${obj.query}`;
-  if (typeof obj.url === 'string') {
-    try { return `${name} - ${new URL(obj.url).hostname}`; } catch {}
-  }
-  if (typeof obj.prompt === 'string') {
-    const short = obj.prompt.replace(/\s+/g, ' ').trim().slice(0, 60);
-    return `${name} - ${short}`;
-  }
-  if (typeof obj.command === 'string') {
-    let cmd = obj.command;
-    if (cmd.startsWith(SANITIZE_PREFIX)) cmd = cmd.slice(SANITIZE_PREFIX.length);
-    const short = cmd.replace(/\s+/g, ' ').trim().slice(0, 60);
-    return `${name} - ${short}`;
-  }
-  if (typeof obj.skill === 'string') return `${name} - ${obj.skill}`;
-  return name;
-}
-
-function formatToolCallWithOutput(name: string, input: unknown, response: unknown): string {
-  const label = escapeHtml(describeToolCall(name, input));
-  const inputText = escapeHtml(formatToolInput(name, input));
-  const outputText = escapeHtml(formatToolResponse(response));
-  return `<details><summary><code>🔧 ${label}</code></summary><b>Input:</b><pre><code>${inputText}</code></pre><b>Output:</b><pre><code>${outputText}</code></pre></details>`;
 }
 
 function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {

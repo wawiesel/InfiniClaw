@@ -31,6 +31,9 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  // [InfiniClaw] hooks for extension points
+  private preCloseHook: ((groupJid: string, inputDir: string) => void) | null = null;
+  private shutdownHook: (() => Promise<void>) | null = null;
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -51,6 +54,24 @@ export class GroupQueue {
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
+  }
+
+  // [InfiniClaw] hook setters
+  setPreCloseHook(fn: (groupJid: string, inputDir: string) => void): void {
+    this.preCloseHook = fn;
+  }
+
+  setShutdownHook(fn: () => Promise<void>): void {
+    this.shutdownHook = fn;
+  }
+
+  /** Returns JIDs of all groups with active containers. */
+  getActiveGroupJids(): string[] {
+    const jids: string[] = [];
+    for (const [jid, state] of this.groups) {
+      if (state.active) jids.push(jid);
+    }
+    return jids;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -151,16 +172,8 @@ export class GroupQueue {
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
-      // Inject a memory-save prompt before close so the agent can persist learnings.
-      // File sorts before _close alphabetically (0 < _).
-      const saveFile = path.join(inputDir, `0-memory-save.json`);
-      const saveMsg = JSON.stringify({
-        type: 'message',
-        text: '[System] Session ending. If you learned anything important this session, save it to memory now. Be concise — only record genuinely new insights.',
-      });
-      const tmpSave = `${saveFile}.tmp`;
-      fs.writeFileSync(tmpSave, saveMsg);
-      fs.renameSync(tmpSave, saveFile);
+      // [InfiniClaw] pre-close hook (e.g. memory save prompt)
+      if (this.preCloseHook) this.preCloseHook(groupJid, inputDir);
       fs.writeFileSync(path.join(inputDir, '_close'), '');
     } catch {
       // ignore
@@ -320,25 +333,14 @@ export class GroupQueue {
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // Signal active containers to save memory and close via IPC
-    const activeContainers: string[] = [];
-    for (const [jid, state] of this.groups) {
-      if (state.active && state.groupFolder) {
-        try { this.closeStdin(jid); } catch { /* best effort */ }
-      }
-      if (state.process && !state.process.killed && state.containerName) {
-        activeContainers.push(state.containerName);
-      }
-    }
-
-    // Wait for containers to process memory-save prompt before shutdown
-    if (activeContainers.length > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 15_000));
+    // [InfiniClaw] graceful shutdown hook (memory save, container signaling, wait)
+    if (this.shutdownHook) {
+      await this.shutdownHook();
     }
 
     logger.info(
-      { activeCount: this.activeCount, signaled: activeContainers },
-      'GroupQueue shutdown complete (remaining containers cleaned on next startup)',
+      { activeCount: this.activeCount },
+      'GroupQueue shutdown complete',
     );
   }
 }

@@ -7,7 +7,17 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { isOllamaBaseUrl, parseEnvLine } from './env-utils.js';
+import { parseEnvLine } from './env-utils.js';
+import {
+  buildBotDirectory,
+  buildInfiniClawMounts,
+  getPersonaPortPublish,
+  readGroupMcpServers,
+} from './infiniclaw/container-mounts.js';
+import {
+  normalizeProviderSecrets,
+  mapCertPathSecretsToContainer,
+} from './infiniclaw/container-secrets.js';
 import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 
 import {
@@ -23,49 +33,11 @@ import {
   ASSISTANT_NAME,
 } from './config.js';
 import { logger } from './logger.js';
-import { validateAdditionalMounts } from './mount-security.js';
-import { loadSkillsToSession } from './skill-sync.js';
 import { RegisteredGroup } from './types.js';
-
-/** Build a directory of all bots: name → main room JID. */
-function buildBotDirectory(): Record<string, string> {
-  const rootDir = process.env.INFINICLAW_ROOT;
-  if (!rootDir) return {};
-  const profilesDir = path.join(rootDir, 'bots', 'profiles');
-  if (!fs.existsSync(profilesDir)) return {};
-  const directory: Record<string, string> = {};
-  try {
-    for (const bot of fs.readdirSync(profilesDir)) {
-      const envFile = path.join(profilesDir, bot, 'env');
-      if (!fs.existsSync(envFile)) continue;
-      const lines = fs.readFileSync(envFile, 'utf-8').split('\n');
-      let name = '';
-      let roomJid = '';
-      for (const line of lines) {
-        const parsed = parseEnvLine(line);
-        if (!parsed) continue;
-        if (parsed[0] === 'ASSISTANT_NAME') name = parsed[1];
-        if (parsed[0] === 'LOCAL_MIRROR_MATRIX_JID') roomJid = parsed[1];
-      }
-      if (name && roomJid) directory[name] = roomJid;
-    }
-  } catch { /* best effort */ }
-  return directory;
-}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
-function getHomeDir(): string {
-  const home = process.env.HOME || os.homedir();
-  if (!home) {
-    throw new Error(
-      'Unable to determine home directory: HOME environment variable is not set and os.homedir() returned empty',
-    );
-  }
-  return home;
-}
 
 export interface ContainerInput {
   prompt: string;
@@ -124,16 +96,6 @@ const ALLOWED_ENV_VARS = [
   'GIT_SSL_CAINFO',
   'NODE_TLS_REJECT_UNAUTHORIZED',
 ];
-const CERT_PATH_ENV_VARS = [
-  'SSL_CERT_FILE',
-  'NODE_EXTRA_CA_CERTS',
-  'REQUESTS_CA_BUNDLE',
-  'CURL_CA_BUNDLE',
-  'GIT_SSL_CAINFO',
-] as const;
-
-// parseEnvLine imported from env-utils.ts
-
 function collectContainerSecrets(projectRoot: string): Record<string, string> {
   const secrets: Record<string, string> = {};
 
@@ -163,44 +125,6 @@ function collectContainerSecrets(projectRoot: string): Record<string, string> {
   return secrets;
 }
 
-
-function normalizeProviderSecrets(
-  secrets: Record<string, string>,
-): Record<string, string> {
-  const normalized = { ...secrets };
-  if (!isOllamaBaseUrl(normalized.ANTHROPIC_BASE_URL)) {
-    return normalized;
-  }
-
-  // In Ollama mode, force Claude SDK to use Anthropic-compatible endpoint auth.
-  // Passing account OAuth here can cause SDK to ignore base URL routing.
-  delete normalized.CLAUDE_CODE_OAUTH_TOKEN;
-  delete normalized.ANTHROPIC_API_KEY;
-
-  const explicitModel = normalized.ANTHROPIC_MODEL?.trim();
-  if (explicitModel) {
-    normalized.ANTHROPIC_MODEL = explicitModel;
-    // Force all SDK model slots to the same ollama model so haiku/sonnet
-    // fallbacks never try models ollama doesn't have.
-    normalized.ANTHROPIC_SMALL_FAST_MODEL = explicitModel;
-    normalized.ANTHROPIC_DEFAULT_SONNET_MODEL = explicitModel;
-  }
-
-  if (!normalized.ANTHROPIC_AUTH_TOKEN?.trim()) {
-    normalized.ANTHROPIC_AUTH_TOKEN = 'ollama';
-  }
-
-  // SDK runtime knobs for local models:
-  // - Skip token counting API (ollama has no /v1/messages/count_tokens)
-  // - Cap context window to match local model limits
-  // - Reduce max output tokens so input context has room (32K - 4K = 28K input)
-  normalized.NANOCLAW_SKIP_TOKEN_COUNTING = '1';
-  normalized.NANOCLAW_CONTEXT_WINDOW = '32000';
-  normalized.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '4096';
-
-  return normalized;
-}
-
 function redactSecrets(
   secrets: Record<string, string> | undefined,
 ): Record<string, string> | undefined {
@@ -208,55 +132,6 @@ function redactSecrets(
   return Object.fromEntries(
     Object.keys(secrets).map((k) => [k, '[REDACTED]']),
   );
-}
-
-function mapCertPathSecretsToContainer(
-  secrets: Record<string, string>,
-  mounts: VolumeMount[],
-): Record<string, string> {
-  const mapped = { ...secrets };
-  const certMountRoot = '/workspace/host-certs';
-
-  for (const key of CERT_PATH_ENV_VARS) {
-    const value = mapped[key];
-    if (!value) continue;
-    if (!path.isAbsolute(value) || !fs.existsSync(value)) continue;
-
-    const safeName = path.basename(value).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const containerPath = `${certMountRoot}/${key.toLowerCase()}-${safeName}`;
-
-    if (
-      !mounts.some(
-        (m) => m.hostPath === value && m.containerPath === containerPath,
-      )
-    ) {
-      mounts.push({
-        hostPath: value,
-        containerPath,
-        readonly: true,
-      });
-    }
-
-    mapped[key] = containerPath;
-  }
-
-  // Normalize CA bundle env so Node, Python/requests, curl, and git all see
-  // the same trust anchor even if only one variable is provided by the host.
-  const certBundle =
-    mapped.SSL_CERT_FILE ||
-    mapped.NODE_EXTRA_CA_CERTS ||
-    mapped.REQUESTS_CA_BUNDLE ||
-    mapped.CURL_CA_BUNDLE ||
-    mapped.GIT_SSL_CAINFO;
-  if (certBundle) {
-    if (!mapped.SSL_CERT_FILE) mapped.SSL_CERT_FILE = certBundle;
-    if (!mapped.NODE_EXTRA_CA_CERTS) mapped.NODE_EXTRA_CA_CERTS = certBundle;
-    if (!mapped.REQUESTS_CA_BUNDLE) mapped.REQUESTS_CA_BUNDLE = certBundle;
-    if (!mapped.CURL_CA_BUNDLE) mapped.CURL_CA_BUNDLE = certBundle;
-    if (!mapped.GIT_SSL_CAINFO) mapped.GIT_SSL_CAINFO = certBundle;
-  }
-
-  return mapped;
 }
 
 function quoteEnvValue(value: string): string {
@@ -269,7 +144,6 @@ function buildVolumeMounts(
   normalizedSecrets: Record<string, string>,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const homeDir = getHomeDir();
   const projectRoot = process.cwd();
 
   if (isMain) {
@@ -326,79 +200,11 @@ function buildVolumeMounts(
   settings.enableAllProjectMcpServers = true;
   fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
 
-  // Sync skills: save session → persona (replace), then rebuild session from shared + persona
-  const skillsDst = path.join(groupSessionsDir, 'skills');
-  const rootDir = process.env.INFINICLAW_ROOT;
-  const personaName = process.env.PERSONA_NAME;
-  const sharedSkillsSrc = path.join(process.cwd(), 'container', 'skills');
-
-  // Load persona container config (version-controlled alongside env/skills)
-  let personaConfig: Record<string, unknown> = {};
-  if (rootDir && personaName) {
-    const personaConfigPath = path.join(rootDir, 'bots', 'personas', personaName, 'container-config.json');
-    try {
-      if (fs.existsSync(personaConfigPath)) {
-        personaConfig = JSON.parse(fs.readFileSync(personaConfigPath, 'utf-8'));
-      }
-    } catch (err) {
-      logger.warn({ personaConfigPath, error: err }, 'Failed to load persona container config');
-    }
-  }
-
-  if (rootDir && personaName) {
-    const personaBaseDir = path.join(rootDir, 'bots', 'personas', personaName);
-    const personaSkillsDir = path.join(personaBaseDir, 'skills');
-    loadSkillsToSession(skillsDst, personaSkillsDir, sharedSkillsSrc);
-
-    // Two-way sync .mcp.json: save-back container → persona, then restore persona → container
-    const groupDir = path.join(GROUPS_DIR, group.folder);
-    const containerMcpJson = path.join(groupDir, '.mcp.json');
-    const personaGroupDir = path.join(personaBaseDir, 'groups', group.folder);
-    const personaMcpJson = path.join(personaGroupDir, '.mcp.json');
-    // Save-back: if container has .mcp.json, copy to persona
-    if (fs.existsSync(containerMcpJson)) {
-      fs.mkdirSync(personaGroupDir, { recursive: true });
-      fs.copyFileSync(containerMcpJson, personaMcpJson);
-    }
-    // Restore: if persona has .mcp.json, copy to container
-    if (fs.existsSync(personaMcpJson)) {
-      fs.copyFileSync(personaMcpJson, containerMcpJson);
-    }
-
-    // Mount persona dir writable so bots can edit their own CLAUDE.md (two-way sync)
-    mounts.push({
-      hostPath: personaBaseDir,
-      containerPath: `/workspace/extra/${personaName}-persona`,
-      readonly: false,
-    });
-  }
-
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
     readonly: false,
   });
-
-  // Share host Codex login state with container delegate_codex runs.
-  // This enables `codex` inside the container to reuse the host's auth.json.
-  const hostCodexDir = path.join(homeDir, '.codex');
-  if (fs.existsSync(hostCodexDir)) {
-    mounts.push({
-      hostPath: hostCodexDir,
-      containerPath: '/home/node/.codex',
-      readonly: false,
-    });
-  }
-
-  // Share host Gemini login/config with container delegate_gemini runs.
-  const hostGeminiDir = path.join(homeDir, '.gemini');
-  if (fs.existsSync(hostGeminiDir)) {
-    mounts.push({
-      hostPath: hostGeminiDir,
-      containerPath: '/home/node/.gemini',
-      readonly: false,
-    });
-  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -429,38 +235,16 @@ function buildVolumeMounts(
     });
   }
 
-  // Per-group persistent cache for model/tool downloads (docling, huggingface, pip, etc.).
-  // Keeps heavy artifacts out of mounted user data like /workspace/extra/home/_vault.
-  const cacheDir = path.join(DATA_DIR, 'cache', group.folder);
-  fs.mkdirSync(cacheDir, { recursive: true });
-  mounts.push({
-    hostPath: cacheDir,
-    containerPath: '/workspace/cache',
-    readonly: false,
+  // [InfiniClaw] additional volume mounts (persona, skills, MCP, delegates, cache, etc.)
+  const extraMounts = buildInfiniClawMounts({
+    group,
+    isMain,
+    groupSessionsDir,
+    groupsDir: GROUPS_DIR,
+    dataDir: DATA_DIR,
+    projectRoot,
   });
-
-  // Mount agent-runner source from host — recompiled on container startup.
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
-  mounts.push({
-    hostPath: agentRunnerSrc,
-    containerPath: '/app/src',
-    readonly: true,
-  });
-
-  // Additional mounts: merge persona container-config.json with group DB config.
-  const allAdditionalMounts = [
-    ...(group.containerConfig?.additionalMounts || []),
-    ...((personaConfig.additionalMounts as Array<{hostPath: string; containerPath?: string; readonly?: boolean}>) || []),
-  ];
-  if (allAdditionalMounts.length > 0) {
-    const validatedMounts = validateAdditionalMounts(
-      allAdditionalMounts,
-      group.name,
-      isMain,
-      process.env.PERSONA_NAME,
-    );
-    mounts.push(...validatedMounts);
-  }
+  mounts.push(...extraMounts);
 
   return mounts;
 }
@@ -529,7 +313,7 @@ export async function runContainerAgent(
   const secrets = normalizeProviderSecrets(collectContainerSecrets(projectRoot));
   const mounts = buildVolumeMounts(group, input.isMain, secrets);
   const mappedSecrets = mapCertPathSecretsToContainer(secrets, mounts);
-  // Write bot directory to IPC dir so the MCP server can resolve recipients
+  // [InfiniClaw] Write bot directory to IPC dir so the MCP server can resolve recipients
   const groupIpcDir = path.join(DATA_DIR, 'ipc', input.groupFolder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   try {
@@ -537,17 +321,8 @@ export async function runContainerAgent(
     fs.writeFileSync(path.join(groupIpcDir, 'bot_directory.json'), JSON.stringify(botDir));
   } catch { /* best effort */ }
 
-  // Read .mcp.json from group dir for inline SDK passthrough
-  let mcpServers: Record<string, Record<string, unknown>> | undefined;
-  const mcpJsonPath = path.join(groupDir, '.mcp.json');
-  try {
-    if (fs.existsSync(mcpJsonPath)) {
-      const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8'));
-      if (mcpJson.mcpServers && Object.keys(mcpJson.mcpServers).length > 0) {
-        mcpServers = mcpJson.mcpServers;
-      }
-    }
-  } catch { /* ignore */ }
+  // [InfiniClaw] Read .mcp.json from group dir for inline SDK passthrough
+  const mcpServers = readGroupMcpServers(groupDir);
   const effectiveInput: ContainerInput = {
     ...input,
     ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
@@ -561,16 +336,8 @@ export async function runContainerAgent(
   const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   const containerName = `nanoclaw-${botTag}-${safeName}-${Date.now()}`;
   killExistingContainersForGroup(botTag, safeName);
-  // Read portPublish from persona container-config.json
-  let portPublish: string[] = [];
-  const rootDir = process.env.INFINICLAW_ROOT;
-  const personaName = process.env.PERSONA_NAME;
-  if (rootDir && personaName) {
-    try {
-      const cfg = JSON.parse(fs.readFileSync(path.join(rootDir, 'bots', 'personas', personaName, 'container-config.json'), 'utf-8'));
-      portPublish = (cfg.portPublish as string[] | undefined) || [];
-    } catch { /* ignore */ }
-  }
+  // [InfiniClaw] Read portPublish from persona container-config.json
+  const portPublish = getPersonaPortPublish();
   const containerArgs = buildContainerArgs(mounts, containerName, portPublish);
 
   logger.debug(

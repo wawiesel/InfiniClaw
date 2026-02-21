@@ -1,17 +1,13 @@
-import { execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from './env-utils.js';
-import { stopContainersByPrefix } from './podman-utils.js';
+import { parseEnvLine } from './env-utils.js';
 
 import {
   ASSISTANT_NAME,
   ASSISTANT_ROLE,
   ASSISTANT_TRIGGER,
-  CONTAINER_IMAGE,
   DATA_DIR,
-  GROUPS_DIR,
   HEAP_LIMIT_MB,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
@@ -21,13 +17,10 @@ import {
   MATRIX_RECONNECT_INTERVAL,
   MATRIX_USERNAME,
   LOCAL_CHANNEL_ENABLED,
-  LOCAL_CHAT_JID,
   LOCAL_MIRROR_MATRIX_JID,
   MEMORY_CHECK_INTERVAL,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
-  IGNORE_PATTERNS,
-  IGNORE_SENDERS,
   CAPTAIN_USER_ID,
 } from './config.js';
 import { grantTemporaryMount, revokeMount } from './mount-security.js';
@@ -65,6 +58,33 @@ import { syncPersona } from './service.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+
+// [InfiniClaw] extracted modules
+import {
+  MAIN_PROVIDER,
+  mainLlm,
+  mainSender,
+  defaultSenderForGroup,
+  resolveConfiguredMainModel,
+  normalizeMainLlm,
+  updateMainLlm,
+  setMainLlm,
+  maybeAutoSwitchBrainsOnQuotaError,
+} from './infiniclaw/brain-management.js';
+import {
+  ensureChatActivity,
+  getChatActivity,
+  setObjectiveFromMessages,
+  markRunStarted,
+  markRunEnded,
+  markProgress,
+  markCompletion,
+  markError,
+  buildMainMissionContext,
+} from './infiniclaw/chat-activity.js';
+import { shouldIgnoreMessage } from './infiniclaw/message-filtering.js';
+import { appendConversationLog } from './infiniclaw/conversation-log.js';
+import { ensureContainerSystemRunning } from './infiniclaw/podman-bootstrap.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -167,286 +187,6 @@ function bumpWorkingIndicator(chatJid: string, threadId?: string): void {
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
 const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
-const AUTO_BRAIN_SWITCH_COOLDOWN_MS = 10 * 60 * 1000;
-const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');
-const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
-let lastAutoBrainSwitchAt = 0;
-
-interface ChatActivity {
-  runStartedAt?: number;
-  currentObjective?: string;
-  currentObjectiveAt?: number;
-  recentUserContext?: string[];
-  lastProgress?: string;
-  lastProgressAt?: number;
-  lastCompletion?: string;
-  lastCompletionAt?: number;
-  lastError?: string;
-  lastErrorAt?: number;
-}
-
-const chatActivity: Record<string, ChatActivity> = {};
-const CHAT_ACTIVITY_STATE_PREFIX = 'chat_activity:';
-
-function firstSet(...values: Array<string | undefined>): string | undefined {
-  for (const v of values) {
-    const s = v?.trim();
-    if (s) return s;
-  }
-  return undefined;
-}
-
-// parseEnvLine imported from env-utils.ts
-
-function loadProjectEnv(): Record<string, string> {
-  const values: Record<string, string> = {};
-  if (!fs.existsSync(PROJECT_ENV_PATH)) return values;
-
-  try {
-    const envContent = fs.readFileSync(PROJECT_ENV_PATH, 'utf-8');
-    for (const line of envContent.split('\n')) {
-      const parsed = parseEnvLine(line);
-      if (!parsed) continue;
-      const [key, value] = parsed;
-      values[key] = value;
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Failed to read project .env');
-  }
-
-  return values;
-}
-
-const PROJECT_ENV = loadProjectEnv();
-
-function getConfiguredEnv(key: string): string | undefined {
-  return firstSet(process.env[key], PROJECT_ENV[key]);
-}
-
-function isMainConfiguredForOllama(): boolean {
-  return isOllamaBaseUrl(getConfiguredEnv('ANTHROPIC_BASE_URL'));
-}
-
-function resolveConfiguredMainModel(): string | undefined {
-  return getConfiguredEnv(MAIN_MODEL_ENV_KEY)?.trim() || undefined;
-}
-
-function parseNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
-function getClaudeModelFromStatsCache(): string | undefined {
-  const statsPath = path.join(
-    DATA_DIR,
-    'sessions',
-    MAIN_GROUP_FOLDER,
-    '.claude',
-    'stats-cache.json',
-  );
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
-  } catch {
-    return undefined;
-  }
-
-  if (!parsed || typeof parsed !== 'object') return undefined;
-
-  // Prefer modelUsage since it summarizes overall token usage by model.
-  const modelUsage = (parsed as { modelUsage?: unknown }).modelUsage;
-  if (modelUsage && typeof modelUsage === 'object') {
-    let bestModel: string | undefined;
-    let bestScore = -1;
-    for (const [model, usage] of Object.entries(modelUsage)) {
-      if (!model.trim() || !usage || typeof usage !== 'object') continue;
-      const metrics = usage as Record<string, unknown>;
-      const score =
-        parseNumber(metrics.inputTokens) +
-        parseNumber(metrics.outputTokens) +
-        parseNumber(metrics.cacheReadInputTokens) +
-        parseNumber(metrics.cacheCreationInputTokens);
-      if (score > bestScore) {
-        bestScore = score;
-        bestModel = model.trim();
-      }
-    }
-    if (bestModel) return bestModel;
-  }
-
-  // Fallback: inspect most recent daily tokens by model.
-  const dailyModelTokens = (parsed as { dailyModelTokens?: unknown }).dailyModelTokens;
-  if (Array.isArray(dailyModelTokens)) {
-    for (let i = dailyModelTokens.length - 1; i >= 0; i -= 1) {
-      const dayEntry = dailyModelTokens[i];
-      if (!dayEntry || typeof dayEntry !== 'object') continue;
-      const tokensByModel = (dayEntry as { tokensByModel?: unknown }).tokensByModel;
-      if (!tokensByModel || typeof tokensByModel !== 'object') continue;
-
-      let bestModel: string | undefined;
-      let bestTokens = -1;
-      for (const [model, tokens] of Object.entries(tokensByModel)) {
-        const tokenCount = parseNumber(tokens);
-        if (model.trim() && tokenCount > bestTokens) {
-          bestTokens = tokenCount;
-          bestModel = model.trim();
-        }
-      }
-      if (bestModel) return bestModel;
-    }
-  }
-
-  return undefined;
-}
-
-function resolveMainProvider(): 'claude' | 'ollama' {
-  if (isMainConfiguredForOllama()) {
-    return 'ollama';
-  }
-  return 'claude';
-}
-
-function isGenericClaudeModel(model: string): boolean {
-  const normalized = model.trim().toLowerCase();
-  if (!normalized) return true;
-
-  if (
-    normalized === 'default' ||
-    normalized === 'opus' ||
-    normalized === 'sonnet' ||
-    normalized === 'haiku' ||
-    normalized === 'claude-opus' ||
-    normalized === 'claude-sonnet' ||
-    normalized === 'claude-haiku'
-  ) {
-    return true;
-  }
-
-  // Treat family aliases like claude-opus, claude-opus-latest as non-specific.
-  // Any model string containing digits is considered specific (e.g. claude-opus-4-6).
-  if (/^(claude-)?(opus|sonnet|haiku)(-[a-z._-]+)?$/i.test(normalized) && !/\d/.test(normalized)) {
-    return true;
-  }
-
-  return false;
-}
-
-function normalizeMainLlm(model: string | undefined): string | undefined {
-  const trimmed = model?.trim();
-  if (!trimmed) return undefined;
-
-  if (resolveMainProvider() !== 'claude') {
-    return trimmed;
-  }
-
-  if (!isGenericClaudeModel(trimmed)) {
-    return trimmed;
-  }
-
-  // Try to upgrade generic aliases to a concrete dated model if available.
-  const fromStats = getClaudeModelFromStatsCache()?.trim();
-  if (fromStats && !isGenericClaudeModel(fromStats)) {
-    return fromStats;
-  }
-
-  return undefined;
-}
-
-// upsertEnvLine imported from env-utils.ts
-
-function applyOllamaFallbackToProfile(envFile: string): void {
-  upsertEnvLine(envFile, 'BRAIN_MODEL', 'devstral-small-2-fast:latest');
-  upsertEnvLine(
-    envFile,
-    'BRAIN_BASE_URL',
-    'http://host.containers.internal:11434',
-  );
-  upsertEnvLine(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
-  upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
-  upsertEnvLine(envFile, 'BRAIN_OAUTH_TOKEN', '');
-}
-
-function isAnthropicQuotaError(text: string): boolean {
-  const lower = text.toLowerCase();
-  return (
-    lower.includes('insufficient_quota') ||
-    lower.includes('insufficient quota') ||
-    lower.includes('credit balance') ||
-    lower.includes('credits') ||
-    (lower.includes('anthropic') && lower.includes('rate limit'))
-  );
-}
-
-async function maybeAutoSwitchBrainsOnQuotaError(
-  rawError: string,
-  chatJid: string,
-): Promise<void> {
-  if (!['engineer'].includes(ASSISTANT_NAME.trim().toLowerCase())) return;
-  if (!isAnthropicQuotaError(rawError)) return;
-  if (Date.now() - lastAutoBrainSwitchAt < AUTO_BRAIN_SWITCH_COOLDOWN_MS) return;
-
-  const root = process.env.INFINICLAW_ROOT?.trim() || path.resolve(process.cwd(), '..', '..', '..');
-  const engineerEnv = path.join(root, 'bots', 'profiles', 'engineer', 'env');
-  const commanderEnv = path.join(root, 'bots', 'profiles', 'commander', 'env');
-  if (!fs.existsSync(engineerEnv) || !fs.existsSync(commanderEnv)) return;
-
-  try {
-    applyOllamaFallbackToProfile(engineerEnv);
-    applyOllamaFallbackToProfile(commanderEnv);
-    lastAutoBrainSwitchAt = Date.now();
-    const ch = findChannel(channels, chatJid);
-    if (ch) {
-      await ch.sendMessage(
-        chatJid,
-        formatMainMessage(
-          'Anthropic credits/quotas look exhausted. I switched engineer and commander brain profiles to ollama fallback. Restart both bots to apply.',
-        ),
-      );
-    }
-    logger.warn('Auto-switched bot brain profiles to ollama fallback due to quota error');
-  } catch (err) {
-    logger.error({ err }, 'Failed automatic ollama fallback switch');
-  }
-}
-function resolveMainLlm(): string {
-  const configuredModel = normalizeMainLlm(resolveConfiguredMainModel());
-  if (configuredModel) return configuredModel;
-
-  if (resolveMainProvider() === 'claude') {
-    const statsModel = normalizeMainLlm(getClaudeModelFromStatsCache());
-    if (statsModel) return statsModel;
-    return 'unknown-model';
-  }
-
-  return 'unknown-model';
-}
-const MAIN_PROVIDER = resolveMainProvider();
-let mainLlm = resolveMainLlm();
-
-function updateMainLlm(model?: string): void {
-  const normalized = normalizeMainLlm(model);
-  if (!normalized || normalized === mainLlm) return;
-  mainLlm = normalized;
-  setRouterState('main_model', mainLlm);
-  logger.info({ mainModel: mainLlm }, 'Updated MAIN model label');
-}
-
-function mainSender(): string {
-  const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
-  const role = ASSISTANT_ROLE;
-  return `<font color="#888888">🧠 ${role} <em>(${providerName}/${mainLlm})</em></font>`;
-}
-
-function defaultSenderForGroup(sourceGroup: string): string {
-  if (sourceGroup === MAIN_GROUP_FOLDER) {
-    return mainSender();
-  }
-
-  const groupName = Object.values(registeredGroups).find(
-    (g) => g.folder === sourceGroup,
-  )?.name;
-  return groupName?.trim() || sourceGroup;
-}
 
 function ensureGroupForIncomingChat(chatJid: string): void {
   // Only log metadata for known groups — no auto-registration
@@ -482,183 +222,6 @@ function storeOutgoing(chatJid: string, text: string, threadId?: string): void {
     thread_id: threadId,
   });
 }
-
-function chatActivityStateKey(chatJid: string): string {
-  return `${CHAT_ACTIVITY_STATE_PREFIX}${encodeURIComponent(chatJid)}`;
-}
-
-function sanitizeActivity(raw: unknown): ChatActivity {
-  if (!raw || typeof raw !== 'object') return {};
-  const record = raw as Record<string, unknown>;
-  const out: ChatActivity = {};
-  if (typeof record.runStartedAt === 'number') out.runStartedAt = record.runStartedAt;
-  if (typeof record.currentObjective === 'string') out.currentObjective = record.currentObjective;
-  if (typeof record.currentObjectiveAt === 'number') out.currentObjectiveAt = record.currentObjectiveAt;
-  if (typeof record.lastProgress === 'string') out.lastProgress = record.lastProgress;
-  if (typeof record.lastProgressAt === 'number') out.lastProgressAt = record.lastProgressAt;
-  if (typeof record.lastCompletion === 'string') out.lastCompletion = record.lastCompletion;
-  if (typeof record.lastCompletionAt === 'number') out.lastCompletionAt = record.lastCompletionAt;
-  if (typeof record.lastError === 'string') out.lastError = record.lastError;
-  if (typeof record.lastErrorAt === 'number') out.lastErrorAt = record.lastErrorAt;
-  if (Array.isArray(record.recentUserContext)) {
-    out.recentUserContext = record.recentUserContext
-      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-      .map((v) => v.trim())
-      .slice(-6);
-  }
-  return out;
-}
-
-function persistChatActivity(chatJid: string): void {
-  const activity = chatActivity[chatJid];
-  if (!activity) return;
-  try {
-    setRouterState(chatActivityStateKey(chatJid), JSON.stringify(activity));
-  } catch (err) {
-    logger.warn({ err, chatJid }, 'Failed to persist chat activity');
-  }
-}
-
-function ensureChatActivity(chatJid: string): ChatActivity {
-  if (!chatActivity[chatJid]) {
-    const persisted = getRouterState(chatActivityStateKey(chatJid));
-    if (persisted) {
-      try {
-        chatActivity[chatJid] = sanitizeActivity(JSON.parse(persisted));
-      } catch {
-        chatActivity[chatJid] = {};
-      }
-    } else {
-      chatActivity[chatJid] = {};
-    }
-  }
-  return chatActivity[chatJid];
-}
-
-/** Returns true if the message is addressed to another bot and should be ignored. */
-function isIgnoredTrigger(text: string): boolean {
-  if (IGNORE_PATTERNS.length === 0) return false;
-  const trimmed = text.trim();
-  return IGNORE_PATTERNS.some((p) => p.test(trimmed));
-}
-
-/** Returns true if the message should be ignored (other bot output). */
-function shouldIgnoreMessage(msg: NewMessage): boolean {
-  if (IGNORE_SENDERS.size > 0 && IGNORE_SENDERS.has(msg.sender)) {
-    return true;
-  }
-  if (isIgnoredTrigger(msg.content.trim())) {
-    return true;
-  }
-  return false;
-}
-
-function compactMessage(text: string, maxLen = 220): string | undefined {
-  let compact = text.trim();
-  if (!compact) return undefined;
-  if (TRIGGER_PATTERN.test(compact)) {
-    compact = compact.replace(TRIGGER_PATTERN, '').trim();
-  }
-  compact = compact.replace(/\s+/g, ' ').trim();
-  if (!compact) return undefined;
-  return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact;
-}
-
-function setCurrentObjective(chatJid: string, objective: string): void {
-  const compact = compactMessage(objective, 180);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.currentObjective = compact;
-  activity.currentObjectiveAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function recordUserContext(chatJid: string, text: string): void {
-  const compact = compactMessage(text, 220);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  const existing = activity.recentUserContext || [];
-  const next = [...existing.filter((v) => v !== compact), compact].slice(-6);
-  activity.recentUserContext = next;
-  persistChatActivity(chatJid);
-}
-
-function setObjectiveFromMessages(chatJid: string, messages: NewMessage[]): void {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const content = messages[i].content.trim();
-    if (!content) continue;
-    recordUserContext(chatJid, content);
-    setCurrentObjective(chatJid, content);
-    return;
-  }
-}
-
-function markRunStarted(chatJid: string): void {
-  const activity = ensureChatActivity(chatJid);
-  activity.runStartedAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function markRunEnded(chatJid: string): void {
-  const activity = ensureChatActivity(chatJid);
-  activity.runStartedAt = undefined;
-  persistChatActivity(chatJid);
-}
-
-function markProgress(chatJid: string, progress: string): void {
-  const compact = compactMessage(progress);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.lastProgress = compact;
-  activity.lastProgressAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function markCompletion(chatJid: string, completion: string): void {
-  const compact = compactMessage(completion);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.lastCompletion = compact;
-  activity.lastCompletionAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function markError(chatJid: string, error: string): void {
-  const compact = compactMessage(error);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.lastError = compact;
-  activity.lastErrorAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function buildMainMissionContext(chatJid: string): string | undefined {
-  const activity = ensureChatActivity(chatJid);
-  const lines: string[] = [];
-
-  if (activity.currentObjective) {
-    lines.push(`Current objective: ${activity.currentObjective}`);
-  }
-  if (activity.recentUserContext && activity.recentUserContext.length > 0) {
-    lines.push('Recent user context:');
-    for (const item of activity.recentUserContext.slice(-4)) {
-      lines.push(`- ${item}`);
-    }
-  }
-  if (activity.lastCompletion) {
-    lines.push(`Last completion: ${activity.lastCompletion}`);
-  }
-  if (activity.lastError) {
-    lines.push(`Last error: ${activity.lastError}`);
-  }
-
-  if (lines.length === 0) return undefined;
-  return [
-    '[Persistent mission context - carry this forward unless user changes priorities]',
-    ...lines,
-  ].join('\n');
-}
-
 
 /**
  * Sync group .md files + skills back to personas/ directory for version control.
@@ -697,7 +260,7 @@ function loadState(): void {
   if (configuredMainModel) {
     const pinnedChanged =
       storedMainModel && configuredMainModel !== storedMainModel;
-    mainLlm = configuredMainModel;
+    setMainLlm(configuredMainModel);
     setRouterState('main_model', mainLlm);
 
     // If model pin changed, drop the main session so Claude initializes fresh
@@ -714,7 +277,7 @@ function loadState(): void {
       );
     }
   } else if (storedMainModel) {
-    mainLlm = storedMainModel;
+    setMainLlm(storedMainModel);
   }
   logger.info(
     { groupCount: Object.keys(registeredGroups).length, mainModel: mainLlm },
@@ -773,53 +336,6 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
 /** @internal - exported for testing */
 export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
   registeredGroups = groups;
-}
-
-/**
- * Append a brief entry to the group's conversation log.
- * Used for cross-channel context between WhatsApp and terminal sessions.
- */
-function appendConversationLog(
-  groupFolder: string,
-  userMessages: NewMessage[],
-  agentResponses: string[],
-  channelName = 'matrix',
-): void {
-  if (userMessages.length === 0 && agentResponses.length === 0) return;
-
-  const logDir = path.join(GROUPS_DIR, groupFolder, 'conversations');
-  const logPath = path.join(logDir, 'log.md');
-  fs.mkdirSync(logDir, { recursive: true });
-
-  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-  const lines = ['---', `${timestamp} [${channelName}]`];
-
-  for (const msg of userMessages) {
-    const content = msg.content.length > 200
-      ? msg.content.slice(0, 200) + '...'
-      : msg.content;
-    lines.push(`${msg.sender_name}: ${content}`);
-  }
-
-  for (const response of agentResponses) {
-    const content = response.length > 200
-      ? response.slice(0, 200) + '...'
-      : response;
-    lines.push(`${ASSISTANT_NAME}: ${content}`);
-  }
-
-  fs.appendFileSync(logPath, lines.join('\n') + '\n');
-
-  // Trim to last 100 entries
-  try {
-    const full = fs.readFileSync(logPath, 'utf-8');
-    const entries = full.split(/(?=^---$)/m).filter((e) => e.trim());
-    if (entries.length > 100) {
-      fs.writeFileSync(logPath, entries.slice(-100).join(''));
-    }
-  } catch {
-    // Non-critical — log continues to grow until next successful trim
-  }
 }
 
 /**
@@ -1036,7 +552,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const rawError =
       runResult.error ||
       (hadError ? 'agent returned an error status' : 'unknown error');
-    await maybeAutoSwitchBrainsOnQuotaError(rawError, chatJid);
+    await maybeAutoSwitchBrainsOnQuotaError(rawError, chatJid, async (jid, text) => {
+      const ch = findChannel(channels, jid);
+      if (ch) await ch.sendMessage(jid, text);
+    });
     const compactError = rawError.replace(/\s+/g, ' ').slice(0, 1000);
     markError(chatJid, compactError);
 
@@ -1332,187 +851,6 @@ function injectResumeMessage(): void {
   }
 }
 
-type PodmanMachineListEntry = {
-  Name: string;
-  Default?: boolean;
-  Running?: boolean;
-  Starting?: boolean;
-};
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function canReachPodmanApi(): boolean {
-  try {
-    execSync('podman info', { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function podmanCommandSucceeded(args: string[]): boolean {
-  const result = spawnSync('podman', args, { stdio: 'ignore' });
-  return result.status === 0;
-}
-
-function ensurePodmanImageAvailable(): void {
-  if (podmanCommandSucceeded(['image', 'exists', CONTAINER_IMAGE])) {
-    logger.debug({ image: CONTAINER_IMAGE }, 'Podman image available');
-    return;
-  }
-
-  const dockerfilePath = path.join(process.cwd(), 'container', 'Dockerfile');
-  const buildContext = path.join(process.cwd(), 'container');
-  if (!fs.existsSync(dockerfilePath) || !fs.existsSync(buildContext)) {
-    throw new Error(
-      `Container image ${CONTAINER_IMAGE} missing and build context not found`,
-    );
-  }
-
-  logger.warn({ image: CONTAINER_IMAGE }, 'Podman image missing; rebuilding');
-  const buildResult = spawnSync(
-    'podman',
-    ['build', '-t', CONTAINER_IMAGE, '-f', dockerfilePath, buildContext],
-    {
-      stdio: 'inherit',
-      timeout: 30 * 60 * 1000,
-    },
-  );
-
-  if (buildResult.error) {
-    throw new Error(
-      `Failed to rebuild container image ${CONTAINER_IMAGE}: ${buildResult.error.message}`,
-    );
-  }
-
-  if (buildResult.status !== 0) {
-    throw new Error(
-      `Failed to rebuild container image ${CONTAINER_IMAGE} (exit code ${buildResult.status ?? 'unknown'})`,
-    );
-  }
-
-  if (!podmanCommandSucceeded(['image', 'exists', CONTAINER_IMAGE])) {
-    throw new Error(
-      `Container image ${CONTAINER_IMAGE} is still missing after rebuild`,
-    );
-  }
-
-  logger.info({ image: CONTAINER_IMAGE }, 'Podman image rebuilt and ready');
-}
-
-async function waitForPodmanApi(timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (canReachPodmanApi()) return true;
-    await sleep(1000);
-  }
-  return canReachPodmanApi();
-}
-
-function getPodmanMachines(): PodmanMachineListEntry[] {
-  const output = execSync('podman machine list --format json', {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    encoding: 'utf-8',
-  });
-  const parsed: unknown = JSON.parse(output || '[]');
-  if (!Array.isArray(parsed)) return [];
-  return parsed.filter(
-    (item): item is PodmanMachineListEntry =>
-      !!item &&
-      typeof item === 'object' &&
-      'Name' in item &&
-      typeof (item as { Name: unknown }).Name === 'string',
-  );
-}
-
-function selectPodmanMachine(machines: PodmanMachineListEntry[]): PodmanMachineListEntry | undefined {
-  return machines.find((m) => m.Default) || machines[0];
-}
-
-async function ensurePodmanRuntimeAvailable(): Promise<void> {
-  if (await waitForPodmanApi(2000)) {
-    logger.debug('Podman runtime available');
-    return;
-  }
-
-  logger.warn('Podman runtime unavailable; attempting machine recovery');
-
-  let machineName = 'podman-machine-default';
-  try {
-    const machine = selectPodmanMachine(getPodmanMachines());
-    if (!machine) {
-      throw new Error('No podman machine exists. Run: podman machine init');
-    }
-    machineName = machine.Name;
-    if (machine.Starting && !machine.Running) {
-      logger.warn({ machineName }, 'Podman machine stuck in starting state; forcing stop');
-      try {
-        execSync(`podman machine stop ${machineName}`, { stdio: 'pipe', timeout: 30000 });
-      } catch {
-        // Best effort: a stale "starting" state may not stop cleanly.
-      }
-    } else if (machine.Running) {
-      logger.warn({ machineName }, 'Podman machine reports running but API is unavailable; restarting');
-      try {
-        execSync(`podman machine stop ${machineName}`, { stdio: 'pipe', timeout: 30000 });
-      } catch {
-        // Best effort before restart.
-      }
-    }
-
-    execSync(`podman machine start ${machineName}`, { stdio: 'pipe', timeout: 180000 });
-  } catch (err) {
-    logger.error({ err, machineName }, 'Failed to start Podman machine');
-    throw err;
-  }
-
-  if (await waitForPodmanApi(120000)) {
-    logger.info({ machineName }, 'Podman runtime recovered');
-    return;
-  }
-
-  throw new Error('Podman machine started but API did not become ready');
-}
-
-function cleanupOrphanedPodmanContainers(): void {
-  const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const stopped = stopContainersByPrefix(`nanoclaw-${botTag}-`);
-  if (stopped.length > 0) {
-    logger.info({ count: stopped.length, names: stopped }, 'Stopped orphaned podman containers');
-  }
-}
-
-async function ensureContainerSystemRunning(): Promise<void> {
-  try {
-    await ensurePodmanRuntimeAvailable();
-    cleanupOrphanedPodmanContainers();
-    ensurePodmanImageAvailable();
-  } catch (err) {
-    logger.error({ err }, 'Podman runtime/image setup failed');
-    console.error(
-      '\n╔════════════════════════════════════════════════════════════════╗',
-    );
-    console.error(
-      '║  FATAL: Podman setup failed                                     ║',
-    );
-    console.error(
-      '║                                                                ║',
-    );
-    console.error(
-      '║  Could not start Podman runtime or prepare container image.    ║',
-    );
-    console.error(
-      '║  Check: podman machine list / podman machine start             ║',
-    );
-    console.error(
-      '╚════════════════════════════════════════════════════════════════╝\n',
-    );
-    throw new Error('Podman is required but not available');
-  }
-}
-
 async function main(): Promise<void> {
   // Load supplemental env from .env.local (for vars not in launchd plist)
   const envLocalPath = path.join(process.cwd(), '.env.local');
@@ -1754,7 +1092,7 @@ async function main(): Promise<void> {
         },
         groups: Object.entries(registeredGroups).map(([jid, g]) => {
           const queueStatus = queue.getGroupStatus(jid);
-          const activity = chatActivity[jid] || {};
+          const activity = getChatActivity(jid) || {};
           return {
             jid,
             name: g.name,
@@ -1814,7 +1152,7 @@ async function main(): Promise<void> {
       await ch.sendMessage(jid, text, threadId);
       storeOutgoing(jid, text, threadId);
     },
-    defaultSenderForGroup,
+    defaultSenderForGroup: (sourceGroup: string) => defaultSenderForGroup(sourceGroup, registeredGroups),
     sendImage: (jid, buffer, filename, mimetype, caption) => {
       const ch = findChannel(channels, jid);
       if (ch?.sendImage) return ch.sendImage(jid, buffer, filename, mimetype, caption);
@@ -1842,6 +1180,38 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+
+  // [InfiniClaw] register group-queue hooks
+  queue.setPreCloseHook((_groupJid, inputDir) => {
+    // Inject a memory-save prompt before close so the agent can persist learnings.
+    // File sorts before _close alphabetically (0 < _).
+    const saveFile = path.join(inputDir, '0-memory-save.json');
+    const saveMsg = JSON.stringify({
+      type: 'message',
+      text: '[System] Session ending. If you learned anything important this session, save it to memory now. Be concise — only record genuinely new insights.',
+    });
+    const tmpSave = `${saveFile}.tmp`;
+    fs.writeFileSync(tmpSave, saveMsg);
+    fs.renameSync(tmpSave, saveFile);
+  });
+
+  queue.setShutdownHook(async () => {
+    // Signal active containers to save memory and close via IPC
+    const activeContainers: string[] = [];
+    for (const jid of queue.getActiveGroupJids()) {
+      try { queue.closeStdin(jid); } catch { /* best effort */ }
+      const status = queue.getGroupStatus(jid);
+      if (status.hasProcess && status.containerName) {
+        activeContainers.push(status.containerName);
+      }
+    }
+    // Wait for containers to process memory-save prompt before shutdown
+    if (activeContainers.length > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+    }
+    logger.info({ signaled: activeContainers }, 'InfiniClaw shutdown: containers signaled');
+  });
+
   recoverPendingMessages();
   injectResumeMessage();
   startMessageLoop();
