@@ -2,13 +2,12 @@
 
 ## Purpose
 
-InfiniClaw is a multi-bot orchestration layer built on top of a maintained NanoClaw fork. It provides cooperating bots on Matrix:
+InfiniClaw is a multi-bot orchestration layer built on a maintained NanoClaw fork. It provides cooperating bots on Matrix:
 
 - `engineer` aka **Cid** — chief engineer, infra + operations + lifecycle control
 - `commander` aka **Johnny5** — commander, takes orders and executes tasks
-- `hologram` aka **Albert** — test entity, lives in the Holodeck for validation
 
-The operator (Captain) gives orders to Johnny5 in the Bridge. Cid works in Engineering, responding when addressed with `@Cid`. Albert runs in the Holodeck for testing new features before promotion to production.
+The operator (Captain) gives orders to Johnny5 in the Bridge. Cid works in Engineering, responding when addressed with `@Cid`.
 
 ## Roles
 
@@ -16,25 +15,19 @@ The operator (Captain) gives orders to Johnny5 in the Bridge. Cid works in Engin
 - Gives orders in the Bridge and Engineering
 - Addresses Johnny5 directly for task execution
 - Addresses Cid with `@Cid` for infrastructure work
-- Tests new features with Albert in the Holodeck
 
 ### Commander — Johnny5 (`@Johnny5`)
 - Takes orders in the Bridge — responds to everything except `@Cid` callouts
 - The Bridge is Johnny5's main room (`requiresTrigger: false`)
 - Sees ALL messages (no code-level filtering) — decides what to respond to via CLAUDE.md
-- Can modify his own persona CLAUDE.md and skills (two-way sync)
-- `$HOME` mounted read-only; `$HOME/_vault` mounted read-write
+- Can modify his own persona CLAUDE.md and skills via writable mount
+- `$HOME/_vault` mounted read-write
 
 ### Engineer — Cid (`@Cid`)
 - Works in Engineering, responds when addressed with `@Cid`
 - Can modify all bots' personas, skills, and source code
 - Manages infrastructure, builds, and deployments
 - InfiniClaw repo mounted read-write
-
-### Hologram — Albert (`@Albert`)
-- Lives in the Holodeck — isolated testing environment
-- Uses engineer's container image with Ollama brain (local models)
-- Can modify his own persona CLAUDE.md and skills (two-way sync)
 
 ## Core Principles
 
@@ -53,36 +46,34 @@ The operator (Captain) gives orders to Johnny5 in the Bridge. Cid works in Engin
 Sibling NanoClaw host processes managed by launchd:
 - `com.infiniclaw.engineer` → `$INFINICLAW/_runtime/instances/engineer/nanoclaw/`
 - `com.infiniclaw.commander` → `$INFINICLAW/_runtime/instances/commander/nanoclaw/`
-- `com.infiniclaw.hologram` → `$INFINICLAW/_runtime/instances/hologram/nanoclaw/`
 
 Each host process spawns agent-runner containers (via Podman) for task execution.
 
-### Persona system (three-layer CLAUDE.md)
+### Bot instructions (CLAUDE.md)
 
-Bot identity is version-controlled in `bots/personas/`:
+Each bot has one CLAUDE.md assembled at deploy time from two sources:
 
-1. **Base** (`$INFINICLAW/nanoclaw/CLAUDE.md`) — Framework: how NanoClaw works, IPC, status messages. All bots get this.
-2. **Persona** (`$INFINICLAW/bots/personas/{bot}/CLAUDE.md`) — Identity: who you are, your rules, your style. **Two-way sync**: bots can edit their own persona CLAUDE.md via writable mount.
-3. **Group** (`$INFINICLAW/groups/{group}/CLAUDE.md`) — Room context: capabilities, accumulated memory. **One-way sync**: repo → bot, read-only in containers.
+1. **Base** (`nanoclaw/CLAUDE.md`) — framework instructions common to all bots
+2. **Persona** (`bots/personas/{bot}/CLAUDE.md`) — identity, rules, and style for that bot
 
-On deploy, persona CLAUDE.md is appended to the instance's base CLAUDE.md. Group files are seeded from the persona to the instance. Skills and MCP servers sync bidirectionally on every container spawn.
+On deploy, the persona is appended to the base, producing a single `CLAUDE.md` in the instance. Each bot has one main room. Group-level context files (`bots/personas/{bot}/groups/main/CLAUDE.md`) are seeded into the instance's groups directory.
+
+Bots can edit their own persona CLAUDE.md at runtime via a writable mount. To update externally: stop the bot, edit the file in the repo, restart.
 
 ### Sync directions
 
-| Artifact | Direction | Bot can edit? | Persists across restart? |
-|----------|-----------|---------------|--------------------------|
-| Group CLAUDE.md | Repo → bot | No | N/A (read-only) |
-| Persona CLAUDE.md | Two-way | Yes | Yes (writable mount) |
-| Skills | Two-way | Yes | Yes (sync on spawn) |
-| MCP servers | Two-way | Yes | Yes (sync on spawn) |
-
-To update a bot's persona CLAUDE.md externally: stop the bot, edit the file in the repo, restart. Otherwise the bot's runtime version takes precedence.
+| Artifact | Direction | Bot can edit? |
+|----------|-----------|---------------|
+| Group CLAUDE.md | Repo → bot | No (read-only seed) |
+| Persona CLAUDE.md | Two-way | Yes (writable mount) |
+| Skills | One-way (persona+shared → session) | Yes (writes to persona dir, loaded on next spawn) |
+| MCP servers | Two-way | Yes (save-back container → persona on spawn) |
 
 ### Container images
 
-| Image | Bots | Purpose |
-|-------|------|---------|
-| `nanoclaw-engineer:latest` | Cid, Albert | Lean — git, ripgrep, Python3, Claude Code |
+| Image | Bot | Purpose |
+|-------|-----|---------|
+| `nanoclaw-engineer:latest` | Cid | Lean — git, ripgrep, Python3, Claude Code |
 | `nanoclaw-commander:latest` | Johnny5 | Full — browser, Python, OCR, build tools, data analysis |
 
 ### Container mounts
@@ -91,12 +82,15 @@ To update a bot's persona CLAUDE.md externally: stop the bot, edit the file in t
 |-------|---------------|--------|-------|
 | Group folder | `/workspace/group` | read-write | Working directory |
 | Claude sessions | `/home/node/.claude` | read-write | Settings, skills, MCP, memory |
-| Persona dir | `/workspace/extra/{bot}-persona` | read-write | Persona CLAUDE.md, skills, MCP |
-| Project root | `/workspace/project` | read-write | Main group only (Cid) |
+| Persona dir | `/workspace/extra/{bot}-persona` | read-write | Persona CLAUDE.md, skills |
+| Project root | `/workspace/project` | read-write | Main group only |
 | IPC namespace | `/workspace/ipc` | read-write | Per-group isolated |
+| Global memory | `/workspace/global` | read-only (non-main) | Cross-group shared state |
+| Env/secrets | `/workspace/env-dir` | read-only | Runtime secrets |
+| Cache | `/workspace/cache` | read-write | Model/build cache |
 | Additional mounts | `/workspace/extra/*` | varies | From container-config.json |
 
-Mount security is enforced by `$HOME/.config/nanoclaw/mount-allowlist.json` (host-side, tamper-proof from containers).
+Mount security enforced by `$HOME/.config/nanoclaw/mount-allowlist.json` (host-side, tamper-proof from containers).
 
 ### Cross-bot communication
 
@@ -116,6 +110,34 @@ Bots can spawn delegate "lobes" for parallel execution:
 
 Lobe output is streamed to chat and returned to the main brain for integration.
 
+### Scheduled tasks
+
+The host process runs a scheduler loop (60s poll interval) that:
+1. Checks SQLite for tasks with `next_run <= now` and `status = 'active'`
+2. Enqueues them on the group queue (respects concurrency limits)
+3. Spawns a container with the task prompt
+4. Forwards progress and results to the task's chat room
+5. Computes next run (cron/interval) and updates the DB
+
+Tasks support `cron`, `interval`, and `once` schedule types. Bots create/pause/cancel tasks via IPC commands.
+
+### Message flow
+
+Two paths through the system:
+
+1. **User message** → stored in SQLite → message loop (250ms poll) → `processGroupMessages()` → spawns container → streams progress + results to chat → working indicator in Matrix
+2. **Scheduled task** → scheduler (60s poll) → group queue → spawns container → streams progress + results to chat
+
+Both paths use the same `runContainerAgent()` function but different output handlers.
+
+### Working indicator
+
+When a bot is processing, the host sends a `🔧 working...` message to Matrix, then edits it every 30s with elapsed time. On completion it becomes `🔧 checkpoint (Xm)`.
+
+### Session resume
+
+Each container gets a Claude Agent SDK session ID stored in SQLite. On restart, the session ID is passed to the new container so it can resume with full conversation history. An `injectResumeMessage` is sent to the group to prompt the bot to check for in-progress work.
+
 ### Process topology
 
 ```
@@ -131,11 +153,6 @@ Mac Host (launchd)
 │   ├── Takes orders in the Bridge
 │   └── Spawns nanoclaw-commander containers for tasks
 │
-├── com.infiniclaw.hologram → node $INFINICLAW/_runtime/instances/hologram/nanoclaw/dist/index.js
-│   ├── Connects to Matrix as @albert-bot (Albert)
-│   ├── Tests features in the Holodeck
-│   └── Spawns nanoclaw-engineer containers (Ollama brain)
-│
 └── $HOME/.config/nanoclaw/mount-allowlist.json (shared, host-side)
 ```
 
@@ -143,36 +160,37 @@ Mac Host (launchd)
 
 ```text
 $INFINICLAW/
+  CLAUDE.md                     Development directives (not picked up by bots)
   README.md
   .gitignore
-  nanoclaw/                   NanoClaw fork (git subtree from wawiesel/nanoclaw)
-    src/                      Platform source (TypeScript)
+  nanoclaw/                     NanoClaw fork (git subtree from wawiesel/nanoclaw)
+    CLAUDE.md                   Base bot instructions (framework layer)
+    src/                        Platform source (TypeScript)
     container/
-      agent-runner/           In-container agent runner
-      skills/                 Shared skills (all bots)
+      agent-runner/             In-container agent runner
+      skills/                   Shared skills (all bots)
   bots/
     personas/
-      {bot}/CLAUDE.md         Bot identity and rules (two-way sync)
-      {bot}/skills/           Bot-specific skills (two-way sync)
-      {bot}/mcp-servers/      Bot-specific MCP servers (two-way sync)
+      {bot}/CLAUDE.md           Bot identity and rules
+      {bot}/skills/             Bot-specific skills
+      {bot}/mcp-servers/        Bot-specific MCP servers
       {bot}/container-config.json  Additional mounts + declarative MCP
-      {bot}/groups/{group}/   Room context (one-way: repo → bot)
+      {bot}/groups/{group}/     Group context (one-way: repo → bot)
     profiles/
-      {bot}/env               Bot env config (gitignored)
+      {bot}/env                 Bot env config (gitignored)
     container/
-      {bot}/Dockerfile        Per-bot agent container image
-      build.sh                Build one or all container images
+      {bot}/Dockerfile          Per-bot agent container image
+      build.sh                  Build one or all container images
     config/
-      mount-allowlist.json    Template for $HOME/.config/nanoclaw/
-  groups/                     Group working directories
+      mount-allowlist.json      Template for $HOME/.config/nanoclaw/
   docs/
-    DESIGN.md                 This file
-    assets/                   Images, banners
-  _runtime/                   Gitignored runtime state
-    instances/                Per-bot runtime instances (synced from nanoclaw/)
-    data/                     SQLite, sessions, IPC, cache
-    logs/                     Bot stdout/stderr logs
-    staging/                  Deploy validation staging area
+    DESIGN.md                   This file
+    assets/                     Images, banners
+  _runtime/                     Gitignored runtime state
+    instances/                  Per-bot runtime instances (synced from nanoclaw/)
+    data/                       SQLite, sessions, IPC, cache
+    logs/                       Bot stdout/stderr logs
+    staging/                    Deploy validation staging area
 ```
 
 ## Operations
@@ -185,33 +203,46 @@ $INFINICLAW/
 
 ### Start / Stop
 
-- `cd $INFINICLAW/nanoclaw && npm run cli start` — deploys code, installs launchd plists, starts all bots
-- `cd $INFINICLAW/nanoclaw && npm run cli stop` — syncs personas, unloads launchd plists, stops containers
+- `npm run cli start` — deploys code, installs launchd plists, starts all bots
+- `npm run cli stop` — syncs personas, unloads launchd plists, stops containers
 
 ### Interactive chat
 
-- `cd $INFINICLAW/nanoclaw && npm run cli chat <bot>` — terminal chat with any bot (mirrors to Matrix)
+- `npm run cli chat <bot>` — terminal chat with any bot (mirrors to Matrix)
 
-### IPC commands (from engineer containers)
+### Send message
 
-| Command | Effect |
-|---------|--------|
-| `restart_bot` (self) | Validate TS → exit → launchd restarts |
-| `restart_bot` (other) | Deploy instance → launchctl kickstart |
-| `rebuild_image` | Run `bots/container/build.sh {bot}` |
-| `bot_status` | Return launchctl status + recent error log |
+- `npm run cli send <room> <message>` — send operator message to a bot's room
+
+### IPC commands (from containers)
+
+| Command | Access | Effect |
+|---------|--------|--------|
+| `restart_bot` | Main only | Self: validate TS → exit → launchd restarts. Other: deploy → kickstart |
+| `stop_bot` | Main only | Stop another bot's launchd service |
+| `rebuild_image` | Main only | Run `bots/container/build.sh {bot}` |
+| `bot_status` | Main only | Return launchctl status + recent error log |
+| `git_push` | Main only | Push current branch to remote |
+| `schedule_task` | Any | Create a scheduled task (cron/interval/once) |
+| `pause_task` | Any | Pause a scheduled task |
+| `resume_task` | Any | Resume a paused task |
+| `cancel_task` | Any | Cancel a scheduled task |
+| `refresh_groups` | Main only | Reload registered groups from DB |
+| `register_group` | Main only | Register a new Matrix room |
+| `set_brain_mode` | Main only | Switch AI model for a bot |
+| `set_thread` | Any (own group) | Set work thread for a group |
 
 ### Deployment workflow (Cid)
 
 1. **Code changes**: Edit `$INFINICLAW/nanoclaw/src/`, then `restart_bot`.
-2. **Container image changes**: Edit Dockerfile, then `restart_bot` (deploys first, then rebuilds image).
+2. **Container image changes**: Edit Dockerfile, then `restart_bot` (deploys first, then rebuilds if Dockerfile changed).
 3. **Persona/skill changes**: Edit in persona dir, then `restart_bot` for the target bot.
 
 ## Security posture
 
-- No credentials in git.
+- No credentials in git (`.mcp.json` files gitignored).
 - Runtime secrets sourced from env and local secure stores.
 - `_runtime/` excluded from version control.
 - Mount allowlist stored outside project root (tamper-proof from containers).
 - Per-group IPC namespaces prevent cross-group privilege escalation.
-- Least-privilege execution by role.
+- Least-privilege execution by role. Main group gets elevated IPC access.

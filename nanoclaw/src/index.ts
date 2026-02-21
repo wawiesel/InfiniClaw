@@ -1690,10 +1690,13 @@ async function main(): Promise<void> {
 
   // Connect channels
   if (matrix) {
-    // Do not block local terminal startup on Matrix/network connectivity.
-    void matrix.connect().catch((err) => {
+    // Wait for Matrix before starting subsystems (scheduler, message loop).
+    // Local CLI is already connected above, so the terminal is responsive.
+    try {
+      await matrix.connect();
+    } catch (err) {
       logger.error({ err }, 'Initial Matrix connection failed; continuing in degraded mode');
-    });
+    }
     refreshConnectedChannels();
 
     let matrixReconnectInProgress = false;

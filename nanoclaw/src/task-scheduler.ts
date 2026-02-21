@@ -114,11 +114,12 @@ async function runTask(
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
-        if (streamedOutput.result && !streamedOutput.isProgress) {
-          result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
+        if (streamedOutput.result && streamedOutput.isProgress) {
+          // Forward progress (tool calls) to chat
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
-          // Only reset idle timer on actual results, not session-update markers
+        } else if (streamedOutput.result && !streamedOutput.isProgress) {
+          result = streamedOutput.result;
+          await deps.sendMessage(task.chat_jid, streamedOutput.result);
           resetIdleTimer();
         }
         if (streamedOutput.status === 'error') {
