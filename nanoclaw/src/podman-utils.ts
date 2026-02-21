@@ -2,7 +2,29 @@
  * Shared podman container utilities.
  * Consolidates container listing, name parsing, and stop logic.
  */
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
+import { logger } from './logger.js';
+
+/**
+ * Attempt to recover a dead podman socket by restarting the machine.
+ * Returns true if recovery succeeded, false otherwise.
+ */
+export function recoverPodman(): boolean {
+  logger.warn('Podman socket dead, attempting recovery...');
+  try { execSync('podman machine stop podman-machine-default', { stdio: 'pipe', timeout: 30_000 }); } catch { /* best effort */ }
+  try { execSync('podman machine start podman-machine-default', { stdio: 'pipe', timeout: 180_000 }); } catch { /* best effort */ }
+  for (let i = 0; i < 10; i++) {
+    try {
+      execSync('podman info', { stdio: 'pipe' });
+      logger.info('Podman recovered');
+      return true;
+    } catch {
+      spawnSync('sleep', ['1']);
+    }
+  }
+  logger.error('Podman recovery failed');
+  return false;
+}
 
 /** Get all running podman container names. Returns empty array on failure. */
 export function getPodmanContainerNames(timeoutMs = 5000): string[] {

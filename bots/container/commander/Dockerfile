@@ -39,8 +39,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install docling for PDF-to-markdown conversion (includes OCR via pytesseract/easyocr)
+# workspace-mcp: Google Workspace (Gmail, Calendar, Drive) MCP server
 RUN pip3 install --break-system-packages \
-    docling rapidocr-onnxruntime pymupdf
+    docling rapidocr-onnxruntime pymupdf workspace-mcp
 
 # Fix model directory permissions for node user
 RUN chmod -R 777 /usr/local/lib/python3.11/dist-packages/rapidocr/models/ || true
@@ -54,7 +55,7 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_OPTIONS="--max-old-space-size=2048"
 
 # Install global CLIs used by delegates/runners
-RUN npm install -g agent-browser @anthropic-ai/claude-code @google/gemini-cli @openai/codex
+RUN npm install -g agent-browser @anthropic-ai/claude-code @google/gemini-cli @openai/codex @softeria/ms-365-mcp-server
 
 # Create app directory
 WORKDIR /app

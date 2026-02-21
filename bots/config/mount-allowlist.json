@@ -12,6 +12,12 @@
       "description": "Vault — Johnny5's read-write workspace"
     },
     {
+      "path": "~/2026-Nanoclaw/InfiniClaw/bots/profiles/commander",
+      "allowReadWrite": true,
+      "bots": ["commander"],
+      "description": "Commander credentials dir — workspace-mcp reads credentials and writes tokens here"
+    },
+    {
       "path": "~/2026-Nanoclaw/InfiniClaw",
       "allowReadWrite": true,
       "description": "InfiniClaw repo — Cid's workspace"

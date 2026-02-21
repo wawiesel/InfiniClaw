@@ -6,19 +6,6 @@
 import fs from 'fs';
 import path from 'path';
 
-function copyDirRecursive(src: string, dst: string): void {
-  fs.mkdirSync(dst, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const srcPath = path.join(src, entry.name);
-    const dstPath = path.join(dst, entry.name);
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, dstPath);
-    } else {
-      fs.copyFileSync(srcPath, dstPath);
-    }
-  }
-}
-
 /** Clean session skills and rebuild from shared + persona sources of truth. */
 export function loadSkillsToSession(
   sessionSkillsDir: string,
@@ -35,7 +22,7 @@ export function loadSkillsToSession(
     for (const entry of fs.readdirSync(src)) {
       const srcDir = path.join(src, entry);
       if (!fs.statSync(srcDir).isDirectory()) continue;
-      copyDirRecursive(srcDir, path.join(sessionSkillsDir, entry));
+      fs.cpSync(srcDir, path.join(sessionSkillsDir, entry), { recursive: true });
     }
   };
 

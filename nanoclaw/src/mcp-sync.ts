@@ -15,18 +15,6 @@ interface McpServerConfig {
   url?: string;
 }
 
-function copyDirRecursive(src: string, dst: string): void {
-  fs.mkdirSync(dst, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const srcPath = path.join(src, entry.name);
-    const dstPath = path.join(dst, entry.name);
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, dstPath);
-    } else {
-      fs.copyFileSync(srcPath, dstPath);
-    }
-  }
-}
 
 /** Read mcp.json manifests from a persona's mcp-servers/ directory. */
 function readPersonaMcpServers(
@@ -90,7 +78,7 @@ export function loadMcpServersToSettings(
     // Copy server code to session
     const srcDir = path.join(personaMcpDir, name);
     const dstDir = path.join(sessionMcpDir, name);
-    copyDirRecursive(srcDir, dstDir);
+    fs.cpSync(srcDir, dstDir, { recursive: true });
 
     // Rewrite config to use container-side paths
     const containerDir = `${containerMcpPath}/${name}`;
@@ -155,7 +143,7 @@ export function saveMcpServersToPersona(
     const personaDir = path.join(personaMcpDir, name);
 
     if (fs.existsSync(sessionDir)) {
-      copyDirRecursive(sessionDir, personaDir);
+      fs.cpSync(sessionDir, personaDir, { recursive: true });
     } else {
       fs.mkdirSync(personaDir, { recursive: true });
     }

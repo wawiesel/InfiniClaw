@@ -12,7 +12,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { parseEnvFile } from './env-utils.js';
-import { stopContainersByPrefix } from './podman-utils.js';
+import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 import { saveMcpServersToPersona } from './mcp-sync.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -148,27 +148,13 @@ export function ensurePodmanReady(): void {
   try {
     execSync('podman info', { stdio: 'pipe' });
     return;
-  } catch {
-    // fall through to recovery
+  } catch { /* fall through to recovery */ }
+  if (!recoverPodman()) {
+    throw new Error(
+      'Podman API unavailable after recovery attempt.\n' +
+      'Try: podman machine stop podman-machine-default && podman machine start podman-machine-default',
+    );
   }
-
-  console.log('Podman API unavailable, attempting recovery...');
-  try { execSync('podman machine stop podman-machine-default', { stdio: 'pipe', timeout: 30_000 }); } catch { /* best effort */ }
-  try { execSync('podman machine start podman-machine-default', { stdio: 'pipe', timeout: 180_000 }); } catch { /* best effort */ }
-
-  for (let i = 0; i < 10; i++) {
-    try {
-      execSync('podman info', { stdio: 'pipe' });
-      return;
-    } catch {
-      spawnSync('sleep', ['1']);
-    }
-  }
-
-  throw new Error(
-    'Podman API unavailable after recovery attempt.\n' +
-    'Try: podman machine stop podman-machine-default && podman machine start podman-machine-default',
-  );
 }
 
 export function killStaleContainers(): void {

@@ -331,9 +331,9 @@ export class GroupQueue {
       }
     }
 
-    // Brief wait for containers to begin winding down
+    // Wait for containers to process memory-save prompt before shutdown
     if (activeContainers.length > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
     }
 
     logger.info(

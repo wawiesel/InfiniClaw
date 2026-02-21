@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "wksm": {
-      "type": "sse",
-      "url": "http://host.containers.internal:8765/sse"
-    }
-  }
-}

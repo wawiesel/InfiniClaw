@@ -47,6 +47,7 @@ import {
   deleteSession,
   getMessagesSince,
   getNewMessages,
+  getRecentMessages,
   getRouterState,
   initDatabase,
   deleteRegisteredGroup,
@@ -86,6 +87,83 @@ const workThreadIds: Record<string, string> = {};
 // Per-group reply thread — tracks the thread for the active run's replies.
 // Updated both at run start and when messages are piped to an active container.
 const activeReplyThreadIds: Record<string, string | undefined> = {};
+// Per-group working indicator: a single "⏳ working..." message edited with elapsed time.
+interface WorkingIndicator {
+  eventId: string;
+  startedAt: number;
+  timer: ReturnType<typeof setInterval>;
+  chatJid: string;
+}
+const workingIndicators: Record<string, WorkingIndicator> = {};
+
+function startWorkingIndicator(chatJid: string, threadId?: string): void {
+  // Don't stack indicators
+  if (workingIndicators[chatJid]) return;
+  const ch = findChannel(channels, chatJid);
+  if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
+  const startedAt = Date.now();
+  ch.sendMessageReturningId(chatJid, '⏳ working...', threadId).then((eventId) => {
+    if (!eventId) return;
+    // Check we weren't already cleared while awaiting
+    if (workingIndicators[chatJid]) {
+      // Already started by another path — redact the duplicate
+      if (ch.redactMessage) ch.redactMessage(chatJid, eventId).catch(() => {});
+      return;
+    }
+    const timer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 60_000);
+      const label = elapsed < 1 ? '<1m' : `${elapsed}m`;
+      ch.editMessage!(chatJid, eventId, `⏳ working (${label})...`).catch(() => {});
+    }, 30_000);
+    workingIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
+  }).catch(() => {});
+}
+
+function clearWorkingIndicator(chatJid: string): void {
+  const indicator = workingIndicators[chatJid];
+  if (!indicator) return;
+  clearInterval(indicator.timer);
+  delete workingIndicators[chatJid];
+  // Stamp final elapsed time as a checkpoint instead of deleting
+  const ch = findChannel(channels, chatJid);
+  const elapsed = Math.floor((Date.now() - indicator.startedAt) / 60_000);
+  const label = elapsed < 1 ? '<1m' : `${elapsed}m`;
+  if (ch?.editMessage) {
+    ch.editMessage(chatJid, indicator.eventId, `⏳ checkpoint (${label})`).catch(() => {});
+  }
+}
+
+/** Stamp old indicator as checkpoint and send a new one below any new messages. */
+function bumpWorkingIndicator(chatJid: string, threadId?: string): void {
+  const indicator = workingIndicators[chatJid];
+  if (!indicator) return;
+  const ch = findChannel(channels, chatJid);
+  if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
+  const { startedAt } = indicator;
+  // Stamp old message as checkpoint
+  clearInterval(indicator.timer);
+  const elapsed = Math.floor((Date.now() - startedAt) / 60_000);
+  const checkpointLabel = elapsed < 1 ? '<1m' : `${elapsed}m`;
+  ch.editMessage(chatJid, indicator.eventId, `⏳ checkpoint (${checkpointLabel})`).catch(() => {});
+  delete workingIndicators[chatJid];
+  // Send new working indicator at the bottom
+  const label = checkpointLabel;
+  ch.sendMessageReturningId(chatJid, `⏳ working (${label})...`, threadId).then((eventId) => {
+    if (!eventId) return;
+    if (workingIndicators[chatJid]) {
+      // Already started by another path — stamp this one too
+      if (ch.editMessage) ch.editMessage(chatJid, eventId, `⏳ checkpoint (${label})`).catch(() => {});
+      return;
+    }
+    const timer = setInterval(() => {
+      const el = Math.floor((Date.now() - startedAt) / 60_000);
+      const lb = el < 1 ? '<1m' : `${el}m`;
+      ch.editMessage!(chatJid, eventId, `⏳ working (${lb})...`).catch(() => {});
+    }, 30_000);
+    workingIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
+  }).catch(() => {});
+}
+
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
 const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
@@ -821,8 +899,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   const channel = findChannel(channels, chatJid);
-  if (channel?.setTyping) await channel.setTyping(chatJid, true);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'processing...');
+  startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
+  // Track inbound message IDs for acknowledgement reaction once bot produces output
+  const inboundMessageIds = filteredMessages.map((m) => m.id).filter(Boolean);
+  let acknowledged = false;
   let hadError = false;
   let outputSentToUser = false;
   const agentResponses: string[] = [];
@@ -870,6 +951,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       if (text) {
+        // Acknowledge inbound messages with 🔹 on first bot output (proves bot saw them)
+        if (!acknowledged && inboundMessageIds.length > 0) {
+          acknowledged = true;
+          const ch = findChannel(channels, chatJid);
+          if (ch?.sendReaction) {
+            for (const msgId of inboundMessageIds) {
+              void ch.sendReaction(chatJid, msgId, '🔹').catch(() => {});
+            }
+          }
+        }
         lastRunOutputAt = Date.now();
         if (result.isProgress) {
           markProgress(chatJid, text);
@@ -885,15 +976,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               const formatted = isToolCall
                 ? text
                 : `<small><em>${text}</em></small>`;
-              void ch.sendMessage(chatJid, formatted, activeReplyThreadIds[chatJid]).catch((err) => {
+              void ch.sendMessage(chatJid, formatted, activeReplyThreadIds[chatJid]).then(() => {
+                bumpWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
+              }).catch((err) => {
                 logger.warn({ chatJid, err }, 'Failed to send progress to chat');
               });
-              // Cycle pulse pip alongside progress
-              if (ch.setStatusPip) {
-                const idx = (pipPulseIndex[chatJid] || 0) % PIP_PULSE.length;
-                pipPulseIndex[chatJid] = idx + 1;
-                void ch.setStatusPip(chatJid, PIP_PULSE[idx]).catch(() => {});
-              }
             }
           }
         } else {
@@ -912,7 +999,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             lastResponseBody = text;
             const ch = findChannel(channels, chatJid);
             if (ch) {
+              clearWorkingIndicator(chatJid);
+              if (ch.setTyping) await ch.setTyping(chatJid, true);
               await ch.sendMessage(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
+              if (ch.setTyping) await ch.setTyping(chatJid, false);
               storeOutgoing(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
             }
             outputSentToUser = true;
@@ -932,6 +1022,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
+  clearWorkingIndicator(chatJid);
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   // Set idle pip on bot's last message
@@ -1159,29 +1250,13 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
+            startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
             const now = Date.now();
             if (
               !lastActivePipeAckAt[chatJid] ||
               now - lastActivePipeAckAt[chatJid] >= ACTIVE_PIPE_ACK_COOLDOWN_MS
             ) {
-              const ch = findChannel(channels, chatJid);
-              if (ch) {
-                // Set working pip to acknowledge piped message
-                if (ch.setStatusPip) {
-                  void ch.setStatusPip(chatJid, '🔵').catch(() => {});
-                } else {
-                  const lastMessage = messagesToSend[messagesToSend.length - 1];
-                  const objective = compactMessage(lastMessage?.content || '', 120);
-                  void ch.sendMessage(
-                    chatJid,
-                    formatMainMessage(
-                      `received and injected into active run.${objective ? ` request: ${objective}.` : ''}`,
-                    ),
-                  ).catch((err) => {
-                    logger.warn({ chatJid, err }, 'Failed to send active-run acknowledgement');
-                  });
-                }
-              }
+              // Acknowledgement reaction (🔹) is placed when the bot first produces output
               lastActivePipeAckAt[chatJid] = now;
             }
             lastAgentTimestamp[chatJid] =
@@ -1199,32 +1274,7 @@ async function startMessageLoop(): Promise<void> {
               !lastQueuedAckAt[chatJid] ||
               now - lastQueuedAckAt[chatJid] >= QUEUED_ACK_COOLDOWN_MS
             ) {
-              const ch = findChannel(channels, chatJid);
-              if (ch) {
-                try {
-                  if (ch.setStatusPip) {
-                    await ch.setStatusPip(chatJid, '🔵');
-                  } else {
-                    const lastMessage = messagesToSend[messagesToSend.length - 1];
-                    const objective = compactMessage(
-                      lastMessage?.content || '',
-                      160,
-                    );
-                    await ch.sendMessage(
-                      chatJid,
-                      formatMainMessage(
-                        `queued and starting run now.${objective ? ` objective: ${objective}.` : ''}`,
-                      ),
-                    );
-                  }
-                  lastQueuedAckAt[chatJid] = now;
-                } catch (err) {
-                  logger.warn(
-                    { chatJid, err },
-                    'Failed to send queued acknowledgement',
-                  );
-                }
-              }
+              lastQueuedAckAt[chatJid] = now;
             }
           }
         }
@@ -1255,43 +1305,31 @@ function recoverPendingMessages(): void {
 }
 
 /**
- * After any restart, inject a synthetic message into the main chat
+ * After any restart, inject a synthetic message into every registered group
  * so the agent re-enters the conversation instead of sitting idle.
- * Injects if there are pending messages OR an active objective to resume.
  */
 function injectResumeMessage(): void {
-  const mainJid = Object.entries(registeredGroups).find(
-    ([, g]) => g.folder === MAIN_GROUP_FOLDER,
-  )?.[0];
-  if (!mainJid) return;
+  for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    // Include recent conversation history so the bot has context
+    const recent = getRecentMessages(chatJid, ASSISTANT_NAME, 10).reverse();
+    let contextBlock = '';
+    if (recent.length > 0) {
+      const lines = recent.map((m) => `[${m.sender_name}]: ${m.content.slice(0, 300)}`);
+      contextBlock = `\n\nHere are the last ${recent.length} messages before restart:\n${lines.join('\n')}`;
+    }
 
-  const pending = getMessagesSince(
-    mainJid,
-    lastAgentTimestamp[mainJid] || '',
-    ASSISTANT_NAME,
-  );
-
-  const activity = ensureChatActivity(mainJid);
-
-  if (pending.length === 0 && !activity.currentObjective) {
-    logger.info({ mainJid }, 'No pending messages or objective after restart — skipping resume injection');
-    return;
+    storeMessage({
+      id: `resume-${Date.now()}-${group.folder}`,
+      chat_jid: chatJid,
+      chat_name: group.name,
+      sender: 'system',
+      sender_name: 'System',
+      content: `You were restarted. Review the conversation below and your memory, then resume any in-progress work. If nothing was in progress, say so briefly and wait.${contextBlock}`,
+      timestamp: new Date().toISOString(),
+    });
+    queue.enqueueMessageCheck(chatJid);
+    logger.info({ chatJid, group: group.name, recentCount: recent.length }, 'Injected resume message with context');
   }
-
-  storeMessage({
-    id: `resume-${Date.now()}`,
-    chat_jid: mainJid,
-    chat_name: registeredGroups[mainJid].name,
-    sender: 'system',
-    sender_name: 'System',
-    content: 'You just restarted. Check your todo list for pending tasks and continue working. Do not wait for instructions.',
-    timestamp: new Date().toISOString(),
-  });
-  queue.enqueueMessageCheck(mainJid);
-  logger.info(
-    { mainJid, pendingCount: pending.length, objective: activity.currentObjective || '(none)' },
-    'Injected resume message after restart',
-  );
 }
 
 type PodmanMachineListEntry = {
@@ -1804,6 +1842,21 @@ async function main(): Promise<void> {
   recoverPendingMessages();
   injectResumeMessage();
   startMessageLoop();
+
+  // Periodic memory-save reminder: every 10 minutes, nudge active bots to save state.
+  // This ensures bots have recent memory even after an unexpected crash.
+  const MEMORY_SAVE_INTERVAL_MS = 10 * 60 * 1000;
+  setInterval(() => {
+    for (const [chatJid, group] of Object.entries(registeredGroups)) {
+      const status = queue.getGroupStatus(chatJid);
+      if (!status.active) continue;
+      queue.sendMessage(
+        chatJid,
+        '[System] Periodic checkpoint: if you have completed or are mid-way through any tasks, save a brief summary to your memory now using /save-memory. Include what you were doing and what remains.',
+      );
+      logger.debug({ chatJid, group: group.name }, 'Sent periodic memory-save reminder');
+    }
+  }, MEMORY_SAVE_INTERVAL_MS);
 
   // Send boot announcement once main channel is available
   const bootAnnounceTimer = setInterval(async () => {

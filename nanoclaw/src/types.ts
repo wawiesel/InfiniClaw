@@ -106,6 +106,12 @@ export interface Channel {
   setPresenceStatus?(state: string, statusMessage?: string): Promise<void>;
   // Optional: react to the bot's own last message with a status pip emoji
   setStatusPip?(jid: string, emoji: string): Promise<void>;
+  // Optional: send a message and return its ID (for later edit/redact)
+  sendMessageReturningId?(jid: string, text: string, threadId?: string): Promise<string | undefined>;
+  // Optional: edit a previously sent message in-place
+  editMessage?(jid: string, eventId: string, newText: string): Promise<void>;
+  // Optional: delete/redact a previously sent message
+  redactMessage?(jid: string, eventId: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

@@ -831,6 +831,70 @@ export class MatrixChannel implements Channel {
     }
   }
 
+  async sendMessageReturningId(jid: string, text: string, threadId?: string): Promise<string | undefined> {
+    if (!this.client || !this._connected) return undefined;
+    const roomId = toRoomId(jid);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msgContent: Record<string, any> = {
+        msgtype: 'm.text',
+        body: text,
+      };
+      if (threadId) {
+        msgContent['m.relates_to'] = { rel_type: 'm.thread', event_id: threadId };
+      }
+      const eventId = await withTimeout(
+        this.client.sendMessage(roomId, msgContent),
+        MATRIX_SEND_TIMEOUT_MS,
+        'sendMessageReturningId',
+      );
+      return eventId;
+    } catch (err) {
+      logger.warn({ jid, err }, 'Failed to send Matrix message (returning id)');
+      return undefined;
+    }
+  }
+
+  async editMessage(jid: string, eventId: string, newText: string): Promise<void> {
+    if (!this.client || !this._connected) return;
+    const roomId = toRoomId(jid);
+    try {
+      const content = {
+        msgtype: 'm.text',
+        body: `* ${newText}`,
+        'm.new_content': {
+          msgtype: 'm.text',
+          body: newText,
+        },
+        'm.relates_to': {
+          rel_type: 'm.replace',
+          event_id: eventId,
+        },
+      };
+      await withTimeout(
+        this.client.sendMessage(roomId, content),
+        MATRIX_SEND_TIMEOUT_MS,
+        'editMessage',
+      );
+    } catch (err) {
+      logger.warn({ jid, eventId, err }, 'Failed to edit Matrix message');
+    }
+  }
+
+  async redactMessage(jid: string, eventId: string): Promise<void> {
+    if (!this.client || !this._connected) return;
+    const roomId = toRoomId(jid);
+    try {
+      await withTimeout(
+        this.client.redactEvent(roomId, eventId),
+        MATRIX_SEND_TIMEOUT_MS,
+        'redactMessage',
+      );
+    } catch (err) {
+      logger.warn({ jid, eventId, err }, 'Failed to redact Matrix message');
+    }
+  }
+
   isConnected(): boolean {
     return this._connected;
   }

@@ -2,13 +2,13 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in the configured container runtime and handles IPC
  */
-import { ChildProcess, exec, execSync, spawn, spawnSync } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
 import { isOllamaBaseUrl, parseEnvLine } from './env-utils.js';
-import { stopContainersByPrefix } from './podman-utils.js';
+import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 
 import {
   CONTAINER_IMAGE,
@@ -51,24 +51,6 @@ function buildBotDirectory(): Record<string, string> {
     }
   } catch { /* best effort */ }
   return directory;
-}
-
-/** Attempt to recover a dead podman socket by restarting the machine. */
-function recoverPodman(): boolean {
-  logger.warn('Podman socket dead, attempting recovery...');
-  try { execSync('podman machine stop podman-machine-default', { stdio: 'pipe', timeout: 30_000 }); } catch { /* best effort */ }
-  try { execSync('podman machine start podman-machine-default', { stdio: 'pipe', timeout: 180_000 }); } catch { /* best effort */ }
-  for (let i = 0; i < 10; i++) {
-    try {
-      execSync('podman info', { stdio: 'pipe' });
-      logger.info('Podman recovered');
-      return true;
-    } catch {
-      spawnSync('sleep', ['1']);
-    }
-  }
-  logger.error('Podman recovery failed');
-  return false;
 }
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -483,7 +465,7 @@ function buildVolumeMounts(
   return mounts;
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
+function buildContainerArgs(mounts: VolumeMount[], containerName: string, portPublish: string[] = []): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Podman-only runtime.
@@ -499,6 +481,9 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
       '-v',
       `${mount.hostPath}:${mount.containerPath}${mount.readonly ? ':ro' : ''}`,
     );
+  }
+  for (const p of portPublish) {
+    args.push('-p', p);
   }
 
   args.push(CONTAINER_IMAGE);
@@ -576,7 +561,17 @@ export async function runContainerAgent(
   const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   const containerName = `nanoclaw-${botTag}-${safeName}-${Date.now()}`;
   killExistingContainersForGroup(botTag, safeName);
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  // Read portPublish from persona container-config.json
+  let portPublish: string[] = [];
+  const rootDir = process.env.INFINICLAW_ROOT;
+  const personaName = process.env.PERSONA_NAME;
+  if (rootDir && personaName) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(path.join(rootDir, 'bots', 'personas', personaName, 'container-config.json'), 'utf-8'));
+      portPublish = (cfg.portPublish as string[] | undefined) || [];
+    } catch { /* ignore */ }
+  }
+  const containerArgs = buildContainerArgs(mounts, containerName, portPublish);
 
   logger.debug(
     {
