@@ -4,15 +4,13 @@
 
 InfiniClaw is a multi-bot orchestration layer built on a maintained NanoClaw fork. It provides cooperating bots on Matrix:
 
-There are intended to be 3 rooms:
+Messages go to **rooms**, not to bots directly. Each room has a role; bots fill that role.
 
-1. The Bridge - where the captain gives orders to commander
-2. Engineering - where the engineer works
-3. Holodeck - where new bots can be tested
+Rooms:
 
-Bots have roles and personas. Currently there are two bots:
-- `engineer` is **Cid** — chief engineer, infra + operations + lifecycle control
-- `commander` is **Johnny5** — commander, takes orders and executes tasks
+1. **The Bridge** — has a commander. Current commander: **Johnny5**.
+2. **Engineering** — has an engineer. Current engineer: **Cid**.
+3. **Holodeck** — testing room for new bots (not yet active).
 
 
 ## Roles
@@ -55,9 +53,64 @@ Bots can spawn delegate "lobes" for parallel execution. These are **not separate
 Lobe output is streamed to chat and returned to the main brain for integration. While currently underutilized, the lobes system is intended to be an active part of the robust architecture.
 
 
+### Terminology: "room" vs "group"
+
+NanoClaw's code uses "group" internally (from its WhatsApp origins: `group_folder`, `groupJid`, `GROUPS_DIR`, `registered_groups`). InfiniClaw calls these **rooms** in all human-facing text. They are the same thing — a Matrix room mapped to a NanoClaw group.
+
+The `bots/` directory is the **active roster** — the currently deployed roles, their personas, skills, and config. Each entry is a role (commander, engineer), not a specific bot identity.
+
 ### Security
 
-Where is env and secrets maintained
+- **No credentials in git.** `.mcp.json` files (contain OAuth secrets) and `bots/profiles/*/env` are gitignored.
+- **Mount allowlist** at `~/.config/nanoclaw/mount-allowlist.json` — stored outside the repo so containers can't tamper with it. Every mount requested by `container-config.json` is validated against this allowlist before the container spawns. The Captain can grant/revoke temporary mounts via `CAPTAIN_USER_ID`.
+- **Per-room IPC namespaces** — each room gets its own IPC directory under `_runtime/data/ipc/{room}/`. Prevents cross-room privilege escalation.
+- **Main room elevation** — only the main room's containers can run privileged IPC commands (`restart_bot`, `rebuild_image`, `git_push`, etc.). Non-main rooms are restricted to task scheduling and their own thread management.
+- **Container isolation** — Podman containers run with memory caps (`CONTAINER_MEMORY_MB`, default 4GB) and optional CPU limits. `_runtime/` is never version-controlled.
+- **Secrets flow**: profile env files → loaded by host process → injected as env vars into containers via `--env`. No secrets are baked into container images.
 
-## Code Structure (key classes)
+## Code Structure
 
+### Host process (`nanoclaw/src/`)
+
+| File | Purpose |
+|------|---------|
+| `index.ts` | Orchestrator: startup, channel connection, message loop, working indicator, session management |
+| `service.ts` | CLI operations: start, stop, chat, send, deployBot, syncPersona, restorePersona |
+| `cli.ts` | CLI entry point: parses `start\|stop\|chat\|send` |
+| `container-runner.ts` | Builds Podman args, spawns containers, streams output, mounts, skill/MCP sync |
+| `task-scheduler.ts` | 60s poll loop for due tasks, spawns containers, forwards progress to chat |
+| `group-queue.ts` | Per-room concurrency: ensures one container per room, queues overflow, retry backoff |
+| `ipc.ts` | Processes IPC commands from containers (restart, schedule, register, etc.) |
+| `db.ts` | SQLite: messages, sessions, registered rooms, scheduled tasks, task runs |
+| `router.ts` | Outbound message routing, cross-bot forwarding, message formatting |
+| `config.ts` | All env-driven configuration (intervals, paths, limits, trigger patterns) |
+| `mount-security.ts` | Validates container mounts against host-side allowlist |
+| `skill-sync.ts` | One-way skill copy: persona + shared → container session on each spawn |
+| `mcp-sync.ts` | Two-way MCP server sync: save-back from container, then restore from persona |
+| `status.ts` | Bot status reporting and status message management |
+| `logger.ts` | Pino logger |
+| `types.ts` | Shared types: Channel, RegisteredGroup, ScheduledTask, MountAllowlist |
+| `channels/matrix.ts` | Matrix channel: connect, send, edit, react, redact, sync |
+| `channels/whatsapp.ts` | WhatsApp channel (Baileys) |
+| `channels/local-cli.ts` | Terminal channel for `cli chat` |
+
+### Container agent (`nanoclaw/container/agent-runner/`)
+
+Runs inside each Podman container. Receives a prompt via stdin JSON, calls Claude Agent SDK, streams output via stdout JSON lines, reads follow-up messages from IPC input directory.
+
+### Key data flows
+
+```
+User message → Matrix → index.ts message loop → SQLite → processGroupMessages()
+  → container-runner.ts spawns Podman container
+    → agent-runner calls Claude SDK → streams JSON lines to stdout
+  → index.ts reads stdout → forwards to Matrix (progress + results)
+  → working indicator: 🔧 working... → edits with elapsed time → checkpoint
+
+Scheduled task → task-scheduler.ts poll → group-queue.ts
+  → same container-runner.ts spawn path
+  → task-scheduler.ts reads stdout → forwards to Matrix
+
+IPC command → container writes JSON to /workspace/ipc/output/
+  → ipc.ts watches directory → processes command → writes response
+```

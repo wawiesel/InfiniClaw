@@ -98,7 +98,7 @@ $INFINICLAW/nanoclaw/CLAUDE.md
 To add an MCP server to any bot, edit the persona's `.mcp.json` (source of truth):
 
 ```
-$INFINICLAW/bots/personas/{bot}/groups/{group}/.mcp.json
+$INFINICLAW/bots/personas/{bot}/groups/{room}/.mcp.json
 ```
 
 ```json

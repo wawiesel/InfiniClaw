@@ -36,7 +36,7 @@ Rebuild container images: `./bots/container/build.sh all` (or `build.sh commande
 - **Skills are one-way** (persona+shared → session on each container spawn). Bots write new skills directly to their persona dir via writable mount.
 - **MCP servers are two-way** (save-back on spawn, then restore).
 - **All bots see all messages.** No code-level message filtering. Bots decide what to respond to via their CLAUDE.md.
-- **IPC is per-group namespaced.** Main group gets elevated commands (restart_bot, rebuild_image, etc.).
+- **IPC is per-room namespaced.** Main room gets elevated commands (restart_bot, rebuild_image, etc.).
 - **Two code paths handle container output**: `processGroupMessages()` in `index.ts` for user messages, and `task-scheduler.ts` for scheduled tasks. Both must forward progress to chat.
 
 ## Source structure (nanoclaw/src/)
@@ -47,7 +47,7 @@ Rebuild container images: `./bots/container/build.sh all` (or `build.sh commande
 | `service.ts` | Start/stop/deploy/chat/send logic |
 | `container-runner.ts` | Spawn Podman containers with mounts |
 | `task-scheduler.ts` | Scheduled task execution |
-| `group-queue.ts` | Per-group concurrency control |
+| `group-queue.ts` | Per-room concurrency control |
 | `ipc.ts` | IPC command handler (container → host) |
 | `db.ts` | SQLite operations |
 | `router.ts` | Message formatting and outbound routing |
