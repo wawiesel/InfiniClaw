@@ -250,11 +250,11 @@ export function getNewMessages(
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
-  // Filter out bot's own messages by checking content prefix (not is_from_me, since user shares the account)
+  // Filter out bot's own messages by content prefix AND is_from_me flag
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
     FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
+    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ? AND is_from_me = 0
     ORDER BY timestamp
   `;
 
