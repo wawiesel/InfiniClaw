@@ -707,7 +707,7 @@ export async function send(room: string, message: string): Promise<void> {
       msgtype: 'm.text',
       body: `[Operator]: ${message}`,
       format: 'org.matrix.custom.html',
-      formatted_body: `<details><summary><code>📞 Operator</code></summary><pre><code>${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre></details>`,
+      formatted_body: `<details><summary>📞 Operator</summary>${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</details>`,
     }),
   });
 
