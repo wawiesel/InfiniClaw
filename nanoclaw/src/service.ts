@@ -86,6 +86,7 @@ export function applyBrainEnv(env: Record<string, string>): Record<string, strin
   out.ANTHROPIC_AUTH_TOKEN = out.BRAIN_AUTH_TOKEN || '';
   out.ANTHROPIC_API_KEY = out.BRAIN_API_KEY || '';
   out.CLAUDE_CODE_OAUTH_TOKEN = out.BRAIN_OAUTH_TOKEN || '';
+  if (out.BRAIN_CA_CERT_FILE) out.NODE_EXTRA_CA_CERTS = out.BRAIN_CA_CERT_FILE;
 
   // Local fallback: if no explicit profile OAuth token, pull from macOS keychain
   if (!out.CLAUDE_CODE_OAUTH_TOKEN) {
