@@ -52,9 +52,6 @@ beforeEach(() => {
 
   deps = {
     sendMessage: async () => {},
-    sendImage: async () => {},
-    sendFile: async () => {},
-    defaultSenderForGroup: (sourceGroup) => sourceGroup,
     registeredGroups: () => groups,
     registerGroup: (jid, group) => {
       groups[jid] = group;

@@ -43,16 +43,8 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## Message Formatting
+## WhatsApp Formatting (and other messaging apps)
 
-### Matrix Formatting
-- Use backticks for filenames: `filename.md` (renders as inline code)
-- Use proper markdown links for web URLs: `[Link Text](https://url.com)`
-- For local file paths: Send plain path `/Users/ww5/<path>` (replace `/home/` with `/Users/ww5/`) so user can copy/paste, and attach the file when appropriate
-- Use Obsidian wiki-links in .md files: `[[note_name]]` for links, `![[image.jpg]]` for images
-- NEVER use bare underscored text like `filename_without_backticks.md` (Matrix auto-links it incorrectly)
-
-### WhatsApp Formatting
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:
 - *Bold* (single asterisks) (NEVER **double asterisks**)
 - _Italic_ (underscores)

@@ -44,7 +44,6 @@ export interface RegisteredGroup {
 export interface NewMessage {
   id: string;
   chat_jid: string;
-  chat_name?: string;
   sender: string;
   sender_name: string;
   content: string;
@@ -88,18 +87,6 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  // Optional: send an image file. Buffer is the raw file data.
-  sendImage?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
-  // Optional: send a generic file attachment. Buffer is the raw file data.
-  sendFile?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
-  // Optional: reaction to a message to acknowledge receipt
-  sendReaction?(jid: string, eventId: string, emoji: string): Promise<void>;
-  // Whether to prefix outbound messages with the assistant name.
-  // Telegram bots already display their name, so they return false.
-  // WhatsApp returns true. Default true if not implemented.
-  prefixAssistantName?: boolean;
-  // Optional: set presence/status visible next to bot display name
-  setPresenceStatus?(state: string, statusMessage?: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
@@ -108,4 +95,10 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;
 // channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
-export type OnChatMetadata = (chatJid: string, timestamp: string, name?: string) => void;
+export type OnChatMetadata = (
+  chatJid: string,
+  timestamp: string,
+  name?: string,
+  channel?: string,
+  isGroup?: boolean,
+) => void;

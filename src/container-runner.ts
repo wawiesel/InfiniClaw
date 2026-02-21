@@ -1,6 +1,6 @@
 /**
  * Container Runner for NanoClaw
- * Spawns agent execution in the configured container runtime and handles IPC
+ * Spawns agent execution in containers and handles IPC
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
@@ -8,20 +8,16 @@ import os from 'os';
 import path from 'path';
 
 import {
-  ASSISTANT_NAME,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
-  CONTAINER_CPUS,
-  CONTAINER_MEMORY_MB,
-  CONTAINER_RUNTIME,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
 } from './config.js';
-import { isPodmanRuntime, containerCli } from './container-runtime.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -52,9 +48,7 @@ export interface ContainerInput {
 export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
-  isProgress?: boolean;
   newSessionId?: string;
-  model?: string;
   error?: string;
 }
 
@@ -64,190 +58,9 @@ interface VolumeMount {
   readonly: boolean;
 }
 
-const ALLOWED_ENV_VARS = [
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-  'ANTHROPIC_MODEL',
-  'OLLAMA_HOST',
-  'OPENAI_API_KEY',
-  'OPENAI_BASE_URL',
-  // Network/TLS passthrough for environments with corporate proxies/certs.
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'ALL_PROXY',
-  'NO_PROXY',
-  'SSL_CERT_FILE',
-  'NODE_EXTRA_CA_CERTS',
-  'REQUESTS_CA_BUNDLE',
-  'CURL_CA_BUNDLE',
-  'GIT_SSL_CAINFO',
-  'NODE_TLS_REJECT_UNAUTHORIZED',
-];
-const CERT_PATH_ENV_VARS = [
-  'SSL_CERT_FILE',
-  'NODE_EXTRA_CA_CERTS',
-  'REQUESTS_CA_BUNDLE',
-  'CURL_CA_BUNDLE',
-  'GIT_SSL_CAINFO',
-] as const;
-
-
-function parseEnvLine(line: string): [string, string] | null {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith('#')) return null;
-  const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-  if (!match) return null;
-  const key = match[1];
-  let value = match[2];
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    value = value.slice(1, -1);
-  }
-  return [key, value];
-}
-
-function collectContainerSecrets(projectRoot: string): Record<string, string> {
-  const secrets: Record<string, string> = {};
-
-  // Launchd/runtime env takes precedence.
-  for (const key of ALLOWED_ENV_VARS) {
-    const value = process.env[key];
-    if (value && value.trim().length > 0) {
-      secrets[key] = value;
-    }
-  }
-
-  // Fill missing values from project .env if present.
-  const envFile = path.join(projectRoot, '.env');
-  if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
-    for (const line of envContent.split('\n')) {
-      const parsed = parseEnvLine(line);
-      if (!parsed) continue;
-      const [key, value] = parsed;
-      if (!ALLOWED_ENV_VARS.includes(key)) continue;
-      if (!secrets[key] && value.trim().length > 0) {
-        secrets[key] = value;
-      }
-    }
-  }
-
-  return secrets;
-}
-
-function isOllamaAnthropicBaseUrl(baseUrl: string | undefined): boolean {
-  const trimmed = baseUrl?.trim();
-  if (!trimmed) return false;
-
-  const normalized = trimmed.toLowerCase();
-  if (normalized.includes('ollama')) return true;
-
-  try {
-    const parsed = new URL(trimmed);
-    const port =
-      parsed.port ||
-      (parsed.protocol === 'https:' ? '443' : parsed.protocol === 'http:' ? '80' : '');
-    return port === '11434';
-  } catch {
-    return false;
-  }
-}
-
-function normalizeProviderSecrets(
-  secrets: Record<string, string>,
-): Record<string, string> {
-  const normalized = { ...secrets };
-  if (!isOllamaAnthropicBaseUrl(normalized.ANTHROPIC_BASE_URL)) {
-    return normalized;
-  }
-
-  // In Ollama mode, force Claude SDK to use Anthropic-compatible endpoint auth.
-  // Passing account OAuth here can cause SDK to ignore base URL routing.
-  delete normalized.CLAUDE_CODE_OAUTH_TOKEN;
-  delete normalized.ANTHROPIC_API_KEY;
-
-  const explicitModel = normalized.ANTHROPIC_MODEL?.trim();
-  if (explicitModel) {
-    normalized.ANTHROPIC_MODEL = explicitModel;
-  }
-
-  if (!normalized.ANTHROPIC_AUTH_TOKEN?.trim()) {
-    normalized.ANTHROPIC_AUTH_TOKEN = 'ollama';
-  }
-
-  return normalized;
-}
-
-function redactSecrets(
-  secrets: Record<string, string> | undefined,
-): Record<string, string> | undefined {
-  if (!secrets || Object.keys(secrets).length === 0) return undefined;
-  return Object.fromEntries(
-    Object.keys(secrets).map((k) => [k, '[REDACTED]']),
-  );
-}
-
-function mapCertPathSecretsToContainer(
-  secrets: Record<string, string>,
-  mounts: VolumeMount[],
-): Record<string, string> {
-  const mapped = { ...secrets };
-  const certMountRoot = '/workspace/host-certs';
-
-  for (const key of CERT_PATH_ENV_VARS) {
-    const value = mapped[key];
-    if (!value) continue;
-    if (!path.isAbsolute(value) || !fs.existsSync(value)) continue;
-
-    const safeName = path.basename(value).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const containerPath = `${certMountRoot}/${key.toLowerCase()}-${safeName}`;
-
-    if (
-      !mounts.some(
-        (m) => m.hostPath === value && m.containerPath === containerPath,
-      )
-    ) {
-      mounts.push({
-        hostPath: value,
-        containerPath,
-        readonly: true,
-      });
-    }
-
-    mapped[key] = containerPath;
-  }
-
-  // Normalize CA bundle env so Node, Python/requests, curl, and git all see
-  // the same trust anchor even if only one variable is provided by the host.
-  const certBundle =
-    mapped.SSL_CERT_FILE ||
-    mapped.NODE_EXTRA_CA_CERTS ||
-    mapped.REQUESTS_CA_BUNDLE ||
-    mapped.CURL_CA_BUNDLE ||
-    mapped.GIT_SSL_CAINFO;
-  if (certBundle) {
-    if (!mapped.SSL_CERT_FILE) mapped.SSL_CERT_FILE = certBundle;
-    if (!mapped.NODE_EXTRA_CA_CERTS) mapped.NODE_EXTRA_CA_CERTS = certBundle;
-    if (!mapped.REQUESTS_CA_BUNDLE) mapped.REQUESTS_CA_BUNDLE = certBundle;
-    if (!mapped.CURL_CA_BUNDLE) mapped.CURL_CA_BUNDLE = certBundle;
-    if (!mapped.GIT_SSL_CAINFO) mapped.GIT_SSL_CAINFO = certBundle;
-  }
-
-  return mapped;
-}
-
-function quoteEnvValue(value: string): string {
-  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
-}
-
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
-  normalizedSecrets: Record<string, string>,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
@@ -276,6 +89,7 @@ function buildVolumeMounts(
     });
 
     // Global memory directory (read-only for non-main)
+    // Only directory mounts are supported, not file mounts
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
@@ -320,12 +134,7 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.mkdirSync(dstDir, { recursive: true });
-      for (const file of fs.readdirSync(srcDir)) {
-        const srcFile = path.join(srcDir, file);
-        const dstFile = path.join(dstDir, file);
-        fs.copyFileSync(srcFile, dstFile);
-      }
+      fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
   mounts.push({
@@ -333,27 +142,6 @@ function buildVolumeMounts(
     containerPath: '/home/node/.claude',
     readonly: false,
   });
-
-  // Share host Codex login state with container delegate_codex runs.
-  // This enables `codex` inside the container to reuse the host's auth.json.
-  const hostCodexDir = path.join(homeDir, '.codex');
-  if (fs.existsSync(hostCodexDir)) {
-    mounts.push({
-      hostPath: hostCodexDir,
-      containerPath: '/home/node/.codex',
-      readonly: false,
-    });
-  }
-
-  // Share host Gemini login/config with container delegate_gemini runs.
-  const hostGeminiDir = path.join(homeDir, '.gemini');
-  if (fs.existsSync(hostGeminiDir)) {
-    mounts.push({
-      hostPath: hostGeminiDir,
-      containerPath: '/home/node/.gemini',
-      readonly: false,
-    });
-  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -367,34 +155,8 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Environment file directory (mounted as /workspace/env-dir for the entrypoint to source)
-  // Only expose specific auth variables needed by Claude Code, not the entire .env
-  const envDir = path.join(DATA_DIR, 'env');
-  fs.mkdirSync(envDir, { recursive: true });
-  const filteredLines = Object.entries(normalizedSecrets)
-    .filter(([key, value]) => ALLOWED_ENV_VARS.includes(key) && value.trim().length > 0)
-    .map(([key, value]) => `${key}=${quoteEnvValue(value)}`);
-
-  if (filteredLines.length > 0) {
-    fs.writeFileSync(path.join(envDir, 'env'), filteredLines.join('\n') + '\n');
-    mounts.push({
-      hostPath: envDir,
-      containerPath: '/workspace/env-dir',
-      readonly: true,
-    });
-  }
-
-  // Per-group persistent cache for model/tool downloads (docling, huggingface, pip, etc.).
-  // Keeps heavy artifacts out of mounted user data like /workspace/extra/home/_vault.
-  const cacheDir = path.join(DATA_DIR, 'cache', group.folder);
-  fs.mkdirSync(cacheDir, { recursive: true });
-  mounts.push({
-    hostPath: cacheDir,
-    containerPath: '/workspace/cache',
-    readonly: false,
-  });
-
   // Mount agent-runner source from host — recompiled on container startup.
+  // Bypasses sticky build cache for code changes.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   mounts.push({
     hostPath: agentRunnerSrc,
@@ -423,36 +185,24 @@ function readSecrets(): Record<string, string> {
   return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
 }
 
-
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  if (isPodmanRuntime()) {
-    // Prefer local image for podman: don't pull from remote registries.
-    args.push('--pull=never');
-    if (CONTAINER_MEMORY_MB > 0) {
-      args.push('--memory', `${CONTAINER_MEMORY_MB}m`);
-    }
-    if (CONTAINER_CPUS > 0) {
-      args.push('--cpus', String(CONTAINER_CPUS));
-    }
-    for (const mount of mounts) {
-      args.push(
-        '-v',
-        `${mount.hostPath}:${mount.containerPath}${mount.readonly ? ':ro' : ''}`,
-      );
-    }
-  } else {
-    // Apple Container: --mount for readonly, -v for read-write
-    for (const mount of mounts) {
-      if (mount.readonly) {
-        args.push(
-          '--mount',
-          `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`,
-        );
-      } else {
-        args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
-      }
+  // Run as host user so bind-mounted files are accessible.
+  // Skip when running as root (uid 0), as the container's node user (uid 1000),
+  // or when getuid is unavailable (native Windows without WSL).
+  const hostUid = process.getuid?.();
+  const hostGid = process.getgid?.();
+  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+    args.push('--user', `${hostUid}:${hostGid}`);
+    args.push('-e', 'HOME=/home/node');
+  }
+
+  for (const mount of mounts) {
+    if (mount.readonly) {
+      args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
+    } else {
+      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
     }
   }
 
@@ -471,21 +221,10 @@ export async function runContainerAgent(
 
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
-  const projectRoot = process.cwd();
-  const secrets = normalizeProviderSecrets(collectContainerSecrets(projectRoot));
-  const mounts = buildVolumeMounts(group, input.isMain, secrets);
-  const mappedSecrets = mapCertPathSecretsToContainer(secrets, mounts);
-  const effectiveInput: ContainerInput = {
-    ...input,
-    ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
-  };
-  const redactedInputForLog: ContainerInput = {
-    ...effectiveInput,
-    secrets: redactSecrets(effectiveInput.secrets),
-  };
+
+  const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const containerName = `nanoclaw-${botTag}-${safeName}-${Date.now()}`;
+  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
 
   logger.debug(
@@ -505,7 +244,6 @@ export async function runContainerAgent(
     {
       group: group.name,
       containerName,
-      runtime: CONTAINER_RUNTIME,
       mountCount: mounts.length,
       isMain: input.isMain,
     },
@@ -516,8 +254,7 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const runtimeCmd = containerCli();
-    const container = spawn(runtimeCmd, containerArgs, {
+    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -528,9 +265,12 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Write input and close stdin so the runtime can flush/finish reading.
-    container.stdin.write(JSON.stringify(effectiveInput));
+    // Pass secrets via stdin (never written to disk or mounted as files)
+    input.secrets = readSecrets();
+    container.stdin.write(JSON.stringify(input));
     container.stdin.end();
+    // Remove secrets from input so they don't appear in logs
+    delete input.secrets;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
@@ -621,7 +361,7 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      exec(`${runtimeCmd} stop ${containerName}`, { timeout: 15000 }, (err) => {
+      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');
@@ -706,7 +446,7 @@ export async function runContainerAgent(
       if (isVerbose || isError) {
         logLines.push(
           `=== Input ===`,
-          JSON.stringify(redactedInputForLog, null, 2),
+          JSON.stringify(input, null, 2),
           ``,
           `=== Container Args ===`,
           containerArgs.join(' '),
@@ -728,8 +468,8 @@ export async function runContainerAgent(
       } else {
         logLines.push(
           `=== Input Summary ===`,
-          `Prompt length: ${effectiveInput.prompt.length} chars`,
-          `Session ID: ${effectiveInput.sessionId || 'new'}`,
+          `Prompt length: ${input.prompt.length} chars`,
+          `Session ID: ${input.sessionId || 'new'}`,
           ``,
           `=== Mounts ===`,
           mounts

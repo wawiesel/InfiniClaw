@@ -123,18 +123,6 @@ ls -la store/auth/
 npm run auth
 ```
 
-## Matrix/Element: LaTeX Not Rendering
-
-If messages include LaTeX delimiters (`$...$`, `$$...$$`) but Element shows plain text:
-
-1. In any room, send `/devtools`.
-2. In the `Developer Tools` dialog, enable `Developer mode`.
-3. Open `Settings -> Labs`.
-4. Enable `Render LaTeX maths in messages` (`feature_latex_maths`).
-5. Reload Element.
-
-Note: NanoClaw already emits Matrix math markup (`data-mx-maths`). Rendering is controlled by the Element client flag above.
-
 ## Service Management
 
 ```bash

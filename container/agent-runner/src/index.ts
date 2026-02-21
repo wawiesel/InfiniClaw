@@ -32,9 +32,7 @@ interface ContainerInput {
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
-  isProgress?: boolean;
   newSessionId?: string;
-  model?: string;
   error?: string;
 }
 
@@ -59,154 +57,6 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-const DOCLING_VENV_BIN = '/workspace/cache/venvs/docling_venv/bin';
-const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
-const TOOL_PROGRESS_EMIT_MS = 15_000;
-const GENERAL_PROGRESS_DEDUPE_MS = 5_000;
-const SDK_PROCESS_ENV_KEYS = [
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-  'ANTHROPIC_MODEL',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'ALL_PROXY',
-  'NO_PROXY',
-  'SSL_CERT_FILE',
-  'NODE_EXTRA_CA_CERTS',
-  'REQUESTS_CA_BUNDLE',
-  'CURL_CA_BUNDLE',
-  'GIT_SSL_CAINFO',
-  'NODE_TLS_REJECT_UNAUTHORIZED',
-] as const;
-const MAIN_DELEGATE_POLICY = `Main brain / lobe policy:
-- You are one brain identity operating multiple lobes.
-- Delegation means lobe cloning, not autonomous handoff.
-- Each lobe gets a tightly-scoped objective with acceptance criteria and reports back for integration.
-- MAIN brain stays user-responsive while lobes execute.
-- For multi-step or long-running execution, launch lobes via mcp__nanoclaw__delegate_codex, mcp__nanoclaw__delegate_gemini, or mcp__nanoclaw__delegate_ollama.
-- Lobe outputs are intermediate cognition. Collapse and integrate results back into one coherent MAIN response.
-- Own final quality: verify lobe outputs, correct drift, and take responsibility for final results.
-- Keep lobe control explicit: use delegate_list/delegate_status/delegate_cancel/delegate_amend to monitor and correct active runs.
-- If user asks "what are you doing" during active work, provide concrete state (completed, running, next) immediately.
-- Your final response text is delivered to the user automatically. Do NOT use status_update for your final answer. Use status_update only for brief progress indicators during long tasks (max 60 chars).`;
-
-const DEFAULT_ALLOWED_TOOLS = [
-  'Bash',
-  'Read',
-  'Write',
-  'Edit',
-  'Glob',
-  'Grep',
-  'WebSearch',
-  'WebFetch',
-  'Task',
-  'TaskOutput',
-  'TaskStop',
-  'TeamCreate',
-  'TeamDelete',
-  'SendMessage',
-  'TodoWrite',
-  'ToolSearch',
-  'Skill',
-  'NotebookEdit',
-  'mcp__nanoclaw__*',
-] as const;
-
-// MAIN can do direct exploratory work, then delegate scale-out.
-const MAIN_ALLOWED_TOOLS = DEFAULT_ALLOWED_TOOLS;
-
-function getAllowedTools(isMainGroup: boolean): readonly string[] {
-  return isMainGroup ? MAIN_ALLOWED_TOOLS : DEFAULT_ALLOWED_TOOLS;
-}
-
-function firstSet(...values: Array<string | undefined>): string | undefined {
-  for (const v of values) {
-    const s = v?.trim();
-    if (s) return s;
-  }
-  return undefined;
-}
-
-function getRequestedMainModel(env: Record<string, string | undefined>): string | undefined {
-  return firstSet(env[MAIN_MODEL_ENV_KEY]);
-}
-
-function claudeModelFamily(model: string): 'opus' | 'sonnet' | 'haiku' | 'unknown' {
-  const normalized = model.trim().toLowerCase();
-  if (normalized.includes('opus')) return 'opus';
-  if (normalized.includes('sonnet')) return 'sonnet';
-  if (normalized.includes('haiku')) return 'haiku';
-  return 'unknown';
-}
-
-function modelMatchesRequest(requested: string, actual: string): boolean {
-  const req = requested.trim().toLowerCase();
-  const act = actual.trim().toLowerCase();
-  if (!req || !act) return false;
-  if (req === act) return true;
-
-  // Allow family aliases (opus/sonnet/haiku) to match concrete dated models.
-  const reqFamily = claudeModelFamily(req);
-  const actFamily = claudeModelFamily(act);
-  if (reqFamily !== 'unknown' && actFamily !== 'unknown' && reqFamily === actFamily) {
-    return true;
-  }
-
-  return false;
-}
-
-function isOllamaAnthropicBaseUrl(baseUrl: string | undefined): boolean {
-  const trimmed = baseUrl?.trim();
-  if (!trimmed) return false;
-
-  const normalized = trimmed.toLowerCase();
-  if (normalized.includes('ollama')) return true;
-
-  try {
-    const parsed = new URL(trimmed);
-    const port =
-      parsed.port ||
-      (parsed.protocol === 'https:' ? '443' : parsed.protocol === 'http:' ? '80' : '');
-    return port === '11434';
-  } catch {
-    return false;
-  }
-}
-
-function prependToPath(currentPath: string | undefined, prefix: string): string {
-  if (!currentPath || currentPath.trim().length === 0) return prefix;
-  const parts = currentPath.split(path.delimiter);
-  if (parts.includes(prefix)) return currentPath;
-  return `${prefix}${path.delimiter}${currentPath}`;
-}
-
-function applySdkProcessEnv(
-  sdkEnv: Record<string, string | undefined>,
-): () => void {
-  const previous: Record<string, string | undefined> = {};
-  for (const key of SDK_PROCESS_ENV_KEYS) {
-    previous[key] = process.env[key];
-    const next = sdkEnv[key];
-    if (typeof next === 'string' && next.length > 0) {
-      process.env[key] = next;
-    } else {
-      delete process.env[key];
-    }
-  }
-
-  return () => {
-    for (const key of SDK_PROCESS_ENV_KEYS) {
-      const prior = previous[key];
-      if (typeof prior === 'string') {
-        process.env[key] = prior;
-      } else {
-        delete process.env[key];
-      }
-    }
-  };
-}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -402,35 +252,6 @@ function parseTranscript(content: string): ParsedMessage[] {
   return messages;
 }
 
-function extractAssistantText(message: unknown): string {
-  if (!message || typeof message !== 'object') return '';
-
-  const record = message as Record<string, unknown>;
-  const fromEnvelope = record.message;
-  const payload =
-    fromEnvelope && typeof fromEnvelope === 'object'
-      ? (fromEnvelope as Record<string, unknown>).content
-      : record.content;
-
-  if (typeof payload === 'string') {
-    return payload.trim();
-  }
-
-  if (!Array.isArray(payload)) return '';
-
-  const parts: string[] = [];
-  for (const item of payload) {
-    if (!item || typeof item !== 'object') continue;
-    const chunk = item as Record<string, unknown>;
-    if (chunk.type !== 'text') continue;
-    if (typeof chunk.text === 'string' && chunk.text.trim()) {
-      parts.push(chunk.text.trim());
-    }
-  }
-
-  return parts.join('\n').trim();
-}
-
 function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {
   const now = new Date();
   const formatDateTime = (d: Date) => d.toLocaleString('en-US', {
@@ -539,12 +360,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{
-  newSessionId?: string;
-  lastAssistantUuid?: string;
-  model?: string;
-  closedDuringQuery: boolean;
-}> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -570,35 +386,9 @@ async function runQuery(
   setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
 
   let newSessionId: string | undefined;
-  let activeModel: string | undefined;
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
-  const lastToolProgressAt = new Map<string, number>();
-  let lastProgressText = '';
-  let lastProgressAt = 0;
-  let lastAssistantText = '';
-
-  const emitProgress = (text: string): void => {
-    const normalized = text.replace(/\r/g, '').replace(/\s+/g, ' ').trim();
-    if (!normalized) return;
-    const now = Date.now();
-    if (
-      normalized === lastProgressText &&
-      now - lastProgressAt < GENERAL_PROGRESS_DEDUPE_MS
-    ) {
-      return;
-    }
-    lastProgressText = normalized;
-    lastProgressAt = now;
-    writeOutput({
-      status: 'success',
-      result: normalized,
-      isProgress: true,
-      newSessionId,
-      model: activeModel,
-    });
-  };
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -606,12 +396,6 @@ async function runQuery(
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
-  const systemPromptAppend = [
-    globalClaudeMd,
-    containerInput.isMain ? MAIN_DELEGATE_POLICY : undefined,
-  ]
-    .filter((x): x is string => !!x && x.trim().length > 0)
-    .join('\n\n');
 
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
@@ -629,81 +413,47 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
-  const anthropicBaseUrl = sdkEnv.ANTHROPIC_BASE_URL;
-  const configuredMainModel = getRequestedMainModel(sdkEnv);
-  const mainIsClaude =
-    containerInput.isMain && !isOllamaAnthropicBaseUrl(anthropicBaseUrl);
-  if (mainIsClaude && !configuredMainModel) {
-    throw new Error(
-      `${MAIN_MODEL_ENV_KEY} is required for MAIN Claude runs`,
-    );
-  }
-  const mainModel = mainIsClaude ? configuredMainModel : undefined;
-
-  const restoreSdkProcessEnv = applySdkProcessEnv(sdkEnv);
-  try {
-    for await (const message of query({
-      prompt: stream,
-      options: {
-        cwd: '/workspace/group',
-        additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-        resume: sessionId,
-        resumeSessionAt: resumeAt,
-        systemPrompt: systemPromptAppend
-          ? { type: 'preset' as const, preset: 'claude_code' as const, append: systemPromptAppend }
-          : undefined,
-        model: mainModel,
-        allowedTools: [...getAllowedTools(containerInput.isMain)],
-        env: sdkEnv,
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        settingSources: ['project', 'user'],
-        mcpServers: {
-          nanoclaw: {
-            command: 'node',
-            args: [mcpServerPath],
-            env: {
-              NANOCLAW_CHAT_JID: containerInput.chatJid,
-              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-              ...(sdkEnv.HTTP_PROXY
-                ? { HTTP_PROXY: sdkEnv.HTTP_PROXY }
-                : {}),
-              ...(sdkEnv.HTTPS_PROXY
-                ? { HTTPS_PROXY: sdkEnv.HTTPS_PROXY }
-                : {}),
-              ...(sdkEnv.ALL_PROXY ? { ALL_PROXY: sdkEnv.ALL_PROXY } : {}),
-              ...(sdkEnv.NO_PROXY ? { NO_PROXY: sdkEnv.NO_PROXY } : {}),
-              ...(sdkEnv.SSL_CERT_FILE
-                ? { SSL_CERT_FILE: sdkEnv.SSL_CERT_FILE }
-                : {}),
-              ...(sdkEnv.NODE_EXTRA_CA_CERTS
-                ? { NODE_EXTRA_CA_CERTS: sdkEnv.NODE_EXTRA_CA_CERTS }
-                : {}),
-              ...(sdkEnv.REQUESTS_CA_BUNDLE
-                ? { REQUESTS_CA_BUNDLE: sdkEnv.REQUESTS_CA_BUNDLE }
-                : {}),
-              ...(sdkEnv.CURL_CA_BUNDLE
-                ? { CURL_CA_BUNDLE: sdkEnv.CURL_CA_BUNDLE }
-                : {}),
-              ...(sdkEnv.GIT_SSL_CAINFO
-                ? { GIT_SSL_CAINFO: sdkEnv.GIT_SSL_CAINFO }
-                : {}),
-              ...(sdkEnv.NODE_TLS_REJECT_UNAUTHORIZED
-                ? {
-                    NODE_TLS_REJECT_UNAUTHORIZED:
-                      sdkEnv.NODE_TLS_REJECT_UNAUTHORIZED,
-                  }
-                : {}),
-            },
+  for await (const message of query({
+    prompt: stream,
+    options: {
+      cwd: '/workspace/group',
+      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
+      resume: sessionId,
+      resumeSessionAt: resumeAt,
+      systemPrompt: globalClaudeMd
+        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+        : undefined,
+      allowedTools: [
+        'Bash',
+        'Read', 'Write', 'Edit', 'Glob', 'Grep',
+        'WebSearch', 'WebFetch',
+        'Task', 'TaskOutput', 'TaskStop',
+        'TeamCreate', 'TeamDelete', 'SendMessage',
+        'TodoWrite', 'ToolSearch', 'Skill',
+        'NotebookEdit',
+        'mcp__nanoclaw__*'
+      ],
+      env: sdkEnv,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      settingSources: ['project', 'user'],
+      mcpServers: {
+        nanoclaw: {
+          command: 'node',
+          args: [mcpServerPath],
+          env: {
+            NANOCLAW_CHAT_JID: containerInput.chatJid,
+            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
-        hooks: {
-          PreCompact: [{ hooks: [createPreCompactHook()] }],
-          PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
-        },
-      }
-    })) {
+      },
+      hooks: {
+        PreCompact: [{ hooks: [createPreCompactHook()] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+      },
+    }
+  })) {
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
@@ -712,108 +462,31 @@ async function runQuery(
       lastAssistantUuid = (message as { uuid: string }).uuid;
     }
 
-    if (message.type === 'assistant') {
-      const assistantText = extractAssistantText(message);
-      if (assistantText && assistantText !== lastAssistantText) {
-        lastAssistantText = assistantText;
-        emitProgress(assistantText);
-      }
-    }
-
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
-      activeModel = (message as { model?: string }).model?.trim() || activeModel;
       log(`Session initialized: ${newSessionId}`);
-      if (
-        containerInput.isMain &&
-        configuredMainModel &&
-        activeModel &&
-        !modelMatchesRequest(configuredMainModel, activeModel)
-      ) {
-        throw new Error(
-          `MAIN model mismatch: requested "${configuredMainModel}" but runtime initialized "${activeModel}"`,
-        );
-      }
     }
 
     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
       const tn = message as { task_id: string; status: string; summary: string };
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
-      const summary = tn.summary?.trim();
-      emitProgress(
-        summary
-          ? `task ${tn.status}: ${summary}`
-          : `task ${tn.task_id} ${tn.status}`,
-      );
-    }
-
-    if (message.type === 'system' && message.subtype === 'status') {
-      const statusText = (message as { status?: string | null }).status?.trim();
-      if (statusText) {
-        emitProgress(`status: ${statusText}`);
-      }
-    }
-
-    if (message.type === 'tool_progress') {
-      const progress = message as {
-        tool_use_id: string;
-        tool_name: string;
-        elapsed_time_seconds: number;
-      };
-      const toolUseId = progress.tool_use_id?.trim() || '';
-      const now = Date.now();
-      const lastEmittedAt = toolUseId ? (lastToolProgressAt.get(toolUseId) || 0) : 0;
-      if (!toolUseId || now - lastEmittedAt >= TOOL_PROGRESS_EMIT_MS) {
-        if (toolUseId) lastToolProgressAt.set(toolUseId, now);
-        const elapsedSeconds = Math.max(
-          1,
-          Math.floor(progress.elapsed_time_seconds || 0),
-        );
-        emitProgress(
-          `tool ${progress.tool_name} running (${elapsedSeconds}s)`,
-        );
-      }
-    }
-
-    if (message.type === 'tool_use_summary') {
-      const summary = (message as { summary?: string }).summary?.trim();
-      if (summary) {
-        emitProgress(summary);
-      }
     }
 
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      const normalizedResult = (textResult || '')
-        .replace(/\r/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (normalizedResult && normalizedResult === lastProgressText) {
-        writeOutput({
-          status: 'success',
-          result: null,
-          newSessionId,
-          model: activeModel,
-        });
-        continue;
-      }
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId,
-        model: activeModel,
+        newSessionId
       });
     }
-  }
-  } finally {
-    restoreSdkProcessEnv();
   }
 
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, model: activeModel, closedDuringQuery };
+  return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
 async function main(): Promise<void> {
@@ -840,13 +513,11 @@ async function main(): Promise<void> {
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
   }
-  sdkEnv.PATH = prependToPath(sdkEnv.PATH, DOCLING_VENV_BIN);
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
-  let activeModel: string | undefined;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
@@ -873,9 +544,6 @@ async function main(): Promise<void> {
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
-      if (queryResult.model) {
-        activeModel = queryResult.model;
-      }
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
       }
@@ -889,12 +557,7 @@ async function main(): Promise<void> {
       }
 
       // Emit session update so host can track it
-      writeOutput({
-        status: 'success',
-        result: null,
-        newSessionId: sessionId,
-        model: activeModel,
-      });
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
       log('Query ended, waiting for next IPC message...');
 
@@ -915,7 +578,6 @@ async function main(): Promise<void> {
       status: 'error',
       result: null,
       newSessionId: sessionId,
-      model: activeModel,
       error: errorMessage
     });
     process.exit(1);

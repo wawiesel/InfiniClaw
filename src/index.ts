@@ -3,52 +3,25 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  ASSISTANT_REACTION,
-  ASSISTANT_ROLE,
-  ASSISTANT_TRIGGER,
   DATA_DIR,
-  GROUPS_DIR,
-  HEAP_LIMIT_MB,
   IDLE_TIMEOUT,
-  LOCAL_CHANNEL_ENABLED,
-  LOCAL_CHAT_JID,
-  LOCAL_MIRROR_MATRIX_JID,
   MAIN_GROUP_FOLDER,
-  MATRIX_ACCESS_TOKEN,
-  MATRIX_HOMESERVER,
-  MATRIX_PASSWORD,
-  MATRIX_RECONNECT_INTERVAL,
-  MATRIX_USERNAME,
-  MEMORY_CHECK_INTERVAL,
   POLL_INTERVAL,
-  STORE_DIR,
   TRIGGER_PATTERN,
 } from './config.js';
-import { LocalCliChannel } from './channels/local-cli.js';
-import { MatrixChannel } from './channels/matrix.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
-import {
-  isCrossBotRoom,
-  shouldIgnoreMessage,
-  forwardCrossBotMessages,
-} from './cross-bot.js';
 import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import {
-  ensureContainerSystemRunning,
-  hasRuntimeActiveContainer,
-  runtimeHealthy,
-} from './container-runtime.js';
+import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
-  deleteSession,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -61,7 +34,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, stripInternalTags } from './router.js';
+import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -74,578 +47,9 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
-const QUEUED_ACK_COOLDOWN_MS = 30_000;
-const lastQueuedAckAt: Record<string, number> = {};
-const ACTIVE_PIPE_ACK_COOLDOWN_MS = 5_000;
-const lastActivePipeAckAt: Record<string, number> = {};
-const PROGRESS_CHAT_COOLDOWN_MS = 10_000;
-const lastProgressChatAt: Record<string, number> = {};
-const STATUS_REQUEST_PATTERN = /\b(progress|status|report)\b/i;
-const ACTIVITY_STATUS_PATTERN =
-  /\b(what are you doing|what are you working on|what's happening|whats happening|where are you at|how's it going|hows it going)\b/i;
-const HEARTBEAT_ONLY_PATTERN = /^(?:@[^\s]+\s+)?(?:ping|heartbeat|hello|hi|hey|are you there|check[-\s]?in)\b[\s!?.,:;]*$/i;
-const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
-const STATUS_NUDGE_STALE_MS = 45_000;
-const STATUS_NUDGE_COOLDOWN_MS = 90_000;
-const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
-const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
-const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
-const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');
-const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
 
-interface ChatActivity {
-  runStartedAt?: number;
-  currentObjective?: string;
-  currentObjectiveAt?: number;
-  recentUserContext?: string[];
-  lastProgress?: string;
-  lastProgressAt?: number;
-  lastCompletion?: string;
-  lastCompletionAt?: number;
-  lastError?: string;
-  lastErrorAt?: number;
-}
-
-const chatActivity: Record<string, ChatActivity> = {};
-const lastStatusNudgeAt: Record<string, number> = {};
-const CHAT_ACTIVITY_STATE_PREFIX = 'chat_activity:';
-
-function firstSet(...values: Array<string | undefined>): string | undefined {
-  for (const v of values) {
-    const s = v?.trim();
-    if (s) return s;
-  }
-  return undefined;
-}
-
-function parseEnvLine(line: string): [string, string] | null {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith('#')) return null;
-  const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-  if (!match) return null;
-  const key = match[1];
-  let value = match[2];
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    value = value.slice(1, -1);
-  }
-  return [key, value];
-}
-
-function loadProjectEnv(): Record<string, string> {
-  const values: Record<string, string> = {};
-  if (!fs.existsSync(PROJECT_ENV_PATH)) return values;
-
-  try {
-    const envContent = fs.readFileSync(PROJECT_ENV_PATH, 'utf-8');
-    for (const line of envContent.split('\n')) {
-      const parsed = parseEnvLine(line);
-      if (!parsed) continue;
-      const [key, value] = parsed;
-      values[key] = value;
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Failed to read project .env');
-  }
-
-  return values;
-}
-
-const PROJECT_ENV = loadProjectEnv();
-
-function getConfiguredEnv(key: string): string | undefined {
-  return firstSet(process.env[key], PROJECT_ENV[key]);
-}
-
-function isOllamaAnthropicBaseUrl(baseUrl: string | undefined): boolean {
-  const trimmed = baseUrl?.trim();
-  if (!trimmed) return false;
-
-  const normalized = trimmed.toLowerCase();
-  if (normalized.includes('ollama')) return true;
-
-  try {
-    const parsed = new URL(trimmed);
-    const port =
-      parsed.port ||
-      (parsed.protocol === 'https:' ? '443' : parsed.protocol === 'http:' ? '80' : '');
-    return port === '11434';
-  } catch {
-    return false;
-  }
-}
-
-function isMainConfiguredForOllama(): boolean {
-  return isOllamaAnthropicBaseUrl(getConfiguredEnv('ANTHROPIC_BASE_URL'));
-}
-
-function resolveConfiguredMainModel(): string | undefined {
-  return getConfiguredEnv(MAIN_MODEL_ENV_KEY)?.trim() || undefined;
-}
-
-function parseNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
-function getClaudeModelFromStatsCache(): string | undefined {
-  const statsPath = path.join(
-    DATA_DIR,
-    'sessions',
-    MAIN_GROUP_FOLDER,
-    '.claude',
-    'stats-cache.json',
-  );
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
-  } catch {
-    return undefined;
-  }
-
-  if (!parsed || typeof parsed !== 'object') return undefined;
-
-  // Prefer modelUsage since it summarizes overall token usage by model.
-  const modelUsage = (parsed as { modelUsage?: unknown }).modelUsage;
-  if (modelUsage && typeof modelUsage === 'object') {
-    let bestModel: string | undefined;
-    let bestScore = -1;
-    for (const [model, usage] of Object.entries(modelUsage)) {
-      if (!model.trim() || !usage || typeof usage !== 'object') continue;
-      const metrics = usage as Record<string, unknown>;
-      const score =
-        parseNumber(metrics.inputTokens) +
-        parseNumber(metrics.outputTokens) +
-        parseNumber(metrics.cacheReadInputTokens) +
-        parseNumber(metrics.cacheCreationInputTokens);
-      if (score > bestScore) {
-        bestScore = score;
-        bestModel = model.trim();
-      }
-    }
-    if (bestModel) return bestModel;
-  }
-
-  // Fallback: inspect most recent daily tokens by model.
-  const dailyModelTokens = (parsed as { dailyModelTokens?: unknown }).dailyModelTokens;
-  if (Array.isArray(dailyModelTokens)) {
-    for (let i = dailyModelTokens.length - 1; i >= 0; i -= 1) {
-      const dayEntry = dailyModelTokens[i];
-      if (!dayEntry || typeof dayEntry !== 'object') continue;
-      const tokensByModel = (dayEntry as { tokensByModel?: unknown }).tokensByModel;
-      if (!tokensByModel || typeof tokensByModel !== 'object') continue;
-
-      let bestModel: string | undefined;
-      let bestTokens = -1;
-      for (const [model, tokens] of Object.entries(tokensByModel)) {
-        const tokenCount = parseNumber(tokens);
-        if (model.trim() && tokenCount > bestTokens) {
-          bestTokens = tokenCount;
-          bestModel = model.trim();
-        }
-      }
-      if (bestModel) return bestModel;
-    }
-  }
-
-  return undefined;
-}
-
-function resolveMainProvider(): 'claude' | 'ollama' {
-  if (isMainConfiguredForOllama()) {
-    return 'ollama';
-  }
-  return 'claude';
-}
-
-function isGenericClaudeModel(model: string): boolean {
-  const normalized = model.trim().toLowerCase();
-  if (!normalized) return true;
-
-  if (
-    normalized === 'default' ||
-    normalized === 'opus' ||
-    normalized === 'sonnet' ||
-    normalized === 'haiku' ||
-    normalized === 'claude-opus' ||
-    normalized === 'claude-sonnet' ||
-    normalized === 'claude-haiku'
-  ) {
-    return true;
-  }
-
-  // Treat family aliases like claude-opus, claude-opus-latest as non-specific.
-  // Any model string containing digits is considered specific (e.g. claude-opus-4-6).
-  if (/^(claude-)?(opus|sonnet|haiku)(-[a-z._-]+)?$/i.test(normalized) && !/\d/.test(normalized)) {
-    return true;
-  }
-
-  return false;
-}
-
-function normalizeMainLlm(model: string | undefined): string | undefined {
-  const trimmed = model?.trim();
-  if (!trimmed) return undefined;
-
-  if (resolveMainProvider() !== 'claude') {
-    return trimmed;
-  }
-
-  if (!isGenericClaudeModel(trimmed)) {
-    return trimmed;
-  }
-
-  // Try to upgrade generic aliases to a concrete dated model if available.
-  const fromStats = getClaudeModelFromStatsCache()?.trim();
-  if (fromStats && !isGenericClaudeModel(fromStats)) {
-    return fromStats;
-  }
-
-  return undefined;
-}
-function resolveMainLlm(): string {
-  const configuredModel = normalizeMainLlm(resolveConfiguredMainModel());
-  if (configuredModel) return configuredModel;
-
-  if (resolveMainProvider() === 'claude') {
-    const statsModel = normalizeMainLlm(getClaudeModelFromStatsCache());
-    if (statsModel) return statsModel;
-    return 'unknown-model';
-  }
-
-  return 'unknown-model';
-}
-const MAIN_PROVIDER = resolveMainProvider();
-let mainLlm = resolveMainLlm();
-
-function updateMainLlm(model?: string): void {
-  const normalized = normalizeMainLlm(model);
-  if (!normalized || normalized === mainLlm) return;
-  mainLlm = normalized;
-  setRouterState('main_model', mainLlm);
-  logger.info({ mainModel: mainLlm }, 'Updated MAIN model label');
-}
-
-function mainSender(): string {
-  const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
-  return `<font color="#888888">${ASSISTANT_ROLE} <em>(${providerName}/${mainLlm})</em></font>`;
-}
-
-function defaultSenderForGroup(sourceGroup: string): string {
-  if (sourceGroup === MAIN_GROUP_FOLDER) {
-    return mainSender();
-  }
-
-  const groupName = Object.values(registeredGroups).find(
-    (g) => g.folder === sourceGroup,
-  )?.name;
-  return groupName?.trim() || sourceGroup;
-}
-
-function getMainChatJid(): string | undefined {
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    if (group.folder === MAIN_GROUP_FOLDER) return jid;
-  }
-  return undefined;
-}
-
-function formatMainMessage(body: string): string {
-  return body.trim();
-}
-
-function chatActivityStateKey(chatJid: string): string {
-  return `${CHAT_ACTIVITY_STATE_PREFIX}${encodeURIComponent(chatJid)}`;
-}
-
-function sanitizeActivity(raw: unknown): ChatActivity {
-  if (!raw || typeof raw !== 'object') return {};
-  const record = raw as Record<string, unknown>;
-  const out: ChatActivity = {};
-  if (typeof record.runStartedAt === 'number') out.runStartedAt = record.runStartedAt;
-  if (typeof record.currentObjective === 'string') out.currentObjective = record.currentObjective;
-  if (typeof record.currentObjectiveAt === 'number') out.currentObjectiveAt = record.currentObjectiveAt;
-  if (typeof record.lastProgress === 'string') out.lastProgress = record.lastProgress;
-  if (typeof record.lastProgressAt === 'number') out.lastProgressAt = record.lastProgressAt;
-  if (typeof record.lastCompletion === 'string') out.lastCompletion = record.lastCompletion;
-  if (typeof record.lastCompletionAt === 'number') out.lastCompletionAt = record.lastCompletionAt;
-  if (typeof record.lastError === 'string') out.lastError = record.lastError;
-  if (typeof record.lastErrorAt === 'number') out.lastErrorAt = record.lastErrorAt;
-  if (Array.isArray(record.recentUserContext)) {
-    out.recentUserContext = record.recentUserContext
-      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-      .map((v) => v.trim())
-      .slice(-6);
-  }
-  return out;
-}
-
-function persistChatActivity(chatJid: string): void {
-  const activity = chatActivity[chatJid];
-  if (!activity) return;
-  try {
-    setRouterState(chatActivityStateKey(chatJid), JSON.stringify(activity));
-  } catch (err) {
-    logger.warn({ err, chatJid }, 'Failed to persist chat activity');
-  }
-}
-
-function isStatusProbe(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  return (
-    STATUS_REQUEST_PATTERN.test(trimmed) ||
-    ACTIVITY_STATUS_PATTERN.test(trimmed)
-  );
-}
-
-function ensureChatActivity(chatJid: string): ChatActivity {
-  if (!chatActivity[chatJid]) {
-    const persisted = getRouterState(chatActivityStateKey(chatJid));
-    if (persisted) {
-      try {
-        chatActivity[chatJid] = sanitizeActivity(JSON.parse(persisted));
-      } catch {
-        chatActivity[chatJid] = {};
-      }
-    } else {
-      chatActivity[chatJid] = {};
-    }
-  }
-  return chatActivity[chatJid];
-}
-
-function compactMessage(text: string, maxLen = 220): string | undefined {
-  let compact = text.trim();
-  if (!compact) return undefined;
-  if (TRIGGER_PATTERN.test(compact)) {
-    compact = compact.replace(TRIGGER_PATTERN, '').trim();
-  }
-  compact = compact.replace(/\s+/g, ' ').trim();
-  if (!compact) return undefined;
-  return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact;
-}
-
-function setCurrentObjective(chatJid: string, objective: string): void {
-  const compact = compactMessage(objective, 180);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.currentObjective = compact;
-  activity.currentObjectiveAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function recordUserContext(chatJid: string, text: string): void {
-  const compact = compactMessage(text, 220);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  const existing = activity.recentUserContext || [];
-  const next = [...existing.filter((v) => v !== compact), compact].slice(-6);
-  activity.recentUserContext = next;
-  persistChatActivity(chatJid);
-}
-
-function setObjectiveFromMessages(chatJid: string, messages: NewMessage[]): void {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const content = messages[i].content.trim();
-    if (!content) continue;
-    if (isStatusProbe(content)) continue;
-    if (HEARTBEAT_ONLY_PATTERN.test(content)) continue;
-    recordUserContext(chatJid, content);
-    setCurrentObjective(chatJid, content);
-    return;
-  }
-}
-
-function markRunStarted(chatJid: string): void {
-  const activity = ensureChatActivity(chatJid);
-  activity.runStartedAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function markRunEnded(chatJid: string): void {
-  const activity = ensureChatActivity(chatJid);
-  activity.runStartedAt = undefined;
-  persistChatActivity(chatJid);
-}
-
-function markProgress(chatJid: string, progress: string): void {
-  const compact = compactMessage(progress);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.lastProgress = compact;
-  activity.lastProgressAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function markCompletion(chatJid: string, completion: string): void {
-  const compact = compactMessage(completion);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.lastCompletion = compact;
-  activity.lastCompletionAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function markError(chatJid: string, error: string): void {
-  const compact = compactMessage(error);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.lastError = compact;
-  activity.lastErrorAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.max(1, Math.floor(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remMinutes = minutes % 60;
-  if (hours < 24) return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`;
-  const days = Math.floor(hours / 24);
-  const remHours = hours % 24;
-  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
-}
-
-function statusTextForChat(chatJid: string, includeTodoReminder: boolean): string {
-  const snapshot = queue.getGroupStatus(chatJid);
-  const runtimeActive = hasRuntimeActiveGroupRun(chatJid);
-  const activity = ensureChatActivity(chatJid);
-  const now = Date.now();
-
-  if (snapshot.active || runtimeActive) {
-    const parts: string[] = ['status: active run.'];
-    if (activity.runStartedAt) {
-      parts.push(`elapsed: ${formatDuration(now - activity.runStartedAt)}.`);
-    }
-    if (activity.currentObjective) {
-      parts.push(`objective: ${activity.currentObjective}.`);
-    }
-    if (activity.lastProgress) {
-      const age = activity.lastProgressAt
-        ? formatDuration(now - activity.lastProgressAt)
-        : 'unknown';
-      parts.push(`latest: ${activity.lastProgress} (${age} ago).`);
-    } else if (activity.runStartedAt && now - activity.runStartedAt >= STATUS_NUDGE_STALE_MS) {
-      parts.push('latest: no output yet; run is still active.');
-    }
-    if (snapshot.pendingTasks > 0) {
-      parts.push(
-        `queued tasks: ${snapshot.pendingTasks}.`,
-      );
-    }
-    return parts.join(' ');
-  }
-
-  if (snapshot.pendingMessages || snapshot.pendingTasks > 0 || snapshot.waitingForSlot) {
-    const parts = ['status: queued and waiting for execution slot.'];
-    if (activity.currentObjective) {
-      parts.push(`next objective: ${activity.currentObjective}.`);
-    }
-    if (snapshot.pendingTasks > 0) {
-      parts.push(`queued tasks: ${snapshot.pendingTasks}.`);
-    }
-    return parts.join(' ');
-  }
-
-  const idleParts: string[] = ['status: idle.'];
-  if (activity.lastCompletion) {
-    const age = activity.lastCompletionAt
-      ? formatDuration(now - activity.lastCompletionAt)
-      : 'unknown';
-    idleParts.push(`last completion ${age} ago: ${activity.lastCompletion}.`);
-  }
-  if (activity.lastError) {
-    const age = activity.lastErrorAt
-      ? formatDuration(now - activity.lastErrorAt)
-      : 'unknown';
-    idleParts.push(`last error ${age} ago: ${activity.lastError}.`);
-  }
-  if (includeTodoReminder && chatJid === getMainChatJid()) {
-    idleParts.push('next step: pick the highest-priority pending item from groups/global/CLAUDE.md.');
-  }
-  return idleParts.join(' ');
-}
-
-function maybeNudgeActiveRunForStatus(chatJid: string): boolean {
-  const snapshot = queue.getGroupStatus(chatJid);
-  if (!snapshot.active) return false;
-
-  const activity = ensureChatActivity(chatJid);
-  const now = Date.now();
-  const lastProgressAt = activity.lastProgressAt || activity.runStartedAt || 0;
-  if (!lastProgressAt || now - lastProgressAt < STATUS_NUDGE_STALE_MS) return false;
-
-  const lastNudgeAt = lastStatusNudgeAt[chatJid] || 0;
-  if (now - lastNudgeAt < STATUS_NUDGE_COOLDOWN_MS) return false;
-
-  const nudge =
-    'Status check requested by user. Reply now with a concise concrete progress update: what is done, what is running, and next step.';
-  if (!queue.sendMessage(chatJid, nudge)) return false;
-
-  lastStatusNudgeAt[chatJid] = now;
-  logger.info({ chatJid }, 'Sent status nudge to active run');
-  return true;
-}
-
-function buildMainMissionContext(chatJid: string): string | undefined {
-  const activity = ensureChatActivity(chatJid);
-  const lines: string[] = [];
-
-  if (activity.currentObjective) {
-    lines.push(`Current objective: ${activity.currentObjective}`);
-  }
-  if (activity.recentUserContext && activity.recentUserContext.length > 0) {
-    lines.push('Recent user context:');
-    for (const item of activity.recentUserContext.slice(-4)) {
-      lines.push(`- ${item}`);
-    }
-  }
-  if (activity.lastCompletion) {
-    lines.push(`Last completion: ${activity.lastCompletion}`);
-  }
-  if (activity.lastError) {
-    lines.push(`Last error: ${activity.lastError}`);
-  }
-
-  if (lines.length === 0) return undefined;
-  return [
-    '[Persistent mission context - carry this forward unless user changes priorities]',
-    ...lines,
-  ].join('\n');
-}
-
-function hasRuntimeActiveGroupRun(chatJid: string): boolean {
-  const group = registeredGroups[chatJid];
-  if (!group) return false;
-  const safeFolder = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  return hasRuntimeActiveContainer(safeFolder);
-}
-
-function heartbeatTextForChat(chatJid: string, includeTodoReminder = false): string {
-  const healthy = channels.length > 0 && runtimeHealthy();
-  return healthy
-    ? `heartbeat: online. ${statusTextForChat(chatJid, includeTodoReminder)}`
-    : `heartbeat: degraded. check runtime/channel health, then continue from groups/global/CLAUDE.md.`;
-}
-
-async function sendHeartbeat(chatJid: string, includeTodoReminder = false): Promise<void> {
-  const ch = findChannel(channels, chatJid);
-  if (!ch) return;
-  try {
-    await ch.sendMessage(
-      chatJid,
-      formatMainMessage(heartbeatTextForChat(chatJid, includeTodoReminder)),
-    );
-  } catch (err) {
-    logger.warn({ err, chatJid }, 'Failed to send heartbeat');
-  }
-}
-
-let channels: Channel[] = [];
+let whatsapp: WhatsAppChannel;
+const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 function loadState(): void {
@@ -659,32 +63,8 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
-  const configuredMainModel = resolveConfiguredMainModel();
-  const storedMainModel = normalizeMainLlm(getRouterState('main_model'));
-  if (configuredMainModel) {
-    const pinnedChanged =
-      storedMainModel && configuredMainModel !== storedMainModel;
-    mainLlm = configuredMainModel;
-    setRouterState('main_model', mainLlm);
-
-    // If model pin changed, drop the main session so Claude initializes fresh
-    // on the requested model instead of resuming a prior-model session.
-    if (pinnedChanged && sessions[MAIN_GROUP_FOLDER]) {
-      deleteSession(MAIN_GROUP_FOLDER);
-      delete sessions[MAIN_GROUP_FOLDER];
-      logger.info(
-        {
-          fromModel: storedMainModel,
-          toModel: configuredMainModel,
-        },
-        'Pinned MAIN model changed; cleared main session',
-      );
-    }
-  } else if (storedMainModel) {
-    mainLlm = storedMainModel;
-  }
   logger.info(
-    { groupCount: Object.keys(registeredGroups).length, mainModel: mainLlm },
+    { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
   );
 }
@@ -695,7 +75,6 @@ function saveState(): void {
     'last_agent_timestamp',
     JSON.stringify(lastAgentTimestamp),
   );
-  setRouterState('main_model', mainLlm);
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -712,72 +91,6 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
-function deriveFolderFromChatJid(chatJid: string): string {
-  const base = chatJid
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  const short = base.slice(0, 48) || 'chat';
-  return `chat-${short}`;
-}
-
-function ensureGroupForIncomingChat(
-  chatJid: string,
-  chatName?: string,
-): void {
-  // Never auto-register the cross-bot room — we only send there, never listen
-  if (isCrossBotRoom(chatJid)) return;
-
-  if (registeredGroups[chatJid]) {
-    if (
-      LOCAL_CHANNEL_ENABLED &&
-      chatJid === LOCAL_CHAT_JID &&
-      registeredGroups[chatJid].requiresTrigger !== false
-    ) {
-      const updated: RegisteredGroup = {
-        ...registeredGroups[chatJid],
-        requiresTrigger: false,
-      };
-      registerGroup(chatJid, updated);
-      logger.info(
-        { chatJid },
-        'Terminal local-chat group set to direct mode (requiresTrigger=false)',
-      );
-    }
-    return;
-  }
-
-  const hasMain = Object.values(registeredGroups).some(
-    (g) => g.folder === MAIN_GROUP_FOLDER,
-  );
-
-  const name = (chatName || chatJid).trim() || chatJid;
-  const addedAt = new Date().toISOString();
-  const defaultTrigger = `@${ASSISTANT_TRIGGER}`;
-  const localDirectMode = LOCAL_CHANNEL_ENABLED && chatJid === LOCAL_CHAT_JID;
-  const group: RegisteredGroup = hasMain
-    ? {
-        name,
-        folder: deriveFolderFromChatJid(chatJid),
-        trigger: defaultTrigger,
-        added_at: addedAt,
-        requiresTrigger: localDirectMode ? false : true,
-      }
-    : {
-        name,
-        folder: MAIN_GROUP_FOLDER,
-        trigger: defaultTrigger,
-        added_at: addedAt,
-        requiresTrigger: false,
-      };
-
-  registerGroup(chatJid, group);
-  logger.info(
-    { chatJid, folder: group.folder, requiresTrigger: group.requiresTrigger },
-    'Auto-registered group for incoming chat',
-  );
-}
-
 /**
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
@@ -787,7 +100,7 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
   const registeredJids = new Set(Object.keys(registeredGroups));
 
   return chats
-    .filter((c) => c.jid !== '__group_sync__' && (c.jid.startsWith('matrix:') || c.jid.endsWith('@g.us')))
+    .filter((c) => c.jid !== '__group_sync__' && c.is_group)
     .map((c) => ({
       jid: c.jid,
       name: c.name,
@@ -802,59 +115,18 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 }
 
 /**
- * Append a brief entry to the group's conversation log.
- * Used for cross-channel context between WhatsApp and terminal sessions.
- */
-function appendConversationLog(
-  groupFolder: string,
-  userMessages: NewMessage[],
-  agentResponses: string[],
-  channelName = 'matrix',
-): void {
-  if (userMessages.length === 0 && agentResponses.length === 0) return;
-
-  const logDir = path.join(GROUPS_DIR, groupFolder, 'conversations');
-  const logPath = path.join(logDir, 'log.md');
-  fs.mkdirSync(logDir, { recursive: true });
-
-  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
-  const lines = ['---', `${timestamp} [${channelName}]`];
-
-  for (const msg of userMessages) {
-    const content = msg.content.length > 200
-      ? msg.content.slice(0, 200) + '...'
-      : msg.content;
-    lines.push(`${msg.sender_name}: ${content}`);
-  }
-
-  for (const response of agentResponses) {
-    const content = response.length > 200
-      ? response.slice(0, 200) + '...'
-      : response;
-    lines.push(`${ASSISTANT_NAME}: ${content}`);
-  }
-
-  fs.appendFileSync(logPath, lines.join('\n') + '\n');
-
-  // Trim to last 100 entries
-  try {
-    const full = fs.readFileSync(logPath, 'utf-8');
-    const entries = full.split(/(?=^---$)/m).filter((e) => e.trim());
-    if (entries.length > 100) {
-      fs.writeFileSync(logPath, entries.slice(-100).join(''));
-    }
-  } catch {
-    // Non-critical — log continues to grow until next successful trim
-  }
-}
-
-/**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
+
+  const channel = findChannel(channels, chatJid);
+  if (!channel) {
+    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+    return true;
+  }
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
@@ -871,14 +143,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  setObjectiveFromMessages(chatJid, missedMessages);
-
-  const basePrompt = formatMessages(missedMessages);
-  const missionContext =
-    isMainGroup ? buildMainMissionContext(chatJid) : undefined;
-  const prompt = missionContext
-    ? `${missionContext}\n\n${basePrompt}`
-    : basePrompt;
+  const prompt = formatMessages(missedMessages);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -903,148 +168,51 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  const channel = findChannel(channels, chatJid);
-  if (channel?.setTyping) await channel.setTyping(chatJid, true);
-
-  // React to the last message to acknowledge we're working on it
-  if (ASSISTANT_REACTION && channel?.sendReaction) {
-    const lastMsg = missedMessages[missedMessages.length - 1];
-    if (lastMsg?.id) {
-      try {
-        await channel.sendReaction(chatJid, lastMsg.id, ASSISTANT_REACTION);
-      } catch (err) {
-        logger.warn({ err, chatJid }, 'Failed to send working reaction');
-      }
-    }
-  }
-
+  await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
-  const agentResponses: string[] = [];
-  let lastResponseBody: string | undefined;
-  let lastRunOutputAt = Date.now();
-  let lastRunProgressNudgeAt = 0;
-  let runProgressNudgeTimer: ReturnType<typeof setInterval> | null = null;
 
-  markRunStarted(chatJid);
-
-  if (isMainGroup) {
-    runProgressNudgeTimer = setInterval(() => {
-      const now = Date.now();
-      if (now - lastRunOutputAt < RUN_PROGRESS_NUDGE_STALE_MS) return;
-      if (now - lastRunProgressNudgeAt < RUN_PROGRESS_NUDGE_COOLDOWN_MS) return;
-      const nudged = queue.sendMessage(
-        chatJid,
-        'If you are still running, send a concise progress update now: done, in-progress, next.',
-      );
-      if (nudged) {
-        lastRunProgressNudgeAt = now;
-        logger.info({ chatJid }, 'Sent automatic run-progress nudge');
-      }
-    }, RUN_PROGRESS_NUDGE_CHECK_MS);
-  }
-
-  const runResult = await runAgent(group, prompt, chatJid, async (result) => {
+  const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
-    if (group.folder === MAIN_GROUP_FOLDER && result.model) {
-      updateMainLlm(result.model);
-    }
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        if (result.isProgress) {
-          markProgress(chatJid, text);
-          // Forward progress to chat with rate limiting
-          const now = Date.now();
-          if (!lastProgressChatAt[chatJid] || now - lastProgressChatAt[chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
-            lastProgressChatAt[chatJid] = now;
-            const ch = findChannel(channels, chatJid);
-            if (ch) {
-              const formatted = text.includes('<details>')
-                ? text
-                : `<small><font color="#888888"><em>${text}</em></font></small>`;
-              void ch.sendMessage(chatJid, formatted).catch((err) => {
-                logger.warn({ chatJid, err }, 'Failed to send progress to chat');
-              });
-            }
-          }
-        } else {
-          // Final result: deliver to chat
-          markProgress(chatJid, text);
-          lastResponseBody = text;
-          lastRunOutputAt = Date.now();
-          const ch = findChannel(channels, chatJid);
-          if (ch) {
-            await ch.sendMessage(chatJid, formatMainMessage(text));
-          }
-          outputSentToUser = true;
-          agentResponses.push(formatMainMessage(text));
-        }
+        await channel.sendMessage(chatJid, text);
+        outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
     }
 
+    if (result.status === 'success') {
+      queue.notifyIdle(chatJid);
+    }
+
     if (result.status === 'error') {
       hadError = true;
-      if (result.error) {
-        markError(chatJid, result.error);
-      }
     }
   });
 
-  if (channel?.setTyping) await channel.setTyping(chatJid, false);
+  await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
-  if (runProgressNudgeTimer) clearInterval(runProgressNudgeTimer);
 
-  if (runResult.status === 'error' || hadError) {
-    const rawError =
-      runResult.error ||
-      (hadError ? 'agent returned an error status' : 'unknown error');
-    const compactError = rawError.replace(/\s+/g, ' ').slice(0, 220);
-    markError(chatJid, compactError);
-
-    if (!outputSentToUser && channel) {
-      const errorReply =
-        formatMainMessage(
-          `I hit an error while processing that request: ${compactError}`,
-        );
-      try {
-        await channel.sendMessage(chatJid, errorReply);
-        outputSentToUser = true;
-        agentResponses.push(errorReply);
-      } catch (sendErr) {
-        logger.warn(
-          { group: group.name, err: sendErr },
-          'Failed to send error reply to channel',
-        );
-      }
-    }
-
+  if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
       logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
-      appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
-      markRunEnded(chatJid);
       return true;
     }
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
-    markRunEnded(chatJid);
     return false;
   }
 
-  if (lastResponseBody) {
-    markCompletion(chatJid, lastResponseBody);
-  }
-  markRunEnded(chatJid);
-  appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
   return true;
 }
 
@@ -1053,10 +221,9 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<{ status: 'success' | 'error'; error?: string }> {
+): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
-  const sessionKey = group.folder;
-  const sessionId = sessions[sessionKey];
+  const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -1087,8 +254,8 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[sessionKey] = output.newSessionId;
-          setSession(sessionKey, output.newSessionId);
+          sessions[group.folder] = output.newSessionId;
+          setSession(group.folder, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -1109,8 +276,8 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[sessionKey] = output.newSessionId;
-      setSession(sessionKey, output.newSessionId);
+      sessions[group.folder] = output.newSessionId;
+      setSession(group.folder, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -1118,19 +285,13 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
-      return {
-        status: 'error',
-        error: output.error || 'container agent error',
-      };
+      return 'error';
     }
 
-    return { status: 'success' };
+    return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return {
-      status: 'error',
-      error: err instanceof Error ? err.message : String(err),
-    };
+    return 'error';
   }
 }
 
@@ -1141,7 +302,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_TRIGGER})`);
+  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
     try {
@@ -1170,33 +331,20 @@ async function startMessageLoop(): Promise<void> {
           const group = registeredGroups[chatJid];
           if (!group) continue;
 
-          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-
-          // Filter out other-bot noise; everything else gets processed
-          const filtered = groupMessages.filter((msg) => !shouldIgnoreMessage(msg));
-          if (filtered.length === 0) continue;
-
-          // Cross-bot @mention forwarding: messages matching @OtherBot
-          // get forwarded to the other bot's room
-          const forThisBot = await forwardCrossBotMessages(
-            chatJid,
-            filtered,
-            group.name,
-            (jid) => findChannel(channels, jid),
-          );
-          if (forThisBot.length === 0) {
-            lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
-            saveState();
+          const channel = findChannel(channels, chatJid);
+          if (!channel) {
+            console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
             continue;
           }
 
+          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
-            const hasTrigger = forThisBot.some((m) =>
+            const hasTrigger = groupMessages.some((m) =>
               TRIGGER_PATTERN.test(m.content.trim()),
             );
             if (!hasTrigger) continue;
@@ -1211,126 +359,23 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const statusMessages = messagesToSend.filter((m) =>
-            isStatusProbe(m.content),
-          );
-          const hasHeartbeatRequest = messagesToSend.some((m) =>
-            HEARTBEAT_ONLY_PATTERN.test(m.content.trim()),
-          );
-          const hasStatusRequest = statusMessages.length > 0;
-
-          if (hasHeartbeatRequest) {
-            await sendHeartbeat(chatJid, true);
-          }
-
-          if (hasStatusRequest) {
-            const ch = findChannel(channels, chatJid);
-            if (ch) {
-              try {
-                const nudged = maybeNudgeActiveRunForStatus(chatJid);
-                await ch.sendMessage(
-                  chatJid,
-                  formatMainMessage(
-                    `observed ${statusTextForChat(chatJid, true)}${nudged ? ' requested a live check-in from the active run.' : ''}`,
-                  ),
-                );
-              } catch (err) {
-                logger.warn(
-                  { chatJid, err },
-                  'Failed to send observed status acknowledgement',
-                );
-              }
-            }
-          }
-
-          const nonProbeMessages = messagesToSend.filter(
-            (m) =>
-              !isStatusProbe(m.content) &&
-              !HEARTBEAT_ONLY_PATTERN.test(m.content.trim()),
-          );
-
-          // Probe-only prompts are answered by observed state/heartbeat and should not
-          // be piped into active runs.
-          if (nonProbeMessages.length === 0) {
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            continue;
-          }
-
-          setObjectiveFromMessages(chatJid, nonProbeMessages);
-          const formatted = formatMessages(nonProbeMessages);
+          const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
-              { chatJid, count: nonProbeMessages.length },
+              { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            const now = Date.now();
-            if (
-              !lastActivePipeAckAt[chatJid] ||
-              now - lastActivePipeAckAt[chatJid] >= ACTIVE_PIPE_ACK_COOLDOWN_MS
-            ) {
-              const ch = findChannel(channels, chatJid);
-              const lastMessage = nonProbeMessages[nonProbeMessages.length - 1];
-              if (ASSISTANT_REACTION && ch?.sendReaction && lastMessage?.id) {
-                void ch.sendReaction(chatJid, lastMessage.id, ASSISTANT_REACTION).catch((err) => {
-                  logger.warn({ chatJid, err }, 'Failed to send active-run reaction acknowledgement');
-                });
-              } else if (ch) {
-                const objective = compactMessage(lastMessage?.content || '', 120);
-                void ch.sendMessage(
-                  chatJid,
-                  formatMainMessage(
-                    `received and injected into active run.${objective ? ` request: ${objective}.` : ''}`,
-                  ),
-                ).catch((err) => {
-                  logger.warn({ chatJid, err }, 'Failed to send active-run acknowledgement');
-                });
-              }
-              lastActivePipeAckAt[chatJid] = now;
-            }
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
             // Show typing indicator while the container processes the piped message
-            const ch = findChannel(channels, chatJid);
-            if (ch?.setTyping) await ch.setTyping(chatJid, true);
+            channel.setTyping?.(chatJid, true)?.catch((err) =>
+              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+            );
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
-            const now = Date.now();
-            if (
-              !lastQueuedAckAt[chatJid] ||
-              now - lastQueuedAckAt[chatJid] >= QUEUED_ACK_COOLDOWN_MS
-            ) {
-              const ch = findChannel(channels, chatJid);
-              if (ch) {
-                try {
-                  const lastMessage = nonProbeMessages[nonProbeMessages.length - 1];
-                  if (ASSISTANT_REACTION && ch.sendReaction && lastMessage?.id) {
-                    await ch.sendReaction(chatJid, lastMessage.id, ASSISTANT_REACTION);
-                  } else {
-                    const objective = compactMessage(
-                      lastMessage?.content || '',
-                      160,
-                    );
-                    await ch.sendMessage(
-                      chatJid,
-                      formatMainMessage(
-                        `queued and starting run now.${objective ? ` objective: ${objective}.` : ''}`,
-                      ),
-                    );
-                  }
-                  lastQueuedAckAt[chatJid] = now;
-                } catch (err) {
-                  logger.warn(
-                    { chatJid, err },
-                    'Failed to send queued acknowledgement',
-                  );
-                }
-              }
-            }
           }
         }
       }
@@ -1359,43 +404,13 @@ function recoverPendingMessages(): void {
   }
 }
 
-
-/**
- * After any restart, inject a synthetic message into the main chat
- * so the agent re-enters the conversation instead of sitting idle.
- * Only injects if there are real pending messages to resume from.
- */
-function injectResumeMessage(): void {
-  const mainJid = Object.entries(registeredGroups).find(
-    ([, g]) => g.folder === MAIN_GROUP_FOLDER,
-  )?.[0];
-  if (!mainJid) return;
-
-  const pending = getMessagesSince(
-    mainJid,
-    lastAgentTimestamp[mainJid] || '',
-    ASSISTANT_NAME,
-  );
-  if (pending.length === 0) {
-    logger.info({ mainJid }, 'No pending messages after restart — skipping resume injection');
-    return;
-  }
-
-  storeMessage({
-    id: `resume-${Date.now()}`,
-    chat_jid: mainJid,
-    chat_name: registeredGroups[mainJid].name,
-    sender: 'system',
-    sender_name: 'System',
-    content: 'You just restarted. Check the conversation above for context and resume where you left off.',
-    timestamp: new Date().toISOString(),
-  });
-  queue.enqueueMessageCheck(mainJid);
-  logger.info({ mainJid, pendingCount: pending.length }, 'Injected resume message after restart');
+function ensureContainerSystemRunning(): void {
+  ensureContainerRuntimeRunning();
+  cleanupOrphans();
 }
 
 async function main(): Promise<void> {
-  await ensureContainerSystemRunning();
+  ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -1410,128 +425,18 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Create Matrix channel (activates only if configured)
-  let matrix: MatrixChannel | null = null;
-  if (
-    MATRIX_HOMESERVER &&
-    (MATRIX_ACCESS_TOKEN || (MATRIX_USERNAME && MATRIX_PASSWORD))
-  ) {
-    matrix = new MatrixChannel({
-      onMessage: (_chatJid, msg) => {
-        ensureGroupForIncomingChat(msg.chat_jid, msg.chat_name);
-        storeMessage(msg);
-      },
-      onChatMetadata: (chatJid, timestamp, name) => {
-        ensureGroupForIncomingChat(chatJid, name);
-        storeChatMetadata(chatJid, timestamp, name);
-      },
-      registeredGroups: () => registeredGroups,
-    });
-  }
-
-  // Create WhatsApp channel (activates only if auth store exists)
-  let whatsapp: WhatsAppChannel | null = null;
-  const waAuthDir = path.join(STORE_DIR, 'auth');
-  if (fs.existsSync(waAuthDir)) {
-    whatsapp = new WhatsAppChannel({
-      onMessage: (_chatJid, msg) => {
-        ensureGroupForIncomingChat(msg.chat_jid, msg.chat_name);
-        storeMessage(msg);
-      },
-      onChatMetadata: (chatJid, timestamp, name) => {
-        ensureGroupForIncomingChat(chatJid, name);
-        storeChatMetadata(chatJid, timestamp, name);
-      },
-      registeredGroups: () => registeredGroups,
-    });
-  }
-
-  let localCli: LocalCliChannel | null = null;
-  if (LOCAL_CHANNEL_ENABLED) {
-    localCli = new LocalCliChannel({
-      onMessage: (_chatJid, msg) => {
-        ensureGroupForIncomingChat(msg.chat_jid, msg.chat_name);
-        storeMessage(msg);
-      },
-      onChatMetadata: (chatJid, timestamp, name) =>
-        storeChatMetadata(chatJid, timestamp, name),
-      mirrorToMatrix: LOCAL_MIRROR_MATRIX_JID
-        ? async (text: string) => {
-            if (!matrix || !matrix.isConnected()) return;
-            await matrix.sendMessage(LOCAL_MIRROR_MATRIX_JID, text);
-          }
-        : undefined,
-    });
-  }
-
-  // Build channels array (only include connected channels)
-  const allChannels: (Channel | null)[] = [localCli, matrix, whatsapp];
-  const refreshConnectedChannels = () => {
-    channels = allChannels.filter((ch): ch is Channel => ch != null && ch.isConnected());
+  // Channel callbacks (shared by all channels)
+  const channelOpts = {
+    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+    onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
+      storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    registeredGroups: () => registeredGroups,
   };
-  refreshConnectedChannels();
 
-  // Connect local CLI first (doesn't need network)
-  if (localCli) {
-    try {
-      await localCli.connect();
-    } catch (err) {
-      logger.error({ err }, 'Local CLI channel connect failed');
-    }
-  }
-
-  // Connect channels
-  if (matrix) {
-    // Do not block local terminal startup on Matrix/network connectivity.
-    void matrix.connect().catch((err) => {
-      logger.error({ err }, 'Initial Matrix connection failed; continuing in degraded mode');
-    });
-    refreshConnectedChannels();
-
-    let matrixReconnectInProgress = false;
-    setInterval(async () => {
-      if (!matrix || matrixReconnectInProgress) return;
-      matrixReconnectInProgress = true;
-      try {
-        const healthy = await matrix.checkHealth();
-        if (!healthy) {
-          await matrix.connect();
-          if (matrix.isConnected()) {
-            logger.info('Matrix reconnected');
-          }
-        }
-      } catch (err) {
-        logger.warn({ err }, 'Matrix reconnect attempt failed');
-      } finally {
-        refreshConnectedChannels();
-        matrixReconnectInProgress = false;
-      }
-    }, MATRIX_RECONNECT_INTERVAL);
-  }
-
-  // Connect WhatsApp (blocks until QR auth or existing session loads)
-  if (whatsapp) {
-    try {
-      await whatsapp.connect();
-      refreshConnectedChannels();
-      logger.info('WhatsApp connected');
-    } catch (err) {
-      logger.error({ err }, 'WhatsApp connection failed');
-    }
-  }
-
-  // Memory watchdog — gracefully recycle before OOM
-  const heapLimitBytes = HEAP_LIMIT_MB * 1024 * 1024;
-  setInterval(() => {
-    const usage = process.memoryUsage();
-    const heapMB = Math.round(usage.heapUsed / 1024 / 1024);
-    const rssMB = Math.round(usage.rss / 1024 / 1024);
-    logger.info({ heapMB, rssMB, limitMB: HEAP_LIMIT_MB }, 'Memory');
-    if (usage.heapUsed > heapLimitBytes) {
-      logger.warn({ heapMB, limitMB: HEAP_LIMIT_MB }, 'Heap limit exceeded, recycling');
-      shutdown('HEAP_LIMIT');
-    }
-  }, MEMORY_CHECK_INTERVAL);
+  // Create and connect channels
+  whatsapp = new WhatsAppChannel(channelOpts);
+  channels.push(whatsapp);
+  await whatsapp.connect();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -1540,116 +445,33 @@ async function main(): Promise<void> {
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
-      const ch = findChannel(channels, jid);
-      if (!ch) return;
-      const text = stripInternalTags(rawText);
-      if (text) await ch.sendMessage(jid, formatMainMessage(text));
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        console.log(`Warning: no channel owns JID ${jid}, cannot send message`);
+        return;
+      }
+      const text = formatOutbound(rawText);
+      if (text) await channel.sendMessage(jid, text);
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
-      const ch = findChannel(channels, jid);
-      if (ch) return ch.sendMessage(jid, text);
-      logger.warn({ jid }, 'No channel found for IPC message');
-      return Promise.resolve();
-    },
-    defaultSenderForGroup,
-    sendImage: (jid, buffer, filename, mimetype, caption) => {
-      const ch = findChannel(channels, jid);
-      if (ch?.sendImage) return ch.sendImage(jid, buffer, filename, mimetype, caption);
-      logger.warn({ jid }, 'No channel with image support found for IPC image');
-      return Promise.resolve();
-    },
-    sendFile: (jid, buffer, filename, mimetype, caption) => {
-      const ch = findChannel(channels, jid);
-      if (ch?.sendFile) return ch.sendFile(jid, buffer, filename, mimetype, caption);
-      logger.warn({ jid }, 'No channel with file support found for IPC file');
-      return Promise.resolve();
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: async () => {},
+    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
-  injectResumeMessage();
-  startMessageLoop();
-
-  // Periodic status snapshot for containers to read via check_health MCP tool
-  const STATUS_SNAPSHOT_INTERVAL = 30_000;
-  const writeStatusSnapshot = () => {
-    try {
-      const snapshot = {
-        timestamp: new Date().toISOString(),
-        bot: ASSISTANT_NAME,
-        role: ASSISTANT_ROLE,
-        model: mainLlm,
-        provider: MAIN_PROVIDER,
-        groups: Object.entries(registeredGroups).map(([jid, g]) => {
-          const queueStatus = queue.getGroupStatus(jid);
-          const activity = chatActivity[jid] || {};
-          return {
-            jid,
-            name: g.name,
-            folder: g.folder,
-            active: queueStatus.active,
-            hasProcess: queueStatus.hasProcess,
-            containerName: queueStatus.containerName,
-            pendingMessages: queueStatus.pendingMessages,
-            pendingTasks: queueStatus.pendingTasks,
-            currentObjective: activity.currentObjective,
-            lastProgress: activity.lastProgress,
-            lastProgressAt: activity.lastProgressAt,
-            lastError: activity.lastError,
-            lastErrorAt: activity.lastErrorAt,
-          };
-        }),
-      };
-
-      for (const [, g] of Object.entries(registeredGroups)) {
-        const ipcDir = path.join(DATA_DIR, 'ipc', g.folder);
-        if (!fs.existsSync(ipcDir)) continue;
-        const statusPath = path.join(ipcDir, 'status.json');
-        const tmpPath = `${statusPath}.tmp`;
-        fs.writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2));
-        fs.renameSync(tmpPath, statusPath);
-      }
-    } catch (err) {
-      logger.warn({ err }, 'Failed to write status snapshot');
-    }
-  };
-  writeStatusSnapshot();
-  setInterval(writeStatusSnapshot, STATUS_SNAPSHOT_INTERVAL);
-
-  // Send boot announcement once main channel is available
-  const bootAnnounceTimer = setInterval(async () => {
-    const mainJid = getMainChatJid();
-    if (!mainJid) return;
-    const ch = findChannel(channels, mainJid);
-    if (!ch) return;
-    clearInterval(bootAnnounceTimer);
-    try {
-      await ch.sendMessage(mainJid, `online.\n\n${mainSender()}`);
-    } catch (err) {
-      logger.warn({ err }, 'Failed to send boot announcement');
-    }
-  }, 2000);
-
-  setInterval(async () => {
-    const mainChatJid = getMainChatJid();
-    if (!mainChatJid) return;
-    const snapshot = queue.getGroupStatus(mainChatJid);
-    const shouldHeartbeat =
-      snapshot.active ||
-      snapshot.pendingMessages ||
-      snapshot.pendingTasks > 0 ||
-      snapshot.waitingForSlot ||
-      hasRuntimeActiveGroupRun(mainChatJid);
-    if (!shouldHeartbeat) return;
-    await sendHeartbeat(mainChatJid, false);
-  }, HEARTBEAT_INTERVAL_MS);
+  startMessageLoop().catch((err) => {
+    logger.fatal({ err }, 'Message loop crashed unexpectedly');
+    process.exit(1);
+  });
 }
 
 // Guard: only run when executed directly, not when imported by tests

@@ -320,6 +320,9 @@ describe('WhatsAppChannel', () => {
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
         'registered@g.us',
         expect.any(String),
+        undefined,
+        'whatsapp',
+        true,
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
@@ -355,6 +358,9 @@ describe('WhatsAppChannel', () => {
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
         'unregistered@g.us',
         expect.any(String),
+        undefined,
+        'whatsapp',
+        true,
       );
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
@@ -508,11 +514,8 @@ describe('WhatsAppChannel', () => {
         },
       ]);
 
-      // Still delivered but with empty content
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({ content: '' }),
-      );
+      // Skipped — no text content to process
+      expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
     it('uses sender JID when pushName is absent', async () => {
@@ -579,6 +582,9 @@ describe('WhatsAppChannel', () => {
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
         '1234567890@s.whatsapp.net',
         expect.any(String),
+        undefined,
+        'whatsapp',
+        false,
       );
     });
 
@@ -605,6 +611,9 @@ describe('WhatsAppChannel', () => {
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
         'registered@g.us',
         expect.any(String),
+        undefined,
+        'whatsapp',
+        true,
       );
     });
 
@@ -631,6 +640,9 @@ describe('WhatsAppChannel', () => {
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
         '0000000000@lid',
         expect.any(String),
+        undefined,
+        'whatsapp',
+        false,
       );
     });
   });
