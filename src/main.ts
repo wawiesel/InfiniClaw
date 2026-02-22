@@ -32,9 +32,6 @@ import {
 } from 'nanoclaw/config.js';
 import {
   getAllChats,
-  getAllRegisteredGroups,
-  getAllSessions,
-  getAllTasks,
   getMessagesSince,
   getNewMessages,
   getRecentMessages,
@@ -53,9 +50,16 @@ import { GroupQueue } from 'nanoclaw/group-queue.js';
 import {
   ContainerOutput,
   writeGroupsSnapshot,
-  writeTasksSnapshot,
 } from 'nanoclaw/container-runner.js';
 import type { AvailableGroup } from 'nanoclaw/container-runner.js';
+import {
+  loadBaseState,
+  saveBaseState,
+  groupMessagesByChat,
+  recoverPendingMessages,
+  writeAgentSnapshots,
+  wrapOnOutputForSession,
+} from 'nanoclaw/composables.js';
 import { grantTemporaryMount, revokeMount } from 'nanoclaw/mount-security.js';
 import { MatrixChannel } from './channels/matrix.js';
 import { LocalCliChannel } from './channels/local-cli.js';
@@ -94,6 +98,7 @@ import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
+import { handleOperatorCommand } from './operator-commands.js';
 
 // ── Module-level state ─────────────────────────────────────────────────
 
@@ -148,14 +153,14 @@ function startWorkingIndicator(chatJid: string, threadId?: string): void {
     ch.sendMessageReturningId(chatJid, statusMessage('⏳', 'working...'), threadId).then((eventId) => {
       if (!eventId) return;
       if (workingIndicators[chatJid]) {
-        ch.editMessage!(chatJid, eventId, statusMessage('⏳', `worked (${formatElapsed(startedAt)})`)).catch(() => {});
+        ch.editMessage!(chatJid, eventId, statusMessage('⏳', `worked (${formatElapsed(startedAt)})`)).catch(() => { });
         return;
       }
       const timer = setInterval(() => {
-        ch.editMessage!(chatJid, eventId, statusMessage('⏳', `working (${formatElapsed(startedAt)})`)).catch(() => {});
+        ch.editMessage!(chatJid, eventId, statusMessage('⏳', `working (${formatElapsed(startedAt)})`)).catch(() => { });
       }, 5_000);
       workingIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
-    }).catch(() => {});
+    }).catch(() => { });
   }, WORKING_INDICATOR_DELAY_MS);
 }
 
@@ -172,7 +177,7 @@ function clearWorkingIndicator(chatJid: string): void {
   delete workingIndicators[chatJid];
   const ch = findChannel(channels, chatJid);
   if (ch?.editMessage) {
-    ch.editMessage(chatJid, indicator.eventId, statusMessage('⏳', `worked (${formatElapsed(indicator.startedAt)})`)).catch(() => {});
+    ch.editMessage(chatJid, indicator.eventId, statusMessage('⏳', `worked (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
   }
 }
 
@@ -192,7 +197,7 @@ function bumpWorkingIndicator(chatJid: string, threadId?: string): void {
   }
   const ch = findChannel(channels, chatJid);
   if (!ch?.editMessage) return;
-  ch.editMessage(chatJid, indicator.eventId, statusMessage('⏳', `working (${formatElapsed(indicator.startedAt)})`)).catch(() => {});
+  ch.editMessage(chatJid, indicator.eventId, statusMessage('⏳', `working (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
 }
 
 // ── Idle indicator functions ──────────────────────────────────────────
@@ -214,12 +219,12 @@ function startIdleIndicator(chatJid: string, threadId?: string): void {
     }
     // Cleared while send was in flight — just finalize the message
     if (idleIndicators[chatJid] !== placeholder) {
-      ch.editMessage!(chatJid, eventId, statusMessage('💤', `idled (${formatElapsed(startedAt)})`)).catch(() => {});
+      ch.editMessage!(chatJid, eventId, statusMessage('💤', `idled (${formatElapsed(startedAt)})`)).catch(() => { });
       return;
     }
     placeholder.eventId = eventId;
     placeholder.timer = setInterval(() => {
-      ch.editMessage!(chatJid, eventId, statusMessage('💤', `idling (${formatElapsed(startedAt)})`)).catch(() => {});
+      ch.editMessage!(chatJid, eventId, statusMessage('💤', `idling (${formatElapsed(startedAt)})`)).catch(() => { });
     }, 30_000);
   }).catch(() => {
     if (idleIndicators[chatJid] === placeholder) delete idleIndicators[chatJid];
@@ -236,7 +241,7 @@ function clearIdleIndicator(chatJid: string): void {
   if (!indicator.eventId) return;
   const ch = findChannel(channels, chatJid);
   if (ch?.editMessage) {
-    ch.editMessage(chatJid, indicator.eventId, statusMessage('💤', `idled (${formatElapsed(indicator.startedAt)})`)).catch(() => {});
+    ch.editMessage(chatJid, indicator.eventId, statusMessage('💤', `idled (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
   }
 }
 
@@ -298,16 +303,12 @@ const queue = new GroupQueue();
 // ── State load/save ────────────────────────────────────────────────────
 
 function loadState(): void {
-  lastTimestamp = getRouterState('last_timestamp') || '';
-  const agentTs = getRouterState('last_agent_timestamp');
-  try {
-    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
-  } catch {
-    logger.warn('Corrupted last_agent_timestamp in DB, resetting');
-    lastAgentTimestamp = {};
-  }
-  sessions = getAllSessions();
-  registeredGroups = getAllRegisteredGroups();
+  const state = loadBaseState();
+  lastTimestamp = state.lastTimestamp;
+  lastAgentTimestamp = state.lastAgentTimestamp;
+  sessions = state.sessions;
+  registeredGroups = state.registeredGroups;
+
   const configuredMainModel = resolveConfiguredMainModel();
   const storedMainModel = normalizeMainLlm(getRouterState('main_model'));
   if (configuredMainModel) {
@@ -337,11 +338,7 @@ function loadState(): void {
 }
 
 function saveState(): void {
-  setRouterState('last_timestamp', lastTimestamp);
-  setRouterState(
-    'last_agent_timestamp',
-    JSON.stringify(lastAgentTimestamp),
-  );
+  saveBaseState(lastTimestamp, lastAgentTimestamp);
   setRouterState('main_model', mainLlm);
 }
 
@@ -478,7 +475,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (channel?.setStatusPip) {
     pipPulseIndex[chatJid] = 0;
-    void channel.setStatusPip(chatJid, PIP_PULSE[0]).catch(() => {});
+    void channel.setStatusPip(chatJid, PIP_PULSE[0]).catch(() => { });
   }
 
   if (isMainGroup) {
@@ -509,7 +506,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           const ch = findChannel(channels, chatJid);
           if (ch?.sendReaction) {
             for (const msgId of inboundMessageIds) {
-              void ch.sendReaction(chatJid, msgId, '🔹').catch(() => {});
+              void ch.sendReaction(chatJid, msgId, '🔹').catch(() => { });
             }
           }
         }
@@ -612,7 +609,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (channel?.setTyping && !isThreadContext(chatJid)) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   if (channel?.setStatusPip) {
-    void channel.setStatusPip(chatJid, '🟢').catch(() => {});
+    void channel.setStatusPip(chatJid, '🟢').catch(() => { });
   }
   if (idleTimer) clearTimeout(idleTimer);
   if (runProgressNudgeTimer) clearInterval(runProgressNudgeTimer);
@@ -682,38 +679,8 @@ async function runAgent(
   const isMain = group.folder === MAIN_GROUP_FOLDER;
   const sessionId = sessions[group.folder];
 
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    group.folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
-
-  const availableGroups = getAvailableGroups();
-  writeGroupsSnapshot(
-    group.folder,
-    isMain,
-    availableGroups,
-    new Set(Object.keys(registeredGroups)),
-  );
-
-  const wrappedOnOutput = onOutput
-    ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
-        }
-        await onOutput(output);
-      }
-    : undefined;
+  writeAgentSnapshots(group.folder, isMain, registeredGroups, getAvailableGroups);
+  const wrappedOnOutput = wrapOnOutputForSession(sessions, group.folder, onOutput);
 
   try {
     const output = await runContainerAgent(
@@ -775,15 +742,7 @@ async function startMessageLoop(): Promise<void> {
         lastTimestamp = newTimestamp;
         saveState();
 
-        const messagesByGroup = new Map<string, NewMessage[]>();
-        for (const msg of messages) {
-          const existing = messagesByGroup.get(msg.chat_jid);
-          if (existing) {
-            existing.push(msg);
-          } else {
-            messagesByGroup.set(msg.chat_jid, [msg]);
-          }
-        }
+        const messagesByGroup = groupMessagesByChat(messages);
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
           const group = registeredGroups[chatJid];
@@ -857,20 +816,6 @@ async function startMessageLoop(): Promise<void> {
 }
 
 // ── Recovery & resume ──────────────────────────────────────────────────
-
-function recoverPendingMessages(): void {
-  for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
-    if (pending.length > 0) {
-      logger.info(
-        { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
-      );
-      queue.enqueueMessageCheck(chatJid);
-    }
-  }
-}
 
 function injectResumeMessage(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
@@ -952,7 +897,7 @@ async function main(): Promise<void> {
   ) {
     matrix = new MatrixChannel({
       onMessage: (_chatJid, msg) => {
-        if (handleMountCommand(msg)) return;
+        if (handleOperatorCommand(msg, matrix)) return;
         ensureGroupForIncomingChat(msg.chat_jid);
         storeMessage(msg);
         // Write last received event ID to IPC dir so containers can create threads
@@ -987,7 +932,7 @@ async function main(): Promise<void> {
   if (LOCAL_CHANNEL_ENABLED) {
     localCli = new LocalCliChannel({
       onMessage: (_chatJid, msg) => {
-        if (handleMountCommand(msg)) return;
+        if (handleOperatorCommand(msg, matrix)) return;
         ensureGroupForIncomingChat(msg.chat_jid);
         storeMessage(msg);
       },
@@ -995,84 +940,14 @@ async function main(): Promise<void> {
         storeChatMetadata(chatJid, timestamp, name),
       mirrorToMatrix: LOCAL_MIRROR_MATRIX_JID
         ? async (text: string) => {
-            if (!matrix || !matrix.isConnected()) return;
-            await matrix.sendMessage(LOCAL_MIRROR_MATRIX_JID, text);
-          }
+          if (!matrix || !matrix.isConnected()) return;
+          await matrix.sendMessage(LOCAL_MIRROR_MATRIX_JID, text);
+        }
         : undefined,
     });
   }
 
-  function getCaptainUserId(): string {
-    const profileEnvPath = path.join(process.env.INFINICLAW_ROOT || path.resolve(process.cwd(), '..', '..', '..'), 'bots', 'profiles', 'engineer', 'env');
-    if (fs.existsSync(profileEnvPath)) {
-      for (const line of fs.readFileSync(profileEnvPath, 'utf-8').split('\n')) {
-        const parsed = parseEnvLine(line);
-        if (parsed?.[0] === 'CAPTAIN_USER_ID') return parsed[1].trim();
-      }
-    }
-    return CAPTAIN_USER_ID;
-  }
 
-  function handleMountCommand(msg: { sender: string; content: string; chat_jid: string }): boolean {
-    const captainUserId = getCaptainUserId();
-    if (!msg.content.startsWith('!grant-mount') && !msg.content.startsWith('!revoke-mount') && !msg.content.startsWith('!restart-wksm')) return false;
-    logger.info({ sender: msg.sender, captainUserId, content: msg.content.slice(0, 50) }, 'handleMountCommand');
-    if (!captainUserId || msg.sender !== captainUserId) {
-      void (async () => {
-        if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `⛔ Unauthorized: only the Captain can run mount commands.`);
-      })();
-      return true;
-    }
-    const grant = msg.content.match(/^!grant-mount\s+(\S+)(?:\s+(\d+))?/);
-    if (grant) {
-      const [, hostPath, mins] = grant;
-      const duration = parseInt(mins ?? '30', 10);
-      logger.info({ hostPath, duration }, 'grant-mount command');
-      void (async () => {
-        try {
-          grantTemporaryMount(hostPath, true, duration, undefined, process.env.PERSONA_NAME);
-          const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
-          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `✅ Mount granted: ${hostPath} (read-write, expires ~${expiry})\nRestart required to pick up new mount.`);
-        } catch (err) {
-          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `⛔ grant-mount failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      })();
-      return true;
-    }
-    const revoke = msg.content.match(/^!revoke-mount\s+(\S+)/);
-    if (revoke) {
-      const hostPath = revoke[1];
-      logger.info({ hostPath }, 'revoke-mount command');
-      void (async () => {
-        const removed = revokeMount(hostPath);
-        if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`);
-      })();
-      return true;
-    }
-    if (msg.content.trim() === '!restart-wksm') {
-      logger.info('restart-wksm command');
-      void (async () => {
-        try {
-          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, '🔄 Restarting wksm...');
-          const { execSync } = await import('child_process');
-          const home = process.env.HOME || '/Users/ww5';
-          const wksc = `${home}/2025-WKS/main/venv/bin/wksc`;
-          const killOut = execSync(`/usr/sbin/lsof -ti:8765 | xargs kill -9 2>&1 || echo "no process on 8765"`, { shell: '/bin/bash' }).toString().trim();
-          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `kill: ${killOut}`);
-          await new Promise(r => setTimeout(r, 2000));
-          const startOut = execSync(`${wksc} mcp proxy start 2>&1`, { shell: '/bin/bash' }).toString().trim();
-          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `start: ${startOut}`);
-          await new Promise(r => setTimeout(r, 2000));
-          const health = execSync('curl -s http://localhost:8765/health', { shell: '/bin/bash' }).toString().trim();
-          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `health: ${health}`);
-        } catch (err) {
-          if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `⛔ restart-wksm failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      })();
-      return true;
-    }
-    return false;
-  }
 
   // Build channels array
   const allChannels: (Channel | null)[] = [localCli, matrix];
@@ -1118,7 +993,7 @@ async function main(): Promise<void> {
               refreshConnectedChannels();
               const mainJid = getMainChatJid();
               if (mainJid) {
-                matrix.sendMessage(mainJid, statusMessage('🔌', 'reconnected.')).catch(() => {});
+                matrix.sendMessage(mainJid, statusMessage('🔌', 'reconnected.')).catch(() => { });
               }
             }
           } else {
@@ -1145,13 +1020,13 @@ async function main(): Promise<void> {
     const heapMB = Math.round(usage.heapUsed / 1024 / 1024);
     const rssMB = Math.round(usage.rss / 1024 / 1024);
     logger.info({ heapMB, rssMB, limitMB: HEAP_LIMIT_MB }, 'Memory');
-    try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch {}
+    try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { }
     if (usage.heapUsed > heapLimitBytes) {
       logger.warn({ heapMB, limitMB: HEAP_LIMIT_MB }, 'Heap limit exceeded, recycling');
       shutdown('HEAP_LIMIT');
     }
   }, MEMORY_CHECK_INTERVAL);
-  try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch {}
+  try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { }
 
   // Periodic status snapshot
   const STATUS_SNAPSHOT_INTERVAL = 30_000;
@@ -1229,6 +1104,18 @@ async function main(): Promise<void> {
       await ch.sendMessage(jid, text, threadId);
       storeOutgoing(jid, text, threadId);
     },
+    sendMessageReturningId: async (jid, text, threadId) => {
+      const ch = findChannel(channels, jid);
+      if (!ch) {
+        logger.warn({ jid }, 'No channel found for IPC message (returning id)');
+        return undefined;
+      }
+      const eventId = ch.sendMessageReturningId
+        ? await ch.sendMessageReturningId(jid, text, threadId)
+        : undefined;
+      storeOutgoing(jid, text, threadId);
+      return eventId;
+    },
     defaultSenderForGroup: (sourceGroup: string) => defaultSenderForGroup(sourceGroup, registeredGroups),
     sendImage: (jid, buffer, filename, mimetype, caption) => {
       const ch = findChannel(channels, jid);
@@ -1252,7 +1139,7 @@ async function main(): Promise<void> {
         delete workThreadIds[chatJid];
       }
     },
-    syncGroupMetadata: async () => {},
+    syncGroupMetadata: async () => { },
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
@@ -1285,7 +1172,12 @@ async function main(): Promise<void> {
     logger.info({ signaled: activeContainers }, 'InfiniClaw shutdown: containers signaled');
   });
 
-  recoverPendingMessages();
+  recoverPendingMessages({
+    registeredGroups,
+    lastAgentTimestamp,
+    assistantName: ASSISTANT_NAME,
+    enqueueCheck: (chatJid) => queue.enqueueMessageCheck(chatJid),
+  });
   injectResumeMessage();
   startMessageLoop();
 
