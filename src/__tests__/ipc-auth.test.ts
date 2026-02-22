@@ -7,9 +7,9 @@ import {
   getRegisteredGroup,
   getTaskById,
   setRegisteredGroup,
-} from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc-watcher.js';
-import { RegisteredGroup } from './types.js';
+} from 'nanoclaw/db.js';
+import { processTaskIpc, IpcDeps } from '../ipc-watcher.js';
+import { RegisteredGroup } from 'nanoclaw/types.js';
 
 // Set up registered groups used across tests
 const MAIN_GROUP: RegisteredGroup = {

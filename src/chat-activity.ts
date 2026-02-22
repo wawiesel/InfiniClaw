@@ -3,9 +3,9 @@
  * Tracks objectives, progress, completions, errors per group.
  * Persists state to the router_state DB table.
  */
-import { TRIGGER_PATTERN } from './config.js';
-import { getRouterState, setRouterState } from './db.js';
-import type { NewMessage } from './types.js';
+import { TRIGGER_PATTERN } from 'nanoclaw/config.js';
+import { getRouterState, setRouterState } from 'nanoclaw/db.js';
+import type { NewMessage } from 'nanoclaw/types.js';
 
 export interface ChatActivity {
   runStartedAt?: number;

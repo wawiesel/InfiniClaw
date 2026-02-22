@@ -79,41 +79,59 @@ The `bots/` directory is the **active roster** — the currently deployed roles,
 
 ## Code Structure
 
-### Host process (`nanoclaw/src/`)
+InfiniClaw source lives in `src/`. The upstream NanoClaw framework lives in `external/nanoclaw/` (a git subtree). InfiniClaw imports upstream modules via npm workspaces (`import from 'nanoclaw/config.js'`).
 
-| File | Origin | Purpose |
-|------|--------|---------|
-| `index.ts` | NanoClaw | Orchestrator: startup, channel connection, message loop, working indicator, session management |
-| `service.ts` | **InfiniClaw** | CLI operations: start, stop, chat, send, deployBot, syncPersona, restorePersona |
-| `cli.ts` | **InfiniClaw** | CLI entry point: parses `start\|stop\|chat\|send` |
-| `container-runner.ts` | NanoClaw | Builds Podman args, spawns containers, streams output, mounts, skill/MCP sync |
-| `task-scheduler.ts` | NanoClaw | 60s poll loop for due tasks, spawns containers, forwards progress to chat |
-| `group-queue.ts` | NanoClaw | Per-room concurrency: ensures one container per room, queues overflow, retry backoff |
-| `ipc.ts` | NanoClaw | Processes IPC commands from containers (restart, schedule, register, etc.) |
-| `db.ts` | NanoClaw | SQLite: messages, sessions, registered rooms, scheduled tasks, task runs |
-| `router.ts` | NanoClaw | Outbound message routing, cross-bot forwarding, message formatting |
-| `config.ts` | NanoClaw | All env-driven configuration (intervals, paths, limits, trigger patterns) |
-| `mount-security.ts` | NanoClaw | Validates container mounts against host-side allowlist |
-| `skill-sync.ts` | **InfiniClaw** | One-way skill copy: persona + shared → container session on each spawn |
-| `mcp-sync.ts` | **InfiniClaw** | Two-way MCP server sync: save-back from container, then restore from persona |
-| `status.ts` | **InfiniClaw** | Bot status reporting and status message management |
-| `logger.ts` | NanoClaw | Pino logger |
-| `types.ts` | NanoClaw | Shared types: Channel, RegisteredGroup, ScheduledTask, MountAllowlist |
-| `channels/matrix.ts` | **InfiniClaw** | Matrix channel: connect, send, edit, react, redact, sync |
-| `channels/whatsapp.ts` | NanoClaw | WhatsApp channel (Baileys) |
-| `channels/local-cli.ts` | **InfiniClaw** | Terminal channel for `cli chat` |
+### InfiniClaw source (`src/`)
 
-### Container agent (`nanoclaw/container/agent-runner/`)
+| File | Purpose |
+|------|---------|
+| `main.ts` | Orchestrator: startup, channel connection, message loop, working indicator |
+| `cli.ts` | CLI entry point: parses `start\|stop\|chat\|send` |
+| `service.ts` | CLI operations: start, stop, chat, send, deployBot, syncPersona, restorePersona |
+| `container-spawn.ts` | Spawn Podman containers with InfiniClaw mounts/secrets |
+| `ipc-watcher.ts` | IPC polling with extended message types and commands |
+| `ipc-commands.ts` | Extended IPC command handlers |
+| `brain-management.ts` | Brain mode switching (model selection) |
+| `chat-activity.ts` | Chat activity tracking and idle detection |
+| `message-filtering.ts` | Message deduplication and filtering |
+| `conversation-log.ts` | Conversation logging to disk |
+| `container-mounts.ts` | InfiniClaw-specific container volume mounts |
+| `container-secrets.ts` | Provider secret normalization and cert mapping |
+| `podman-bootstrap.ts` | Podman machine setup and validation |
+| `skill-sync.ts` | One-way skill copy: persona + shared → container session on each spawn |
+| `mcp-sync.ts` | Two-way MCP server sync: save-back from container, then restore from persona |
+| `status.ts` | Bot status reporting and status message management |
+| `channels/matrix.ts` | Matrix channel: connect, send, edit, react, redact, sync |
+| `channels/local-cli.ts` | Terminal channel for `cli chat` |
+
+### NanoClaw upstream (`external/nanoclaw/src/`)
+
+| File | Purpose |
+|------|---------|
+| `config.ts` | All env-driven configuration (intervals, paths, limits, trigger patterns) |
+| `db.ts` | SQLite: messages, sessions, registered rooms, scheduled tasks, task runs |
+| `router.ts` | Outbound message routing, cross-bot forwarding, message formatting |
+| `container-runner.ts` | Builds Podman args, spawns containers, streams output |
+| `task-scheduler.ts` | 60s poll loop for due tasks, spawns containers, forwards progress to chat |
+| `group-queue.ts` | Per-room concurrency: ensures one container per room, queues overflow, retry backoff |
+| `mount-security.ts` | Validates container mounts against host-side allowlist |
+| `env-utils.ts` | Environment variable helpers |
+| `podman-utils.ts` | Podman CLI helpers |
+| `logger.ts` | Pino logger |
+| `types.ts` | Shared types: Channel, RegisteredGroup, ScheduledTask, MountAllowlist |
+| `channels/whatsapp.ts` | WhatsApp channel (Baileys) |
+
+### Container agent (`external/nanoclaw/container/agent-runner/`)
 
 Runs inside each Podman container. Receives a prompt via stdin JSON, calls Claude Agent SDK, streams output via stdout JSON lines, reads follow-up messages from IPC input directory.
 
 ### Key data flows
 
 ```
-User message → Matrix → index.ts message loop → SQLite → processGroupMessages()
+User message → Matrix → main.ts message loop → SQLite → processGroupMessages()
   → container-runner.ts spawns Podman container
     → agent-runner calls Claude SDK → streams JSON lines to stdout
-  → index.ts reads stdout → forwards to Matrix (progress + results)
+  → main.ts reads stdout → forwards to Matrix (progress + results)
   → working indicator: 🔧 working... → edits with elapsed time → checkpoint
 
 Scheduled task → task-scheduler.ts poll → group-queue.ts
@@ -121,5 +139,5 @@ Scheduled task → task-scheduler.ts poll → group-queue.ts
   → task-scheduler.ts reads stdout → forwards to Matrix
 
 IPC command → container writes JSON to /workspace/ipc/output/
-  → ipc.ts watches directory → processes command → writes response
+  → ipc-watcher.ts watches directory → processes command → writes response
 ```

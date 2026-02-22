@@ -391,7 +391,7 @@ export function getSystemStatus(rootDir: string): SystemStatus {
   for (const bot of ['engineer', 'commander']) {
     const { service, pid } = getBotServiceStatus(bot);
     const { model, provider } = getBrainConfig(rootDir, bot);
-    const instanceDir = path.join(rootDir, '_runtime', 'instances', bot, 'nanoclaw');
+    const instanceDir = path.join(rootDir, '_runtime', 'instances', bot);
 
     // Match containers by bot name prefix
     const botContainers = allContainers.filter((c) => {
@@ -488,7 +488,7 @@ export function getBotActivity(rootDir: string): Array<{ bot: string; activity: 
   const result: Array<{ bot: string; activity: string }> = [];
 
   for (const bot of ['engineer', 'commander']) {
-    const instanceDir = path.join(rootDir, '_runtime', 'instances', bot, 'nanoclaw');
+    const instanceDir = path.join(rootDir, '_runtime', 'instances', bot);
     const db = openReadonlyDb(instanceDir);
     if (!db) {
       result.push({ bot, activity: 'no database' });

@@ -5,15 +5,15 @@
 import fs from 'fs';
 import path from 'path';
 
-import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from './env-utils.js';
+import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from 'nanoclaw/env-utils.js';
 import {
   ASSISTANT_NAME,
   ASSISTANT_ROLE,
   DATA_DIR,
   MAIN_GROUP_FOLDER,
-} from './config.js';
-import { setRouterState } from './db.js';
-import { logger } from './logger.js';
+} from 'nanoclaw/config.js';
+import { setRouterState } from 'nanoclaw/db.js';
+import { logger } from 'nanoclaw/logger.js';
 
 const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');
 const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';

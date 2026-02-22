@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-NANOCLAW_CONTAINER="${ROOT_DIR}/nanoclaw/container"
+NANOCLAW_CONTAINER="${ROOT_DIR}/external/nanoclaw/container"
 
 if ! command -v podman >/dev/null 2>&1; then
   echo "podman not found in PATH" >&2

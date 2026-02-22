@@ -6,9 +6,9 @@ import { execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, CONTAINER_IMAGE } from './config.js';
-import { logger } from './logger.js';
-import { stopContainersByPrefix } from './podman-utils.js';
+import { ASSISTANT_NAME, CONTAINER_IMAGE } from 'nanoclaw/config.js';
+import { logger } from 'nanoclaw/logger.js';
+import { stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
 
 type PodmanMachineListEntry = {
   Name: string;

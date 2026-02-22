@@ -6,11 +6,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseEnvLine } from './env-utils.js';
-import { logger } from './logger.js';
+import { parseEnvLine } from 'nanoclaw/env-utils.js';
+import { logger } from 'nanoclaw/logger.js';
 import { loadSkillsToSession } from './skill-sync.js';
-import { validateAdditionalMounts } from './mount-security.js';
-import type { RegisteredGroup } from './types.js';
+import { validateAdditionalMounts } from 'nanoclaw/mount-security.js';
+import type { RegisteredGroup } from 'nanoclaw/types.js';
 
 interface VolumeMount {
   hostPath: string;
@@ -80,7 +80,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
   // Sync skills: save session → persona (replace), then rebuild session from shared + persona
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  const sharedSkillsSrc = path.join(projectRoot, 'container', 'skills');
+  const sharedSkillsSrc = path.join(projectRoot, 'external', 'nanoclaw', 'container', 'skills');
 
   if (rootDir && personaName) {
     const personaBaseDir = path.join(rootDir, 'bots', 'personas', personaName);
@@ -140,7 +140,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
   });
 
   // Mount agent-runner source from host — recompiled on container startup.
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  const agentRunnerSrc = path.join(projectRoot, 'external', 'nanoclaw', 'container', 'agent-runner', 'src');
   mounts.push({
     hostPath: agentRunnerSrc,
     containerPath: '/app/src',

@@ -1,0 +1,23 @@
+{
+  "name": "infiniclaw",
+  "private": true,
+  "type": "module",
+  "workspaces": ["external/nanoclaw"],
+  "scripts": {
+    "build": "npm run build -w nanoclaw && tsc",
+    "dev": "npm run build -w nanoclaw && tsc --watch",
+    "cli": "node dist/cli.js",
+    "test": "vitest run --root .",
+    "test:watch": "vitest --root ."
+  },
+  "dependencies": {
+    "matrix-bot-sdk": "^0.8.0",
+    "marked": "^17.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18",
+    "tsx": "^4.19.0"
+  }
+}

@@ -4,9 +4,9 @@ import {
   LOCAL_CHAT_JID,
   LOCAL_CHAT_NAME,
   LOCAL_CHAT_SENDER_NAME,
-} from '../config.js';
-import { logger } from '../logger.js';
-import { Channel, NewMessage, OnChatMetadata, OnInboundMessage } from '../types.js';
+} from 'nanoclaw/config.js';
+import { logger } from 'nanoclaw/logger.js';
+import { Channel, NewMessage, OnChatMetadata, OnInboundMessage } from 'nanoclaw/types.js';
 
 export interface LocalCliChannelOpts {
   onMessage: OnInboundMessage;

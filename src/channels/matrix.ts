@@ -15,15 +15,15 @@ import {
   MATRIX_USER_ID,
   MATRIX_USERNAME,
   STORE_DIR,
-} from '../config.js';
-import { logger } from '../logger.js';
+} from 'nanoclaw/config.js';
+import { logger } from 'nanoclaw/logger.js';
 import {
   Channel,
   NewMessage,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
-} from '../types.js';
+} from 'nanoclaw/types.js';
 
 export interface MatrixChannelOpts {
   onMessage: OnInboundMessage;

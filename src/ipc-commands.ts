@@ -6,12 +6,12 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { upsertEnvLine } from './env-utils.js';
+import { upsertEnvLine } from 'nanoclaw/env-utils.js';
 
 import {
   ASSISTANT_ROLE,
-} from './config.js';
-import { logger } from './logger.js';
+} from 'nanoclaw/config.js';
+import { logger } from 'nanoclaw/logger.js';
 import {
   BOTS,
   bootstrapBot as serviceBootstrapBot,
@@ -21,7 +21,7 @@ import {
   resolveRoot,
   validateDeploy as serviceValidateDeploy,
 } from './service.js';
-import type { RegisteredGroup } from './types.js';
+import type { RegisteredGroup } from 'nanoclaw/types.js';
 
 // ── Interfaces ──────────────────────────────────────────────────────────
 

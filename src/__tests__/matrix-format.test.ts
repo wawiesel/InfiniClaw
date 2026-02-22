@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { toFormattedBodyWithMarkdownAndMath } from './matrix.js';
+import { toFormattedBodyWithMarkdownAndMath } from '../channels/matrix.js';
 
 describe('toFormattedBodyWithMarkdownAndMath', () => {
   it('is no longer used - pure passthrough to Matrix', () => {

@@ -11,8 +11,8 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { parseEnvFile } from './env-utils.js';
-import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
+import { parseEnvFile } from 'nanoclaw/env-utils.js';
+import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
 import { saveMcpServersToPersona } from './mcp-sync.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -34,10 +34,10 @@ const RSYNC_EXCLUDES = [
 export function resolveRoot(): string {
   const explicit = process.env.INFINICLAW_ROOT?.trim();
   if (explicit) return explicit;
-  // Walk up from cwd looking for bots/ directory
+  // Walk up from cwd looking for bots/ + external/nanoclaw/
   let dir = process.cwd();
   while (dir !== path.dirname(dir)) {
-    if (fs.existsSync(path.join(dir, 'bots')) && fs.existsSync(path.join(dir, 'nanoclaw'))) {
+    if (fs.existsSync(path.join(dir, 'bots')) && fs.existsSync(path.join(dir, 'external', 'nanoclaw'))) {
       return dir;
     }
     dir = path.dirname(dir);
@@ -45,12 +45,12 @@ export function resolveRoot(): string {
   throw new Error('Cannot resolve InfiniClaw root. Set INFINICLAW_ROOT or run from project directory.');
 }
 
-function baseNanoclawDir(root: string): string {
-  return path.join(root, 'nanoclaw');
+function externalNanoclawDir(root: string): string {
+  return path.join(root, 'external', 'nanoclaw');
 }
 
 export function instanceDir(root: string, bot: string): string {
-  return path.join(root, '_runtime', 'instances', bot, 'nanoclaw');
+  return path.join(root, '_runtime', 'instances', bot);
 }
 
 function logDir(root: string): string {
@@ -260,15 +260,14 @@ export function restorePersona(root: string, bot: string): void {
  */
 export function deployBot(root: string, bot: string): void {
   const instance = instanceDir(root, bot);
-  const base = baseNanoclawDir(root);
   fs.mkdirSync(instance, { recursive: true });
 
   rebuildImageIfChanged(root, bot);
   syncPersona(root, bot);
-  rsyncNanoclaw(base, instance);
+  rsyncInstance(root, instance);
 
   // Install deps if lockfile differs
-  const lockSrc = path.join(base, 'package-lock.json');
+  const lockSrc = path.join(root, 'package-lock.json');
   const lockDst = path.join(instance, 'node_modules', '.package-lock.json');
   if (!fs.existsSync(path.join(instance, 'node_modules')) || !filesEqual(lockSrc, lockDst)) {
     console.log(`${bot}: installing dependencies...`);
@@ -316,11 +315,10 @@ export function deployBot(root: string, bot: string): void {
  */
 export function validateDeploy(root: string, bot: string): { ok: boolean; errors: string } {
   const instance = instanceDir(root, bot);
-  const base = baseNanoclawDir(root);
-  const staging = path.join(root, '_runtime', 'staging', bot, 'nanoclaw');
+  const staging = path.join(root, '_runtime', 'staging', bot);
   fs.mkdirSync(staging, { recursive: true });
 
-  rsyncNanoclaw(base, staging, 'pipe');
+  rsyncInstance(root, staging, 'pipe');
 
   // Symlink node_modules from live instance (fall back to any bot's instance for new bots)
   let instanceModules = path.join(instance, 'node_modules');
@@ -357,8 +355,8 @@ function computeBuildContextHash(root: string, bot: string): string {
   // Bot-specific Dockerfile
   const dockerfile = path.join(root, 'bots', 'container', bot, 'Dockerfile');
   if (fs.existsSync(dockerfile)) hash.update(fs.readFileSync(dockerfile));
-  // Shared build context: nanoclaw/container/agent-runner/
-  const agentRunner = path.join(root, 'nanoclaw', 'container', 'agent-runner');
+  // Shared build context: external/nanoclaw/container/agent-runner/
+  const agentRunner = path.join(root, 'external', 'nanoclaw', 'container', 'agent-runner');
   if (fs.existsSync(agentRunner)) {
     const walk = (dir: string) => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -400,9 +398,32 @@ function unloadPlist(plistFile: string): void {
   try { execSync(`launchctl unload "${plistFile}"`, { stdio: 'pipe' }); } catch { /* ok */ }
 }
 
-function rsyncNanoclaw(src: string, dst: string, stdio: 'inherit' | 'pipe' = 'inherit'): void {
+/**
+ * Sync project files to an instance directory.
+ * Copies external/nanoclaw/, src/, and root config files.
+ */
+function rsyncInstance(root: string, dst: string, stdio: 'inherit' | 'pipe' = 'inherit'): void {
   const excludeArgs = RSYNC_EXCLUDES.flatMap((e) => ['--exclude', e]);
-  execFileSync('rsync', ['-a', '--delete', ...excludeArgs, `${src}/`, `${dst}/`], { stdio });
+
+  // 1. external/nanoclaw/ → instance/external/nanoclaw/
+  const ncDst = path.join(dst, 'external', 'nanoclaw');
+  fs.mkdirSync(ncDst, { recursive: true });
+  execFileSync('rsync', ['-a', '--delete', ...excludeArgs, `${externalNanoclawDir(root)}/`, `${ncDst}/`], { stdio });
+
+  // 2. src/ → instance/src/
+  const srcDst = path.join(dst, 'src');
+  fs.mkdirSync(srcDst, { recursive: true });
+  execFileSync('rsync', ['-a', '--delete', `${path.join(root, 'src')}/`, `${srcDst}/`], { stdio });
+
+  // 3. Root config files
+  for (const file of ['package.json', 'package-lock.json', 'tsconfig.json']) {
+    const src = path.join(root, file);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dst, file));
+  }
+
+  // 4. Base CLAUDE.md from external/nanoclaw/
+  const baseClaude = path.join(externalNanoclawDir(root), 'CLAUDE.md');
+  if (fs.existsSync(baseClaude)) fs.copyFileSync(baseClaude, path.join(dst, 'CLAUDE.md'));
 }
 
 function buildLaunchdEnv(root: string, bot: string): Record<string, string> {
@@ -575,21 +596,20 @@ export function stop(): void {
 
 export function chat(bot: string): void {
   const root = resolveRoot();
-  const base = baseNanoclawDir(root);
   const instance = instanceDir(root, bot);
 
   if (!fs.existsSync(instance)) {
     throw new Error(`Missing instance for ${bot}. Run 'start' first.`);
   }
 
-  rsyncNanoclaw(base, instance);
+  rsyncInstance(root, instance);
 
   // Build if needed
-  const distIndex = path.join(instance, 'dist', 'index.js');
-  let needsBuild = !fs.existsSync(distIndex);
+  const distMain = path.join(instance, 'dist', 'main.js');
+  let needsBuild = !fs.existsSync(distMain);
   if (!needsBuild) {
     try {
-      const srcFiles = execSync(`find "${instance}/src" -name '*.ts' -newer "${distIndex}"`, {
+      const srcFiles = execSync(`find "${instance}/src" -name '*.ts' -newer "${distMain}"`, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();

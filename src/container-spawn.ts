@@ -10,7 +10,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseEnvLine } from './env-utils.js';
+import { parseEnvLine } from 'nanoclaw/env-utils.js';
 import {
   buildBotDirectory,
   buildInfiniClawMounts,
@@ -21,7 +21,7 @@ import {
   normalizeProviderSecrets,
   mapCertPathSecretsToContainer,
 } from './container-secrets.js';
-import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
+import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
 
 import {
   CONTAINER_IMAGE,
@@ -34,14 +34,14 @@ import {
   STORE_DIR,
   IDLE_TIMEOUT,
   ASSISTANT_NAME,
-} from './config.js';
-import { logger } from './logger.js';
-import type { RegisteredGroup } from './types.js';
-import type { ContainerInput, ContainerOutput } from './container-runner.js';
+} from 'nanoclaw/config.js';
+import { logger } from 'nanoclaw/logger.js';
+import type { RegisteredGroup } from 'nanoclaw/types.js';
+import type { ContainerInput, ContainerOutput } from 'nanoclaw/container-runner.js';
 
 // Re-export upstream utilities that main.ts needs
-export { writeTasksSnapshot, writeGroupsSnapshot } from './container-runner.js';
-export type { ContainerOutput, ContainerInput } from './container-runner.js';
+export { writeTasksSnapshot, writeGroupsSnapshot } from 'nanoclaw/container-runner.js';
+export type { ContainerOutput, ContainerInput } from 'nanoclaw/container-runner.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';

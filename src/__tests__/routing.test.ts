@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { _initTestDatabase, getAllChats, storeChatMetadata } from './db.js';
-import { getAvailableGroups, _setRegisteredGroups } from './main.js';
+import { _initTestDatabase, getAllChats, storeChatMetadata } from 'nanoclaw/db.js';
+import { getAvailableGroups, _setRegisteredGroups } from '../main.js';
 
 beforeEach(() => {
   _initTestDatabase();

@@ -8,7 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { parseEnvLine } from './env-utils.js';
+import { parseEnvLine } from 'nanoclaw/env-utils.js';
 
 import {
   ASSISTANT_NAME,
@@ -29,7 +29,7 @@ import {
   POLL_INTERVAL,
   MEMORY_CHECK_INTERVAL,
   TRIGGER_PATTERN,
-} from './config.js';
+} from 'nanoclaw/config.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -47,24 +47,23 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
-} from './db.js';
-import { GroupQueue } from './group-queue.js';
+} from 'nanoclaw/db.js';
+import { GroupQueue } from 'nanoclaw/group-queue.js';
 import {
   ContainerOutput,
   writeGroupsSnapshot,
   writeTasksSnapshot,
-} from './container-runner.js';
-import type { AvailableGroup } from './container-runner.js';
-import { grantTemporaryMount, revokeMount } from './mount-security.js';
+} from 'nanoclaw/container-runner.js';
+import type { AvailableGroup } from 'nanoclaw/container-runner.js';
+import { grantTemporaryMount, revokeMount } from 'nanoclaw/mount-security.js';
 import { MatrixChannel } from './channels/matrix.js';
 import { LocalCliChannel } from './channels/local-cli.js';
-import { findChannel, formatMessages, stripInternalTags } from './router.js';
+import { findChannel, formatMessages, stripInternalTags } from 'nanoclaw/router.js';
 import { syncPersona } from './service.js';
-import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
-import { logger } from './logger.js';
+import { startSchedulerLoop } from 'nanoclaw/task-scheduler.js';
+import { Channel, NewMessage, RegisteredGroup } from 'nanoclaw/types.js';
+import { logger } from 'nanoclaw/logger.js';
 
-// InfiniClaw modules (flattened to src/)
 import {
   MAIN_PROVIDER,
   mainLlm,
@@ -327,7 +326,7 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 }
 
 // Re-export for backwards compatibility during refactor
-export { escapeXml, formatMessages } from './router.js';
+export { escapeXml, formatMessages } from 'nanoclaw/router.js';
 
 // ── Process group messages ─────────────────────────────────────────────
 

@@ -14,15 +14,15 @@ import {
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
-} from './config.js';
-import type { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+} from 'nanoclaw/config.js';
+import type { AvailableGroup } from 'nanoclaw/container-runner.js';
+import { createTask, deleteTask, getTaskById, updateTask } from 'nanoclaw/db.js';
 import {
   handleInfiniClawCommand,
   handleInfiniClawMessage,
 } from './ipc-commands.js';
-import { logger } from './logger.js';
-import type { RegisteredGroup } from './types.js';
+import { logger } from 'nanoclaw/logger.js';
+import type { RegisteredGroup } from 'nanoclaw/types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
