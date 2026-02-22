@@ -1,0 +1,284 @@
+/**
+ * InfiniClaw brain management.
+ * Model resolution, quota fallback, Ollama detection, auto-switch.
+ */
+import fs from 'fs';
+import path from 'path';
+
+import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from './env-utils.js';
+import {
+  ASSISTANT_NAME,
+  ASSISTANT_ROLE,
+  DATA_DIR,
+  MAIN_GROUP_FOLDER,
+} from './config.js';
+import { setRouterState } from './db.js';
+import { logger } from './logger.js';
+
+const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');
+const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
+const AUTO_BRAIN_SWITCH_COOLDOWN_MS = 10 * 60 * 1000;
+
+let lastAutoBrainSwitchAt = 0;
+
+function firstSet(...values: Array<string | undefined>): string | undefined {
+  for (const v of values) {
+    const s = v?.trim();
+    if (s) return s;
+  }
+  return undefined;
+}
+
+function loadProjectEnv(): Record<string, string> {
+  const values: Record<string, string> = {};
+  if (!fs.existsSync(PROJECT_ENV_PATH)) return values;
+
+  try {
+    const envContent = fs.readFileSync(PROJECT_ENV_PATH, 'utf-8');
+    for (const line of envContent.split('\n')) {
+      const parsed = parseEnvLine(line);
+      if (!parsed) continue;
+      const [key, value] = parsed;
+      values[key] = value;
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to read project .env');
+  }
+
+  return values;
+}
+
+const PROJECT_ENV = loadProjectEnv();
+
+function getConfiguredEnv(key: string): string | undefined {
+  return firstSet(process.env[key], PROJECT_ENV[key]);
+}
+
+function isMainConfiguredForOllama(): boolean {
+  return isOllamaBaseUrl(getConfiguredEnv('ANTHROPIC_BASE_URL'));
+}
+
+export function resolveConfiguredMainModel(): string | undefined {
+  return getConfiguredEnv(MAIN_MODEL_ENV_KEY)?.trim() || undefined;
+}
+
+function parseNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function getClaudeModelFromStatsCache(): string | undefined {
+  const statsPath = path.join(
+    DATA_DIR,
+    'sessions',
+    MAIN_GROUP_FOLDER,
+    '.claude',
+    'stats-cache.json',
+  );
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+
+  if (!parsed || typeof parsed !== 'object') return undefined;
+
+  // Prefer modelUsage since it summarizes overall token usage by model.
+  const modelUsage = (parsed as { modelUsage?: unknown }).modelUsage;
+  if (modelUsage && typeof modelUsage === 'object') {
+    let bestModel: string | undefined;
+    let bestScore = -1;
+    for (const [model, usage] of Object.entries(modelUsage)) {
+      if (!model.trim() || !usage || typeof usage !== 'object') continue;
+      const metrics = usage as Record<string, unknown>;
+      const score =
+        parseNumber(metrics.inputTokens) +
+        parseNumber(metrics.outputTokens) +
+        parseNumber(metrics.cacheReadInputTokens) +
+        parseNumber(metrics.cacheCreationInputTokens);
+      if (score > bestScore) {
+        bestScore = score;
+        bestModel = model.trim();
+      }
+    }
+    if (bestModel) return bestModel;
+  }
+
+  // Fallback: inspect most recent daily tokens by model.
+  const dailyModelTokens = (parsed as { dailyModelTokens?: unknown }).dailyModelTokens;
+  if (Array.isArray(dailyModelTokens)) {
+    for (let i = dailyModelTokens.length - 1; i >= 0; i -= 1) {
+      const dayEntry = dailyModelTokens[i];
+      if (!dayEntry || typeof dayEntry !== 'object') continue;
+      const tokensByModel = (dayEntry as { tokensByModel?: unknown }).tokensByModel;
+      if (!tokensByModel || typeof tokensByModel !== 'object') continue;
+
+      let bestModel: string | undefined;
+      let bestTokens = -1;
+      for (const [model, tokens] of Object.entries(tokensByModel)) {
+        const tokenCount = parseNumber(tokens);
+        if (model.trim() && tokenCount > bestTokens) {
+          bestTokens = tokenCount;
+          bestModel = model.trim();
+        }
+      }
+      if (bestModel) return bestModel;
+    }
+  }
+
+  return undefined;
+}
+
+export function resolveMainProvider(): 'claude' | 'ollama' {
+  if (isMainConfiguredForOllama()) {
+    return 'ollama';
+  }
+  return 'claude';
+}
+
+function isGenericClaudeModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  if (!normalized) return true;
+
+  if (
+    normalized === 'default' ||
+    normalized === 'opus' ||
+    normalized === 'sonnet' ||
+    normalized === 'haiku' ||
+    normalized === 'claude-opus' ||
+    normalized === 'claude-sonnet' ||
+    normalized === 'claude-haiku'
+  ) {
+    return true;
+  }
+
+  // Treat family aliases like claude-opus, claude-opus-latest as non-specific.
+  // Any model string containing digits is considered specific (e.g. claude-opus-4-6).
+  if (/^(claude-)?(opus|sonnet|haiku)(-[a-z._-]+)?$/i.test(normalized) && !/\d/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function normalizeMainLlm(model: string | undefined): string | undefined {
+  const trimmed = model?.trim();
+  if (!trimmed) return undefined;
+
+  if (resolveMainProvider() !== 'claude') {
+    return trimmed;
+  }
+
+  if (!isGenericClaudeModel(trimmed)) {
+    return trimmed;
+  }
+
+  // Try to upgrade generic aliases to a concrete dated model if available.
+  const fromStats = getClaudeModelFromStatsCache()?.trim();
+  if (fromStats && !isGenericClaudeModel(fromStats)) {
+    return fromStats;
+  }
+
+  return undefined;
+}
+
+function applyOllamaFallbackToProfile(envFile: string): void {
+  upsertEnvLine(envFile, 'BRAIN_MODEL', 'devstral-small-2-fast:latest');
+  upsertEnvLine(
+    envFile,
+    'BRAIN_BASE_URL',
+    'http://host.containers.internal:11434',
+  );
+  upsertEnvLine(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
+  upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
+  upsertEnvLine(envFile, 'BRAIN_OAUTH_TOKEN', '');
+}
+
+function isAnthropicQuotaError(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes('insufficient_quota') ||
+    lower.includes('insufficient quota') ||
+    lower.includes('credit balance') ||
+    lower.includes('credits') ||
+    (lower.includes('anthropic') && lower.includes('rate limit'))
+  );
+}
+
+export async function maybeAutoSwitchBrainsOnQuotaError(
+  rawError: string,
+  chatJid: string,
+  sendMessage: (jid: string, text: string) => Promise<void>,
+): Promise<void> {
+  if (!['engineer'].includes(ASSISTANT_NAME.trim().toLowerCase())) return;
+  if (!isAnthropicQuotaError(rawError)) return;
+  if (Date.now() - lastAutoBrainSwitchAt < AUTO_BRAIN_SWITCH_COOLDOWN_MS) return;
+
+  const root = process.env.INFINICLAW_ROOT?.trim() || path.resolve(process.cwd(), '..', '..', '..');
+  const engineerEnv = path.join(root, 'bots', 'profiles', 'engineer', 'env');
+  const commanderEnv = path.join(root, 'bots', 'profiles', 'commander', 'env');
+  if (!fs.existsSync(engineerEnv) || !fs.existsSync(commanderEnv)) return;
+
+  try {
+    applyOllamaFallbackToProfile(engineerEnv);
+    applyOllamaFallbackToProfile(commanderEnv);
+    lastAutoBrainSwitchAt = Date.now();
+    await sendMessage(
+      chatJid,
+      'Anthropic credits/quotas look exhausted. I switched engineer and commander brain profiles to ollama fallback. Restart both bots to apply.',
+    );
+    logger.warn('Auto-switched bot brain profiles to ollama fallback due to quota error');
+  } catch (err) {
+    logger.error({ err }, 'Failed automatic ollama fallback switch');
+  }
+}
+
+export function resolveMainLlm(): string {
+  const configuredModel = normalizeMainLlm(resolveConfiguredMainModel());
+  if (configuredModel) return configuredModel;
+
+  if (resolveMainProvider() === 'claude') {
+    const statsModel = normalizeMainLlm(getClaudeModelFromStatsCache());
+    if (statsModel) return statsModel;
+    return 'unknown-model';
+  }
+
+  return 'unknown-model';
+}
+
+// Module-level state
+export const MAIN_PROVIDER = resolveMainProvider();
+export let mainLlm = resolveMainLlm();
+
+export function updateMainLlm(model?: string): void {
+  const normalized = normalizeMainLlm(model);
+  if (!normalized || normalized === mainLlm) return;
+  mainLlm = normalized;
+  setRouterState('main_model', mainLlm);
+  logger.info({ mainModel: mainLlm }, 'Updated MAIN model label');
+}
+
+export function setMainLlm(model: string): void {
+  mainLlm = model;
+}
+
+export function mainSender(): string {
+  const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
+  const role = ASSISTANT_ROLE;
+  return `<font color="#888888">🧠 ${role} <em>(${providerName}/${mainLlm})</em></font>`;
+}
+
+export function defaultSenderForGroup(
+  sourceGroup: string,
+  registeredGroups: Record<string, { folder: string; name: string }>,
+): string {
+  if (sourceGroup === MAIN_GROUP_FOLDER) {
+    return mainSender();
+  }
+
+  const groupName = Object.values(registeredGroups).find(
+    (g) => g.folder === sourceGroup,
+  )?.name;
+  return groupName?.trim() || sourceGroup;
+}
