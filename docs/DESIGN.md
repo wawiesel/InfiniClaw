@@ -104,7 +104,12 @@ The agent sees **all three** — base+persona as the instance-level CLAUDE.md (l
 
 ## Code Structure
 
-InfiniClaw source lives in `src/`. The upstream NanoClaw framework lives in `external/nanoclaw/` (a git subtree). InfiniClaw imports upstream modules via npm workspaces (`import from 'nanoclaw/config.js'`).
+**Architectural Strategy: Thin Fork & Thick Wrappers**
+InfiniClaw is built on top of the upstream NanoClaw framework located in `external/nanoclaw/` (a git subtree). The goal is to keep `external/nanoclaw/` as a "super thin fork" that can be cleanly patched and merged from upstream.
+
+To accomplish this, `src/` (InfiniClaw) optimally builds on top of NanoClaw by wrapping its entry points (`main.ts` wrapping `index.ts`, `container-spawn.ts` wrapping `container-runner.ts`) or inserting plugin/hook calls. While this introduces some understandable duplication, it isolates InfiniClaw-specific logic (like the matrix channel, custom IPC commands, and secrets proxying) from the core framework.
+
+InfiniClaw imports upstream modules via npm workspaces (`import from 'nanoclaw/config.js'`).
 
 ### InfiniClaw source (`src/`)
 
