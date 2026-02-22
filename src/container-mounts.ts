@@ -196,11 +196,17 @@ export function readGroupMcpServers(groupDir: string): Record<string, Record<str
   const mcpJsonPath = path.join(groupDir, '.mcp.json');
   try {
     if (fs.existsSync(mcpJsonPath)) {
-      const mcpJson = JSON.parse(fs.readFileSync(mcpJsonPath, 'utf-8'));
+      let raw = fs.readFileSync(mcpJsonPath, 'utf-8');
+      // Strip trailing commas before } or ] so linters/formatters don't break JSON.parse
+      raw = raw.replace(/,\s*([}\]])/g, '$1');
+      const mcpJson = JSON.parse(raw);
       if (mcpJson.mcpServers && Object.keys(mcpJson.mcpServers).length > 0) {
         return mcpJson.mcpServers;
       }
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    // Log the error so MCP failures aren't silently swallowed
+    console.error(`[readGroupMcpServers] Failed to parse ${mcpJsonPath}:`, err);
+  }
   return undefined;
 }

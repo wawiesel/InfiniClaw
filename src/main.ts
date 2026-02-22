@@ -122,25 +122,49 @@ function isThreadContext(chatJid: string): boolean {
   return Boolean(activeReplyThreadIds[chatJid]);
 }
 
-interface WorkingIndicator {
+interface StatusIndicator {
   eventId: string;
   startedAt: number;
   timer: ReturnType<typeof setInterval>;
   chatJid: string;
 }
-const workingIndicators: Record<string, WorkingIndicator> = {};
-const workingIndicatorDelays: Record<string, ReturnType<typeof setTimeout>> = {};
 
-const WORKING_INDICATOR_DELAY_MS = 5_000;
+// ── Shared indicator timing ────────────────────────────────────────────
+
+const INDICATOR_DELAY_MS = 5_000;
+const INDICATOR_FAST_INTERVAL_MS = 5_000;
+const INDICATOR_SLOW_INTERVAL_MS = 15_000;
+const INDICATOR_SLOW_THRESHOLD_MS = 55_000; // switch at ~1 minute
 
 function formatElapsed(startedAt: number): string {
   const secs = Math.round((Date.now() - startedAt) / 1000);
-  if (secs < 60) return `${secs}s`;
-  return `${Math.floor(secs / 60)}m`;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+/** Create an adaptive timer: fast (5s) for the first minute, then slow (15s). */
+function createAdaptiveTimer(
+  startedAt: number,
+  onTick: () => void,
+  registry: Record<string, StatusIndicator>,
+  chatJid: string,
+): ReturnType<typeof setInterval> {
+  const fastTimer = setInterval(() => {
+    onTick();
+    if (Date.now() - startedAt >= INDICATOR_SLOW_THRESHOLD_MS && registry[chatJid]?.timer === fastTimer) {
+      clearInterval(fastTimer);
+      const slowTimer = setInterval(onTick, INDICATOR_SLOW_INTERVAL_MS);
+      registry[chatJid].timer = slowTimer;
+    }
+  }, INDICATOR_FAST_INTERVAL_MS);
+  return fastTimer;
+}
 
 // ── Working indicator functions ────────────────────────────────────────
+
+const workingIndicators: Record<string, StatusIndicator> = {};
+const workingIndicatorDelays: Record<string, ReturnType<typeof setTimeout>> = {};
 
 function startWorkingIndicator(chatJid: string, threadId?: string): void {
   if (workingIndicators[chatJid] || workingIndicatorDelays[chatJid]) return;
@@ -156,16 +180,14 @@ function startWorkingIndicator(chatJid: string, threadId?: string): void {
         ch.editMessage!(chatJid, eventId, statusMessage('⏳', `worked (${formatElapsed(startedAt)})`)).catch(() => { });
         return;
       }
-      const timer = setInterval(() => {
-        ch.editMessage!(chatJid, eventId, statusMessage('⏳', `working (${formatElapsed(startedAt)})`)).catch(() => { });
-      }, 5_000);
+      const doEdit = () => ch.editMessage!(chatJid, eventId, statusMessage('⏳', `working (${formatElapsed(startedAt)})`)).catch(() => { });
+      const timer = createAdaptiveTimer(startedAt, doEdit, workingIndicators, chatJid);
       workingIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
     }).catch(() => { });
-  }, WORKING_INDICATOR_DELAY_MS);
+  }, INDICATOR_DELAY_MS);
 }
 
 function clearWorkingIndicator(chatJid: string): void {
-  // Cancel pending delay if indicator hasn't posted yet — silent, no message
   if (workingIndicatorDelays[chatJid]) {
     clearTimeout(workingIndicatorDelays[chatJid]);
     delete workingIndicatorDelays[chatJid];
@@ -182,14 +204,12 @@ function clearWorkingIndicator(chatJid: string): void {
 }
 
 function bumpWorkingIndicator(chatJid: string, threadId?: string): void {
-  // Still in delay — restart it, no checkpoint needed
   if (workingIndicatorDelays[chatJid]) {
     clearTimeout(workingIndicatorDelays[chatJid]);
     delete workingIndicatorDelays[chatJid];
     startWorkingIndicator(chatJid, threadId);
     return;
   }
-  // No indicator active — start a fresh one
   const indicator = workingIndicators[chatJid];
   if (!indicator) {
     startWorkingIndicator(chatJid, threadId);
@@ -202,30 +222,27 @@ function bumpWorkingIndicator(chatJid: string, threadId?: string): void {
 
 // ── Idle indicator functions ──────────────────────────────────────────
 
-const idleIndicators: Record<string, WorkingIndicator> = {};
+const idleIndicators: Record<string, StatusIndicator> = {};
 
 function startIdleIndicator(chatJid: string, threadId?: string): void {
   if (idleIndicators[chatJid]) return;
   const ch = findChannel(channels, chatJid);
   if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
   const startedAt = Date.now();
-  // Reserve the slot synchronously so clearIdleIndicator can detect in-flight sends
-  const placeholder: WorkingIndicator = { eventId: '', startedAt, timer: 0 as unknown as ReturnType<typeof setInterval>, chatJid };
+  const placeholder: StatusIndicator = { eventId: '', startedAt, timer: 0 as unknown as ReturnType<typeof setInterval>, chatJid };
   idleIndicators[chatJid] = placeholder;
   ch.sendMessageReturningId(chatJid, statusMessage('💤', 'idling...'), threadId).then((eventId) => {
     if (!eventId) {
       if (idleIndicators[chatJid] === placeholder) delete idleIndicators[chatJid];
       return;
     }
-    // Cleared while send was in flight — just finalize the message
     if (idleIndicators[chatJid] !== placeholder) {
       ch.editMessage!(chatJid, eventId, statusMessage('💤', `idled (${formatElapsed(startedAt)})`)).catch(() => { });
       return;
     }
     placeholder.eventId = eventId;
-    placeholder.timer = setInterval(() => {
-      ch.editMessage!(chatJid, eventId, statusMessage('💤', `idling (${formatElapsed(startedAt)})`)).catch(() => { });
-    }, 30_000);
+    const doEdit = () => ch.editMessage!(chatJid, eventId, statusMessage('💤', `idling (${formatElapsed(startedAt)})`)).catch(() => { });
+    placeholder.timer = createAdaptiveTimer(startedAt, doEdit, idleIndicators, chatJid);
   }).catch(() => {
     if (idleIndicators[chatJid] === placeholder) delete idleIndicators[chatJid];
   });
@@ -236,8 +253,6 @@ function clearIdleIndicator(chatJid: string): void {
   if (!indicator) return;
   if (indicator.timer) clearInterval(indicator.timer);
   delete idleIndicators[chatJid];
-  // If eventId is empty, the send is still in flight — the .then() handler
-  // will see the placeholder was removed and edit to "idled" itself.
   if (!indicator.eventId) return;
   const ch = findChannel(channels, chatJid);
   if (ch?.editMessage) {
