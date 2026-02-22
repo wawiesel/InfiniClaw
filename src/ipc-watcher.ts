@@ -96,13 +96,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       ? data.sender.trim()
                       : deps.defaultSenderForGroup(sourceGroup);
                   const threadId = typeof data.threadId === 'string' ? data.threadId : undefined;
-                  // Suppress brain header in thread replies — it's noise in a thread context
-                  const formatted = threadId
-                    ? String(data.text)
-                    : `${sender}:\n\n${String(data.text)}`;
+                  // Suppress brain header in thread replies — it's noise in a thread context.
+                  // When not in a thread, send header and body as separate messages so each
+                  // can be rendered correctly (header is HTML, body may be markdown).
+                  const body = String(data.text);
+                  if (!threadId) {
+                    await deps.sendMessage(data.chatJid, `${sender}:`, undefined);
+                  }
                   await deps.sendMessage(
                     data.chatJid,
-                    formatted,
+                    body,
                     threadId,
                   );
                   logger.info(

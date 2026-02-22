@@ -219,7 +219,7 @@ Behavior:
         'gpt-5-codex';
       const delegateHeader = formatDelegateSender(args.name, 'codex', effectiveModel);
 
-      const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+      const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
       emitDelegateMessage(headerAndObjective);
 
       const cwdResult = resolveDelegateCwd(args.cwd);
@@ -478,7 +478,7 @@ Behavior:
         firstSet(args.model, process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
       const delegateHeader = formatDelegateSender(args.name, 'gemini', effectiveModel);
 
-      const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+      const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
       emitDelegateMessage(headerAndObjective);
 
       const cwdResult = resolveDelegateCwd(args.cwd);
@@ -708,7 +708,7 @@ Behavior:
     async (args) => {
       const delegateHeader = formatDelegateSender(args.name, 'ollama', args.model);
 
-      const headerAndObjective = `${delegateHeader}\n<font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+      const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
       emitDelegateMessage(headerAndObjective);
 
       const timeoutMs = Math.max(
