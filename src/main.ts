@@ -89,6 +89,7 @@ import {
 } from './chat-activity.js';
 import { shouldIgnoreMessage } from './message-filtering.js';
 import { appendConversationLog } from './conversation-log.js';
+import { statusMessage } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
@@ -119,67 +120,75 @@ interface WorkingIndicator {
   chatJid: string;
 }
 const workingIndicators: Record<string, WorkingIndicator> = {};
+const workingIndicatorDelays: Record<string, ReturnType<typeof setTimeout>> = {};
+
+const WORKING_INDICATOR_DELAY_MS = 5_000;
+
+function formatElapsed(startedAt: number): string {
+  const secs = Math.round((Date.now() - startedAt) / 1000);
+  if (secs < 60) return `${secs}s`;
+  return `${Math.floor(secs / 60)}m`;
+}
+
 
 // ── Working indicator functions ────────────────────────────────────────
 
 function startWorkingIndicator(chatJid: string, threadId?: string): void {
-  if (workingIndicators[chatJid]) return;
-  const ch = findChannel(channels, chatJid);
-  if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
+  if (workingIndicators[chatJid] || workingIndicatorDelays[chatJid]) return;
   const startedAt = Date.now();
-  ch.sendMessageReturningId(chatJid, '⏳ working...', threadId).then((eventId) => {
-    if (!eventId) return;
-    if (workingIndicators[chatJid]) {
-      if (ch.redactMessage) ch.redactMessage(chatJid, eventId).catch(() => {});
-      return;
-    }
-    const timer = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startedAt) / 60_000);
-      const label = elapsed < 1 ? '<1m' : `${elapsed}m`;
-      ch.editMessage!(chatJid, eventId, `⏳ working (${label})...`).catch(() => {});
-    }, 30_000);
-    workingIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
-  }).catch(() => {});
+  workingIndicatorDelays[chatJid] = setTimeout(() => {
+    delete workingIndicatorDelays[chatJid];
+    if (workingIndicators[chatJid]) return;
+    const ch = findChannel(channels, chatJid);
+    if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
+    ch.sendMessageReturningId(chatJid, statusMessage('⏳', 'working...'), threadId).then((eventId) => {
+      if (!eventId) return;
+      if (workingIndicators[chatJid]) {
+        ch.editMessage!(chatJid, eventId, statusMessage('⏳', `worked (${formatElapsed(startedAt)})`)).catch(() => {});
+        return;
+      }
+      const timer = setInterval(() => {
+        ch.editMessage!(chatJid, eventId, statusMessage('⏳', `working (${formatElapsed(startedAt)})`)).catch(() => {});
+      }, 5_000);
+      workingIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
+    }).catch(() => {});
+  }, WORKING_INDICATOR_DELAY_MS);
 }
 
 function clearWorkingIndicator(chatJid: string): void {
+  // Cancel pending delay if indicator hasn't posted yet — silent, no message
+  if (workingIndicatorDelays[chatJid]) {
+    clearTimeout(workingIndicatorDelays[chatJid]);
+    delete workingIndicatorDelays[chatJid];
+    return;
+  }
   const indicator = workingIndicators[chatJid];
   if (!indicator) return;
   clearInterval(indicator.timer);
   delete workingIndicators[chatJid];
   const ch = findChannel(channels, chatJid);
-  const elapsed = Math.floor((Date.now() - indicator.startedAt) / 60_000);
-  const label = elapsed < 1 ? '<1m' : `${elapsed}m`;
   if (ch?.editMessage) {
-    ch.editMessage(chatJid, indicator.eventId, `⏳ checkpoint (${label})`).catch(() => {});
+    ch.editMessage(chatJid, indicator.eventId, statusMessage('⏳', `worked (${formatElapsed(indicator.startedAt)})`)).catch(() => {});
   }
 }
 
 function bumpWorkingIndicator(chatJid: string, threadId?: string): void {
+  // Still in delay — restart it, no checkpoint needed
+  if (workingIndicatorDelays[chatJid]) {
+    clearTimeout(workingIndicatorDelays[chatJid]);
+    delete workingIndicatorDelays[chatJid];
+    startWorkingIndicator(chatJid, threadId);
+    return;
+  }
+  // No indicator active — start a fresh one
   const indicator = workingIndicators[chatJid];
-  if (!indicator) return;
+  if (!indicator) {
+    startWorkingIndicator(chatJid, threadId);
+    return;
+  }
   const ch = findChannel(channels, chatJid);
-  if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
-  const { startedAt } = indicator;
-  clearInterval(indicator.timer);
-  const elapsed = Math.floor((Date.now() - startedAt) / 60_000);
-  const checkpointLabel = elapsed < 1 ? '<1m' : `${elapsed}m`;
-  ch.editMessage(chatJid, indicator.eventId, `⏳ checkpoint (${checkpointLabel})`).catch(() => {});
-  delete workingIndicators[chatJid];
-  const label = checkpointLabel;
-  ch.sendMessageReturningId(chatJid, `⏳ working (${label})...`, threadId).then((eventId) => {
-    if (!eventId) return;
-    if (workingIndicators[chatJid]) {
-      if (ch.editMessage) ch.editMessage(chatJid, eventId, `⏳ checkpoint (${label})`).catch(() => {});
-      return;
-    }
-    const timer = setInterval(() => {
-      const el = Math.floor((Date.now() - startedAt) / 60_000);
-      const lb = el < 1 ? '<1m' : `${el}m`;
-      ch.editMessage!(chatJid, eventId, `⏳ working (${lb})...`).catch(() => {});
-    }, 30_000);
-    workingIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
-  }).catch(() => {});
+  if (!ch?.editMessage) return;
+  ch.editMessage(chatJid, indicator.eventId, statusMessage('⏳', `working (${formatElapsed(indicator.startedAt)})`)).catch(() => {});
 }
 
 // ── Idle indicator functions ──────────────────────────────────────────
@@ -191,29 +200,39 @@ function startIdleIndicator(chatJid: string, threadId?: string): void {
   const ch = findChannel(channels, chatJid);
   if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
   const startedAt = Date.now();
-  ch.sendMessageReturningId(chatJid, '💤 Idling...', threadId).then((eventId) => {
-    if (!eventId) return;
-    if (idleIndicators[chatJid]) {
-      if (ch.redactMessage) ch.redactMessage(chatJid, eventId).catch(() => {});
+  // Reserve the slot synchronously so clearIdleIndicator can detect in-flight sends
+  const placeholder: WorkingIndicator = { eventId: '', startedAt, timer: 0 as unknown as ReturnType<typeof setInterval>, chatJid };
+  idleIndicators[chatJid] = placeholder;
+  ch.sendMessageReturningId(chatJid, statusMessage('💤', 'idling...'), threadId).then((eventId) => {
+    if (!eventId) {
+      if (idleIndicators[chatJid] === placeholder) delete idleIndicators[chatJid];
       return;
     }
-    const timer = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startedAt) / 60_000);
-      const label = elapsed < 1 ? '<1m' : `${elapsed}m`;
-      ch.editMessage!(chatJid, eventId, `💤 Idling (${label})...`).catch(() => {});
+    // Cleared while send was in flight — just finalize the message
+    if (idleIndicators[chatJid] !== placeholder) {
+      ch.editMessage!(chatJid, eventId, statusMessage('💤', `idled (${formatElapsed(startedAt)})`)).catch(() => {});
+      return;
+    }
+    placeholder.eventId = eventId;
+    placeholder.timer = setInterval(() => {
+      ch.editMessage!(chatJid, eventId, statusMessage('💤', `idling (${formatElapsed(startedAt)})`)).catch(() => {});
     }, 30_000);
-    idleIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
-  }).catch(() => {});
+  }).catch(() => {
+    if (idleIndicators[chatJid] === placeholder) delete idleIndicators[chatJid];
+  });
 }
 
 function clearIdleIndicator(chatJid: string): void {
   const indicator = idleIndicators[chatJid];
   if (!indicator) return;
-  clearInterval(indicator.timer);
+  if (indicator.timer) clearInterval(indicator.timer);
   delete idleIndicators[chatJid];
+  // If eventId is empty, the send is still in flight — the .then() handler
+  // will see the placeholder was removed and edit to "idled" itself.
+  if (!indicator.eventId) return;
   const ch = findChannel(channels, chatJid);
-  if (ch?.redactMessage) {
-    ch.redactMessage(chatJid, indicator.eventId).catch(() => {});
+  if (ch?.editMessage) {
+    ch.editMessage(chatJid, indicator.eventId, statusMessage('💤', `idled (${formatElapsed(indicator.startedAt)})`)).catch(() => {});
   }
 }
 
@@ -534,12 +553,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             }
             outputSentToUser = true;
             agentResponses.push(formatMainMessage(text));
-            // Bot delivered its answer — stop nudging and show idle status
+            // Bot delivered its answer — stop nudging
             if (runProgressNudgeTimer) {
               clearInterval(runProgressNudgeTimer);
               runProgressNudgeTimer = null;
             }
-            startIdleIndicator(chatJid, activeReplyThreadIds[chatJid]);
           }
         }
       }
@@ -557,6 +575,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   clearWorkingIndicator(chatJid);
   clearIdleIndicator(chatJid);
+  if (outputSentToUser) {
+    startIdleIndicator(chatJid, activeReplyThreadIds[chatJid]);
+  }
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   if (channel?.setStatusPip) {
@@ -1222,7 +1243,7 @@ async function main(): Promise<void> {
     clearInterval(bootAnnounceTimer);
     try {
       if (ch.setPresenceStatus) await ch.setPresenceStatus('online', 'idle');
-      await ch.sendMessage(mainJid, `✅ <font color="#00cc00">online.</font>\n\n${mainSender()}`);
+      await ch.sendMessage(mainJid, `${statusMessage('✅', 'online.')}\n\n${mainSender()}`);
     } catch (err) {
       logger.warn({ err }, 'Failed to send boot announcement');
     }

@@ -22,6 +22,7 @@ import {
   validateDeploy as serviceValidateDeploy,
 } from './service.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
+import { statusMessage } from './formatting.js';
 
 // ── Interfaces ──────────────────────────────────────────────────────────
 
@@ -290,7 +291,7 @@ export async function handleInfiniClawCommand(
         }
         if (chatJid) {
           try {
-            await ctx.sendMessage(chatJid, `<font color="#555555">⭕️ restarting ${bot}...</font>`);
+            await ctx.sendMessage(chatJid, statusMessage('⭕️', 'restarting...'));
           } catch {}
         }
         setTimeout(() => {
@@ -300,7 +301,7 @@ export async function handleInfiniClawCommand(
         logger.info({ bot }, 'Deploy validation passed — bootstrapping');
         if (chatJid) {
           try {
-            await ctx.sendMessage(chatJid, `<font color="#555555">⭕️ restarting ${bot}...</font>`);
+            await ctx.sendMessage(chatJid, statusMessage('⭕️', 'restarting...'));
           } catch {}
         }
         try {

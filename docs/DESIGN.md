@@ -44,6 +44,7 @@ Rooms:
 - The base bot is Claude based and can upgrade/downgrade his brain by himself.
 - **Output Formatting & Math**: All tool calls are rendered as collapsible blocks showing their input and output. Escaped newlines (`\n`) are preserved. Matrix environments must natively support robust rendering for mathematical equations (e.g. MathJax) wherever the LLM outputs LaTeX equivalents.
 - **System Actions**: Any message that is not a direct response to a conversation (e.g., restarts, working hourglass, brain reload, start up) must be prefixed with an emoji.
+- **No redactions.** Status messages are never deleted or redacted. They have a "live" state while active and a "finished" state when done. This preserves a readable timeline — e.g., `⏳ working (3m)` → `⏳ worked (3m)`, `💤 idling (5m)` → `💤 idled (5m)`.
 - **Network Passthrough (SSL)**: Container agents and host processes must explicitly handle forwarding corporate variables (like `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`) and mounting the host's SSL certificates so they don't fail when routed through company TLS inspection proxies.
 
 ### Lobes (delegate agents)
@@ -156,7 +157,7 @@ User message → Matrix → main.ts message loop → SQLite → processGroupMess
   → container-runner.ts spawns Podman container
     → agent-runner calls Claude SDK → streams JSON lines to stdout
   → main.ts reads stdout → forwards to Matrix (progress + results)
-  → working indicator: 🔧 working... → edits with elapsed time → checkpoint
+  → working indicator: ⏳ working... → ⏳ working (Xm) → ⏳ worked (Xm)
 
 Scheduled task → task-scheduler.ts poll → group-queue.ts
   → same container-runner.ts spawn path

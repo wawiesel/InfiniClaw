@@ -840,6 +840,10 @@ export class MatrixChannel implements Channel {
         msgtype: 'm.text',
         body: text,
       };
+      if (/<[a-z][\s\S]*>/i.test(text)) {
+        msgContent['format'] = 'org.matrix.custom.html';
+        msgContent['formatted_body'] = text;
+      }
       if (threadId) {
         msgContent['m.relates_to'] = { rel_type: 'm.thread', event_id: threadId };
       }
@@ -859,13 +863,19 @@ export class MatrixChannel implements Channel {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const newContent: Record<string, any> = {
+        msgtype: 'm.text',
+        body: newText,
+      };
+      if (/<[a-z][\s\S]*>/i.test(newText)) {
+        newContent['format'] = 'org.matrix.custom.html';
+        newContent['formatted_body'] = newText;
+      }
       const content = {
         msgtype: 'm.text',
         body: `* ${newText}`,
-        'm.new_content': {
-          msgtype: 'm.text',
-          body: newText,
-        },
+        'm.new_content': newContent,
         'm.relates_to': {
           rel_type: 'm.replace',
           event_id: eventId,

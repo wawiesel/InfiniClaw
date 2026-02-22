@@ -266,7 +266,7 @@ export function setMainLlm(model: string): void {
 export function mainSender(): string {
   const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
   const role = ASSISTANT_ROLE;
-  return `<font color="#888888">🧠 ${role} <em>(${providerName}/${mainLlm})</em></font>`;
+  return `<font color="#888888">🧠 <em>${providerName}/${mainLlm}</em></font>`;
 }
 
 export function defaultSenderForGroup(
