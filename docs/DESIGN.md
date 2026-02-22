@@ -42,6 +42,9 @@ Rooms:
 - We have the lobe concept where a bot can spawn a delegate agent that merges back into the main bot using Matrix threads
 - Bots must be responsive at all times. Matrix features like emoji and reactions help with this.
 - The base bot is Claude based and can upgrade/downgrade his brain by himself.
+- **Output Formatting & Math**: All tool calls are rendered as collapsible blocks showing their input and output. Escaped newlines (`\n`) are preserved. Matrix environments must natively support robust rendering for mathematical equations (e.g. MathJax) wherever the LLM outputs LaTeX equivalents.
+- **System Actions**: Any message that is not a direct response to a conversation (e.g., restarts, working hourglass, brain reload, start up) must be prefixed with an emoji.
+- **Network Passthrough (SSL)**: Container agents and host processes must explicitly handle forwarding corporate variables (like `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`) and mounting the host's SSL certificates so they don't fail when routed through company TLS inspection proxies.
 
 ### Lobes (delegate agents)
 
@@ -49,8 +52,14 @@ Bots can spawn delegate "lobes" for parallel execution. These are **not separate
 - `delegate_codex` — OpenAI Codex for scoped file operations
 - `delegate_gemini` — Google Gemini for research and analysis
 - `delegate_ollama` — Local Ollama models for lightweight tasks
+- `delegate_claude` — Anthropic Claude (Planned priority)
 
 Lobe output is streamed to chat and returned to the main brain for integration. While currently underutilized, the lobes system is intended to be an active part of the robust architecture.
+
+**Execution Rules:**
+- Any **long-running operations** must be delegated to a lobe rather than blocking the main bot.
+- Every lobe activity **must be performed within a thread** to keep the main room channel clear.
+- **One-way sync** must be active for all bots to reliably propagate repository skills/config down into the active container sessions.
 
 
 ### Terminology: "room" vs "group"
@@ -72,27 +81,27 @@ The `bots/` directory is the **active roster** — the currently deployed roles,
 
 ### Host process (`nanoclaw/src/`)
 
-| File | Purpose |
-|------|---------|
-| `index.ts` | Orchestrator: startup, channel connection, message loop, working indicator, session management |
-| `service.ts` | CLI operations: start, stop, chat, send, deployBot, syncPersona, restorePersona |
-| `cli.ts` | CLI entry point: parses `start\|stop\|chat\|send` |
-| `container-runner.ts` | Builds Podman args, spawns containers, streams output, mounts, skill/MCP sync |
-| `task-scheduler.ts` | 60s poll loop for due tasks, spawns containers, forwards progress to chat |
-| `group-queue.ts` | Per-room concurrency: ensures one container per room, queues overflow, retry backoff |
-| `ipc.ts` | Processes IPC commands from containers (restart, schedule, register, etc.) |
-| `db.ts` | SQLite: messages, sessions, registered rooms, scheduled tasks, task runs |
-| `router.ts` | Outbound message routing, cross-bot forwarding, message formatting |
-| `config.ts` | All env-driven configuration (intervals, paths, limits, trigger patterns) |
-| `mount-security.ts` | Validates container mounts against host-side allowlist |
-| `skill-sync.ts` | One-way skill copy: persona + shared → container session on each spawn |
-| `mcp-sync.ts` | Two-way MCP server sync: save-back from container, then restore from persona |
-| `status.ts` | Bot status reporting and status message management |
-| `logger.ts` | Pino logger |
-| `types.ts` | Shared types: Channel, RegisteredGroup, ScheduledTask, MountAllowlist |
-| `channels/matrix.ts` | Matrix channel: connect, send, edit, react, redact, sync |
-| `channels/whatsapp.ts` | WhatsApp channel (Baileys) |
-| `channels/local-cli.ts` | Terminal channel for `cli chat` |
+| File | Origin | Purpose |
+|------|--------|---------|
+| `index.ts` | NanoClaw | Orchestrator: startup, channel connection, message loop, working indicator, session management |
+| `service.ts` | **InfiniClaw** | CLI operations: start, stop, chat, send, deployBot, syncPersona, restorePersona |
+| `cli.ts` | **InfiniClaw** | CLI entry point: parses `start\|stop\|chat\|send` |
+| `container-runner.ts` | NanoClaw | Builds Podman args, spawns containers, streams output, mounts, skill/MCP sync |
+| `task-scheduler.ts` | NanoClaw | 60s poll loop for due tasks, spawns containers, forwards progress to chat |
+| `group-queue.ts` | NanoClaw | Per-room concurrency: ensures one container per room, queues overflow, retry backoff |
+| `ipc.ts` | NanoClaw | Processes IPC commands from containers (restart, schedule, register, etc.) |
+| `db.ts` | NanoClaw | SQLite: messages, sessions, registered rooms, scheduled tasks, task runs |
+| `router.ts` | NanoClaw | Outbound message routing, cross-bot forwarding, message formatting |
+| `config.ts` | NanoClaw | All env-driven configuration (intervals, paths, limits, trigger patterns) |
+| `mount-security.ts` | NanoClaw | Validates container mounts against host-side allowlist |
+| `skill-sync.ts` | **InfiniClaw** | One-way skill copy: persona + shared → container session on each spawn |
+| `mcp-sync.ts` | **InfiniClaw** | Two-way MCP server sync: save-back from container, then restore from persona |
+| `status.ts` | **InfiniClaw** | Bot status reporting and status message management |
+| `logger.ts` | NanoClaw | Pino logger |
+| `types.ts` | NanoClaw | Shared types: Channel, RegisteredGroup, ScheduledTask, MountAllowlist |
+| `channels/matrix.ts` | **InfiniClaw** | Matrix channel: connect, send, edit, react, redact, sync |
+| `channels/whatsapp.ts` | NanoClaw | WhatsApp channel (Baileys) |
+| `channels/local-cli.ts` | **InfiniClaw** | Terminal channel for `cli chat` |
 
 ### Container agent (`nanoclaw/container/agent-runner/`)
 
