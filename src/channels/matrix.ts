@@ -739,9 +739,11 @@ export class MatrixChannel implements Channel {
       logger.info({ roomId, threadId }, 'Matrix sendMessage with thread');
     }
     const normalizedText = normalizeSenderPrefixForMarkdown(text);
-    // If text is already structured HTML (e.g. <details> from tool calls, or status messages
-    // with <font>/<em> tags), skip markdown processing to avoid escaping the HTML.
-    const isPreformattedHtml = text.startsWith('<details') || text.startsWith('<small>') || /<[a-z][\s\S]*>/i.test(text);
+    // If text STARTS with an HTML tag, treat it as preformatted HTML and skip markdown.
+    // This covers: <details> tool call blocks, <font> status messages, <small> headers.
+    // We do NOT match HTML anywhere in the text — markdown content may contain inline HTML
+    // (e.g. delegate headers) and marked handles that fine.
+    const isPreformattedHtml = /^<[a-z]/i.test(text.trimStart());
 
     let html: string;
     if (isPreformattedHtml) {
