@@ -68,6 +68,30 @@ NanoClaw's code uses "group" internally (from its WhatsApp origins: `group_folde
 
 The `bots/` directory is the **active roster** — the currently deployed roles, their personas, skills, and config. Each entry is a role (commander, engineer), not a specific bot identity.
 
+### CLAUDE.md layers
+
+Bots receive instructions from three CLAUDE.md files, assembled at different stages:
+
+**1. Base** (`external/nanoclaw/CLAUDE.md`) — framework instructions shared by all bots. Copied to `instance/CLAUDE.md` during deploy.
+
+**2. Persona** (`bots/personas/{bot}/CLAUDE.md`) — bot identity, rules, capabilities. Appended to `instance/CLAUDE.md` during deploy (so the agent sees base + persona as one file).
+
+**3. Group** (`bots/personas/{bot}/groups/{room}/CLAUDE.md`) — per-room context. Copied to `instance/groups/{room}/CLAUDE.md` during deploy. The container mounts `instance/groups/{room}/` as `/workspace/group/` (the SDK's cwd), so the agent loads this as the project-level CLAUDE.md.
+
+The agent sees **all three** — base+persona as the instance-level CLAUDE.md (loaded via `systemPrompt` or the root CLAUDE.md path), and group as the project-level CLAUDE.md in its working directory.
+
+**Editability from inside a container:**
+
+| Layer | Bot can edit? | How |
+|-------|--------------|-----|
+| Base | No | Read-only in the instance |
+| Persona | Yes | Writable mount at `/workspace/extra/{bot}-persona/CLAUDE.md`. Changes persist directly to `bots/personas/{bot}/CLAUDE.md` in the repo. |
+| Group | No (read-only copy) | The container gets a copy in `/workspace/group/CLAUDE.md`. Edits affect the running session only — they're overwritten on next deploy. Source of truth is `bots/personas/{bot}/groups/{room}/CLAUDE.md` in the repo. |
+
+**Deploy flow:** `rsyncInstance()` copies code → `restorePersona()` appends persona to base and seeds group files.
+
+**Restart flow:** `syncPersona()` saves MCP changes back to persona dir (skills are one-way: persona → session). Then redeploy runs `restorePersona()` again with the latest persona content.
+
 ### Security
 
 - **No credentials in git.** `.mcp.json` files (contain OAuth secrets) and `bots/profiles/*/env` are gitignored.
