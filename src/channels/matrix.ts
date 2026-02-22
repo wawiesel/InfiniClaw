@@ -47,6 +47,7 @@ const MATRIX_SEND_TIMEOUT_MS = 4_000;
 const MATRIX_TYPING_TIMEOUT_MS = 1_500;
 const MATRIX_META_TIMEOUT_MS = 2_500;
 const MATRIX_HEALTH_TIMEOUT_MS = 5_000;
+const MATRIX_CONNECT_TIMEOUT_MS = 60_000;
 let matrixSdkLoggerConfigured = false;
 
 function isExpectedAccountDataMissing(args: unknown[]): boolean {
@@ -721,7 +722,7 @@ export class MatrixChannel implements Channel {
     });
 
     try {
-      await withTimeout(client.start(), MATRIX_HEALTH_TIMEOUT_MS, 'client.start');
+      await withTimeout(client.start(), MATRIX_CONNECT_TIMEOUT_MS, 'client.start');
       this._connected = true;
       logger.info('Connected to Matrix');
     } catch (err) {

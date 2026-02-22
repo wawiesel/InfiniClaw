@@ -1098,24 +1098,37 @@ async function main(): Promise<void> {
     refreshConnectedChannels();
 
     let matrixReconnectInProgress = false;
-    setInterval(async () => {
-      if (!matrix || matrixReconnectInProgress) return;
-      matrixReconnectInProgress = true;
-      try {
-        const healthy = await matrix.checkHealth();
-        if (!healthy) {
-          await matrix.connect();
-          if (matrix.isConnected()) {
-            logger.info('Matrix reconnected');
-          }
+    let matrixReconnectDelay = MATRIX_RECONNECT_INTERVAL;
+    const MATRIX_RECONNECT_MAX_DELAY = 5 * 60_000;
+    const scheduleReconnect = (): void => {
+      setTimeout(async () => {
+        if (!matrix || matrixReconnectInProgress) {
+          scheduleReconnect();
+          return;
         }
-      } catch (err) {
-        logger.warn({ err }, 'Matrix reconnect attempt failed');
-      } finally {
-        refreshConnectedChannels();
-        matrixReconnectInProgress = false;
-      }
-    }, MATRIX_RECONNECT_INTERVAL);
+        matrixReconnectInProgress = true;
+        try {
+          const healthy = await matrix.checkHealth();
+          if (!healthy) {
+            await matrix.connect();
+            if (matrix.isConnected()) {
+              logger.info('Matrix reconnected');
+              matrixReconnectDelay = MATRIX_RECONNECT_INTERVAL;
+            }
+          } else {
+            matrixReconnectDelay = MATRIX_RECONNECT_INTERVAL;
+          }
+        } catch (err) {
+          matrixReconnectDelay = Math.min(matrixReconnectDelay * 2, MATRIX_RECONNECT_MAX_DELAY);
+          logger.warn({ err, nextRetryMs: matrixReconnectDelay }, 'Matrix reconnect attempt failed');
+        } finally {
+          refreshConnectedChannels();
+          matrixReconnectInProgress = false;
+          scheduleReconnect();
+        }
+      }, matrixReconnectDelay);
+    };
+    scheduleReconnect();
   }
 
   // Memory watchdog
