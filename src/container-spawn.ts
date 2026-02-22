@@ -228,10 +228,8 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string, portPu
   args.push('--pull=never');
 
   const hostUid = process.getuid?.();
-  const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
+    args.push('--userns=keep-id', '-e', 'HOME=/home/node');
   }
 
   if (CONTAINER_MEMORY_MB > 0) {

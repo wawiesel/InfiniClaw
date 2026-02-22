@@ -47,6 +47,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  updateChatName,
 } from 'nanoclaw/db.js';
 import { GroupQueue } from 'nanoclaw/group-queue.js';
 import {
@@ -776,6 +777,9 @@ function recoverPendingMessages(): void {
 
 function injectResumeMessage(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    // Ensure chat entry exists (FK constraint) — fresh deploys may not have one yet
+    updateChatName(chatJid, group.name);
+
     const recent = getRecentMessages(chatJid, ASSISTANT_NAME, 10).reverse();
     let contextBlock = '';
     if (recent.length > 0) {
