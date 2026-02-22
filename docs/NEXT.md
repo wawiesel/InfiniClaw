@@ -30,6 +30,26 @@
 - **Why:** The underlying NanoClaw framework receives upstream bug fixes and features. We must stay current without breaking InfiniClaw's custom IPC, UI, and Matrix layers.
 - **How:** Document and automate a clean workflow (e.g., `git subtree pull` or rebasing) that safely integrates upstream changes.
 
+## Priority 1: Semantic Versioning
+- **What:** Introduce strict semver on `main` for InfiniClaw, independent of NanoClaw's version.
+- **Why:** No version currently exists in InfiniClaw's `package.json`. Versioning gives us clear release milestones, makes the `safe` branch meaningful (it tracks the last tagged stable release), and lets us reason about breaking changes vs. additive features.
+- **How:**
+  - Start InfiniClaw at **`1.0.0`** — set in `package.json`
+  - **Patch** (`1.0.x`) — bug fixes, config/persona changes, dependency bumps
+  - **Minor** (`1.x.0`) — new features, new tools/channels, new IPC command types
+  - **Major** (`x.0.0`) — breaking changes to IPC protocol, container API, or persona contract
+  - Bump version in `package.json` with every merge to `main`; tag `main` with `vX.Y.Z`
+  - Advance `safe` to the new tag after a confirmed stable build+restart cycle
+  - NanoClaw's version in `external/nanoclaw/package.json` tracks upstream independently — document the pinned nanoclaw commit in release notes
+
+## Priority 1: Branch Strategy — `safe` and `exp`
+- **What:** Maintain two permanent branches alongside `main`: `safe` (last known-good deployable state) and `exp` (experimental/holodeck work-in-progress).
+- **Why:** The deploy validator runs `tsc` against the working tree on every restart. Parallel edits from Captain and Engineer can leave the tree in a broken state that blocks restarts entirely. `safe` gives us a guaranteed fallback; `exp` lets us iterate without risking the live bots.
+- **How:**
+  - `safe` — advance after a stable build+restart cycle. Use when a restart is urgently needed and `main` is broken.
+  - `exp` — branch off `main` for risky/experimental changes. Merge back to `main` when stable.
+  - Engineer should check `git status` before any restart attempt and flag if `main` is in a broken state.
+
 ## Priority 2: Restore Holodeck
 - **What:** Add back the Holodeck functionality.
 - **Why:** It provided a crucial blue-green test instance capability for deploying feature branches safely without risking the live Bridge and Engineering bots.

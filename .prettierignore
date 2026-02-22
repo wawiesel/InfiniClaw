@@ -1,0 +1,9 @@
+# Don't format MCP config files — they are gitignored secrets and
+# Prettier's trailing-comma rules corrupt the JSON, breaking MCP loading.
+**/.mcp.json
+
+# Runtime artifacts
+_runtime/
+
+# External subtree — managed upstream
+external/

@@ -16,5 +16,5 @@ Your only room. All your work happens here.
 
 ## Workspace
 
-- `/workspace/extra/home/_vault` — the Captain's vault, mounted read-write.
+- `/workspace/extra/home/_vault` — the vault. Mine to manage: keep it tight, keep it clean.
 - If you need infrastructure changes (container dependencies, code fixes), say what you need once. The Captain or Cid will handle it.

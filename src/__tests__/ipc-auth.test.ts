@@ -8,7 +8,8 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from 'nanoclaw/db.js';
-import { processTaskIpc, IpcDeps } from '../ipc-watcher.js';
+import { processTaskIpc } from 'nanoclaw/ipc.js';
+import { IpcDeps } from '../ipc-watcher.js';
 import { RegisteredGroup } from 'nanoclaw/types.js';
 
 // Set up registered groups used across tests
@@ -52,6 +53,7 @@ beforeEach(() => {
 
   deps = {
     sendMessage: async () => {},
+    sendMessageReturningId: async () => undefined,
     sendImage: async () => {},
     sendFile: async () => {},
     defaultSenderForGroup: () => 'test',
