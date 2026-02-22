@@ -477,6 +477,52 @@ export async function handleInfiniClawCommand(
       return true;
     }
 
+    case 'restart_wksm': {
+      if (!ctx.isMain) {
+        logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized restart_wksm attempt blocked');
+        return true;
+      }
+      const wksmChatJid = typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
+        ? data.chatJid
+        : null;
+      logger.info('restart_wksm requested via IPC');
+      try {
+        const home = process.env.HOME || '/Users/ww5';
+        const wksc = `${home}/2025-WKS/main/venv/bin/wksc`;
+
+        if (wksmChatJid) await ctx.sendMessage(wksmChatJid, '🔄 Restarting wksm...');
+
+        const killOut = execSync(`/usr/sbin/lsof -ti:8765 | xargs kill -9 2>&1 || echo "no process on 8765"`, {
+          shell: '/bin/bash',
+          encoding: 'utf-8',
+          timeout: 10000,
+        }).trim();
+        if (wksmChatJid) await ctx.sendMessage(wksmChatJid, `kill: ${killOut}`);
+
+        await new Promise(r => setTimeout(r, 2000));
+
+        const startOut = execSync(`${wksc} mcp proxy start 2>&1`, {
+          shell: '/bin/bash',
+          encoding: 'utf-8',
+          timeout: 15000,
+        }).trim();
+        if (wksmChatJid) await ctx.sendMessage(wksmChatJid, `start: ${startOut}`);
+
+        await new Promise(r => setTimeout(r, 2000));
+
+        const health = execSync('curl -s http://localhost:8765/health', {
+          shell: '/bin/bash',
+          encoding: 'utf-8',
+          timeout: 5000,
+        }).trim();
+        if (wksmChatJid) await ctx.sendMessage(wksmChatJid, `health: ${health}`);
+      } catch (err) {
+        logger.error({ err }, 'restart_wksm failed');
+        if (wksmChatJid) await ctx.sendMessage(wksmChatJid, `⛔ restart_wksm failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return true;
+    }
+
     case 'git_push': {
       if (!ctx.isMain) {
         logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized git_push attempt blocked');

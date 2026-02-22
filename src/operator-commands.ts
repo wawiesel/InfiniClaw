@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { parseEnvLine } from 'nanoclaw/env-utils.js';
-import { CAPTAIN_USER_ID } from 'nanoclaw/config.js';
+import { ASSISTANT_NAME, CAPTAIN_USER_ID, DATA_DIR } from 'nanoclaw/config.js';
+import { getAllRegisteredGroups, getSession } from 'nanoclaw/db.js';
 import { logger } from 'nanoclaw/logger.js';
 import { grantTemporaryMount, revokeMount } from 'nanoclaw/mount-security.js';
 import type { MatrixChannel } from './channels/matrix.js';
@@ -27,9 +28,21 @@ export function handleOperatorCommand(
 ): boolean {
     const captainUserId = getCaptainUserId();
 
-    if (!msg.content.startsWith('!grant-mount') &&
-        !msg.content.startsWith('!revoke-mount') &&
-        !msg.content.startsWith('!restart-wksm')) {
+    if (msg.content.trim() === '!todo') {
+        void (async () => {
+            try {
+                const text = buildTodoMessage(msg.chat_jid);
+                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, text);
+            } catch (err) {
+                logger.error({ err }, '!todo failed');
+                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `⛔ !todo failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+        })();
+        return true;
+    }
+
+    if (!msg.content.startsWith('!allow') &&
+        !msg.content.startsWith('!deny')) {
         return false;
     }
 
@@ -44,11 +57,11 @@ export function handleOperatorCommand(
         return true;
     }
 
-    const grant = msg.content.match(/^!grant-mount\s+(\S+)(?:\s+(\d+))?/);
+    const grant = msg.content.match(/^!allow\s+(\S+)(?:\s+(\d+))?/);
     if (grant) {
         const [, hostPath, mins] = grant;
         const duration = parseInt(mins ?? '30', 10);
-        logger.info({ hostPath, duration }, 'grant-mount command');
+        logger.info({ hostPath, duration }, '!allow command');
         void (async () => {
             try {
                 grantTemporaryMount(hostPath, true, duration, undefined, process.env.PERSONA_NAME);
@@ -58,17 +71,17 @@ export function handleOperatorCommand(
                 }
             } catch (err) {
                 if (matrix?.isConnected()) {
-                    await matrix.sendMessage(msg.chat_jid, `⛔ grant-mount failed: ${err instanceof Error ? err.message : String(err)}`);
+                    await matrix.sendMessage(msg.chat_jid, `⛔ !allow failed: ${err instanceof Error ? err.message : String(err)}`);
                 }
             }
         })();
         return true;
     }
 
-    const revoke = msg.content.match(/^!revoke-mount\s+(\S+)/);
+    const revoke = msg.content.match(/^!deny\s+(\S+)/);
     if (revoke) {
         const hostPath = revoke[1];
-        logger.info({ hostPath }, 'revoke-mount command');
+        logger.info({ hostPath }, '!deny command');
         void (async () => {
             const removed = revokeMount(hostPath);
             if (matrix?.isConnected()) {
@@ -78,31 +91,123 @@ export function handleOperatorCommand(
         return true;
     }
 
-    if (msg.content.trim() === '!restart-wksm') {
-        logger.info('restart-wksm command');
-        void (async () => {
-            try {
-                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, '🔄 Restarting wksm...');
-                const { execSync } = await import('child_process');
-                const home = process.env.HOME || '/Users/ww5';
-                const wksc = `${home}/2025-WKS/main/venv/bin/wksc`;
+    return false;
+}
 
-                const killOut = execSync(`/usr/sbin/lsof -ti:8765 | xargs kill -9 2>&1 || echo "no process on 8765"`, { shell: '/bin/bash' }).toString().trim();
-                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `kill: ${killOut}`);
-                await new Promise(r => setTimeout(r, 2000));
+// ── !todo helpers ──────────────────────────────────────────────────
 
-                const startOut = execSync(`${wksc} mcp proxy start 2>&1`, { shell: '/bin/bash' }).toString().trim();
-                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `start: ${startOut}`);
-                await new Promise(r => setTimeout(r, 2000));
+interface TodoItem {
+    content: string;
+    status: 'pending' | 'in_progress' | 'completed';
+    activeForm?: string;
+}
 
-                const health = execSync('curl -s http://localhost:8765/health', { shell: '/bin/bash' }).toString().trim();
-                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `health: ${health}`);
-            } catch (err) {
-                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `⛔ restart-wksm failed: ${err instanceof Error ? err.message : String(err)}`);
-            }
-        })();
-        return true;
+const STATUS_ICON: Record<string, string> = {
+    in_progress: '🔧',
+    pending: '⏳',
+    completed: '✅',
+};
+
+function readTodoItems(folder: string): TodoItem[] {
+    const todosDir = path.join(DATA_DIR, 'sessions', folder, '.claude', 'todos');
+    if (!fs.existsSync(todosDir)) return [];
+
+    // Try current session first
+    const sessionId = getSession(folder);
+    if (sessionId) {
+        const sessionFile = path.join(todosDir, `${sessionId}-agent-${sessionId}.json`);
+        const items = parseTodoFile(sessionFile);
+        if (items.length > 0) return items;
     }
 
-    return false;
+    // Fallback: most recently modified non-empty file
+    let files: string[];
+    try {
+        files = fs.readdirSync(todosDir).filter(f => f.endsWith('.json'));
+    } catch {
+        return [];
+    }
+    if (files.length === 0) return [];
+
+    const withStats = files
+        .map(f => ({ file: path.join(todosDir, f), mtime: fs.statSync(path.join(todosDir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+
+    for (const { file } of withStats) {
+        const items = parseTodoFile(file);
+        if (items.length > 0) return items;
+    }
+    return [];
+}
+
+function parseTodoFile(filePath: string): TodoItem[] {
+    if (!fs.existsSync(filePath)) return [];
+    try {
+        const raw = fs.readFileSync(filePath, 'utf-8').trim();
+        if (!raw || raw === '[]') return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((t: unknown) =>
+            t && typeof t === 'object' && 'content' in t && 'status' in t
+        ) as TodoItem[];
+    } catch {
+        return [];
+    }
+}
+
+interface StatusSnapshot {
+    groups?: Array<{
+        folder: string;
+        active?: boolean;
+        currentObjective?: string;
+        lastProgress?: string;
+    }>;
+}
+
+function readStatus(folder: string): { active: boolean; currentObjective?: string; lastProgress?: string } {
+    const statusPath = path.join(DATA_DIR, 'ipc', folder, 'status.json');
+    try {
+        const raw = fs.readFileSync(statusPath, 'utf-8');
+        const snap: StatusSnapshot = JSON.parse(raw);
+        const group = snap.groups?.find(g => g.folder === folder);
+        return {
+            active: group?.active ?? false,
+            currentObjective: group?.currentObjective,
+            lastProgress: group?.lastProgress,
+        };
+    } catch {
+        return { active: false };
+    }
+}
+
+function buildTodoMessage(chatJid: string): string {
+    // Look up which room folder this JID maps to
+    const groups = getAllRegisteredGroups();
+    const group = groups[chatJid];
+    if (!group) return `📋 ${ASSISTANT_NAME}\n\nRoom not registered.`;
+
+    const folder = group.folder;
+    const items = readTodoItems(folder);
+    const status = readStatus(folder);
+
+    const lines: string[] = [`📋 ${ASSISTANT_NAME} — ${group.name}\n`];
+
+    if (items.length === 0) {
+        lines.push('No active tasks.');
+    } else {
+        for (const item of items) {
+            const icon = STATUS_ICON[item.status] ?? '·';
+            lines.push(`${icon} ${item.content}`);
+        }
+    }
+
+    lines.push('');
+    if (status.active) {
+        const objective = status.lastProgress || status.currentObjective;
+        lines.push(`Currently: ${objective ? objective.slice(0, 200) : 'working'}`);
+    } else {
+        lines.push('Currently: idle (no container)');
+    }
+
+    return lines.join('\n');
 }

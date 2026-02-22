@@ -5,57 +5,77 @@ description: Instructions for setting up, diagnosing, and fixing the WKSM (WKS M
 
 # WKSM Setup and Diagnosis
 
-As the Engineer, you are responsible for making sure the WKSM (Wieselquist Knowledge System MCP Server) is operational for the bots (primarily the Commander in the Bridge).
+As the Engineer, you are responsible for making sure the WKSM (Wieselquist Knowledge System MCP Server) is operational for all bots.
+
+## How WKSM Works
+
+WKSM runs as an SSE proxy on the host at `http://host.containers.internal:8765/sse`. Bots connect to it via their `.mcp.json` config. The host-side proxy must be running for any bot to use WKSM.
 
 ## Container Setup for WKSM
 
-A bot's container is configured for WKSM via its `container-config.json` (e.g., `bots/personas/commander/container-config.json`).
-An active setup must include two things:
+A bot's MCP servers are configured in its **persona group `.mcp.json`** file:
 
-1. **The MCP Server Entry**:
-   ```json
-   "mcpServers": {
-     "wksm": {
-       "command": "python3",
-       "args": ["-m", "wks.mcp.main"],
-       "env": {
-         "PYTHONPATH": "/workspace/extra/home/2025-WKS/main"
-       },
-       "cwd": "/workspace/extra/home/2025-WKS/main"
-     }
-   }
-   ```
-2. **The Required Mount**:
-   The bot must have a mount for the home directory to access the codebase.
-   ```json
-   "additionalMounts": [
-     {
-       "hostPath": "~",
-       "containerPath": "home",
-       "readonly": true
-     }
-   ]
-   ```
+```
+bots/personas/<bot>/groups/main/.mcp.json
+```
 
-*Note: The WKS repo is located at `~/2025-WKS/main` on the host, which maps to `/workspace/extra/home/2025-WKS/main` in the container.*
+The `.mcp.json` must contain:
+```json
+{
+  "mcpServers": {
+    "wksm": {
+      "type": "sse",
+      "url": "http://host.containers.internal:8765/sse"
+    }
+  }
+}
+```
+
+**Important notes:**
+- `container-config.json` does NOT support `mcpServers` — only `.mcp.json` is read (via `readGroupMcpServers()` in `container-mounts.ts`).
+- The runtime copy at `_runtime/instances/<bot>/groups/main/.mcp.json` is **read-only** and regenerates from the persona source on respawn. Always edit the persona source.
+- `.mcp.json` files are gitignored. Protect them from linters via `.prettierignore` (pattern: `**/.mcp.json`).
 
 ## Diagnosis & Troubleshooting
 
-If WKSM is failing to start, failing to build, or returning errors, you must diagnose the issue in the codebase itself. 
+### 1. Check if WKSM proxy is running on the host
+```bash
+curl -s --max-time 3 http://host.containers.internal:8765/sse
+```
+Should return `event: endpoint`. If it fails, restart it via IPC task:
+```json
+{"type":"restart_wksm","chatJid":"<room JID for status updates>"}
+```
+Write this to `/workspace/ipc/tasks/restart-wksm-{timestamp}.json`.
 
-1. **Verify the container config**: Ensure the `cwd` and `PYTHONPATH` in the `mcpServers` block accurately points to `/workspace/extra/home/2025-WKS/main`.
-2. **Check Logs**: Review the bot logs at `$INFINICLAW_ROOT/_runtime/logs/{bot}.log` and `$INFINICLAW_ROOT/_runtime/logs/{bot}.error.log` to see if Python threw an error initializing the MCP server or importing dependencies.
-3. **Inspect the Code**: Navigate to `/workspace/extra/home/2025-WKS/main` and inspect the source code, `pyproject.toml`, or the specific `wks.mcp.main` module. Run manual python tests if necessary.
+### 2. Check `mcp-debug.json`
+Each bot writes debug info when its container spawns:
+```
+_runtime/instances/<bot>/groups/main/mcp-debug.json
+```
+Check:
+- `hasMcpServers`: should be `true`
+- `mcpServerKeys`: should include `"wksm"`
+- File timestamp: if stale, the container hasn't respawned since the last config change
 
-## Fixing WKSM & Requesting Read/Write Upgrades
+**Commander special case:** Commander only spawns a container when a Bridge message arrives — restarts alone do not trigger a spawn. After changing commander's config, you must send a message to Johnny5 to trigger a container spawn, then check `mcp-debug.json`.
 
-Because your `~` mount is `readonly: true` by default, you **cannot** write fixes, run `npm install`, or `npm run build` directly in the `~/2025-WKS/main` repo if a code fix is required.
+### 3. Trailing comma in `.mcp.json` (common issue)
+`readGroupMcpServers()` uses `JSON.parse`, which rejects trailing commas. As of the Feb 22 2026 fix, the parser strips trailing commas before parsing, but older deployments may silently fail.
 
-If you determine that WKSM requires a development fix or a rebuild, you MUST:
+**Symptoms:** `hasMcpServers: false` with no errors in logs.
+**Fix:** Remove trailing commas from `.mcp.json`, or ensure the trailing-comma stripping code is deployed in `container-mounts.ts`.
 
-1. Request a **mount upgrade** from the Captain (William).
-2. Ask the Captain to run: `!grant-mount ~/2025-WKS/main` (or a specific subdirectory).
-3. Wait for the Captain to confirm the grant and automatically restart your container.
-4. Once restarted, verify you have write access to the repo.
-5. Develop the fix, build the new `dist/index.js`, and test internally. 
-6. Request the Captain to revoke the mount when you are finished by using `!revoke-mount ~/2025-WKS/main`.
+### 4. Check bot logs
+```
+$INFINICLAW_ROOT/_runtime/logs/<bot>.log
+$INFINICLAW_ROOT/_runtime/logs/<bot>.error.log
+```
+Look for `[readGroupMcpServers]` error messages (added in the Feb 22 2026 fix).
+
+## Quick Verification Checklist
+
+1. ✅ `curl -s --max-time 3 http://host.containers.internal:8765/sse` → returns `event: endpoint`
+2. ✅ Persona `.mcp.json` exists and has valid JSON with `mcpServers.wksm`
+3. ✅ `mcp-debug.json` shows `hasMcpServers: true` and `"wksm"` in keys
+4. ✅ Bot can call WKSM tools (test with a simple query)

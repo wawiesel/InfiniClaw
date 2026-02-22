@@ -32,6 +32,7 @@ Write JSON to `/workspace/ipc/tasks/` to trigger host-side actions:
 | `git_push` | Push commits to remote | `{"type":"git_push","remote":"origin","branches":["main"]}` |
 | `restart_bot` | Restart another bot | `{"type":"restart_bot","bot":"commander"}` |
 | `rebuild_image` | Rebuild container image | `{"type":"rebuild_image","bot":"engineer"}` |
+| `restart_wksm` | Restart the WKSM proxy | `{"type":"restart_wksm","chatJid":"<room JID>"}` |
 
 ## Skills
 
