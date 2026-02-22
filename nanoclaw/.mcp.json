@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "nanoclaw-status": {
-      "command": "npx",
-      "args": ["tsx", "src/status-cli.ts", "--mcp"],
-      "cwd": "/Users/ww5/2026-Nanoclaw/InfiniClaw/nanoclaw"
-    }
-  }
-}
