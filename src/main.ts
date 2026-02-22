@@ -606,6 +606,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (outputSentToUser) {
     startIdleIndicator(chatJid, activeReplyThreadIds[chatJid]);
   }
+  // Clear work thread after each response — thread context is per-turn, derived from
+  // the incoming message's thread_id. set_thread() only overrides for a single response.
+  delete workThreadIds[chatJid];
   if (channel?.setTyping && !isThreadContext(chatJid)) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   if (channel?.setStatusPip) {
@@ -1290,7 +1293,7 @@ async function main(): Promise<void> {
     clearInterval(bootAnnounceTimer);
     try {
       if (ch.setPresenceStatus) await ch.setPresenceStatus('online', 'idle');
-      await ch.sendMessage(mainJid, `${statusMessage('✅', 'online.')}\n\n${mainSender()}`);
+      await ch.sendMessage(mainJid, `${statusMessage('✅', 'online.')}<br>${mainSender()}`);
     } catch (err) {
       logger.warn({ err }, 'Failed to send boot announcement');
     }

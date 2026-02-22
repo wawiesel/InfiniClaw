@@ -282,18 +282,18 @@ Behavior:
           resolve(payload);
         };
 
-        const pushMessage = (text: string) => {
+        const pushMessage = (text: string, isStatus = false) => {
           const normalized = text.replace(/\r/g, '').trim();
           if (!normalized) return;
           prefixedMessages.push(`codex: ${normalized}`);
-          const greyText = `<font color="#888888">${normalized}</font>`;
-          emitDelegateMessage(greyText);
+          const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
+          emitDelegateMessage(formatted);
         };
 
         const failUnavailable = (reason: string) => {
           if (unavailableTriggered) return;
           unavailableTriggered = true;
-          pushMessage(`unavailable: ${reason}`);
+          pushMessage(`unavailable: ${reason}`, true);
           if (proc && proc.exitCode === null) {
             proc.kill('SIGTERM');
           }
@@ -540,18 +540,18 @@ Behavior:
           resolve(payload);
         };
 
-        const pushMessage = (text: string) => {
+        const pushMessage = (text: string, isStatus = false) => {
           const normalized = text.replace(/\r/g, '').trim();
           if (!normalized) return;
           prefixedMessages.push(`gemini: ${normalized}`);
-          const greyText = `<font color="#888888">${normalized}</font>`;
-          emitDelegateMessage(greyText);
+          const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
+          emitDelegateMessage(formatted);
         };
 
         const failUnavailable = (reason: string) => {
           if (unavailableTriggered) return;
           unavailableTriggered = true;
-          pushMessage(`unavailable: ${reason}`);
+          pushMessage(`unavailable: ${reason}`, true);
           if (proc && proc.exitCode === null) {
             proc.kill('SIGTERM');
           }
@@ -753,15 +753,13 @@ Behavior:
         );
         if (!responseText) {
           const doneText = 'completed with no textual output.';
-          const greyText = `<font color="#888888">${doneText}</font>`;
-          emitDelegateMessage(greyText);
+          emitDelegateMessage(`<font color="#888888"><em>${doneText}</em></font>`);
           return {
             content: [{ type: 'text' as const, text: `ollama: ${doneText}` }],
           };
         }
 
-        const greyText = `<font color="#888888">${responseText}</font>`;
-        emitDelegateMessage(greyText);
+        emitDelegateMessage(responseText);
         return {
           content: [{ type: 'text' as const, text: `ollama: ${responseText}` }],
         };

@@ -19,6 +19,7 @@ import {
   stopBot as serviceStopBot,
   rebuildImage as serviceRebuildImage,
   resolveRoot,
+  instanceDir,
   validateDeploy as serviceValidateDeploy,
 } from './service.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
@@ -299,10 +300,36 @@ export async function handleInfiniClawCommand(
         }, 500);
       } else {
         logger.info({ bot }, 'Deploy validation passed — bootstrapping');
-        if (chatJid) {
-          try {
-            await ctx.sendMessage(chatJid, statusMessage('⭕️', 'restarting...'));
-          } catch {}
+        // Send restarting notice to the TARGET bot's own main room (not the caller's room).
+        // We find the target's registered JID from its available_groups.json and write
+        // a message directly into its ipc-watcher messages dir.
+        try {
+          const root = resolveRoot();
+          const targetIpcMain = path.join(instanceDir(root, bot), 'data', 'ipc', 'main');
+          const groupsFile = path.join(targetIpcMain, 'available_groups.json');
+          if (fs.existsSync(groupsFile)) {
+            const groups = JSON.parse(fs.readFileSync(groupsFile, 'utf-8')) as {
+              groups: Array<{ jid: string; isRegistered: boolean }>;
+            };
+            const mainGroup = groups.groups.find((g) => g.isRegistered);
+            if (mainGroup) {
+              const messagesDir = path.join(targetIpcMain, 'messages');
+              fs.mkdirSync(messagesDir, { recursive: true });
+              const msg = {
+                type: 'message',
+                chatJid: mainGroup.jid,
+                text: statusMessage('⭕️', 'restarting...'),
+                sender: bot,
+                timestamp: new Date().toISOString(),
+              };
+              fs.writeFileSync(
+                path.join(messagesDir, `restart-notice-${Date.now()}.json`),
+                JSON.stringify(msg),
+              );
+            }
+          }
+        } catch (err) {
+          logger.warn({ bot, err }, 'Failed to write restart notice to target bot IPC');
         }
         try {
           const root = resolveRoot();
