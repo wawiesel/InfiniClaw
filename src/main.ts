@@ -1110,17 +1110,23 @@ async function main(): Promise<void> {
         try {
           const healthy = await matrix.checkHealth();
           if (!healthy) {
+            logger.info({ nextRetryMs: matrixReconnectDelay }, 'Matrix disconnected, attempting reconnect...');
             await matrix.connect();
             if (matrix.isConnected()) {
               logger.info('Matrix reconnected');
               matrixReconnectDelay = MATRIX_RECONNECT_INTERVAL;
+              refreshConnectedChannels();
+              const mainJid = getMainChatJid();
+              if (mainJid) {
+                matrix.sendMessage(mainJid, statusMessage('🔌', 'reconnected.')).catch(() => {});
+              }
             }
           } else {
             matrixReconnectDelay = MATRIX_RECONNECT_INTERVAL;
           }
         } catch (err) {
           matrixReconnectDelay = Math.min(matrixReconnectDelay * 2, MATRIX_RECONNECT_MAX_DELAY);
-          logger.warn({ err, nextRetryMs: matrixReconnectDelay }, 'Matrix reconnect attempt failed');
+          logger.warn({ err, nextRetryMs: matrixReconnectDelay }, 'Matrix reconnect failed, backing off');
         } finally {
           refreshConnectedChannels();
           matrixReconnectInProgress = false;
