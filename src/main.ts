@@ -98,7 +98,7 @@ import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
-import { handleOperatorCommand } from './operator-commands.js';
+import { handleOperatorCommand, buildTodoMessage } from './operator-commands.js';
 
 // ── Module-level state ─────────────────────────────────────────────────
 
@@ -1220,6 +1220,9 @@ async function main(): Promise<void> {
     try {
       if (ch.setPresenceStatus) await ch.setPresenceStatus('online', 'idle');
       await ch.sendMessage(mainJid, `${statusMessage('✅', 'online.')}<br>${mainSender()}`);
+      // Auto-send todo list so Operator sees what the bot is picking up
+      const todo = buildTodoMessage(mainJid);
+      await ch.sendMessage(mainJid, todo);
     } catch (err) {
       logger.warn({ err }, 'Failed to send boot announcement');
     }

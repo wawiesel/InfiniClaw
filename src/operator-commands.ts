@@ -180,7 +180,7 @@ function readStatus(folder: string): { active: boolean; currentObjective?: strin
     }
 }
 
-function buildTodoMessage(chatJid: string): string {
+export function buildTodoMessage(chatJid: string): string {
     // Look up which room folder this JID maps to
     const groups = getAllRegisteredGroups();
     const group = groups[chatJid];
