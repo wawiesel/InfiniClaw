@@ -1,18 +1,29 @@
+import os from 'os';
 import path from 'path';
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
+import { readEnvFile } from './env.js';
+
+// Read config values from .env (falls back to process.env).
+// Secrets are NOT read here — they stay on disk and are loaded only
+// where needed (container-runner.ts) to avoid leaking to child processes.
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+]);
+
+export const ASSISTANT_NAME =
+  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_ROLE = process.env.ASSISTANT_ROLE!;
 export const ASSISTANT_TRIGGER =
   process.env.ASSISTANT_TRIGGER || ASSISTANT_NAME;
-export const POLL_INTERVAL = Math.max(
-  100,
-  parseInt(process.env.POLL_INTERVAL || '250', 10) || 250,
-);
+export const ASSISTANT_HAS_OWN_NUMBER =
+  (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
-const HOME_DIR = process.env.HOME || '/Users/user';
+const HOME_DIR = process.env.HOME || os.homedir();
 
 // Captain: Matrix user ID authorized to grant/revoke temporary mounts
 export const CAPTAIN_USER_ID = (process.env.CAPTAIN_USER_ID || '').trim();
@@ -27,7 +38,7 @@ export const MOUNT_ALLOWLIST_PATH = path.join(
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
-export const MAIN_GROUP_FOLDER = process.env.MAIN_GROUP_FOLDER || 'main';
+export const MAIN_GROUP_FOLDER = 'main';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
@@ -47,10 +58,7 @@ export const CONTAINER_MEMORY_MB = parseInt(
 export const CONTAINER_CPUS = parseFloat(
   process.env.CONTAINER_CPUS || '0',
 ); // 0 = runtime default (no explicit limit)
-export const IPC_POLL_INTERVAL = Math.max(
-  50,
-  parseInt(process.env.IPC_POLL_INTERVAL || '200', 10) || 200,
-);
+export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(
   process.env.IDLE_TIMEOUT || '1800000',
   10,
@@ -73,7 +81,6 @@ export const TRIGGER_PATTERN = new RegExp(
   `^@?${escapeRegex(ASSISTANT_TRIGGER)}\\b`,
   'i',
 );
-
 
 // Other bot triggers to ignore (comma-separated, e.g. "@Cid,@OtherBot")
 const ignoreTriggerStr = (process.env.IGNORE_TRIGGERS || '').trim();

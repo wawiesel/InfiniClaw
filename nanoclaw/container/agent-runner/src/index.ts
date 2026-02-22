@@ -48,10 +48,10 @@ interface ContainerInput {
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
-  isProgress?: boolean;
   newSessionId?: string;
-  model?: string;
   error?: string;
+  isProgress?: boolean;
+  model?: string;
 }
 
 interface SessionEntry {
@@ -458,12 +458,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{
-  newSessionId?: string;
-  lastAssistantUuid?: string;
-  model?: string;
-  closedDuringQuery: boolean;
-}> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -492,12 +487,33 @@ async function runQuery(
   setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
 
   let newSessionId: string | undefined;
-  let activeModel: string | undefined;
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
   let consecutiveDupResults = 0;
   let lastResultText = '';
+
+  // Load global CLAUDE.md as additional system context (shared across all groups)
+  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  let globalClaudeMd: string | undefined;
+  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
+  }
+
+  // Extra directories under /workspace/extra/ are mounted for file access only.
+  // CLAUDE.md is loaded exclusively from /workspace/group/ — no additional directories.
+
+  const anthropicBaseUrl = sdkEnv.ANTHROPIC_BASE_URL;
+  const configuredMainModel = getRequestedMainModel(sdkEnv);
+  const mainIsClaude =
+    containerInput.isMain && !isOllamaAnthropicBaseUrl(anthropicBaseUrl);
+  if (mainIsClaude && !configuredMainModel) {
+    throw new Error(
+      `${MAIN_MODEL_ENV_KEY} is required for MAIN Claude runs`,
+    );
+  }
+  const mainModel = mainIsClaude ? configuredMainModel : undefined;
+
   const lastToolProgressAt = new Map<string, number>();
   let lastProgressText = '';
   let lastProgressAt = 0;
@@ -520,36 +536,9 @@ async function runQuery(
       result: cleaned,
       isProgress: true,
       newSessionId,
-      model: activeModel,
+      model: mainModel,
     });
   };
-
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
-  let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
-  }
-  const systemPromptAppend = [
-    globalClaudeMd,
-    containerInput.isMain ? MAIN_DELEGATE_POLICY : undefined,
-  ]
-    .filter((x): x is string => !!x && x.trim().length > 0)
-    .join('\n\n');
-
-  // Extra directories under /workspace/extra/ are mounted for file access only.
-  // CLAUDE.md is loaded exclusively from /workspace/group/ — no additional directories.
-
-  const anthropicBaseUrl = sdkEnv.ANTHROPIC_BASE_URL;
-  const configuredMainModel = getRequestedMainModel(sdkEnv);
-  const mainIsClaude =
-    containerInput.isMain && !isOllamaAnthropicBaseUrl(anthropicBaseUrl);
-  if (mainIsClaude && !configuredMainModel) {
-    throw new Error(
-      `${MAIN_MODEL_ENV_KEY} is required for MAIN Claude runs`,
-    );
-  }
-  const mainModel = mainIsClaude ? configuredMainModel : undefined;
 
   // Debug: write MCP config to file for diagnosis
   try {
@@ -573,8 +562,8 @@ async function runQuery(
         additionalDirectories: undefined,
         resume: sessionId,
         resumeSessionAt: resumeAt,
-        systemPrompt: systemPromptAppend
-          ? { type: 'preset' as const, preset: 'claude_code' as const, append: systemPromptAppend }
+        systemPrompt: globalClaudeMd
+          ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
           : undefined,
         model: mainModel,
         allowedTools: [...getAllowedTools(containerInput.isMain)],
@@ -642,113 +631,60 @@ async function runQuery(
         },
       }
     })) {
-    messageCount++;
-    const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+      messageCount++;
+      const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
+      log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
-    }
-
-    // Assistant text is NOT emitted as progress — it arrives via the SDK's
-    // result event and gets delivered to chat by the host as the final response.
-    // Only tool-related progress is streamed.
-
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      activeModel = (message as { model?: string }).model?.trim() || activeModel;
-      log(`Session initialized: ${newSessionId}`);
-      if (
-        containerInput.isMain &&
-        configuredMainModel &&
-        activeModel &&
-        !modelMatchesRequest(configuredMainModel, activeModel)
-      ) {
-        throw new Error(
-          `MAIN model mismatch: requested "${configuredMainModel}" but runtime initialized "${activeModel}"`,
-        );
+      if (message.type === 'assistant' && 'uuid' in message) {
+        lastAssistantUuid = (message as { uuid: string }).uuid;
       }
-    }
 
-    if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-      const tn = message as { task_id: string; status: string; summary: string };
-      log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
-      const summary = tn.summary?.trim();
-      emitProgress(
-        summary
-          ? `task ${tn.status}: ${summary}`
-          : `task ${tn.task_id} ${tn.status}`,
-      );
-    }
+      // Assistant text is NOT emitted as progress — it arrives via the SDK's
+      // result event and gets delivered to chat by the host as the final response.
+      // Only tool-related progress is streamed.
 
-    if (message.type === 'system' && message.subtype === 'status') {
-      const statusText = (message as { status?: string | null }).status?.trim();
-      if (statusText) {
-        emitProgress(`status: ${statusText}`);
+      if (message.type === 'system' && message.subtype === 'init') {
+        newSessionId = message.session_id;
+        log(`Session initialized: ${newSessionId}`);
       }
-    }
 
-    if (message.type === 'tool_progress') {
-      const progress = message as {
-        tool_use_id: string;
-        tool_name: string;
-        elapsed_time_seconds: number;
-      };
-      const toolUseId = progress.tool_use_id?.trim() || '';
-      const now = Date.now();
-      const lastEmittedAt = toolUseId ? (lastToolProgressAt.get(toolUseId) || 0) : 0;
-      if (!toolUseId || now - lastEmittedAt >= TOOL_PROGRESS_EMIT_MS) {
-        if (toolUseId) lastToolProgressAt.set(toolUseId, now);
-        const elapsedSeconds = Math.max(
-          1,
-          Math.floor(progress.elapsed_time_seconds || 0),
-        );
-        emitProgress(
-          `tool ${progress.tool_name} running (${elapsedSeconds}s)`,
-        );
+      if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
+        const tn = message as { task_id: string; status: string; summary: string };
+        log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
       }
-    }
 
-    if (message.type === 'tool_use_summary') {
-      const summary = (message as { summary?: string }).summary?.trim();
-      if (summary) {
-        emitProgress(summary);
-      }
-    }
+      if (message.type === 'result') {
+        resultCount++;
+        const textResult = 'result' in message ? (message as { result?: string }).result : null;
+        log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
 
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-
-      // Dedup consecutive identical results (e.g. agent stuck repeating "Done. Awaiting orders.")
-      const normalized = (textResult || '').replace(/\s+/g, ' ').trim();
-      if (normalized && normalized === lastResultText) {
-        consecutiveDupResults++;
-        if (consecutiveDupResults >= 3) {
-          log(`Suppressed duplicate result #${consecutiveDupResults}: ${normalized.slice(0, 100)}`);
-          continue;
+        // Dedup consecutive identical results (e.g. agent stuck repeating "Done. Awaiting orders.")
+        const normalized = (textResult || '').replace(/\s+/g, ' ').trim();
+        if (normalized && normalized === lastResultText) {
+          consecutiveDupResults++;
+          if (consecutiveDupResults >= 3) {
+            log(`Suppressed duplicate result #${consecutiveDupResults}: ${normalized.slice(0, 100)}`);
+            continue;
+          }
+        } else {
+          consecutiveDupResults = 0;
+          if (normalized) lastResultText = normalized;
         }
-      } else {
-        consecutiveDupResults = 0;
-        if (normalized) lastResultText = normalized;
-      }
 
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId,
-        model: activeModel,
-      });
+        writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId
+        });
+      }
     }
-  }
   } finally {
     restoreSdkProcessEnv();
   }
 
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, model: activeModel, closedDuringQuery };
+  return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
 async function main(): Promise<void> {
@@ -783,7 +719,6 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
-  let activeModel: string | undefined;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
@@ -800,7 +735,7 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
-  // Query loop: run query → wait for IPC message → run new query → repeat
+  // Query loop: run query -> wait for IPC message -> run new query -> repeat
   let resumeAt: string | undefined;
   try {
     while (true) {
@@ -824,9 +759,6 @@ async function main(): Promise<void> {
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
-      if (queryResult.model) {
-        activeModel = queryResult.model;
-      }
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
       }
@@ -840,12 +772,7 @@ async function main(): Promise<void> {
       }
 
       // Emit session update so host can track it
-      writeOutput({
-        status: 'success',
-        result: null,
-        newSessionId: sessionId,
-        model: activeModel,
-      });
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
       log('Query ended, waiting for next IPC message...');
 

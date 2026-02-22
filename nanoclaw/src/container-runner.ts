@@ -254,6 +254,17 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string, portPu
 
   // Podman-only runtime.
   args.push('--pull=never');
+
+  // Run as host user so bind-mounted files are accessible.
+  // Skip when running as root (uid 0), as the container's node user (uid 1000),
+  // or when getuid is unavailable (native Windows without WSL).
+  const hostUid = process.getuid?.();
+  const hostGid = process.getgid?.();
+  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+    args.push('--user', `${hostUid}:${hostGid}`);
+    args.push('-e', 'HOME=/home/node');
+  }
+
   if (CONTAINER_MEMORY_MB > 0) {
     args.push('--memory', `${CONTAINER_MEMORY_MB}m`);
   }

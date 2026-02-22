@@ -37,13 +37,13 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
-  deleteSession,
   getMessagesSince,
   getNewMessages,
   getRecentMessages,
   getRouterState,
   initDatabase,
   deleteRegisteredGroup,
+  deleteSession,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -280,7 +280,7 @@ function loadState(): void {
     setMainLlm(storedMainModel);
   }
   logger.info(
-    { groupCount: Object.keys(registeredGroups).length, mainModel: mainLlm },
+    { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
   );
 }
@@ -345,6 +345,12 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
+
+  const channel = findChannel(channels, chatJid);
+  if (!channel) {
+    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+    return true;
+  }
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
@@ -414,7 +420,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  const channel = findChannel(channels, chatJid);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'processing...');
   startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
   // Track inbound message IDs for acknowledgement reaction once bot produces output
@@ -459,9 +464,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const runResult = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
-    if (group.folder === MAIN_GROUP_FOLDER && result.model) {
-      updateMainLlm(result.model);
-    }
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
@@ -530,11 +532,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       resetIdleTimer();
     }
 
+    if (result.status === 'success') {
+      queue.notifyIdle(chatJid);
+    }
+
     if (result.status === 'error') {
       hadError = true;
-      if (result.error) {
-        markError(chatJid, result.error);
-      }
     }
   });
 
@@ -612,8 +615,7 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<{ status: 'success' | 'error'; error?: string }> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
-  const sessionKey = group.folder;
-  const sessionId = sessions[sessionKey];
+  const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -644,8 +646,8 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[sessionKey] = output.newSessionId;
-          setSession(sessionKey, output.newSessionId);
+          sessions[group.folder] = output.newSessionId;
+          setSession(group.folder, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -666,8 +668,8 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[sessionKey] = output.newSessionId;
-      setSession(sessionKey, output.newSessionId);
+      sessions[group.folder] = output.newSessionId;
+      setSession(group.folder, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -675,19 +677,13 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
-      return {
-        status: 'error',
-        error: output.error || 'container agent error',
-      };
+      return { status: 'error', error: output.error };
     }
 
     return { status: 'success' };
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return {
-      status: 'error',
-      error: err instanceof Error ? err.message : String(err),
-    };
+    return { status: 'error', error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -698,7 +694,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_TRIGGER})`);
+  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
     try {
@@ -840,7 +836,6 @@ function injectResumeMessage(): void {
     storeMessage({
       id: `resume-${Date.now()}-${group.folder}`,
       chat_jid: chatJid,
-      chat_name: group.name,
       sender: 'system',
       sender_name: 'System',
       content: `You were restarted. Review the conversation below and your memory, then resume any in-progress work. If nothing was in progress, say so briefly and wait.${contextBlock}`,
@@ -1015,7 +1010,6 @@ async function main(): Promise<void> {
   const refreshConnectedChannels = () => {
     channels = allChannels.filter((ch): ch is Channel => ch != null && ch.isConnected());
   };
-  refreshConnectedChannels();
 
   if (localCli) {
     try {

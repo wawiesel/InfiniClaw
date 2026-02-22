@@ -7,8 +7,10 @@
 </p>
 
 <p align="center">
-  <a href="README_zh.md">中文</a> ·
-  <a href="https://discord.gg/VGWXrf8x"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord"></a>
+  <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
+  <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
+  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
+  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
 
 **New:** First AI assistant to support [Agent Swarms](https://code.claude.com/docs/en/agent-teams). Spin up teams of agents that collaborate in your chat.
@@ -22,7 +24,7 @@ NanoClaw gives you the same core functionality in a codebase you can understand 
 ## Quick Start
 
 ```bash
-git clone https://github.com/gavrielc/nanoclaw.git
+git clone https://github.com/qwibitai/nanoclaw.git
 cd nanoclaw
 claude
 ```
@@ -116,19 +118,6 @@ Skills we'd love to see:
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
 
-## Pin MAIN Model Version
-
-Set this in your project `.env` to force MAIN to request an exact Claude model version:
-
-```bash
-ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
-```
-
-Notes:
-- This is the only supported way to configure MAIN model selection.
-- `ANTHROPIC_MODEL` is required for MAIN Claude runs.
-- If you set `ANTHROPIC_MODEL` and Claude initializes a different model, NanoClaw now returns a clear mismatch error instead of silently continuing.
-
 ## Architecture
 
 ```
@@ -154,13 +143,13 @@ Key files:
 
 Because I use WhatsApp. Fork it and run a skill to change it. That's the whole point.
 
-**Why Apple Container instead of Docker?**
+**Why Docker?**
 
-On macOS, Apple Container is lightweight, fast, and optimized for Apple silicon. But Docker is also fully supported—during `/setup`, you can choose which runtime to use. On Linux, Docker is used automatically.
+Docker provides cross-platform support (macOS and Linux) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
 
 **Can I run this on Linux?**
 
-Yes. Run `/setup` and it will automatically configure Docker as the container runtime. Thanks to [@dotsetgreg](https://github.com/dotsetgreg) for contributing the `/convert-to-docker` skill.
+Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
 
 **Is this secure?**
 
@@ -188,7 +177,7 @@ This keeps the base system minimal and lets every user customize their installat
 
 ## Community
 
-Questions? Ideas? [Join the Discord](https://discord.gg/VGWXrf8x).
+Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
 
 ## License
 

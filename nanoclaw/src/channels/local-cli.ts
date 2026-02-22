@@ -71,7 +71,6 @@ export class LocalCliChannel implements Channel {
       const msg: NewMessage = {
         id: `local-${Date.now()}-${this.msgSeq++}`,
         chat_jid: LOCAL_CHAT_JID,
-        chat_name: LOCAL_CHAT_NAME,
         sender: this.senderId,
         sender_name: this.senderName,
         content: text,

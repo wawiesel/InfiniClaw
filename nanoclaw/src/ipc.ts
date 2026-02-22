@@ -83,11 +83,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              // Authorization: verify this group can send to this chatJid
-              const targetGroup = registeredGroups[data.chatJid];
-              const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup);
-
               if (data.type === 'message' && data.chatJid && data.text) {
+                // Authorization: verify this group can send to this chatJid
+                const targetGroup = registeredGroups[data.chatJid];
+                const authorized =
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup);
                 if (authorized) {
                   const sender =
                     typeof data.sender === 'string' && data.sender.trim()
@@ -111,8 +112,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 }
               } else {
                 // [InfiniClaw] delegate extended message types (image, file)
+                // Compute authorization for extended message handlers
+                const targetGroup = registeredGroups[data.chatJid];
+                const authorized =
+                  isMain ||
+                  !!(targetGroup && targetGroup.folder === sourceGroup);
                 await handleInfiniClawMessage(data, {
-                  authorized: !!authorized,
+                  authorized,
                   sourceGroup,
                   sendImage: deps.sendImage,
                   sendFile: deps.sendFile,

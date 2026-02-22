@@ -37,7 +37,6 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
-  private onFirstOpen?: () => void;
 
   private opts: WhatsAppChannelOpts;
 
@@ -47,12 +46,11 @@ export class WhatsAppChannel implements Channel {
 
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      this.onFirstOpen = resolve;
-      this.connectInternal().catch(reject);
+      this.connectInternal(resolve).catch(reject);
     });
   }
 
-  private async connectInternal(): Promise<void> {
+  private async connectInternal(onFirstOpen?: () => void): Promise<void> {
     const authDir = path.join(STORE_DIR, 'auth');
     fs.mkdirSync(authDir, { recursive: true });
 
@@ -138,9 +136,9 @@ export class WhatsAppChannel implements Channel {
         }
 
         // Signal first connection to caller
-        if (this.onFirstOpen) {
-          this.onFirstOpen();
-          this.onFirstOpen = undefined;
+        if (onFirstOpen) {
+          onFirstOpen();
+          onFirstOpen = undefined;
         }
       }
     });
@@ -149,7 +147,6 @@ export class WhatsAppChannel implements Channel {
 
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
-        logger.info({ rawJid: msg.key.remoteJid, fromMe: msg.key.fromMe, hasMessage: !!msg.message, type: msg.message ? Object.keys(msg.message)[0] : 'none' }, 'Raw incoming message');
         if (!msg.message) continue;
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
@@ -162,7 +159,8 @@ export class WhatsAppChannel implements Channel {
         ).toISOString();
 
         // Always notify about chat metadata for group discovery
-        this.opts.onChatMetadata(chatJid, timestamp);
+        const isGroup = chatJid.endsWith('@g.us');
+        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', isGroup);
 
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
@@ -173,6 +171,10 @@ export class WhatsAppChannel implements Channel {
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
+
+          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+          if (!content) continue;
+
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
 
