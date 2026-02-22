@@ -110,6 +110,17 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
     });
   }
 
+  // Lock group CLAUDE.md read-only: overlay a file mount on top of the writable dir mount.
+  // Bots can edit their persona CLAUDE.md (writable mount), not the group-level one.
+  const groupClaudeMd = path.join(groupsDir, group.folder, 'CLAUDE.md');
+  if (fs.existsSync(groupClaudeMd)) {
+    mounts.push({
+      hostPath: groupClaudeMd,
+      containerPath: '/workspace/group/CLAUDE.md',
+      readonly: true,
+    });
+  }
+
   // Share host Codex login state with container delegate_codex runs.
   const hostCodexDir = path.join(homeDir, '.codex');
   if (fs.existsSync(hostCodexDir)) {

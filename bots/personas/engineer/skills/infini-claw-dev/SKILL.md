@@ -11,7 +11,7 @@ user-invocable: false
 InfiniClaw is the umbrella repo. `external/nanoclaw/` is a **git subtree** (not a submodule) pulled from `https://github.com/wawiesel/nanoclaw`. InfiniClaw's own source lives in `src/` and imports NanoClaw modules via npm workspaces (`import from 'nanoclaw/config.js'`).
 
 ```
-/workspace/extra/InfiniClaw/          <- git root
+$INFINICLAW_ROOT/          <- git root
 ├── package.json                      <- workspace root (npm workspaces)
 ├── tsconfig.json                     <- InfiniClaw build config
 ├── vitest.config.ts                  <- InfiniClaw test config
@@ -53,7 +53,7 @@ InfiniClaw is the umbrella repo. `external/nanoclaw/` is a **git subtree** (not 
 
 ## Git subtree operations
 
-Run from the InfiniClaw repo root (`/workspace/extra/InfiniClaw`).
+Run from the InfiniClaw repo root (`$INFINICLAW_ROOT`).
 
 ### Pull upstream changes
 

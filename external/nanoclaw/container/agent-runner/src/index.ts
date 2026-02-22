@@ -43,6 +43,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
   mcpServers?: Record<string, Record<string, unknown>>;
+  disallowedTools?: string[];
 }
 
 interface ContainerOutput {
@@ -567,7 +568,7 @@ async function runQuery(
           : undefined,
         model: mainModel,
         allowedTools: [...getAllowedTools(containerInput.isMain)],
-        disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete'],
+        ...(containerInput.disallowedTools?.length ? { disallowedTools: containerInput.disallowedTools } : {}),
         env: sdkEnv,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,

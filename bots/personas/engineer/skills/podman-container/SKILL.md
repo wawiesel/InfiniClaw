@@ -10,7 +10,7 @@ Edit Dockerfiles and trigger host-side rebuilds. No podman inside the container 
 ## Files
 
 ```
-/workspace/extra/InfiniClaw/bots/container/
+$INFINICLAW_ROOT/bots/container/
   build.sh                    # Build script (host-side only)
   engineer/Dockerfile         # Your image
   commander/Dockerfile        # Johnny5's image

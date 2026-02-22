@@ -136,7 +136,7 @@ function buildVolumeMounts(
     mounts.push({
       hostPath: projectRoot,
       containerPath: '/workspace/project',
-      readonly: false,
+      readonly: true,
     });
     mounts.push({
       hostPath: path.join(GROUPS_DIR, group.folder),
@@ -291,6 +291,20 @@ export async function runContainerAgent(
   const secrets = normalizeProviderSecrets(collectContainerSecrets(projectRoot));
   const mounts = buildVolumeMounts(group, input.isMain, secrets);
   const mappedSecrets = mapCertPathSecretsToContainer(secrets, mounts);
+
+  // Remap INFINICLAW_ROOT from host path to container-side path
+  const hostRoot = mappedSecrets['INFINICLAW_ROOT'];
+  if (hostRoot) {
+    const resolvedRoot = fs.existsSync(hostRoot) ? fs.realpathSync(hostRoot) : hostRoot;
+    const rootMount = mounts.find((m) => {
+      const resolvedMount = fs.existsSync(m.hostPath) ? fs.realpathSync(m.hostPath) : m.hostPath;
+      return resolvedMount === resolvedRoot;
+    });
+    if (rootMount) {
+      mappedSecrets['INFINICLAW_ROOT'] = rootMount.containerPath;
+    }
+  }
+
   // Write bot directory to IPC dir so the MCP server can resolve recipients
   const groupIpcDir = path.join(DATA_DIR, 'ipc', input.groupFolder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
@@ -301,8 +315,9 @@ export async function runContainerAgent(
 
   // Read .mcp.json from group dir for inline SDK passthrough
   const mcpServers = readGroupMcpServers(groupDir);
-  const effectiveInput: ContainerInput = {
+  const effectiveInput: ContainerInput & { disallowedTools?: string[] } = {
     ...input,
+    disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete'],
     ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
     ...(mcpServers ? { mcpServers } : {}),
   };

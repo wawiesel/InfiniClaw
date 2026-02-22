@@ -182,6 +182,41 @@ function bumpWorkingIndicator(chatJid: string, threadId?: string): void {
   }).catch(() => {});
 }
 
+// ── Idle indicator functions ──────────────────────────────────────────
+
+const idleIndicators: Record<string, WorkingIndicator> = {};
+
+function startIdleIndicator(chatJid: string, threadId?: string): void {
+  if (idleIndicators[chatJid]) return;
+  const ch = findChannel(channels, chatJid);
+  if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
+  const startedAt = Date.now();
+  ch.sendMessageReturningId(chatJid, '💤 Idling...', threadId).then((eventId) => {
+    if (!eventId) return;
+    if (idleIndicators[chatJid]) {
+      if (ch.redactMessage) ch.redactMessage(chatJid, eventId).catch(() => {});
+      return;
+    }
+    const timer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 60_000);
+      const label = elapsed < 1 ? '<1m' : `${elapsed}m`;
+      ch.editMessage!(chatJid, eventId, `💤 Idling (${label})...`).catch(() => {});
+    }, 30_000);
+    idleIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
+  }).catch(() => {});
+}
+
+function clearIdleIndicator(chatJid: string): void {
+  const indicator = idleIndicators[chatJid];
+  if (!indicator) return;
+  clearInterval(indicator.timer);
+  delete idleIndicators[chatJid];
+  const ch = findChannel(channels, chatJid);
+  if (ch?.redactMessage) {
+    ch.redactMessage(chatJid, indicator.eventId).catch(() => {});
+  }
+}
+
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
 const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
@@ -457,6 +492,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         }
         lastRunOutputAt = Date.now();
         if (result.isProgress) {
+          clearIdleIndicator(chatJid);
           markProgress(chatJid, text);
           const isToolCall = text.includes('<details>');
           const now = Date.now();
@@ -485,6 +521,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           if (consecutiveDupSent >= 2) {
             logger.warn({ group: group.name, dupCount: consecutiveDupSent }, 'Suppressed duplicate result to chat');
           } else {
+            clearIdleIndicator(chatJid);
             markProgress(chatJid, text);
             lastResponseBody = text;
             const ch = findChannel(channels, chatJid);
@@ -497,6 +534,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             }
             outputSentToUser = true;
             agentResponses.push(formatMainMessage(text));
+            // Bot delivered its answer — stop nudging and show idle status
+            if (runProgressNudgeTimer) {
+              clearInterval(runProgressNudgeTimer);
+              runProgressNudgeTimer = null;
+            }
+            startIdleIndicator(chatJid, activeReplyThreadIds[chatJid]);
           }
         }
       }
@@ -513,6 +556,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   });
 
   clearWorkingIndicator(chatJid);
+  clearIdleIndicator(chatJid);
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   if (channel?.setStatusPip) {
@@ -726,6 +770,7 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
+            clearIdleIndicator(chatJid);
             startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
             const now = Date.now();
             if (

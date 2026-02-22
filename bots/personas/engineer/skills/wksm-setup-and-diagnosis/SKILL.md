@@ -44,7 +44,7 @@ An active setup must include two things:
 If WKSM is failing to start, failing to build, or returning errors, you must diagnose the issue in the codebase itself. 
 
 1. **Verify the container config**: Ensure the `cwd` and `PYTHONPATH` in the `mcpServers` block accurately points to `/workspace/extra/home/2025-WKS/main`.
-2. **Check Logs**: Review the bot logs at `$INFINICLAW/_runtime/logs/{bot}.log` and `$INFINICLAW/_runtime/logs/{bot}.error.log` to see if Python threw an error initializing the MCP server or importing dependencies.
+2. **Check Logs**: Review the bot logs at `$INFINICLAW_ROOT/_runtime/logs/{bot}.log` and `$INFINICLAW_ROOT/_runtime/logs/{bot}.error.log` to see if Python threw an error initializing the MCP server or importing dependencies.
 3. **Inspect the Code**: Navigate to `/workspace/extra/home/2025-WKS/main` and inspect the source code, `pyproject.toml`, or the specific `wks.mcp.main` module. Run manual python tests if necessary.
 
 ## Fixing WKSM & Requesting Read/Write Upgrades

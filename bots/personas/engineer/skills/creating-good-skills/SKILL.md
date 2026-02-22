@@ -75,8 +75,8 @@ The description field is the only thing Claude always sees. Body is loaded *afte
 Write skills directly to the persona dir (mounted writable). Changes persist immediately to the repo.
 
 ```
-$INFINICLAW/bots/personas/engineer/skills/{name}/   ← your skills
-$INFINICLAW/bots/personas/commander/skills/{name}/  ← skills for Johnny5
+$INFINICLAW_ROOT/bots/personas/engineer/skills/{name}/   ← your skills
+$INFINICLAW_ROOT/bots/personas/commander/skills/{name}/  ← skills for Johnny5
 ```
 
 Restart the target bot to load new skills into its session.
