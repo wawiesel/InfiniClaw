@@ -15,7 +15,10 @@ RUN apt-get update && apt-get install -y \
 
 # Cap Node.js heap so processes GC instead of growing until VM OOM.
 # Applies to main brain, MCP server, and lobe spawns.
-ENV NODE_OPTIONS="--max-old-space-size=2048"
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+
+# Update npm to suppress version notices
+RUN npm install -g npm@latest
 
 # Install global CLIs used by delegates/runners
 RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex

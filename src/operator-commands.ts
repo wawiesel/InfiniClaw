@@ -206,7 +206,7 @@ export function buildTodoMessage(chatJid: string): string {
         const objective = status.lastProgress || status.currentObjective;
         lines.push(`Currently: ${objective ? objective.slice(0, 200) : 'working'}`);
     } else {
-        lines.push('Currently: idle (no container)');
+        lines.push('Currently: idle');
     }
 
     return lines.join('\n');

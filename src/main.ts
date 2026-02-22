@@ -641,9 +641,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     markError(chatJid, compactError);
 
     if (!outputSentToUser && channel) {
+      // OOM kills and signal-based crashes get a prominent standalone status line
+      const isSignalCrash = /^⚠️ /.test(compactError);
       const errorReply =
         formatMainMessage(
-          `I hit an error while processing that request: ${compactError}`,
+          isSignalCrash
+            ? compactError
+            : `I hit an error while processing that request: ${compactError}`,
         );
       try {
         await channel.sendMessage(chatJid, errorReply, activeReplyThreadIds[chatJid]);

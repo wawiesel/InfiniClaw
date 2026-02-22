@@ -15,6 +15,11 @@
 - **Why:** Bots should be able to dynamically select a smarter model (e.g., Opus) for difficult, high-context tasks, and a faster/cheaper model (e.g., Haiku) for simple formatting or status checks.
 - **How:** Expose an MCP tool or system command allowing the bot to write changes to its `.claude/settings.json` or update its active bot profile (e.g., `ANTHROPIC_MODEL`) via IPC.
 
+### Bug: `set_brain_mode` doesn't fully take effect
+- **Problem:** `set_brain_mode` writes to the profile env file, but `restart_self` does `process.exit(0)` and launchd respawns with the **old plist env**. The plist env is only rebuilt on `bootstrapBot()` or full `start()`, not on self-restart.
+- **Fix:** When mode is `anthropic`, stop overriding `ANTHROPIC_SMALL_FAST_MODEL` and `ANTHROPIC_DEFAULT_SONNET_MODEL` — let the SDK use its own defaults for those. Only set `ANTHROPIC_MODEL` from `BRAIN_MODEL`. When mode is `ollama`, set all model vars to the ollama model.
+- **Also:** `restart_self` must rebuild the launchd plist (via `installPlistAndLoad` with fresh `buildLaunchdEnv`) before exiting, so the respawned process picks up the new env.
+
 ## Priority 1: Thread Management
 - **What:** Ensure Matrix threads are properly managed.
 - **Why:** Keeping the main room channels clear is vital for operator visibility. Every lobe activity and long-running operation must be neatly organized into conversation threads.

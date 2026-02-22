@@ -52,7 +52,7 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   10,
 ); // 10MB default
 export const CONTAINER_MEMORY_MB = parseInt(
-  process.env.CONTAINER_MEMORY_MB || '4096',
+  process.env.CONTAINER_MEMORY_MB || '12288',
   10,
 ); // Per-container memory cap (prevents one bot from starving the VM)
 export const CONTAINER_CPUS = parseFloat(

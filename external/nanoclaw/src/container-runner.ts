@@ -367,6 +367,17 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
       if (code !== 0) {
+        // Map well-known signal-based exit codes to human-readable descriptions
+        const signalExits: Record<number, { signal: string; label: string }> = {
+          137: { signal: 'SIGKILL', label: '⚠️ OOM KILLED — Container ran out of memory' },
+          139: { signal: 'SIGSEGV', label: '⚠️ SEGFAULT — Container crashed (segmentation fault)' },
+          134: { signal: 'SIGABRT', label: '⚠️ ABORTED — Container aborted' },
+          143: { signal: 'SIGTERM', label: 'Container was terminated' },
+        };
+
+        const signalInfo = signalExits[code ?? -1];
+        const isOomKill = code === 137;
+
         logger.error(
           {
             group: opts.groupName,
@@ -375,17 +386,26 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
             stderr,
             stdout,
             logFile,
+            ...(signalInfo ? { signal: signalInfo.signal, isOomKill } : {}),
           },
-          'Container exited with error',
+          signalInfo ? signalInfo.label : 'Container exited with error',
         );
 
-        const maxChars = opts.maxErrorStderrChars ?? 200;
-        const stderrSnippet =
-          maxChars > 0 ? stderr.slice(-maxChars) : stderr;
+        let errorMsg: string;
+        if (signalInfo) {
+          const durationSec = Math.round(duration / 1000);
+          errorMsg = `${signalInfo.label} (exit ${code}, ${signalInfo.signal}, ${durationSec}s)`;
+        } else {
+          const maxChars = opts.maxErrorStderrChars ?? 200;
+          const stderrSnippet =
+            maxChars > 0 ? stderr.slice(-maxChars) : stderr;
+          errorMsg = `Container exited with code ${code}: ${stderrSnippet}`;
+        }
+
         resolve({
           status: 'error',
           result: null,
-          error: `Container exited with code ${code}: ${stderrSnippet}`,
+          error: errorMsg,
         });
         return;
       }
