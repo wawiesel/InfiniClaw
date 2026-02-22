@@ -567,6 +567,7 @@ async function runQuery(
           : undefined,
         model: mainModel,
         allowedTools: [...getAllowedTools(containerInput.isMain)],
+        disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete'],
         env: sdkEnv,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
