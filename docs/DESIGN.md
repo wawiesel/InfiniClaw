@@ -150,6 +150,28 @@ InfiniClaw source lives in `src/`. The upstream NanoClaw framework lives in `ext
 
 Runs inside each Podman container. Receives a prompt via stdin JSON, calls Claude Agent SDK, streams output via stdout JSON lines, reads follow-up messages from IPC input directory.
 
+### Message Queue Architecture
+
+InfiniClaw uses a **FIFO (first-in, first-out)** queue per room. This is intentional.
+
+**Decision: FIFO over priority/interrupt**
+
+We considered interrupt-style scheduling (thread messages preempt main-room work) but chose FIFO for now:
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| FIFO (current) | Simple, predictable, no starvation | Long main task blocks thread replies |
+| Priority/interrupt | Thread feels responsive even during long tasks | Complex state management, risk of starvation, harder to reason about |
+
+FIFO is the right starting point. If latency in threads becomes a real problem, we can layer priority on top — but we don't pay that complexity cost until we need it.
+
+**Threading model**
+
+- Every lobe operation runs inside a Matrix thread (not on the main timeline)
+- Typing indicators are suppressed on the main room when the bot is working in a thread
+- The bot maintains a single sequential "big brain" — lobes provide parallelism for delegated subtasks, not for splitting the main agent
+- Lobe drafts are staged to `/workspace/group/drafts/` for review before posting
+
 ### Key data flows
 
 ```

@@ -96,9 +96,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       ? data.sender.trim()
                       : deps.defaultSenderForGroup(sourceGroup);
                   const threadId = typeof data.threadId === 'string' ? data.threadId : undefined;
+                  // Suppress brain header in thread replies — it's noise in a thread context
+                  const formatted = threadId
+                    ? String(data.text)
+                    : `${sender}:\n\n${String(data.text)}`;
                   await deps.sendMessage(
                     data.chatJid,
-                    `${sender}:\n\n${String(data.text)}`,
+                    formatted,
                     threadId,
                   );
                   logger.info(

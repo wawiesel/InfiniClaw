@@ -381,6 +381,35 @@ Use this after making code changes that require a process restart.`,
   );
 
   server.tool(
+    'get_last_event_id',
+    'Get the Matrix event ID of the last message received in this room. Use this event ID as the thread_id parameter in send_message to create or reply in a Matrix thread.',
+    {},
+    async () => {
+      const idsFile = path.join(ipcDir, 'last_event_ids.json');
+      if (!fs.existsSync(idsFile)) {
+        return {
+          content: [{ type: 'text' as const, text: 'No event IDs recorded yet. Send or receive a Matrix message first.' }],
+        };
+      }
+      try {
+        const data = JSON.parse(fs.readFileSync(idsFile, 'utf-8')) as Record<string, string>;
+        const lines: string[] = [];
+        if (data.lastReceived) lines.push(`lastReceived: ${data.lastReceived}${data.lastReceivedAt ? ` (at ${data.lastReceivedAt})` : ''}`);
+        if (data.lastSent) lines.push(`lastSent: ${data.lastSent}${data.lastSentAt ? ` (at ${data.lastSentAt})` : ''}`);
+        if (lines.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No event IDs recorded yet.' }] };
+        }
+        return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Failed to read event IDs: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
     'get_message',
     'Retrieve content for a Matrix message by its event ID. Use this to look up the full text of a message that was reacted to.',
     {

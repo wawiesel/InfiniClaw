@@ -13,15 +13,9 @@ export const GENERAL_PROGRESS_DEDUPE_MS = 5_000;
 
 const BLOCKED_TOOLS = new Set(['SendMessage', 'TeamCreate', 'TeamDelete']);
 
-export function createToolProgressHook(emitFn: (text: string) => void): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const postInput = input as PostToolUseHookInput;
-    const formatted = formatToolCallWithOutput(
-      postInput.tool_name,
-      postInput.tool_input,
-      postInput.tool_response,
-    );
-    emitFn(formatted);
+export function createToolProgressHook(_emitFn: (text: string) => void): HookCallback {
+  return async (_input, _toolUseId, _context) => {
+    // Tool call details are suppressed — only final responses are shown in chat
     return {};
   };
 }

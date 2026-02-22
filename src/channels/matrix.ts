@@ -731,74 +731,80 @@ export class MatrixChannel implements Channel {
 
   }
 
-  async sendMessage(jid: string, text: string, threadId?: string): Promise<void> {
-    if (!this.client || !this._connected) return;
+  private async sendTextReturningId(jid: string, text: string, threadId?: string): Promise<string | undefined> {
+    if (!this.client || !this._connected) return undefined;
     const roomId = toRoomId(jid);
     if (threadId) {
       logger.info({ roomId, threadId }, 'Matrix sendMessage with thread');
     }
     const normalizedText = normalizeSenderPrefixForMarkdown(text);
-    try {
-      // If text is already structured HTML (e.g. <details> from tool calls),
-      // skip markdown processing to avoid breaking the HTML structure.
-      const isPreformattedHtml = text.startsWith('<details') || text.startsWith('<small>');
+    // If text is already structured HTML (e.g. <details> from tool calls, or status messages
+    // with <font>/<em> tags), skip markdown processing to avoid escaping the HTML.
+    const isPreformattedHtml = text.startsWith('<details') || text.startsWith('<small>') || /<[a-z][\s\S]*>/i.test(text);
 
-      let html: string;
-      if (isPreformattedHtml) {
-        html = text;
-      } else {
-        // Strategy: Extract math to protect it, apply markdown, then restore math
-        const mathTokens: string[] = [];
-        const mathPlaceholder = (htmlStr: string): string => {
-          const idx = mathTokens.push(htmlStr) - 1;
-          return `@@MATH_${idx}@@`;
-        };
-
-        // Extract inline and display math before markdown processing
-        let working = normalizedText;
-        working = working.replace(/\$\$([^\$]+)\$\$/g, (_m, latex) => {
-          return mathPlaceholder(`<div data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></div>`);
-        });
-        working = working.replace(/\$([^\$\n]+)\$/g, (_m, latex) => {
-          return mathPlaceholder(`<span data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></span>`);
-        });
-
-        // Apply markdown with custom renderer to strip <p> tags inside list items
-        // (marked generates "loose" lists with <p> when items are separated by blank lines)
-        const renderer = new marked.Renderer();
-        const origListitem = renderer.listitem.bind(renderer);
-        renderer.listitem = (item) => {
-          const result = origListitem(item);
-          return result.replace(/<p>([\s\S]*?)<\/p>/g, '$1');
-        };
-        html = await marked(working, { breaks: true, gfm: true, renderer });
-
-        // Restore math placeholders
-        html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
-      }
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msgContent: Record<string, any> = {
-        msgtype: 'm.text',
-        body: normalizedText,
-        format: 'org.matrix.custom.html',
-        formatted_body: html.trim(),
+    let html: string;
+    if (isPreformattedHtml) {
+      html = text;
+    } else {
+      // Strategy: Extract math to protect it, apply markdown, then restore math
+      const mathTokens: string[] = [];
+      const mathPlaceholder = (htmlStr: string): string => {
+        const idx = mathTokens.push(htmlStr) - 1;
+        return `@@MATH_${idx}@@`;
       };
 
-      // MSC3440 thread support
-      if (threadId) {
-        msgContent['m.relates_to'] = {
-          rel_type: 'm.thread',
-          event_id: threadId,
-        };
-      }
+      // Extract inline and display math before markdown processing
+      let working = normalizedText;
+      working = working.replace(/\$\$([^\$]+)\$\$/g, (_m, latex) => {
+        return mathPlaceholder(`<div data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></div>`);
+      });
+      working = working.replace(/\$([^\$\n]+)\$/g, (_m, latex) => {
+        return mathPlaceholder(`<span data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></span>`);
+      });
 
-      const eventId = await withTimeout(
-        this.client.sendMessage(roomId, msgContent),
-        MATRIX_SEND_TIMEOUT_MS,
-        'sendMessage',
-      );
-      if (eventId) this.lastBotEventId.set(roomId, eventId);
+      // Apply markdown with custom renderer to strip <p> tags inside list items
+      // (marked generates "loose" lists with <p> when items are separated by blank lines)
+      const renderer = new marked.Renderer();
+      const origListitem = renderer.listitem.bind(renderer);
+      renderer.listitem = (item) => {
+        const result = origListitem(item);
+        return result.replace(/<p>([\s\S]*?)<\/p>/g, '$1');
+      };
+      html = await marked(working, { breaks: true, gfm: true, renderer });
+
+      // Restore math placeholders
+      html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msgContent: Record<string, any> = {
+      msgtype: 'm.text',
+      body: normalizedText,
+      format: 'org.matrix.custom.html',
+      formatted_body: html.trim(),
+    };
+
+    // MSC3440 thread support
+    if (threadId) {
+      msgContent['m.relates_to'] = {
+        rel_type: 'm.thread',
+        event_id: threadId,
+        is_falling_back: false,
+      };
+    }
+
+    const eventId = await withTimeout(
+      this.client.sendMessage(roomId, msgContent),
+      MATRIX_SEND_TIMEOUT_MS,
+      'sendMessage',
+    );
+    if (eventId) this.lastBotEventId.set(roomId, eventId);
+    return eventId;
+  }
+
+  async sendMessage(jid: string, text: string, threadId?: string): Promise<void> {
+    try {
+      await this.sendTextReturningId(jid, text, threadId);
     } catch (err) {
       if (this.isAuthFailure(err)) {
         this.markDisconnected('Matrix auth failed while sending message', err);
@@ -832,27 +838,8 @@ export class MatrixChannel implements Channel {
   }
 
   async sendMessageReturningId(jid: string, text: string, threadId?: string): Promise<string | undefined> {
-    if (!this.client || !this._connected) return undefined;
-    const roomId = toRoomId(jid);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msgContent: Record<string, any> = {
-        msgtype: 'm.text',
-        body: text,
-      };
-      if (/<[a-z][\s\S]*>/i.test(text)) {
-        msgContent['format'] = 'org.matrix.custom.html';
-        msgContent['formatted_body'] = text;
-      }
-      if (threadId) {
-        msgContent['m.relates_to'] = { rel_type: 'm.thread', event_id: threadId };
-      }
-      const eventId = await withTimeout(
-        this.client.sendMessage(roomId, msgContent),
-        MATRIX_SEND_TIMEOUT_MS,
-        'sendMessageReturningId',
-      );
-      return eventId;
+      return await this.sendTextReturningId(jid, text, threadId);
     } catch (err) {
       logger.warn({ jid, err }, 'Failed to send Matrix message (returning id)');
       return undefined;
