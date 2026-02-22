@@ -5,8 +5,8 @@
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, GROUPS_DIR } from '../config.js';
-import type { NewMessage } from '../types.js';
+import { ASSISTANT_NAME, GROUPS_DIR } from './config.js';
+import type { NewMessage } from './types.js';
 
 export function appendConversationLog(
   groupFolder: string,

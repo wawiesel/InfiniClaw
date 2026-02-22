@@ -6,11 +6,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseEnvLine } from '../env-utils.js';
-import { logger } from '../logger.js';
-import { loadSkillsToSession } from '../skill-sync.js';
-import { validateAdditionalMounts } from '../mount-security.js';
-import type { RegisteredGroup } from '../types.js';
+import { parseEnvLine } from './env-utils.js';
+import { logger } from './logger.js';
+import { loadSkillsToSession } from './skill-sync.js';
+import { validateAdditionalMounts } from './mount-security.js';
+import type { RegisteredGroup } from './types.js';
 
 interface VolumeMount {
   hostPath: string;

@@ -25,14 +25,14 @@ import {
   getRequestedMainModel,
   modelMatchesRequest,
   isOllamaAnthropicBaseUrl,
-} from './infiniclaw/model-selection.js';
+} from './model-selection.js';
 import {
   SANITIZE_PREFIX,
   TOOL_PROGRESS_EMIT_MS,
   GENERAL_PROGRESS_DEDUPE_MS,
   createToolProgressHook,
   createBlockBuiltinToolsHook,
-} from './infiniclaw/progress.js';
+} from './progress.js';
 
 interface ContainerInput {
   prompt: string;

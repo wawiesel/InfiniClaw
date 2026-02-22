@@ -8,7 +8,7 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc.js';
+import { processTaskIpc, IpcDeps } from './ipc-watcher.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests

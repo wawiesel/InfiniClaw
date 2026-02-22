@@ -2,8 +2,8 @@
  * InfiniClaw message filtering.
  * Determines which messages should be ignored (other bot output, wrong triggers).
  */
-import { IGNORE_PATTERNS, IGNORE_SENDERS } from '../config.js';
-import type { NewMessage } from '../types.js';
+import { IGNORE_PATTERNS, IGNORE_SENDERS } from './config.js';
+import type { NewMessage } from './types.js';
 
 /** Returns true if the message is addressed to another bot and should be ignored. */
 export function isIgnoredTrigger(text: string): boolean {

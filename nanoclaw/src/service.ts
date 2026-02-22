@@ -168,7 +168,7 @@ export function killStaleContainers(): void {
 
 export function killRogueProcesses(): void {
   try {
-    const output = execSync("pgrep -f 'nanoclaw.*dist/index\\.js'", {
+    const output = execSync("pgrep -f 'nanoclaw.*dist/main\\.js'", {
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
@@ -467,7 +467,7 @@ function generatePlist(
     <key>ProgramArguments</key>
     <array>
         <string>${escapeXml(nodeBin)}</string>
-        <string>${escapeXml(instance)}/dist/index.js</string>
+        <string>${escapeXml(instance)}/dist/main.js</string>
     </array>
     <key>WorkingDirectory</key>
     <string>${escapeXml(instance)}</string>
@@ -620,7 +620,7 @@ export function chat(bot: string): void {
   };
 
   // exec into node (replaces this process)
-  const result = spawnSync('node', ['dist/index.js'], {
+  const result = spawnSync('node', ['dist/main.js'], {
     cwd: instance,
     env: childEnv,
     stdio: 'inherit',

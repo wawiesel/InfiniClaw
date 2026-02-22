@@ -5,7 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { isOllamaBaseUrl } from '../env-utils.js';
+import { isOllamaBaseUrl } from './env-utils.js';
 
 const CERT_PATH_ENV_VARS = [
   'SSL_CERT_FILE',

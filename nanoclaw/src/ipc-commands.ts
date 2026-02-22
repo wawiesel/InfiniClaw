@@ -6,12 +6,12 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { upsertEnvLine } from '../env-utils.js';
+import { upsertEnvLine } from './env-utils.js';
 
 import {
   ASSISTANT_ROLE,
 } from './config.js';
-import { logger } from '../logger.js';
+import { logger } from './logger.js';
 import {
   BOTS,
   bootstrapBot as serviceBootstrapBot,
@@ -20,8 +20,8 @@ import {
   rebuildImage as serviceRebuildImage,
   resolveRoot,
   validateDeploy as serviceValidateDeploy,
-} from '../service.js';
-import type { RegisteredGroup } from '../types.js';
+} from './service.js';
+import type { RegisteredGroup } from './types.js';
 
 // ── Interfaces ──────────────────────────────────────────────────────────
 
