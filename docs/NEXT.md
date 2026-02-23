@@ -55,6 +55,10 @@
   - `exp` — branch off `main` for risky/experimental changes. Merge back to `main` when stable.
   - Engineer should check `git status` before any restart attempt and flag if `main` is in a broken state.
 
+## Priority 1: Engineer vault access gap
+- **Problem:** Engineer can reach `~/_vault` via `/workspace/extra/home/_vault` — a direct host path that bypasses the mount allowlist entirely. The allowlist correctly scopes `_vault` to `commander` only, but `/workspace/extra/` is mounted without those restrictions.
+- **Fix:** Either remove `/workspace/extra/` from engineer's container mounts, or make the agent-runner enforce allowlist rules against the `/workspace/extra/` tree the same way it does for standard mounts. Engineer should have no write access to the vault under any path.
+
 ## Priority 2: Restore Holodeck
 - **What:** Add back the Holodeck functionality.
 - **Why:** It provided a crucial blue-green test instance capability for deploying feature branches safely without risking the live Bridge and Engineering bots.

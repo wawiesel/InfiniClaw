@@ -95,6 +95,51 @@ export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
   );
 
   server.tool(
+    'send_and_open_thread',
+    `Send a message to the main timeline and return its Matrix event ID so you can immediately use it as thread_id in a delegate tool or follow-up send_message.
+
+Use this when you want to post a brief summary line (e.g. "💭 Lobe delegation - reason") and then put all detail/output in a thread. Returns { event_id } on success.`,
+    {
+      text: z.string().describe('The message text to post on the main timeline'),
+      timeout_ms: z.number().int().positive().max(15000).default(8000).describe('How long to wait for the event ID to be written (default 8s)'),
+    },
+    async (args) => {
+      const idsFile = path.join(ipcDir, 'last_event_ids.json');
+      const sentBefore = (() => {
+        try {
+          if (!fs.existsSync(idsFile)) return '';
+          const d = JSON.parse(fs.readFileSync(idsFile, 'utf-8')) as Record<string, string>;
+          return d.lastSentAt || '';
+        } catch { return ''; }
+      })();
+
+      emitChatMessageTo(chatJid, args.text);
+
+      const timeoutMs = Math.max(1000, Math.min(args.timeout_ms ?? 8000, 15000));
+      const deadline = Date.now() + timeoutMs;
+      const pollIntervalMs = 200;
+
+      while (Date.now() < deadline) {
+        await new Promise<void>((r) => setTimeout(r, pollIntervalMs));
+        try {
+          if (!fs.existsSync(idsFile)) continue;
+          const d = JSON.parse(fs.readFileSync(idsFile, 'utf-8')) as Record<string, string>;
+          if (d.lastSent && d.lastSentAt && d.lastSentAt !== sentBefore) {
+            return {
+              content: [{ type: 'text' as const, text: `event_id: ${d.lastSent}` }],
+            };
+          }
+        } catch { /* keep polling */ }
+      }
+
+      return {
+        content: [{ type: 'text' as const, text: 'send_and_open_thread: timed out waiting for event ID. Message was sent but thread_id unavailable.' }],
+        isError: true,
+      };
+    },
+  );
+
+  server.tool(
     'set_thread',
     'Set a persistent work thread for all future replies in this group. Pass thread_id to route replies into a Matrix thread, or omit it to clear and reply on the main timeline.',
     {
@@ -451,6 +496,8 @@ Use this after making code changes that require a process restart.`,
   registerDelegateTools(server, {
     writeIpcFile,
     messagesDir,
+    tasksDir,
+    ipcDir,
     chatJid,
     groupFolder,
     isMain,

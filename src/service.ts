@@ -78,10 +78,16 @@ export function loadProfileEnv(root: string, bot: string): Record<string, string
 export function applyBrainEnv(env: Record<string, string>): Record<string, string> {
   const out = { ...env };
 
-  // Explicitly set all mapped vars (even to empty string) to override any launchd global env
+  // For Anthropic mode (no custom base URL): only override the main model.
+  // Let the SDK use its own defaults for small/fast and sonnet.
+  // For Ollama mode (custom base URL set): override all three model vars so the
+  // SDK doesn't fall back to Anthropic defaults.
+  const isOllama = Boolean(out.BRAIN_BASE_URL);
   out.ANTHROPIC_MODEL = out.BRAIN_MODEL || '';
-  out.ANTHROPIC_SMALL_FAST_MODEL = out.BRAIN_MODEL || '';
-  out.ANTHROPIC_DEFAULT_SONNET_MODEL = out.BRAIN_MODEL || '';
+  if (isOllama) {
+    out.ANTHROPIC_SMALL_FAST_MODEL = out.BRAIN_MODEL || '';
+    out.ANTHROPIC_DEFAULT_SONNET_MODEL = out.BRAIN_MODEL || '';
+  }
   out.ANTHROPIC_BASE_URL = out.BRAIN_BASE_URL || '';
   out.ANTHROPIC_AUTH_TOKEN = out.BRAIN_AUTH_TOKEN || '';
   out.ANTHROPIC_API_KEY = out.BRAIN_API_KEY || '';
@@ -510,6 +516,19 @@ ${envEntries}
 
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Rewrite the launchd plist for a bot with fresh env, WITHOUT unloading/loading it.
+ * Use before self-restart so the respawned process picks up new env vars.
+ */
+export function refreshPlist(root: string, bot: string): void {
+  const instance = instanceDir(root, bot);
+  const logs = logDir(root);
+  const pp = plistPath(bot);
+  const env = buildLaunchdEnv(root, bot);
+  const plist = generatePlist(`com.infiniclaw.${bot}`, process.execPath, instance, logs, bot, env);
+  fs.writeFileSync(pp, plist);
 }
 
 /**

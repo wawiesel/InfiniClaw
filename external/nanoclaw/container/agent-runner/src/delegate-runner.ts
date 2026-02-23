@@ -168,23 +168,62 @@ export function registerDelegateTools(
   ctx: {
     writeIpcFile: WriteIpcFile;
     messagesDir: string;
+    tasksDir: string;
+    ipcDir: string;
     chatJid: string;
     groupFolder: string;
     isMain: boolean;
   },
 ): void {
-  const emitChatMessageTo = (jid: string, text: string): void => {
+  const emitChatMessageTo = (jid: string, text: string, threadId?: string): void => {
     ctx.writeIpcFile(ctx.messagesDir, {
       type: 'message',
       chatJid: jid,
       text,
       groupFolder: ctx.groupFolder,
       timestamp: new Date().toISOString(),
+      ...(threadId ? { threadId } : {}),
     });
   };
-  const emitDelegateMessage = (text: string): void => {
-    emitChatMessageTo(ctx.chatJid, text);
+  const emitDelegateMessage = (text: string, threadId?: string): void => {
+    emitChatMessageTo(ctx.chatJid, text, threadId);
   };
+
+  /** Send a message and wait up to timeoutMs for its Matrix event ID. */
+  async function sendAndGetEventId(text: string, timeoutMs = 10000): Promise<string | null> {
+    const idsFile = path.join(ctx.ipcDir, 'last_event_ids.json');
+    const sentBefore = (() => {
+      try {
+        if (!fs.existsSync(idsFile)) return '';
+        const d = JSON.parse(fs.readFileSync(idsFile, 'utf-8')) as Record<string, string>;
+        return d.lastSentAt || '';
+      } catch { return ''; }
+    })();
+    emitDelegateMessage(text);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise<void>((r) => setTimeout(r, 200));
+      try {
+        if (!fs.existsSync(idsFile)) continue;
+        const d = JSON.parse(fs.readFileSync(idsFile, 'utf-8')) as Record<string, string>;
+        if (d.lastSent && d.lastSentAt && d.lastSentAt !== sentBefore) {
+          return d.lastSent;
+        }
+      } catch { /* keep polling */ }
+    }
+    return null;
+  }
+
+  /** Write a set_thread IPC task. Pass null to clear the thread. */
+  function setThread(threadId: string | null): void {
+    ctx.writeIpcFile(ctx.tasksDir, {
+      type: 'set_thread',
+      chatJid: ctx.chatJid,
+      threadId: threadId || undefined,
+      groupFolder: ctx.groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   const ollamaHost = process.env.OLLAMA_HOST || (process.env.NANOCLAW_IPC_DIR ? 'http://localhost:11434' : 'http://host.containers.internal:11434');
 
@@ -205,6 +244,7 @@ Behavior:
       objective: z.string().describe('Task for Codex to execute'),
       cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
       model: z.string().optional().describe('Optional Codex model override (e.g. "o3").'),
+      thread_id: z.string().optional().describe('Matrix thread root event ID. When provided, all output is posted into this thread instead of the main timeline.'),
       timeout_ms: z
         .number()
         .int()
@@ -214,19 +254,20 @@ Behavior:
         .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
     },
     async (args) => {
+      const threadId = args.thread_id?.trim() || undefined;
       const effectiveModel =
         firstSet(args.model, process.env.CODEX_MODEL, process.env.OPENAI_MODEL) ||
         'gpt-5-codex';
       const delegateHeader = formatDelegateSender(args.name, 'codex', effectiveModel);
 
       const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-      emitDelegateMessage(headerAndObjective);
+      emitDelegateMessage(headerAndObjective, threadId);
 
       const cwdResult = resolveDelegateCwd(args.cwd);
       if (!cwdResult.ok) {
         const unavailable = `unavailable: ${cwdResult.error}`;
         const redText = `<font color="#cc0000">${unavailable}</font>`;
-        emitDelegateMessage(redText);
+        emitDelegateMessage(redText, threadId);
         return {
           content: [{ type: 'text' as const, text: `codex: ${unavailable}` }],
           isError: true,
@@ -287,7 +328,7 @@ Behavior:
           if (!normalized) return;
           prefixedMessages.push(`codex: ${normalized}`);
           const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
-          emitDelegateMessage(formatted);
+          emitDelegateMessage(formatted, threadId);
         };
 
         const failUnavailable = (reason: string) => {
@@ -352,7 +393,7 @@ Behavior:
           const reason = err instanceof Error ? err.message : String(err);
           const unavailable = `unavailable: ${reason}`;
           const redText = `<font color="#cc0000">${unavailable}</font>`;
-          emitDelegateMessage(redText);
+          emitDelegateMessage(redText, threadId);
           finalize({
             content: [{ type: 'text', text: `codex: ${unavailable}` }],
             isError: true,
@@ -465,6 +506,7 @@ Behavior:
       objective: z.string().describe('Task for Gemini to execute'),
       cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
       model: z.string().optional().describe('Optional Gemini model override (e.g. "gemini-2.5-pro").'),
+      thread_id: z.string().optional().describe('Matrix thread root event ID. When provided, all output is posted into this thread instead of the main timeline.'),
       timeout_ms: z
         .number()
         .int()
@@ -474,18 +516,19 @@ Behavior:
         .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
     },
     async (args) => {
+      const threadId = args.thread_id?.trim() || undefined;
       const effectiveModel =
         firstSet(args.model, process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
       const delegateHeader = formatDelegateSender(args.name, 'gemini', effectiveModel);
 
       const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-      emitDelegateMessage(headerAndObjective);
+      emitDelegateMessage(headerAndObjective, threadId);
 
       const cwdResult = resolveDelegateCwd(args.cwd);
       if (!cwdResult.ok) {
         const unavailable = `unavailable: ${cwdResult.error}`;
         const redText = `<font color="#cc0000">${unavailable}</font>`;
-        emitDelegateMessage(redText);
+        emitDelegateMessage(redText, threadId);
         return {
           content: [{ type: 'text' as const, text: `gemini: ${unavailable}` }],
           isError: true,
@@ -545,7 +588,7 @@ Behavior:
           if (!normalized) return;
           prefixedMessages.push(`gemini: ${normalized}`);
           const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
-          emitDelegateMessage(formatted);
+          emitDelegateMessage(formatted, threadId);
         };
 
         const failUnavailable = (reason: string) => {
@@ -586,7 +629,7 @@ Behavior:
           const reason = err instanceof Error ? err.message : String(err);
           const unavailable = `unavailable: ${reason}`;
           const redText = `<font color="#cc0000">${unavailable}</font>`;
-          emitDelegateMessage(redText);
+          emitDelegateMessage(redText, threadId);
           finalize({
             content: [{ type: 'text', text: `gemini: ${unavailable}` }],
             isError: true,
@@ -697,6 +740,7 @@ Behavior:
       objective: z.string().describe('Task/objective for Ollama to execute'),
       model: z.string().default('llama3.2').describe('Ollama model name'),
       system: z.string().optional().describe('Optional system prompt'),
+      thread_id: z.string().optional().describe('Matrix thread root event ID. When provided, all output is posted into this thread instead of the main timeline.'),
       timeout_ms: z
         .number()
         .int()
@@ -706,10 +750,11 @@ Behavior:
         .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
     },
     async (args) => {
+      const threadId = args.thread_id?.trim() || undefined;
       const delegateHeader = formatDelegateSender(args.name, 'ollama', args.model);
 
       const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-      emitDelegateMessage(headerAndObjective);
+      emitDelegateMessage(headerAndObjective, threadId);
 
       const timeoutMs = Math.max(
         1000,
@@ -737,7 +782,7 @@ Behavior:
           const text = await res.text();
           const unavailable = `unavailable: Ollama error (${res.status}): ${text}`;
           const redText = `<font color="#cc0000">${unavailable}</font>`;
-          emitDelegateMessage(redText);
+          emitDelegateMessage(redText, threadId);
           return {
             content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
             isError: true,
@@ -753,20 +798,20 @@ Behavior:
         );
         if (!responseText) {
           const doneText = 'completed with no textual output.';
-          emitDelegateMessage(`<font color="#888888"><em>${doneText}</em></font>`);
+          emitDelegateMessage(`<font color="#888888"><em>${doneText}</em></font>`, threadId);
           return {
             content: [{ type: 'text' as const, text: `ollama: ${doneText}` }],
           };
         }
 
-        emitDelegateMessage(responseText);
+        emitDelegateMessage(responseText, threadId);
         return {
           content: [{ type: 'text' as const, text: `ollama: ${responseText}` }],
         };
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         const unavailable = `unavailable: ${reason}`;
-        emitDelegateMessage(unavailable);
+        emitDelegateMessage(unavailable, threadId);
         return {
           content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
           isError: true,
@@ -816,6 +861,188 @@ Behavior:
           isError: true,
         };
       }
+    },
+  );
+
+  // ── delegate_to_lobe ─────────────────────────────────────────────────
+
+  server.tool(
+    'delegate_to_lobe',
+    `Atomically delegate a task to a lobe (Codex or Gemini) with correct Matrix threading.
+
+The tool handles the entire flow:
+1. Posts "💭 Lobe delegation - {reason}" to the main timeline
+2. Captures that message's event ID
+3. Posts the full formatted request in the thread
+4. Runs the lobe subprocess with the objective
+5. Posts the lobe response in the thread
+6. Returns the thread to the main timeline
+7. Returns the lobe output to the calling agent
+
+You never need to call send_message, set_thread, or get_last_event_id manually for delegations.`,
+    {
+      reason: z.string().min(1).describe('Short reason shown on the main timeline, e.g. "Save memory: threading fix"'),
+      objective: z.string().describe('Full detailed prompt/objective for the lobe to execute'),
+      lobe: z.enum(['codex', 'gemini']).default('codex').describe('Which lobe to use (default: codex)'),
+      cwd: z.string().optional().describe('Working directory. Must be under /workspace/group or /workspace/extra.'),
+      model: z.string().optional().describe('Optional model override for the lobe.'),
+      timeout_ms: z
+        .number()
+        .int()
+        .positive()
+        .max(MAX_DELEGATE_TIMEOUT_MS)
+        .default(DEFAULT_DELEGATE_TIMEOUT_MS)
+        .describe('Hard timeout for the lobe run in milliseconds (default 900000, max 3600000).'),
+    },
+    async (args) => {
+      // Step 1+2: Post summary to main timeline and capture event ID
+      const summaryText = `💭 Lobe delegation - ${args.reason}`;
+      const threadId = await sendAndGetEventId(summaryText, 10000);
+
+      // Step 3: Post formatted request in thread (or main if no event ID)
+      const lobe = args.lobe ?? 'codex';
+      const effectiveModel = (() => {
+        if (args.model) return args.model;
+        if (lobe === 'gemini') return firstSet(process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
+        return firstSet(process.env.CODEX_MODEL, process.env.OPENAI_MODEL) || 'gpt-5-codex';
+      })();
+      const delegateHeader = formatDelegateSender(args.reason, lobe as 'codex' | 'gemini', effectiveModel);
+      const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
+      emitDelegateMessage(headerAndObjective, threadId ?? undefined);
+
+      // Step 4+5: Resolve cwd and run the lobe
+      const cwdResult = resolveDelegateCwd(args.cwd);
+      if (!cwdResult.ok) {
+        const errText = `<font color="#cc0000">unavailable: ${cwdResult.error}</font>`;
+        emitDelegateMessage(errText, threadId ?? undefined);
+        if (threadId) setThread(null);
+        return {
+          content: [{ type: 'text' as const, text: `${lobe}: unavailable: ${cwdResult.error}` }],
+          isError: true,
+        };
+      }
+
+      const timeoutMs = Math.max(1000, Math.min(args.timeout_ms ?? DEFAULT_DELEGATE_TIMEOUT_MS, MAX_DELEGATE_TIMEOUT_MS));
+      const delegatedObjective = [
+        'Execution constraints:',
+        '- Do NOT create Python virtual environments inside /workspace/group or /workspace/extra.',
+        '- If a Python environment is required, create it under /workspace/cache/venvs.',
+        '- Route large model/package caches under /workspace/cache.',
+        '',
+        'Objective:',
+        args.objective,
+      ].join('\n');
+
+      const result = await new Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>((resolve) => {
+        const prefixedMessages: string[] = [];
+        const stderrLines: string[] = [];
+        let stdoutBuffer = '';
+        let stderrBuffer = '';
+        let finalized = false;
+        let unavailableTriggered = false;
+        let timedOut = false;
+        let proc: ReturnType<typeof spawn> | null = null;
+
+        const finalize = (payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean }) => {
+          if (finalized) return;
+          const estimatedTokens = estimateTokens(args.objective) + estimateTokens(prefixedMessages.join('\n\n'));
+          recordCapabilityUsage(lobe, effectiveModel, estimatedTokens);
+          finalized = true;
+          resolve(payload);
+        };
+
+        const pushMessage = (text: string, isStatus = false) => {
+          const normalized = text.replace(/\r/g, '').trim();
+          if (!normalized) return;
+          prefixedMessages.push(`${lobe}: ${normalized}`);
+          const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
+          emitDelegateMessage(formatted, threadId ?? undefined);
+        };
+
+        const failUnavailable = (reason: string) => {
+          if (unavailableTriggered) return;
+          unavailableTriggered = true;
+          pushMessage(`unavailable: ${reason}`, true);
+          if (proc && proc.exitCode === null) proc.kill('SIGTERM');
+        };
+
+        const handleStdoutLine = (line: string) => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          if (lobe === 'codex') {
+            try {
+              const event = JSON.parse(trimmed) as { type?: string; message?: string; item?: { type?: string; text?: string } };
+              if (event.type === 'item.completed' && event.item?.type === 'agent_message' && typeof event.item.text === 'string') {
+                pushMessage(event.item.text);
+                return;
+              }
+              if (event.type === 'error' && typeof event.message === 'string') {
+                failUnavailable(event.message);
+                return;
+              }
+            } catch { pushMessage(trimmed); return; }
+          } else {
+            pushMessage(trimmed);
+          }
+        };
+
+        const handleStderrLine = (line: string) => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          if (isIgnorableDelegateStderr(trimmed)) return;
+          stderrLines.push(trimmed);
+          if (stderrLines.length > 100) stderrLines.shift();
+          if (!unavailableTriggered && isProviderUnavailableError(trimmed)) failUnavailable(trimmed);
+        };
+
+        try {
+          const delegateEnv = buildDelegateEnv();
+          if (lobe === 'codex') {
+            const codexArgs = [
+              'exec', '--json', '--skip-git-repo-check',
+              '--dangerously-bypass-approvals-and-sandbox',
+              '--cd', cwdResult.cwd,
+              '--model', effectiveModel,
+              delegatedObjective,
+            ];
+            proc = spawnNpxDelegate('@openai/codex', codexArgs, cwdResult.cwd, delegateEnv);
+          } else {
+            const geminiArgs = ['--prompt', delegatedObjective, '--yolo', '--output-format', 'text', '--model', effectiveModel];
+            proc = spawnNpxDelegate('@google/gemini-cli', geminiArgs, cwdResult.cwd, delegateEnv);
+          }
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          emitDelegateMessage(`<font color="#cc0000">unavailable: ${reason}</font>`, threadId ?? undefined);
+          finalize({ content: [{ type: 'text', text: `${lobe}: unavailable: ${reason}` }], isError: true });
+          return;
+        }
+
+        const timer = setTimeout(() => { timedOut = true; failUnavailable(`timed out after ${timeoutMs}ms`); }, timeoutMs);
+
+        proc.stdout!.on('data', (chunk: Buffer | string) => {
+          stdoutBuffer += chunk.toString();
+          while (true) { const idx = stdoutBuffer.indexOf('\n'); if (idx === -1) break; handleStdoutLine(stdoutBuffer.slice(0, idx)); stdoutBuffer = stdoutBuffer.slice(idx + 1); }
+        });
+        proc.stderr!.on('data', (chunk: Buffer | string) => {
+          stderrBuffer += chunk.toString();
+          while (true) { const idx = stderrBuffer.indexOf('\n'); if (idx === -1) break; handleStderrLine(stderrBuffer.slice(0, idx)); stderrBuffer = stderrBuffer.slice(idx + 1); }
+        });
+        proc.on('error', (err) => { clearTimeout(timer); failUnavailable(err.message); finalize({ content: [{ type: 'text', text: prefixedMessages.join('\n\n') || `${lobe}: unavailable: ${err.message}` }], isError: true }); });
+        proc.on('close', (code, signal) => {
+          clearTimeout(timer);
+          if (stdoutBuffer.trim()) handleStdoutLine(stdoutBuffer);
+          if (stderrBuffer.trim()) handleStderrLine(stderrBuffer);
+          if (timedOut || unavailableTriggered) { finalize({ content: [{ type: 'text', text: prefixedMessages.join('\n\n') || `${lobe}: unavailable` }], isError: true }); return; }
+          if (code !== 0) { failUnavailable(stderrLines[stderrLines.length - 1] || `${lobe} exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`); finalize({ content: [{ type: 'text', text: prefixedMessages.join('\n\n') }], isError: true }); return; }
+          if (prefixedMessages.length === 0) prefixedMessages.push(`${lobe}: completed with no textual output.`);
+          finalize({ content: [{ type: 'text', text: prefixedMessages.join('\n\n') }] });
+        });
+      });
+
+      // Step 6: Clear thread back to main timeline
+      if (threadId) setThread(null);
+
+      return result;
     },
   );
 }

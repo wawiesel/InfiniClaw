@@ -18,6 +18,7 @@ import {
   deployBot as serviceDeployBot,
   stopBot as serviceStopBot,
   rebuildImage as serviceRebuildImage,
+  refreshPlist as serviceRefreshPlist,
   resolveRoot,
   instanceDir,
   validateDeploy as serviceValidateDeploy,
@@ -294,6 +295,15 @@ export async function handleInfiniClawCommand(
           try {
             await ctx.sendMessage(chatJid, statusMessage('⭕️', 'restarting...'));
           } catch {}
+        }
+        // Rewrite the launchd plist with fresh env before exiting so the
+        // respawned process picks up any brain mode changes. We only write
+        // the file — no unload/load — so launchd respawns us naturally on exit.
+        try {
+          const root = resolveRoot();
+          serviceRefreshPlist(root, bot);
+        } catch (err) {
+          logger.warn({ bot, err }, 'Plist refresh failed — restarting anyway');
         }
         setTimeout(() => {
           process.exit(0);
