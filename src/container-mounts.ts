@@ -53,121 +53,65 @@ export function buildBotDirectory(): Record<string, string> {
   return directory;
 }
 
-/**
- * Build InfiniClaw-specific volume mounts.
- * Returns additional VolumeMount entries to append to the base mounts.
- */
-export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount[] {
-  const { group, isMain, groupSessionsDir, groupsDir, dataDir, projectRoot } = opts;
-  const mounts: VolumeMount[] = [];
-  const homeDir = process.env.HOME || os.homedir();
+// ── Helper functions ────────────────────────────────────────────────────
 
-  const rootDir = process.env.INFINICLAW_ROOT;
-  const personaName = process.env.PERSONA_NAME;
-
-  // Load persona container config (version-controlled alongside env/skills)
-  let personaConfig: Record<string, unknown> = {};
-  if (rootDir && personaName) {
-    const personaConfigPath = path.join(rootDir, 'bots', 'personas', personaName, 'container-config.json');
-    try {
-      if (fs.existsSync(personaConfigPath)) {
-        personaConfig = JSON.parse(fs.readFileSync(personaConfigPath, 'utf-8'));
-      }
-    } catch (err) {
-      logger.warn({ personaConfigPath, error: err }, 'Failed to load persona container config');
+function loadPersonaConfig(rootDir: string, personaName: string): Record<string, unknown> {
+  const personaConfigPath = path.join(rootDir, 'bots', 'personas', personaName, 'container-config.json');
+  try {
+    if (fs.existsSync(personaConfigPath)) {
+      return JSON.parse(fs.readFileSync(personaConfigPath, 'utf-8'));
     }
+  } catch (err) {
+    logger.warn({ personaConfigPath, error: err }, 'Failed to load persona container config');
   }
+  return {};
+}
 
-  // Sync skills: save session → persona (replace), then rebuild session from shared + persona
-  const skillsDst = path.join(groupSessionsDir, 'skills');
-  const sharedSkillsSrc = path.join(projectRoot, 'external', 'nanoclaw', 'container', 'skills');
-
-  if (rootDir && personaName) {
-    const personaBaseDir = path.join(rootDir, 'bots', 'personas', personaName);
-    const personaSkillsDir = path.join(personaBaseDir, 'skills');
-    loadSkillsToSession(skillsDst, personaSkillsDir, sharedSkillsSrc);
-
-    // Two-way sync .mcp.json: save-back container → persona, then restore persona → container
-    const groupDir = path.join(groupsDir, group.folder);
-    const containerMcpJson = path.join(groupDir, '.mcp.json');
-    const personaGroupDir = path.join(personaBaseDir, 'groups', group.folder);
-    const personaMcpJson = path.join(personaGroupDir, '.mcp.json');
-    // Save-back: if container has .mcp.json, copy to persona
-    if (fs.existsSync(containerMcpJson)) {
-      fs.mkdirSync(personaGroupDir, { recursive: true });
-      fs.copyFileSync(containerMcpJson, personaMcpJson);
-    }
-    // Restore: if persona has .mcp.json, copy to container
-    if (fs.existsSync(personaMcpJson)) {
-      fs.copyFileSync(personaMcpJson, containerMcpJson);
-    }
-
-    // Mount persona dir writable so bots can edit their own CLAUDE.md (two-way sync)
-    mounts.push({
-      hostPath: personaBaseDir,
-      containerPath: `/workspace/extra/${personaName}-persona`,
-      readonly: false,
-    });
+function mountDirIfExists(
+  mounts: VolumeMount[],
+  hostPath: string,
+  containerPath: string,
+  readonly: boolean,
+): void {
+  if (fs.existsSync(hostPath)) {
+    mounts.push({ hostPath, containerPath, readonly });
   }
+}
 
-  // Lock group CLAUDE.md read-only: overlay a file mount on top of the writable dir mount.
-  // Bots can edit their persona CLAUDE.md (writable mount), not the group-level one.
-  const groupClaudeMd = path.join(groupsDir, group.folder, 'CLAUDE.md');
-  if (fs.existsSync(groupClaudeMd)) {
-    mounts.push({
-      hostPath: groupClaudeMd,
-      containerPath: '/workspace/group/CLAUDE.md',
-      readonly: true,
-    });
+function mountFileIfExists(
+  mounts: VolumeMount[],
+  hostPath: string,
+  containerPath: string,
+  readonly: boolean,
+): void {
+  if (fs.existsSync(hostPath)) {
+    mounts.push({ hostPath, containerPath, readonly });
   }
+}
 
-  // Share host Codex login state with container delegate_codex runs.
-  const hostCodexDir = path.join(homeDir, '.codex');
-  if (fs.existsSync(hostCodexDir)) {
-    mounts.push({
-      hostPath: hostCodexDir,
-      containerPath: '/home/node/.codex',
-      readonly: false,
-    });
+function syncMcpJson(groupsDir: string, groupFolder: string, personaBaseDir: string): void {
+  const groupDir = path.join(groupsDir, groupFolder);
+  const containerMcpJson = path.join(groupDir, '.mcp.json');
+  const personaGroupDir = path.join(personaBaseDir, 'groups', groupFolder);
+  const personaMcpJson = path.join(personaGroupDir, '.mcp.json');
+
+  // Save-back: if container has .mcp.json, copy to persona
+  if (fs.existsSync(containerMcpJson)) {
+    fs.mkdirSync(personaGroupDir, { recursive: true });
+    fs.copyFileSync(containerMcpJson, personaMcpJson);
   }
-
-  // Share host Gemini login/config with container delegate_gemini runs.
-  const hostGeminiDir = path.join(homeDir, '.gemini');
-  if (fs.existsSync(hostGeminiDir)) {
-    mounts.push({
-      hostPath: hostGeminiDir,
-      containerPath: '/home/node/.gemini',
-      readonly: false,
-    });
+  // Restore: if persona has .mcp.json, copy to container
+  if (fs.existsSync(personaMcpJson)) {
+    fs.copyFileSync(personaMcpJson, containerMcpJson);
   }
+}
 
-  // Per-group persistent cache for model/tool downloads (docling, huggingface, pip, etc.).
-  const cacheDir = path.join(dataDir, 'cache', group.folder);
-  fs.mkdirSync(cacheDir, { recursive: true });
-  mounts.push({
-    hostPath: cacheDir,
-    containerPath: '/workspace/cache',
-    readonly: false,
-  });
-
-  // Mount agent-runner source from host — recompiled on container startup.
-  const agentRunnerSrc = path.join(projectRoot, 'external', 'nanoclaw', 'container', 'agent-runner', 'src');
-  mounts.push({
-    hostPath: agentRunnerSrc,
-    containerPath: '/app/src',
-    readonly: true,
-  });
-
-  // Read-only mirror of host home directory at its real path.
-  // Bots can read any file using the same path as on the host.
-  // Write access to specific subdirs is granted via additionalMounts (/workspace/extra/).
-  mounts.push({
-    hostPath: homeDir,
-    containerPath: homeDir,
-    readonly: true,
-  });
-
-  // Additional mounts: merge persona container-config.json with group DB config.
+function addValidatedMounts(
+  mounts: VolumeMount[],
+  group: RegisteredGroup,
+  personaConfig: Record<string, unknown>,
+  isMain: boolean,
+): void {
   const allAdditionalMounts = [
     ...(group.containerConfig?.additionalMounts || []),
     ...((personaConfig.additionalMounts as Array<{hostPath: string; containerPath?: string; readonly?: boolean}>) || []),
@@ -181,6 +125,67 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
     );
     mounts.push(...validatedMounts);
   }
+}
+
+// ── Main mount builder ──────────────────────────────────────────────────
+
+/**
+ * Build InfiniClaw-specific volume mounts.
+ * Returns additional VolumeMount entries to append to the base mounts.
+ */
+export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount[] {
+  const { group, isMain, groupSessionsDir, groupsDir, dataDir, projectRoot } = opts;
+  const mounts: VolumeMount[] = [];
+  const homeDir = process.env.HOME || os.homedir();
+
+  const rootDir = process.env.INFINICLAW_ROOT;
+  const personaName = process.env.PERSONA_NAME;
+
+  // Load persona container config
+  const personaConfig = rootDir && personaName
+    ? loadPersonaConfig(rootDir, personaName)
+    : {};
+
+  // Sync skills and persona mounts
+  const skillsDst = path.join(groupSessionsDir, 'skills');
+  const sharedSkillsSrc = path.join(projectRoot, 'external', 'nanoclaw', 'container', 'skills');
+
+  if (rootDir && personaName) {
+    const personaBaseDir = path.join(rootDir, 'bots', 'personas', personaName);
+    const personaSkillsDir = path.join(personaBaseDir, 'skills');
+    loadSkillsToSession(skillsDst, personaSkillsDir, sharedSkillsSrc);
+    syncMcpJson(groupsDir, group.folder, personaBaseDir);
+
+    // Mount persona dir writable so bots can edit their own CLAUDE.md
+    mounts.push({
+      hostPath: personaBaseDir,
+      containerPath: `/workspace/extra/${personaName}-persona`,
+      readonly: false,
+    });
+  }
+
+  // Lock group CLAUDE.md read-only
+  const groupClaudeMd = path.join(groupsDir, group.folder, 'CLAUDE.md');
+  mountFileIfExists(mounts, groupClaudeMd, '/workspace/group/CLAUDE.md', true);
+
+  // Share host delegate auth directories
+  mountDirIfExists(mounts, path.join(homeDir, '.codex'), '/home/node/.codex', false);
+  mountDirIfExists(mounts, path.join(homeDir, '.gemini'), '/home/node/.gemini', false);
+
+  // Per-group persistent cache
+  const cacheDir = path.join(dataDir, 'cache', group.folder);
+  fs.mkdirSync(cacheDir, { recursive: true });
+  mounts.push({ hostPath: cacheDir, containerPath: '/workspace/cache', readonly: false });
+
+  // Mount agent-runner source from host
+  const agentRunnerSrc = path.join(projectRoot, 'external', 'nanoclaw', 'container', 'agent-runner', 'src');
+  mounts.push({ hostPath: agentRunnerSrc, containerPath: '/app/src', readonly: true });
+
+  // Read-only mirror of host home directory
+  mounts.push({ hostPath: homeDir, containerPath: homeDir, readonly: true });
+
+  // Additional mounts from persona and group config
+  addValidatedMounts(mounts, group, personaConfig, isMain);
 
   return mounts;
 }
