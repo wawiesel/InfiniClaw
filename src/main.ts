@@ -766,6 +766,82 @@ async function runAgent(
   }
 }
 
+// ── Per-group message handling ─────────────────────────────────────────
+
+async function handleGroupMessagesInLoop(
+  chatJid: string,
+  groupMessages: NewMessage[],
+): Promise<void> {
+  const group = registeredGroups[chatJid];
+  if (!group) return;
+
+  const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+  const filtered = groupMessages.filter((msg) => !shouldIgnoreMessage(msg));
+  if (filtered.length === 0) return;
+
+  // Check trigger requirement for non-main groups
+  if (!isMainGroup && group.requiresTrigger !== false) {
+    const hasTrigger = filtered.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
+    if (!hasTrigger) {
+      lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
+      saveState();
+      return;
+    }
+  }
+
+  // Collect all pending messages since last agent response
+  const allPending = getMessagesSince(
+    chatJid,
+    lastAgentTimestamp[chatJid] || '',
+    ASSISTANT_NAME,
+  ).filter((msg) => !shouldIgnoreMessage(msg));
+  const messagesToSend = allPending.length > 0 ? allPending : filtered;
+
+  setObjectiveFromMessages(chatJid, messagesToSend);
+  const formatted = formatMessages(messagesToSend);
+
+  const lastPiped = messagesToSend[messagesToSend.length - 1];
+  activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid];
+
+  if (queue.sendMessage(chatJid, formatted)) {
+    await handlePipedToActiveContainer(chatJid, messagesToSend);
+  } else {
+    handleQueuedForProcessing(chatJid);
+  }
+}
+
+async function handlePipedToActiveContainer(
+  chatJid: string,
+  messagesToSend: NewMessage[],
+): Promise<void> {
+  logger.debug(
+    { chatJid, count: messagesToSend.length },
+    'Piped messages to active container',
+  );
+  clearIdleIndicator(chatJid);
+  startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
+
+  const now = Date.now();
+  if (!lastActivePipeAckAt[chatJid] || now - lastActivePipeAckAt[chatJid] >= ACTIVE_PIPE_ACK_COOLDOWN_MS) {
+    lastActivePipeAckAt[chatJid] = now;
+  }
+
+  lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
+  saveState();
+
+  const ch = findChannel(channels, chatJid);
+  if (ch?.setTyping && !isThreadContext(chatJid)) await ch.setTyping(chatJid, true);
+  if (ch?.setPresenceStatus) await ch.setPresenceStatus('online', 'processing...');
+}
+
+function handleQueuedForProcessing(chatJid: string): void {
+  queue.enqueueMessageCheck(chatJid);
+  const now = Date.now();
+  if (!lastQueuedAckAt[chatJid] || now - lastQueuedAckAt[chatJid] >= QUEUED_ACK_COOLDOWN_MS) {
+    lastQueuedAckAt[chatJid] = now;
+  }
+}
+
 // ── Message loop ───────────────────────────────────────────────────────
 
 async function startMessageLoop(): Promise<void> {
@@ -795,67 +871,7 @@ async function startMessageLoop(): Promise<void> {
         const messagesByGroup = groupMessagesByChat(messages);
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
-          if (!group) continue;
-
-          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-
-          const filtered = groupMessages.filter((msg) => !shouldIgnoreMessage(msg));
-          if (filtered.length === 0) continue;
-
-          if (!isMainGroup && group.requiresTrigger !== false) {
-            const hasTrigger = filtered.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
-            if (!hasTrigger) {
-              lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
-              saveState();
-              continue;
-            }
-          }
-
-          const allPending = getMessagesSince(
-            chatJid,
-            lastAgentTimestamp[chatJid] || '',
-            ASSISTANT_NAME,
-          ).filter((msg) => !shouldIgnoreMessage(msg));
-          const messagesToSend =
-            allPending.length > 0 ? allPending : filtered;
-
-          setObjectiveFromMessages(chatJid, messagesToSend);
-          const formatted = formatMessages(messagesToSend);
-
-          const lastPiped = messagesToSend[messagesToSend.length - 1];
-          activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid];
-
-          if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
-            clearIdleIndicator(chatJid);
-            startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
-            const now = Date.now();
-            if (
-              !lastActivePipeAckAt[chatJid] ||
-              now - lastActivePipeAckAt[chatJid] >= ACTIVE_PIPE_ACK_COOLDOWN_MS
-            ) {
-              lastActivePipeAckAt[chatJid] = now;
-            }
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            const ch = findChannel(channels, chatJid);
-            if (ch?.setTyping && !isThreadContext(chatJid)) await ch.setTyping(chatJid, true);
-            if (ch?.setPresenceStatus) await ch.setPresenceStatus('online', 'processing...');
-          } else {
-            queue.enqueueMessageCheck(chatJid);
-            const now = Date.now();
-            if (
-              !lastQueuedAckAt[chatJid] ||
-              now - lastQueuedAckAt[chatJid] >= QUEUED_ACK_COOLDOWN_MS
-            ) {
-              lastQueuedAckAt[chatJid] = now;
-            }
-          }
+          await handleGroupMessagesInLoop(chatJid, groupMessages);
         }
       }
     } catch (err) {
