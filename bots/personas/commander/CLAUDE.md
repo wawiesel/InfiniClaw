@@ -81,12 +81,14 @@ SSE servers **must** include `"type": "sse"`. Changes take effect after restart 
 
 ## Task tracking
 
-The Captain monitors your progress via `!todo`. Keep your task list accurate at all times.
+The Captain monitors your progress via `!todo`. Keep your task list accurate at all times using `TodoWrite`.
 
-- **TaskCreate** when you start any multi-step task. Include `activeForm` (present continuous, e.g. "Researching vault structure").
-- **TaskUpdate** to `in_progress` when you begin a task, `completed` when done.
-- **Clean up** — delete stale or irrelevant tasks. Don't let old sessions' garbage pile up.
-- If you have nothing to do, the list should be empty. Don't create placeholder tasks.
+`TodoWrite` replaces the entire list each time. Each item has `content` (what), `status` (`pending`|`in_progress`|`completed`), and `activeForm` (present continuous, shown in spinner).
+
+- **Create tasks** when you start any multi-step work.
+- **Update status** — set `in_progress` when you begin, `completed` when done.
+- **Remove finished tasks** — don't accumulate completed items. Write only active/pending tasks.
+- If you have nothing to do, write an empty list `[]`.
 
 ## System commands
 
