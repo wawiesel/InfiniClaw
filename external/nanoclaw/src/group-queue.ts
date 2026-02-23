@@ -72,6 +72,7 @@ export class GroupQueue {
   /** Returns a snapshot of a group's queue state for status reporting. */
   getGroupStatus(groupJid: string): {
     active: boolean;
+    idleWaiting: boolean;
     hasProcess: boolean;
     containerName: string | null;
     pendingMessages: boolean;
@@ -79,10 +80,11 @@ export class GroupQueue {
   } {
     const state = this.groups.get(groupJid);
     if (!state) {
-      return { active: false, hasProcess: false, containerName: null, pendingMessages: false, pendingTasks: 0 };
+      return { active: false, idleWaiting: false, hasProcess: false, containerName: null, pendingMessages: false, pendingTasks: 0 };
     }
     return {
       active: state.active,
+      idleWaiting: state.idleWaiting,
       hasProcess: state.process !== null,
       containerName: state.containerName,
       pendingMessages: state.pendingMessages,
