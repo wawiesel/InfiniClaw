@@ -99,10 +99,8 @@ function formatDelegateSender(
   provider: 'codex' | 'gemini' | 'ollama' | 'claude',
   llm: string,
 ): string {
-  const lobeName = name.trim();
-  const model = llm.trim();
   const providerName = provider.charAt(0).toUpperCase() + provider.slice(1);
-  return `<font color="#888888">💭 ${lobeName} <em>(${providerName}/${model})</em></font>`;
+  return `💭 ${providerName}/${llm.trim()} - ${name.trim()}`;
 }
 
 function buildDelegateEnv(): DelegateEnv {
@@ -259,9 +257,8 @@ Behavior:
         firstSet(args.model, process.env.CODEX_MODEL, process.env.OPENAI_MODEL) ||
         'gpt-5-codex';
       const delegateHeader = formatDelegateSender(args.name, 'codex', effectiveModel);
-
-      const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-      emitDelegateMessage(headerAndObjective, threadId);
+      emitDelegateMessage(delegateHeader, threadId);
+      if (threadId) emitDelegateMessage(args.objective, threadId);
 
       const cwdResult = resolveDelegateCwd(args.cwd);
       if (!cwdResult.ok) {
@@ -520,9 +517,8 @@ Behavior:
       const effectiveModel =
         firstSet(args.model, process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
       const delegateHeader = formatDelegateSender(args.name, 'gemini', effectiveModel);
-
-      const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-      emitDelegateMessage(headerAndObjective, threadId);
+      emitDelegateMessage(delegateHeader, threadId);
+      if (threadId) emitDelegateMessage(args.objective, threadId);
 
       const cwdResult = resolveDelegateCwd(args.cwd);
       if (!cwdResult.ok) {
@@ -752,9 +748,8 @@ Behavior:
     async (args) => {
       const threadId = args.thread_id?.trim() || undefined;
       const delegateHeader = formatDelegateSender(args.name, 'ollama', args.model);
-
-      const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-      emitDelegateMessage(headerAndObjective, threadId);
+      emitDelegateMessage(delegateHeader, threadId);
+      if (threadId) emitDelegateMessage(args.objective, threadId);
 
       const timeoutMs = Math.max(
         1000,
@@ -854,9 +849,8 @@ Behavior:
         firstSet(args.model, process.env.ANTHROPIC_MODEL, process.env.CLAUDE_MODEL) ||
         'sonnet';
       const delegateHeader = formatDelegateSender(args.name, 'claude', effectiveModel);
-
-      const headerAndObjective = `${delegateHeader}<br><font color="#888888"><strong>Objective:</strong> ${args.objective}</font>`;
-      emitDelegateMessage(headerAndObjective, threadId);
+      emitDelegateMessage(delegateHeader, threadId);
+      if (threadId) emitDelegateMessage(args.objective, threadId);
 
       const cwdResult = resolveDelegateCwd(args.cwd);
       if (!cwdResult.ok) {
