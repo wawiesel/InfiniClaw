@@ -412,7 +412,6 @@ interface OutputHandlerContext {
   onOutputSent: (text: string) => void;
   onError: () => void;
   onProgress: (text: string) => void;
-  onCompletion: (text: string) => void;
   stopNudgeTimer: () => void;
   resetIdleTimer: () => void;
 }
@@ -485,6 +484,9 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
 async function handleResultOutput(ctx: OutputHandlerContext, text: string): Promise<void> {
   clearIdleIndicator(ctx.chatJid);
   markProgress(ctx.chatJid, text);
+  // Set state before channel send to preserve original behavior if send throws
+  ctx.onOutputSent(text);
+  ctx.stopNudgeTimer();
   const ch = findChannel(channels, ctx.chatJid);
   if (ch) {
     clearWorkingIndicator(ctx.chatJid);
@@ -502,8 +504,6 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
       if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
     }
   }
-  ctx.onOutputSent(text);
-  ctx.stopNudgeTimer();
 }
 
 // ── Process group messages ─────────────────────────────────────────────
@@ -633,7 +633,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     },
     onError: () => { hadError = true; },
     onProgress: () => { lastRunOutputAt = Date.now(); },
-    onCompletion: (text) => { lastResponseBody = text; },
     stopNudgeTimer: () => {
       if (runProgressNudgeTimer) {
         clearInterval(runProgressNudgeTimer);
