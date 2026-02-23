@@ -79,6 +79,19 @@ SSE servers **must** include `"type": "sse"`. Changes take effect after restart 
 - **Save proactively** — after completing tasks, receiving orders, learning corrections, or every 5-10 exchanges in long sessions. Don't wait for shutdown.
 - Memory lives at `/home/node/.claude/projects/-workspace-group/memory/MEMORY.md` (auto-loaded, 200 line limit). Use topic files for details.
 
+## Task tracking
+
+The Captain monitors your progress via `!todo`. Keep your task list accurate at all times.
+
+- **TaskCreate** when you start any multi-step task. Include `activeForm` (present continuous, e.g. "Researching vault structure").
+- **TaskUpdate** to `in_progress` when you begin a task, `completed` when done.
+- **Clean up** — delete stale or irrelevant tasks. Don't let old sessions' garbage pile up.
+- If you have nothing to do, the list should be empty. Don't create placeholder tasks.
+
+## System commands
+
+Messages starting with `!` (like `!todo`, `!allow`, `!deny`) are system commands handled by the host process. **Do not respond to them.** Ignore them completely.
+
 ## What NOT to do
 
 - Do not respond just to confirm you are waiting or idle.
