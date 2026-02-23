@@ -39,6 +39,56 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
+// Per-group delegate thread IDs — created on first delegate message, cleared when container exits
+const delegateThreadIds: Record<string, string> = {};
+
+interface TextMessageData {
+  chatJid: string;
+  text: string;
+  sender?: string;
+  threadId?: string;
+}
+
+async function handleTextMessage(
+  data: TextMessageData,
+  sourceGroup: string,
+  isMain: boolean,
+  deps: IpcDeps,
+): Promise<void> {
+  const registeredGroups = deps.registeredGroups();
+  const targetGroup = registeredGroups[data.chatJid];
+  const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup);
+
+  if (!authorized) {
+    logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Unauthorized IPC message attempt blocked');
+    return;
+  }
+
+  const sender = typeof data.sender === 'string' && data.sender.trim()
+    ? data.sender.trim()
+    : deps.defaultSenderForGroup(sourceGroup);
+  const explicitThreadId = typeof data.threadId === 'string' ? data.threadId : undefined;
+  const body = String(data.text);
+  const isDelegateHeader = body.startsWith('💭');
+
+  // Auto-thread delegate output: create a new thread on the first delegate
+  // message (the lobe header), then route all subsequent messages into it.
+  const threadId = explicitThreadId ?? delegateThreadIds[sourceGroup];
+
+  if (isDelegateHeader && !explicitThreadId) {
+    // Start a new delegate thread rooted at this header message
+    const eventId = await deps.sendMessageReturningId(data.chatJid, body, undefined);
+    if (eventId) {
+      delegateThreadIds[sourceGroup] = eventId;
+      deps.writeLastEventId(sourceGroup, eventId);
+      logger.info({ sourceGroup, eventId }, 'Delegate thread created');
+    }
+  } else {
+    await deps.sendMessage(data.chatJid, body, threadId);
+  }
+  logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -46,62 +96,25 @@ export function startIpcWatcher(deps: IpcDeps): void {
   }
   ipcWatcherRunning = true;
 
-  // Per-group delegate thread IDs — created on first delegate message, cleared when container exits
-  const delegateThreadIds: Record<string, string> = {};
-
   createIpcPoller({
     onMessage: async (_filePath, data, sourceGroup, isMain) => {
-      const registeredGroups = deps.registeredGroups();
-
       if (data.type === 'message' && data.chatJid && data.text) {
-        const targetGroup = registeredGroups[data.chatJid as string];
-        const authorized =
-          isMain ||
-          (targetGroup && targetGroup.folder === sourceGroup);
-        if (authorized) {
-          const sender =
-            typeof data.sender === 'string' && (data.sender as string).trim()
-              ? (data.sender as string).trim()
-              : deps.defaultSenderForGroup(sourceGroup);
-          const explicitThreadId = typeof data.threadId === 'string' ? data.threadId as string : undefined;
-          const body = String(data.text);
-          // Delegate headers start with 💭 (plain text, not HTML)
-          const isDelegateHeader = body.startsWith('💭');
-
-          // Auto-thread delegate output: create a new thread on the first delegate
-          // message (the lobe header), then route all subsequent messages into it.
-          // Explicit threadId (from set_thread) takes priority.
-          const threadId = explicitThreadId ?? delegateThreadIds[sourceGroup];
-
-          if (isDelegateHeader && !explicitThreadId) {
-            // Start a new delegate thread rooted at this header message
-            const eventId = await deps.sendMessageReturningId(data.chatJid as string, body, undefined);
-            if (eventId) {
-              delegateThreadIds[sourceGroup] = eventId;
-              // Write event ID back to IPC dir so container can poll for it
-              deps.writeLastEventId(sourceGroup, eventId);
-              logger.info({ sourceGroup, eventId }, 'Delegate thread created');
-            }
-          } else {
-            // Non-header message — send into delegate thread if one exists, else main
-            await deps.sendMessage(data.chatJid as string, body, threadId);
-          }
-          logger.info(
-            { chatJid: data.chatJid, sourceGroup },
-            'IPC message sent',
-          );
-        } else {
-          logger.warn(
-            { chatJid: data.chatJid, sourceGroup },
-            'Unauthorized IPC message attempt blocked',
-          );
-        }
+        await handleTextMessage(
+          {
+            chatJid: data.chatJid as string,
+            text: data.text as string,
+            sender: data.sender as string | undefined,
+            threadId: data.threadId as string | undefined,
+          },
+          sourceGroup,
+          isMain,
+          deps,
+        );
       } else {
         // Handle extended message types (image, file)
+        const registeredGroups = deps.registeredGroups();
         const targetGroup = registeredGroups[data.chatJid as string];
-        const authorized =
-          isMain ||
-          !!(targetGroup && targetGroup.folder === sourceGroup);
+        const authorized = isMain || !!(targetGroup && targetGroup.folder === sourceGroup);
         await handleInfiniClawMessage(data as Parameters<typeof handleInfiniClawMessage>[0], {
           authorized,
           sourceGroup,
