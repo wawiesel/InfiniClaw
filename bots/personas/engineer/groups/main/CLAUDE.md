@@ -33,8 +33,11 @@ cd $INFINICLAW_ROOT && npm run build
 
 ## Mount system
 
-- **Allowlist**: `bots/config/mount-allowlist.json` — controls which paths can be mounted and by which bots.
-- **My mounts**: `~` (ro), `~/2026-Nanoclaw/InfiniClaw` (rw). No vault access.
-- **J5's mounts**: `~` (ro), `~/_vault` (rw) — scoped to `commander` in the allowlist.
-- **`!allow <path> [minutes]`**: Captain/Operator Matrix command. Grants temporary mount access. Requires restart.
+Two-tier design: read-only access everywhere, write access where needed.
+
+- **Tier 1 (ro home)**: The host home directory is mounted read-only at its real path (`/Users/ww5`). All bots can read any file using the same path as on the host.
+- **Tier 2 (rw workspace)**: Specific directories are mounted read-write at `/workspace/extra/...` via `container-config.json`, validated against the host-side allowlist.
+- **My rw mounts**: `~/2026-Nanoclaw/InfiniClaw` → `/workspace/extra/InfiniClaw`. No vault access.
+- **J5's rw mounts**: `~/_vault` → `/workspace/extra/_vault`.
+- **`!allow <path> [minutes]`**: Captain/Operator Matrix command. Grants temporary rw mount access. Requires restart.
 - **`!deny <path>`**: Revokes a grant.

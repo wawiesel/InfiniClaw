@@ -102,6 +102,24 @@ The agent sees **all three** — base+persona as the instance-level CLAUDE.md (l
 - **Container isolation** — Podman containers run with memory caps (`CONTAINER_MEMORY_MB`, default 4GB) and optional CPU limits. `_runtime/` is never version-controlled.
 - **Secrets flow**: profile env files → loaded by host process → injected as env vars into containers via `--env`. No secrets are baked into container images.
 
+### Mount System
+
+Two-tier design: read-only access everywhere, write access where needed.
+
+**Tier 1: Read-only home mirror (built-in)**
+- The host home directory is mounted at its real path (`/Users/ww5`) inside every container, read-only.
+- Bots can read any file using the same path as on the host.
+- Dotfiles are visible but read-only. Sensitive credentials (SSH keys, tokens) cannot be exfiltrated because the container has no network egress to arbitrary hosts.
+- Added automatically by `container-mounts.ts` — not configurable per-bot.
+
+**Tier 2: Read-write workspace mounts (per-bot)**
+- Specific directories are mounted read-write at `/workspace/extra/...` via `container-config.json`.
+- Validated against the host-side allowlist (`~/.config/nanoclaw/mount-allowlist.json`).
+- The Captain can grant/revoke temporary rw access via `!allow <path> [minutes]` / `!deny <path>`.
+- Each bot gets only the rw mounts it needs:
+  - Commander: `~/_vault` (rw), `~/InfiniClaw/bots/profiles/commander` (rw)
+  - Engineer: `~/2026-Nanoclaw/InfiniClaw` (rw)
+
 ## Code Structure
 
 **Architectural Strategy: Thin Fork & Thick Wrappers**

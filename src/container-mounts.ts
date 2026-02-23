@@ -158,6 +158,15 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
     readonly: true,
   });
 
+  // Read-only mirror of host home directory at its real path.
+  // Bots can read any file using the same path as on the host.
+  // Write access to specific subdirs is granted via additionalMounts (/workspace/extra/).
+  mounts.push({
+    hostPath: homeDir,
+    containerPath: homeDir,
+    readonly: true,
+  });
+
   // Additional mounts: merge persona container-config.json with group DB config.
   const allAdditionalMounts = [
     ...(group.containerConfig?.additionalMounts || []),

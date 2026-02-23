@@ -1,20 +1,7 @@
 {
   "additionalMounts": [
-    {
-      "hostPath": "~",
-      "containerPath": "home",
-      "readonly": true
-    },
-    {
-      "hostPath": "~/_vault",
-      "containerPath": "home/_vault",
-      "readonly": false
-    },
-    {
-      "hostPath": "~/2026-Nanoclaw/InfiniClaw/bots/profiles/commander",
-      "containerPath": "home/2026-Nanoclaw/InfiniClaw/bots/profiles/commander",
-      "readonly": false
-    }
+    {"hostPath": "~/_vault", "readonly": false},
+    {"hostPath": "~/2026-Nanoclaw/InfiniClaw/bots/profiles/commander", "readonly": false}
   ],
   "portPublish": ["9000:8000"]
 }
