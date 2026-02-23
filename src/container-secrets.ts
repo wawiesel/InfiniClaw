@@ -64,6 +64,49 @@ export function normalizeProviderSecrets(
 }
 
 /**
+ * Normalize CA bundle env so all tools see the same trust anchor.
+ */
+function normalizeCertBundleEnv(mapped: Record<string, string>): void {
+  const certBundle =
+    mapped.SSL_CERT_FILE ||
+    mapped.NODE_EXTRA_CA_CERTS ||
+    mapped.REQUESTS_CA_BUNDLE ||
+    mapped.CURL_CA_BUNDLE ||
+    mapped.GIT_SSL_CAINFO;
+  if (!certBundle) return;
+
+  for (const key of CERT_PATH_ENV_VARS) {
+    if (!mapped[key]) mapped[key] = certBundle;
+  }
+}
+
+/**
+ * Map a single cert path to container, adding mount if needed.
+ */
+function mapCertPath(
+  key: string,
+  value: string,
+  mounts: VolumeMount[],
+  certMountRoot: string,
+): string {
+  if (!value || !path.isAbsolute(value) || !fs.existsSync(value)) {
+    return value;
+  }
+
+  const safeName = path.basename(value).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const containerPath = `${certMountRoot}/${key.toLowerCase()}-${safeName}`;
+
+  const alreadyMounted = mounts.some(
+    (m) => m.hostPath === value && m.containerPath === containerPath,
+  );
+  if (!alreadyMounted) {
+    mounts.push({ hostPath: value, containerPath, readonly: true });
+  }
+
+  return containerPath;
+}
+
+/**
  * Map host cert file paths to container paths via volume mounts.
  * Normalizes CA bundle env so Node, Python/requests, curl, and git
  * all see the same trust anchor.
@@ -76,43 +119,11 @@ export function mapCertPathSecretsToContainer(
   const certMountRoot = '/workspace/host-certs';
 
   for (const key of CERT_PATH_ENV_VARS) {
-    const value = mapped[key];
-    if (!value) continue;
-    if (!path.isAbsolute(value) || !fs.existsSync(value)) continue;
-
-    const safeName = path.basename(value).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const containerPath = `${certMountRoot}/${key.toLowerCase()}-${safeName}`;
-
-    if (
-      !mounts.some(
-        (m) => m.hostPath === value && m.containerPath === containerPath,
-      )
-    ) {
-      mounts.push({
-        hostPath: value,
-        containerPath,
-        readonly: true,
-      });
+    if (mapped[key]) {
+      mapped[key] = mapCertPath(key, mapped[key], mounts, certMountRoot);
     }
-
-    mapped[key] = containerPath;
   }
 
-  // Normalize CA bundle env so Node, Python/requests, curl, and git all see
-  // the same trust anchor even if only one variable is provided by the host.
-  const certBundle =
-    mapped.SSL_CERT_FILE ||
-    mapped.NODE_EXTRA_CA_CERTS ||
-    mapped.REQUESTS_CA_BUNDLE ||
-    mapped.CURL_CA_BUNDLE ||
-    mapped.GIT_SSL_CAINFO;
-  if (certBundle) {
-    if (!mapped.SSL_CERT_FILE) mapped.SSL_CERT_FILE = certBundle;
-    if (!mapped.NODE_EXTRA_CA_CERTS) mapped.NODE_EXTRA_CA_CERTS = certBundle;
-    if (!mapped.REQUESTS_CA_BUNDLE) mapped.REQUESTS_CA_BUNDLE = certBundle;
-    if (!mapped.CURL_CA_BUNDLE) mapped.CURL_CA_BUNDLE = certBundle;
-    if (!mapped.GIT_SSL_CAINFO) mapped.GIT_SSL_CAINFO = certBundle;
-  }
-
+  normalizeCertBundleEnv(mapped);
   return mapped;
 }
