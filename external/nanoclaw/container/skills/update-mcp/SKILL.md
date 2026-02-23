@@ -1,9 +1,9 @@
 ---
-name: add-mcp-server
-description: Add an MCP server to this bot. Use when asked to install, add, or configure an MCP server or tool integration.
+name: update-mcp
+description: Add or modify MCP server configuration. Use when asked to install, add, or configure an MCP server or tool integration.
 ---
 
-# Add MCP Server
+# Update MCP
 
 There are two methods depending on where the server runs.
 

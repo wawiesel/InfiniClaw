@@ -50,34 +50,15 @@ When a user's message arrives in a thread (`thread_id` attribute on `<message>`)
 - **Brain mode**: Use `mcp__nanoclaw__set_brain_mode` + `restart_self` to switch models. Default to Opus for complex/iterative work. Only demote to Sonnet when the Captain explicitly says to.
 - **After a restart**, you resume with conversation history. Do NOT re-execute actions from earlier messages — they already happened. Check your memory and the recent conversation to determine if you were mid-task. If so, continue that work. If nothing was in progress, wait for new instructions.
 
-## Adding MCP servers
+## Self-management skills
 
-Edit the persona `.mcp.json` (source of truth, mounted writable):
+| Skill | Purpose |
+|-------|---------|
+| `/update-directives` | Save standing orders, corrections, preferences to persona CLAUDE.md |
+| `/save-memory` | Save knowledge, bug findings, architecture notes to memory files |
+| `/update-mcp` | Add or modify MCP server configuration |
 
-```
-/workspace/extra/commander-persona/groups/main/.mcp.json
-```
-
-```json
-{
-  "mcpServers": {
-    "my-server": {
-      "type": "sse",
-      "url": "http://host.containers.internal:PORT/sse"
-    }
-  }
-}
-```
-
-For command-based (stdio) servers: `{"command": "node", "args": ["/path/to/server.js"]}`.
-
-SSE servers **must** include `"type": "sse"`. Changes take effect after restart (`mcp__nanoclaw__restart_self`).
-
-## Memory
-
-- **Save memory using a lobe** — don't burn main brain context on file I/O. Use `/save-memory` skill: delegate to codex/gemini with a summary of what to save.
-- **Save proactively** — after completing tasks, receiving orders, learning corrections, or every 5-10 exchanges in long sessions. Don't wait for shutdown.
-- Memory lives at `/home/node/.claude/projects/-workspace-group/memory/MEMORY.md` (auto-loaded, 200 line limit). Use topic files for details.
+Delegate to a lobe so you don't burn main brain context. Save proactively — after completing tasks, receiving orders, learning corrections, or every 5-10 exchanges in long sessions.
 
 ## Task tracking
 

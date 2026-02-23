@@ -116,13 +116,9 @@ function readTodoItems(folder: string): TodoItem[] {
     if (!sessionId) return [];
 
     const sessionFile = path.join(todosDir, `${sessionId}-agent-${sessionId}.json`);
-    return parseTodoFile(sessionFile);
-}
-
-function parseTodoFile(filePath: string): TodoItem[] {
-    if (!fs.existsSync(filePath)) return [];
+    if (!fs.existsSync(sessionFile)) return [];
     try {
-        const raw = fs.readFileSync(filePath, 'utf-8').trim();
+        const raw = fs.readFileSync(sessionFile, 'utf-8').trim();
         if (!raw || raw === '[]') return [];
         const parsed = JSON.parse(raw);
         if (!Array.isArray(parsed)) return [];

@@ -85,34 +85,15 @@ Your persona CLAUDE.md is mounted writable at `/workspace/extra/engineer-persona
 
 Room-level CLAUDE.md (`/workspace/group/CLAUDE.md`) is **read-only** — managed by the Captain in the repo. Do not attempt to edit it.
 
-## Adding MCP servers
+## Self-management skills
 
-To add an MCP server to any bot, edit the persona's `.mcp.json` (source of truth):
+| Skill | Purpose |
+|-------|---------|
+| `/update-directives` | Save standing orders, corrections, preferences to persona CLAUDE.md |
+| `/save-memory` | Save knowledge, bug findings, architecture notes to memory files |
+| `/update-mcp` | Add or modify MCP server configuration |
 
-```
-$INFINICLAW_ROOT/bots/personas/{bot}/groups/{room}/.mcp.json
-```
-
-```json
-{
-  "mcpServers": {
-    "my-server": {
-      "type": "sse",
-      "url": "http://host.containers.internal:PORT/sse"
-    }
-  }
-}
-```
-
-For command-based (stdio) servers: `{"command": "node", "args": ["/path/to/server.js"]}`.
-
-SSE servers **must** include `"type": "sse"`. Changes take effect after restart.
-
-## Memory
-
-- **Save memory using a lobe** — don't burn main brain context on file I/O. Use `/save-memory` skill: delegate to codex/gemini with a summary of what to save.
-- **Save proactively** — after fixes, corrections, orders, mistakes, or every 5-10 exchanges in long sessions. Don't wait for shutdown.
-- Memory lives at `/home/node/.claude/projects/-workspace-group/memory/MEMORY.md` (auto-loaded, 200 line limit). Use topic files for details.
+Delegate to a lobe so you don't burn main brain context. Save proactively — after fixes, corrections, orders, mistakes, or every 5-10 exchanges in long sessions.
 
 ## Task tracking
 
