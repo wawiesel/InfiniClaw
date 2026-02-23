@@ -8,7 +8,6 @@
 import fs from 'fs';
 import path from 'path';
 
-import { parseEnvLine } from 'nanoclaw/env-utils.js';
 
 import {
   ASSISTANT_NAME,
@@ -279,12 +278,6 @@ const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
 
 // ── Utility functions ──────────────────────────────────────────────────
 
-function ensureGroupForIncomingChat(chatJid: string): void {
-  if (!registeredGroups[chatJid]) {
-    logger.debug({ chatJid }, 'Ignored message from unregistered chat');
-  }
-}
-
 function getMainChatJid(): string | undefined {
   for (const [jid, group] of Object.entries(registeredGroups)) {
     if (group.folder === MAIN_GROUP_FOLDER) return jid;
@@ -410,7 +403,7 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 }
 
 // Re-export for backwards compatibility during refactor
-export { escapeXml, formatMessages } from 'nanoclaw/router.js';
+export { formatMessages } from 'nanoclaw/router.js';
 
 // ── Process group messages ─────────────────────────────────────────────
 
@@ -427,14 +420,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const allMissed = getMessagesSince(
+  const missedMessages = getMessagesSince(
     chatJid,
     sinceTimestamp,
     ASSISTANT_NAME,
   );
 
-  if (allMissed.length === 0) return true;
-  const missedMessages = allMissed;
+  if (missedMessages.length === 0) return true;
 
   const filteredMessages = missedMessages.filter((msg) => !shouldIgnoreMessage(msg));
   if (filteredMessages.length === 0) return true;
@@ -915,7 +907,6 @@ async function main(): Promise<void> {
     matrix = new MatrixChannel({
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix)) return;
-        ensureGroupForIncomingChat(msg.chat_jid);
         storeMessage(msg);
         if (msg.id && msg.id.startsWith('$')) {
           const group = registeredGroups[msg.chat_jid];
@@ -923,7 +914,6 @@ async function main(): Promise<void> {
         }
       },
       onChatMetadata: (chatJid, timestamp, name) => {
-        ensureGroupForIncomingChat(chatJid);
         storeChatMetadata(chatJid, timestamp, name);
       },
       registeredGroups: () => registeredGroups,
@@ -935,7 +925,6 @@ async function main(): Promise<void> {
     localCli = new LocalCliChannel({
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix)) return;
-        ensureGroupForIncomingChat(msg.chat_jid);
         storeMessage(msg);
       },
       onChatMetadata: (chatJid, timestamp, name) =>
@@ -977,6 +966,8 @@ async function main(): Promise<void> {
     let matrixReconnectInProgress = false;
     let matrixReconnectDelay = MATRIX_RECONNECT_INTERVAL;
     const MATRIX_RECONNECT_MAX_DELAY = 5 * 60_000;
+    let reconnectEventId: string | undefined;
+    let reconnectCount = 0;
     const scheduleReconnect = (): void => {
       setTimeout(async () => {
         if (!matrix || matrixReconnectInProgress) {
@@ -993,9 +984,18 @@ async function main(): Promise<void> {
               logger.info('Matrix reconnected');
               matrixReconnectDelay = MATRIX_RECONNECT_INTERVAL;
               refreshConnectedChannels();
+              reconnectCount++;
               const mainJid = getMainChatJid();
               if (mainJid) {
-                matrix.sendMessage(mainJid, statusMessage('🔌', 'reconnected.')).catch(() => { });
+                const label = reconnectCount > 1
+                  ? statusMessage('🔌', `reconnected (${reconnectCount}x).`)
+                  : statusMessage('🔌', 'reconnected.');
+                if (reconnectEventId) {
+                  matrix.editMessage(mainJid, reconnectEventId, label).catch(() => { });
+                } else {
+                  const id = await matrix.sendMessageReturningId(mainJid, label).catch(() => undefined);
+                  if (id) reconnectEventId = id;
+                }
               }
             }
           } else {
@@ -1184,12 +1184,12 @@ async function main(): Promise<void> {
   injectResumeMessage();
   startMessageLoop();
 
-  // Periodic memory-save reminder
+  // Periodic memory-save reminder (only when bot is actively working, not idle)
   const MEMORY_SAVE_INTERVAL_MS = 10 * 60 * 1000;
   setInterval(() => {
     for (const [chatJid, group] of Object.entries(registeredGroups)) {
       const status = queue.getGroupStatus(chatJid);
-      if (!status.active) continue;
+      if (!status.active || status.idleWaiting) continue;
       queue.sendMessage(
         chatJid,
         '[System] Periodic checkpoint: if you have completed or are mid-way through any tasks, save a brief summary to your memory now using /save-memory. Include what you were doing and what remains.',
