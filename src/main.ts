@@ -402,6 +402,110 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
   registeredGroups = groups;
 }
 
+// ── Output handler context ──────────────────────────────────────────────
+
+interface OutputHandlerContext {
+  chatJid: string;
+  group: RegisteredGroup;
+  inboundMessageIds: string[];
+  onAcknowledge: () => void;
+  onOutputSent: (text: string) => void;
+  onError: () => void;
+  onProgress: (text: string) => void;
+  onCompletion: (text: string) => void;
+  stopNudgeTimer: () => void;
+  resetIdleTimer: () => void;
+}
+
+function createOutputHandler(ctx: OutputHandlerContext): (result: ContainerOutput) => Promise<void> {
+  let acknowledged = false;
+  let lastSentResultText = '';
+  let consecutiveDupSent = 0;
+
+  return async (result: ContainerOutput) => {
+    if (result.result) {
+      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      if (text) {
+        // Acknowledge inbound messages on first output
+        if (!acknowledged && ctx.inboundMessageIds.length > 0) {
+          acknowledged = true;
+          ctx.onAcknowledge();
+        }
+        ctx.onProgress(text);
+
+        if (result.isProgress) {
+          handleProgressOutput(ctx, text);
+        } else {
+          const dedupKey = text.replace(/\s+/g, ' ').trim();
+          if (dedupKey === lastSentResultText) {
+            consecutiveDupSent++;
+          } else {
+            consecutiveDupSent = 0;
+            lastSentResultText = dedupKey;
+          }
+          if (consecutiveDupSent >= 2) {
+            logger.warn({ group: ctx.group.name, dupCount: consecutiveDupSent }, 'Suppressed duplicate result to chat');
+          } else {
+            await handleResultOutput(ctx, text);
+          }
+        }
+      }
+      ctx.resetIdleTimer();
+    }
+
+    if (result.status === 'success') {
+      queue.notifyIdle(ctx.chatJid);
+    }
+    if (result.status === 'error') {
+      ctx.onError();
+    }
+  };
+}
+
+function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
+  clearIdleIndicator(ctx.chatJid);
+  markProgress(ctx.chatJid, text);
+  const isToolCall = text.includes('<details>');
+  const now = Date.now();
+  if (isToolCall || !lastProgressChatAt[ctx.chatJid] || now - lastProgressChatAt[ctx.chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
+    if (!isToolCall) lastProgressChatAt[ctx.chatJid] = now;
+    const ch = findChannel(channels, ctx.chatJid);
+    if (ch) {
+      const formatted = isToolCall ? text : `<small><em>${text}</em></small>`;
+      void ch.sendMessage(ctx.chatJid, formatted, activeReplyThreadIds[ctx.chatJid]).then(() => {
+        bumpWorkingIndicator(ctx.chatJid, activeReplyThreadIds[ctx.chatJid]);
+      }).catch((err) => {
+        logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send progress to chat');
+      });
+    }
+  }
+}
+
+async function handleResultOutput(ctx: OutputHandlerContext, text: string): Promise<void> {
+  clearIdleIndicator(ctx.chatJid);
+  markProgress(ctx.chatJid, text);
+  const ch = findChannel(channels, ctx.chatJid);
+  if (ch) {
+    clearWorkingIndicator(ctx.chatJid);
+    if (ch.setTyping && !isThreadContext(ctx.chatJid)) await ch.setTyping(ctx.chatJid, true);
+    let sentEventId: string | undefined;
+    if (ch.sendMessageReturningId) {
+      sentEventId = await ch.sendMessageReturningId(ctx.chatJid, formatMainMessage(text), activeReplyThreadIds[ctx.chatJid]);
+    } else {
+      await ch.sendMessage(ctx.chatJid, formatMainMessage(text), activeReplyThreadIds[ctx.chatJid]);
+    }
+    if (ch.setTyping && !isThreadContext(ctx.chatJid)) await ch.setTyping(ctx.chatJid, false);
+    storeOutgoing(ctx.chatJid, formatMainMessage(text), activeReplyThreadIds[ctx.chatJid]);
+    if (sentEventId) {
+      const group = registeredGroups[ctx.chatJid];
+      if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
+    }
+  }
+  ctx.onOutputSent(text);
+  ctx.stopNudgeTimer();
+}
+
 // ── Process group messages ─────────────────────────────────────────────
 
 async function processGroupMessages(chatJid: string): Promise<boolean> {
@@ -476,14 +580,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'processing...');
   startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
-  const inboundMessageIds = filteredMessages.map((m) => m.id).filter(Boolean);
-  let acknowledged = false;
+  const inboundMessageIds = filteredMessages.map((m) => m.id).filter(Boolean) as string[];
   let hadError = false;
   let outputSentToUser = false;
   const agentResponses: string[] = [];
   let lastResponseBody: string | undefined;
-  let lastSentResultText = '';
-  let consecutiveDupSent = 0;
   let lastRunOutputAt = Date.now();
   let lastRunProgressNudgeAt = 0;
   let runProgressNudgeTimer: ReturnType<typeof setInterval> | null = null;
@@ -513,92 +614,36 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, RUN_PROGRESS_NUDGE_CHECK_MS);
   }
 
-  const runResult = await runAgent(group, prompt, chatJid, async (result) => {
-    if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      if (text) {
-        if (!acknowledged && inboundMessageIds.length > 0) {
-          acknowledged = true;
-          const ch = findChannel(channels, chatJid);
-          if (ch?.sendReaction) {
-            for (const msgId of inboundMessageIds) {
-              void ch.sendReaction(chatJid, msgId, '🔹').catch(() => { });
-            }
-          }
-        }
-        lastRunOutputAt = Date.now();
-        if (result.isProgress) {
-          clearIdleIndicator(chatJid);
-          markProgress(chatJid, text);
-          const isToolCall = text.includes('<details>');
-          const now = Date.now();
-          if (isToolCall || !lastProgressChatAt[chatJid] || now - lastProgressChatAt[chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
-            if (!isToolCall) lastProgressChatAt[chatJid] = now;
-            const ch = findChannel(channels, chatJid);
-            if (ch) {
-              const formatted = isToolCall
-                ? text
-                : `<small><em>${text}</em></small>`;
-              void ch.sendMessage(chatJid, formatted, activeReplyThreadIds[chatJid]).then(() => {
-                bumpWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
-              }).catch((err) => {
-                logger.warn({ chatJid, err }, 'Failed to send progress to chat');
-              });
-            }
-          }
-        } else {
-          const dedupKey = text.replace(/\s+/g, ' ').trim();
-          if (dedupKey === lastSentResultText) {
-            consecutiveDupSent++;
-          } else {
-            consecutiveDupSent = 0;
-            lastSentResultText = dedupKey;
-          }
-          if (consecutiveDupSent >= 2) {
-            logger.warn({ group: group.name, dupCount: consecutiveDupSent }, 'Suppressed duplicate result to chat');
-          } else {
-            clearIdleIndicator(chatJid);
-            markProgress(chatJid, text);
-            lastResponseBody = text;
-            const ch = findChannel(channels, chatJid);
-            if (ch) {
-              clearWorkingIndicator(chatJid);
-              if (ch.setTyping && !isThreadContext(chatJid)) await ch.setTyping(chatJid, true);
-              let sentEventId: string | undefined;
-              if (ch.sendMessageReturningId) {
-                sentEventId = await ch.sendMessageReturningId(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
-              } else {
-                await ch.sendMessage(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
-              }
-              if (ch.setTyping && !isThreadContext(chatJid)) await ch.setTyping(chatJid, false);
-              storeOutgoing(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
-              if (sentEventId) {
-                const group = registeredGroups[chatJid];
-                if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
-              }
-            }
-            outputSentToUser = true;
-            agentResponses.push(formatMainMessage(text));
-            // Bot delivered its answer — stop nudging
-            if (runProgressNudgeTimer) {
-              clearInterval(runProgressNudgeTimer);
-              runProgressNudgeTimer = null;
-            }
-          }
+  const outputHandler = createOutputHandler({
+    chatJid,
+    group,
+    inboundMessageIds,
+    onAcknowledge: () => {
+      const ch = findChannel(channels, chatJid);
+      if (ch?.sendReaction) {
+        for (const msgId of inboundMessageIds) {
+          void ch.sendReaction(chatJid, msgId, '🔹').catch(() => { });
         }
       }
-      resetIdleTimer();
-    }
-
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
-
-    if (result.status === 'error') {
-      hadError = true;
-    }
+    },
+    onOutputSent: (text) => {
+      outputSentToUser = true;
+      lastResponseBody = text;
+      agentResponses.push(formatMainMessage(text));
+    },
+    onError: () => { hadError = true; },
+    onProgress: () => { lastRunOutputAt = Date.now(); },
+    onCompletion: (text) => { lastResponseBody = text; },
+    stopNudgeTimer: () => {
+      if (runProgressNudgeTimer) {
+        clearInterval(runProgressNudgeTimer);
+        runProgressNudgeTimer = null;
+      }
+    },
+    resetIdleTimer,
   });
+
+  const runResult = await runAgent(group, prompt, chatJid, outputHandler);
 
   clearWorkingIndicator(chatJid);
   clearIdleIndicator(chatJid);
