@@ -511,7 +511,7 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
     logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized git_push attempt blocked');
     return;
   }
-  const chatJid = typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+  const chatJid = parseChatJid(data) ?? '';
   const remote = typeof data.remote === 'string' ? data.remote.trim() : 'origin';
   const branches = Array.isArray(data.branches) ? data.branches.map(String) : ['main'];
   const safeBranch = /^[a-zA-Z0-9._\-/]+$/;
