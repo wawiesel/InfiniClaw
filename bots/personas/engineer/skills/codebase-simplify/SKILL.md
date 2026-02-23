@@ -11,9 +11,7 @@ Systematically reduce complexity in the codebase using cyclomatic complexity ana
 
 Install lizard (first run only):
 ```bash
-~/.local/bin/pip3 install lizard --user --break-system-packages 2>/dev/null || \
-  (curl -sS https://bootstrap.pypa.io/get-pip.py | python3 - --user --break-system-packages && \
-   ~/.local/bin/pip3 install lizard --user --break-system-packages)
+pip3 install --user lizard
 ```
 
 ## Workflow
@@ -59,7 +57,7 @@ echo '{"type":"git_push","remote":"origin","branches":["main"]}' > /workspace/ip
 
 ```bash
 # Install lizard
-~/.local/bin/pip3 install lizard --user --break-system-packages
+pip3 install --user lizard
 
 # Find complex functions
 ~/.local/bin/lizard /workspace/extra/InfiniClaw/src/ -s cyclomatic_complexity 2>&1 | tail -30
@@ -73,5 +71,5 @@ cd /workspace/extra/InfiniClaw && npm run build
 git add <files> && git commit -m "simplify: ..."
 
 # Push via IPC
-echo '{"type":"git_push"}' > /workspace/ipc/tasks/git-push-$(date +%s).json
+echo '{"type":"git_push","remote":"origin","branches":["main"]}' > /workspace/ipc/tasks/git-push-$(date +%s).json
 ```

@@ -402,9 +402,6 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
   registeredGroups = groups;
 }
 
-// Re-export for backwards compatibility during refactor
-export { formatMessages } from 'nanoclaw/router.js';
-
 // ── Process group messages ─────────────────────────────────────────────
 
 async function processGroupMessages(chatJid: string): Promise<boolean> {
