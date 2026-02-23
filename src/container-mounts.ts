@@ -67,7 +67,7 @@ function loadPersonaConfig(rootDir: string, personaName: string): Record<string,
   return {};
 }
 
-function mountDirIfExists(
+function mountIfExists(
   mounts: VolumeMount[],
   hostPath: string,
   containerPath: string,
@@ -78,17 +78,8 @@ function mountDirIfExists(
   }
 }
 
-function mountFileIfExists(
-  mounts: VolumeMount[],
-  hostPath: string,
-  containerPath: string,
-  readonly: boolean,
-): void {
-  if (fs.existsSync(hostPath)) {
-    mounts.push({ hostPath, containerPath, readonly });
-  }
-}
-
+// TODO: This bidirectional sync contradicts one-way sync principle.
+// Should be persona → container only, with explicit save-back command.
 function syncMcpJson(groupsDir: string, groupFolder: string, personaBaseDir: string): void {
   const groupDir = path.join(groupsDir, groupFolder);
   const containerMcpJson = path.join(groupDir, '.mcp.json');
@@ -166,11 +157,11 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
   // Lock group CLAUDE.md read-only
   const groupClaudeMd = path.join(groupsDir, group.folder, 'CLAUDE.md');
-  mountFileIfExists(mounts, groupClaudeMd, '/workspace/group/CLAUDE.md', true);
+  mountIfExists(mounts, groupClaudeMd, '/workspace/group/CLAUDE.md', true);
 
   // Share host delegate auth directories
-  mountDirIfExists(mounts, path.join(homeDir, '.codex'), '/home/node/.codex', false);
-  mountDirIfExists(mounts, path.join(homeDir, '.gemini'), '/home/node/.gemini', false);
+  mountIfExists(mounts, path.join(homeDir, '.codex'), '/home/node/.codex', false);
+  mountIfExists(mounts, path.join(homeDir, '.gemini'), '/home/node/.gemini', false);
 
   // Per-group persistent cache
   const cacheDir = path.join(dataDir, 'cache', group.folder);
