@@ -112,32 +112,11 @@ function readTodoItems(folder: string): TodoItem[] {
     const todosDir = path.join(DATA_DIR, 'sessions', folder, '.claude', 'todos');
     if (!fs.existsSync(todosDir)) return [];
 
-    // Try current session first
     const sessionId = getSession(folder);
-    if (sessionId) {
-        const sessionFile = path.join(todosDir, `${sessionId}-agent-${sessionId}.json`);
-        const items = parseTodoFile(sessionFile);
-        if (items.length > 0) return items;
-    }
+    if (!sessionId) return [];
 
-    // Fallback: most recently modified non-empty file
-    let files: string[];
-    try {
-        files = fs.readdirSync(todosDir).filter(f => f.endsWith('.json'));
-    } catch {
-        return [];
-    }
-    if (files.length === 0) return [];
-
-    const withStats = files
-        .map(f => ({ file: path.join(todosDir, f), mtime: fs.statSync(path.join(todosDir, f)).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime);
-
-    for (const { file } of withStats) {
-        const items = parseTodoFile(file);
-        if (items.length > 0) return items;
-    }
-    return [];
+    const sessionFile = path.join(todosDir, `${sessionId}-agent-${sessionId}.json`);
+    return parseTodoFile(sessionFile);
 }
 
 function parseTodoFile(filePath: string): TodoItem[] {

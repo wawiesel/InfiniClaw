@@ -309,7 +309,7 @@ export async function runContainerAgent(
   const mcpServers = readGroupMcpServers(groupDir);
   const effectiveInput: ContainerInput & { disallowedTools?: string[] } = {
     ...input,
-    disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete'],
+    disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
     ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
     ...(mcpServers ? { mcpServers } : {}),
   };

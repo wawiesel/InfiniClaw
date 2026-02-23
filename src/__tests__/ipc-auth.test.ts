@@ -69,6 +69,7 @@ beforeEach(() => {
     syncGroupMetadata: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
+    writeLastEventId: () => {},
   };
 });
 

@@ -122,6 +122,19 @@ function isThreadContext(chatJid: string): boolean {
   return Boolean(activeReplyThreadIds[chatJid]);
 }
 
+function updateEventIdFile(groupFolder: string, key: 'lastSent' | 'lastReceived', eventId: string): void {
+  const idsFile = path.join(DATA_DIR, 'ipc', groupFolder, 'last_event_ids.json');
+  try {
+    let existing: Record<string, string> = {};
+    if (fs.existsSync(idsFile)) {
+      existing = JSON.parse(fs.readFileSync(idsFile, 'utf-8'));
+    }
+    existing[key] = eventId;
+    existing[`${key}At`] = new Date().toISOString();
+    fs.writeFileSync(idsFile, JSON.stringify(existing, null, 2));
+  } catch { /* best effort */ }
+}
+
 interface StatusIndicator {
   eventId: string;
   startedAt: number;
@@ -571,24 +584,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               }
               if (ch.setTyping && !isThreadContext(chatJid)) await ch.setTyping(chatJid, false);
               storeOutgoing(chatJid, formatMainMessage(text), activeReplyThreadIds[chatJid]);
-              // Write last sent event ID so containers can create threads off bot messages
               if (sentEventId) {
                 const group = registeredGroups[chatJid];
-                if (group) {
-                  const ipcDir = path.join(DATA_DIR, 'ipc', group.folder);
-                  const idsFile = path.join(ipcDir, 'last_event_ids.json');
-                  try {
-                    let existing: Record<string, string> = {};
-                    if (fs.existsSync(idsFile)) {
-                      existing = JSON.parse(fs.readFileSync(idsFile, 'utf-8'));
-                    }
-                    existing.lastSent = sentEventId;
-                    existing.lastSentAt = new Date().toISOString();
-                    fs.writeFileSync(idsFile, JSON.stringify(existing, null, 2));
-                  } catch {
-                    // best-effort
-                  }
-                }
+                if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
               }
             }
             outputSentToUser = true;
@@ -919,24 +917,9 @@ async function main(): Promise<void> {
         if (handleOperatorCommand(msg, matrix)) return;
         ensureGroupForIncomingChat(msg.chat_jid);
         storeMessage(msg);
-        // Write last received event ID to IPC dir so containers can create threads
         if (msg.id && msg.id.startsWith('$')) {
           const group = registeredGroups[msg.chat_jid];
-          if (group) {
-            const ipcDir = path.join(DATA_DIR, 'ipc', group.folder);
-            const idsFile = path.join(ipcDir, 'last_event_ids.json');
-            try {
-              let existing: Record<string, string> = {};
-              if (fs.existsSync(idsFile)) {
-                existing = JSON.parse(fs.readFileSync(idsFile, 'utf-8'));
-              }
-              existing.lastReceived = msg.id;
-              existing.lastReceivedAt = new Date().toISOString();
-              fs.writeFileSync(idsFile, JSON.stringify(existing, null, 2));
-            } catch {
-              // best-effort
-            }
-          }
+          if (group) updateEventIdFile(group.folder, 'lastReceived', msg.id);
         }
       },
       onChatMetadata: (chatJid, timestamp, name) => {
@@ -1161,6 +1144,7 @@ async function main(): Promise<void> {
     syncGroupMetadata: async () => { },
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    writeLastEventId: (sourceGroup, eventId) => updateEventIdFile(sourceGroup, 'lastSent', eventId),
   });
   queue.setProcessMessagesFn(processGroupMessages);
 

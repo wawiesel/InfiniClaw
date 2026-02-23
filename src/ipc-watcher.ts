@@ -34,6 +34,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  writeLastEventId: (sourceGroup: string, eventId: string) => void;
 }
 
 let ipcWatcherRunning = false;
@@ -64,7 +65,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
               : deps.defaultSenderForGroup(sourceGroup);
           const explicitThreadId = typeof data.threadId === 'string' ? data.threadId as string : undefined;
           const body = String(data.text);
-          const isDelegateHeader = body.includes('💭') && body.startsWith('<font');
+          // Delegate headers start with 💭 (plain text, not HTML)
+          const isDelegateHeader = body.startsWith('💭');
 
           // Auto-thread delegate output: create a new thread on the first delegate
           // message (the lobe header), then route all subsequent messages into it.
@@ -76,6 +78,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const eventId = await deps.sendMessageReturningId(data.chatJid as string, body, undefined);
             if (eventId) {
               delegateThreadIds[sourceGroup] = eventId;
+              // Write event ID back to IPC dir so container can poll for it
+              deps.writeLastEventId(sourceGroup, eventId);
               logger.info({ sourceGroup, eventId }, 'Delegate thread created');
             }
           } else {
