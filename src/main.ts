@@ -35,6 +35,7 @@ import {
   getNewMessages,
   getRecentMessages,
   getRouterState,
+  getSession,
   initDatabase,
   deleteRegisteredGroup,
   deleteSession,
@@ -1274,6 +1275,47 @@ async function main(): Promise<void> {
       logger.debug({ chatJid, group: group.name }, 'Sent periodic memory-save reminder');
     }
   }, MEMORY_SAVE_INTERVAL_MS);
+
+  // Periodic todo list enforcement (every 2 minutes)
+  const TODO_ENFORCE_INTERVAL_MS = 2 * 60 * 1000;
+  setInterval(() => {
+    for (const [chatJid, group] of Object.entries(registeredGroups)) {
+      const status = queue.getGroupStatus(chatJid);
+      if (!status.active || status.idleWaiting) continue;
+
+      // Read todo file
+      const todosDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'todos');
+      if (!fs.existsSync(todosDir)) {
+        injectSystemNotice(chatJid, '[System] TodoWrite reminder: Your todo list is empty. Please update it to reflect your current work.');
+        logger.debug({ chatJid, group: group.name }, 'Sent todo enforcement reminder (no todos dir)');
+        continue;
+      }
+
+      const sessionId = getSession(group.folder);
+      if (!sessionId) continue;
+
+      const sessionFile = path.join(todosDir, `${sessionId}-agent-${sessionId}.json`);
+      let hasInProgress = false;
+      try {
+        if (fs.existsSync(sessionFile)) {
+          const raw = fs.readFileSync(sessionFile, 'utf-8').trim();
+          if (raw && raw !== '[]') {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              hasInProgress = parsed.some((t: { status?: string }) => t.status === 'in_progress');
+            }
+          }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+
+      if (!hasInProgress) {
+        injectSystemNotice(chatJid, '[System] TodoWrite reminder: Your todo list has no in_progress items. Please update it to reflect what you are currently working on.');
+        logger.debug({ chatJid, group: group.name }, 'Sent todo enforcement reminder (no in_progress)');
+      }
+    }
+  }, TODO_ENFORCE_INTERVAL_MS);
 
   // Boot announcement
   const bootAnnounceTimer = setInterval(async () => {

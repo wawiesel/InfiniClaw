@@ -26,6 +26,11 @@ import {
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { statusMessage } from './formatting.js';
 
+// ── Restart cooldown tracking ───────────────────────────────────────────
+
+const RESTART_COOLDOWN_MS = 60_000; // 60 seconds
+const lastRestartTimes: Record<string, number> = {};
+
 // ── Interfaces ──────────────────────────────────────────────────────────
 
 export interface InfiniClawIpcContext {
@@ -263,6 +268,23 @@ async function handleRestartBot(data: CommandData, ctx: InfiniClawIpcContext): P
   }
   const bot = parseBot(data, 'engineer');
   const chatJid = parseChatJid(data);
+
+  // Restart cooldown check — prevent restart loops
+  const now = Date.now();
+  const lastRestart = lastRestartTimes[bot] || 0;
+  const elapsed = now - lastRestart;
+  if (elapsed < RESTART_COOLDOWN_MS) {
+    const remaining = Math.ceil((RESTART_COOLDOWN_MS - elapsed) / 1000);
+    logger.warn({ bot, elapsed, remaining }, 'Restart rejected — cooldown active');
+    if (chatJid) {
+      try {
+        await ctx.sendMessage(chatJid, `⏳ Restart cooldown: ${bot} was restarted ${Math.floor(elapsed / 1000)}s ago. Wait ${remaining}s before restarting again.`);
+      } catch {}
+    }
+    return;
+  }
+  lastRestartTimes[bot] = now;
+
   logger.info({ bot }, 'Restart requested via IPC — validating deploy');
 
   const { ok, errors } = await validateDeploy(bot);
