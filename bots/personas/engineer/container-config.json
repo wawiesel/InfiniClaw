@@ -1,5 +1,1 @@
-{
-  "additionalMounts": [
-    {"hostPath": "~/2026-Nanoclaw/InfiniClaw", "readonly": false}
-  ]
-}
+{}

@@ -4,7 +4,7 @@ import { parseEnvLine } from 'nanoclaw/env-utils.js';
 import { ASSISTANT_NAME, CAPTAIN_USER_ID, DATA_DIR } from 'nanoclaw/config.js';
 import { getAllRegisteredGroups, getSession } from 'nanoclaw/db.js';
 import { logger } from 'nanoclaw/logger.js';
-import { grantTemporaryMount, revokeMount } from 'nanoclaw/mount-security.js';
+import { grantMount, revokeMount } from './allow-list.js';
 import type { MatrixChannel } from './channels/matrix.js';
 
 export function getCaptainUserId(): string {
@@ -24,7 +24,8 @@ export function getCaptainUserId(): string {
 
 export function handleOperatorCommand(
     msg: { sender: string; content: string; chat_jid: string },
-    matrix: MatrixChannel | null
+    matrix: MatrixChannel | null,
+    notifyBot?: (chatJid: string, content: string) => void,
 ): boolean {
     const captainUserId = getCaptainUserId();
 
@@ -64,11 +65,13 @@ export function handleOperatorCommand(
         logger.info({ hostPath, duration }, '!allow command');
         void (async () => {
             try {
-                grantTemporaryMount(hostPath, true, duration, undefined, process.env.PERSONA_NAME);
+                grantMount(process.env.PERSONA_NAME!, hostPath, duration);
                 const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
+                const notice = `✅ Mount granted: ${hostPath} (read-write, expires ~${expiry})\nRestart required to pick up new mount.`;
                 if (matrix?.isConnected()) {
-                    await matrix.sendMessage(msg.chat_jid, `✅ Mount granted: ${hostPath} (read-write, expires ~${expiry})\nRestart required to pick up new mount.`);
+                    await matrix.sendMessage(msg.chat_jid, notice);
                 }
+                notifyBot?.(msg.chat_jid, notice);
             } catch (err) {
                 if (matrix?.isConnected()) {
                     await matrix.sendMessage(msg.chat_jid, `⛔ !allow failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -83,7 +86,7 @@ export function handleOperatorCommand(
         const hostPath = revoke[1];
         logger.info({ hostPath }, '!deny command');
         void (async () => {
-            const removed = revokeMount(hostPath);
+            const removed = revokeMount(process.env.PERSONA_NAME!, hostPath);
             if (matrix?.isConnected()) {
                 await matrix.sendMessage(msg.chat_jid, removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`);
             }

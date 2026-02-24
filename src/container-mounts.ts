@@ -9,7 +9,7 @@ import path from 'path';
 import { parseEnvLine } from 'nanoclaw/env-utils.js';
 import { logger } from 'nanoclaw/logger.js';
 import { loadSkillsToSession } from './skill-sync.js';
-import { validateAdditionalMounts } from 'nanoclaw/mount-security.js';
+import { mountsForBot } from './allow-list.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 
 interface VolumeMount {
@@ -55,18 +55,6 @@ export function buildBotDirectory(): Record<string, string> {
 
 // ── Helper functions ────────────────────────────────────────────────────
 
-function loadPersonaConfig(rootDir: string, personaName: string): Record<string, unknown> {
-  const personaConfigPath = path.join(rootDir, 'bots', 'personas', personaName, 'container-config.json');
-  try {
-    if (fs.existsSync(personaConfigPath)) {
-      return JSON.parse(fs.readFileSync(personaConfigPath, 'utf-8'));
-    }
-  } catch (err) {
-    logger.warn({ personaConfigPath, error: err }, 'Failed to load persona container config');
-  }
-  return {};
-}
-
 function mountIfExists(
   mounts: VolumeMount[],
   hostPath: string,
@@ -97,27 +85,6 @@ function syncMcpJson(groupsDir: string, groupFolder: string, personaBaseDir: str
   }
 }
 
-function addValidatedMounts(
-  mounts: VolumeMount[],
-  group: RegisteredGroup,
-  personaConfig: Record<string, unknown>,
-  isMain: boolean,
-): void {
-  const allAdditionalMounts = [
-    ...(group.containerConfig?.additionalMounts || []),
-    ...((personaConfig.additionalMounts as Array<{hostPath: string; containerPath?: string; readonly?: boolean}>) || []),
-  ];
-  if (allAdditionalMounts.length > 0) {
-    const validatedMounts = validateAdditionalMounts(
-      allAdditionalMounts,
-      group.name,
-      isMain,
-      process.env.PERSONA_NAME,
-    );
-    mounts.push(...validatedMounts);
-  }
-}
-
 // ── Main mount builder ──────────────────────────────────────────────────
 
 /**
@@ -131,11 +98,6 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
   const rootDir = process.env.INFINICLAW_ROOT;
   const personaName = process.env.PERSONA_NAME;
-
-  // Load persona container config
-  const personaConfig = rootDir && personaName
-    ? loadPersonaConfig(rootDir, personaName)
-    : {};
 
   // Sync skills and persona mounts
   const skillsDst = path.join(groupSessionsDir, 'skills');
@@ -175,8 +137,8 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
   // Read-only mirror of host home directory
   mounts.push({ hostPath: homeDir, containerPath: homeDir, readonly: true });
 
-  // Additional mounts from persona and group config
-  addValidatedMounts(mounts, group, personaConfig, isMain);
+  // Additional mounts from allow-list
+  if (personaName) mounts.push(...mountsForBot(personaName));
 
   return mounts;
 }

@@ -364,9 +364,68 @@ export class MatrixChannel implements Channel {
   private lastMessageEventId = new Map<string, string>();
   private lastBotEventId = new Map<string, string>();
 
+  // Rate-limiting send queue
+  private static readonly MIN_SEND_INTERVAL_MS = 500;
+  private _sendQueue: Array<() => Promise<void>> = [];
+  private _sendQueueRunning = false;
+  private _lastSendAt = 0;
+
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
     configureMatrixSdkLogger();
+  }
+
+  /**
+   * Queue a Matrix API call with minimum spacing between sends.
+   * Retries once on 429 (rate limit) using the server's retry_after_ms.
+   */
+  private enqueueSend<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this._sendQueue.push(async () => {
+        try {
+          resolve(await fn());
+        } catch (err) {
+          // Retry once on rate limit
+          const retryMs = this.extractRetryAfterMs(err);
+          if (retryMs !== undefined) {
+            logger.debug({ retryMs }, 'Matrix 429, retrying after delay');
+            await new Promise(r => setTimeout(r, retryMs));
+            try {
+              resolve(await fn());
+            } catch (retryErr) {
+              reject(retryErr);
+            }
+          } else {
+            reject(err);
+          }
+        }
+      });
+      void this.drainSendQueue();
+    });
+  }
+
+  private extractRetryAfterMs(err: unknown): number | undefined {
+    if (!err || typeof err !== 'object') return undefined;
+    const record = err as Record<string, unknown>;
+    const body = record.body as Record<string, unknown> | undefined;
+    const errcode = body?.errcode ?? record.errcode;
+    if (errcode !== 'M_LIMIT_EXCEEDED') return undefined;
+    const ms = body?.retry_after_ms ?? record.retry_after_ms;
+    return typeof ms === 'number' ? ms : 3000;
+  }
+
+  private async drainSendQueue(): Promise<void> {
+    if (this._sendQueueRunning) return;
+    this._sendQueueRunning = true;
+    while (this._sendQueue.length > 0) {
+      const elapsed = Date.now() - this._lastSendAt;
+      const wait = MatrixChannel.MIN_SEND_INTERVAL_MS - elapsed;
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      const task = this._sendQueue.shift()!;
+      this._lastSendAt = Date.now();
+      await task();
+    }
+    this._sendQueueRunning = false;
   }
 
   private readStored(
@@ -796,13 +855,15 @@ export class MatrixChannel implements Channel {
       };
     }
 
-    const eventId = await withTimeout(
-      this.client.sendMessage(roomId, msgContent),
-      MATRIX_SEND_TIMEOUT_MS,
-      'sendMessage',
-    );
-    if (eventId) this.lastBotEventId.set(roomId, eventId);
-    return eventId;
+    return this.enqueueSend(async () => {
+      const eventId = await withTimeout(
+        this.client!.sendMessage(roomId, msgContent),
+        MATRIX_SEND_TIMEOUT_MS,
+        'sendMessage',
+      );
+      if (eventId) this.lastBotEventId.set(roomId, eventId);
+      return eventId;
+    });
   }
 
   async sendMessage(jid: string, text: string, threadId?: string): Promise<void> {
@@ -827,11 +888,11 @@ export class MatrixChannel implements Channel {
           key: emoji,
         },
       };
-      await withTimeout(
-        this.client.sendEvent(roomId, 'm.reaction', content),
+      await this.enqueueSend(() => withTimeout(
+        this.client!.sendEvent(roomId, 'm.reaction', content),
         MATRIX_SEND_TIMEOUT_MS,
         'sendReaction',
-      );
+      ));
     } catch (err) {
       if (this.isAuthFailure(err)) {
         this.markDisconnected('Matrix auth failed while sending reaction', err);
@@ -871,11 +932,11 @@ export class MatrixChannel implements Channel {
           event_id: eventId,
         },
       };
-      await withTimeout(
-        this.client.sendMessage(roomId, content),
+      await this.enqueueSend(() => withTimeout(
+        this.client!.sendMessage(roomId, content),
         MATRIX_SEND_TIMEOUT_MS,
         'editMessage',
-      );
+      ));
     } catch (err) {
       logger.warn({ jid, eventId, err }, 'Failed to edit Matrix message');
     }
@@ -885,11 +946,11 @@ export class MatrixChannel implements Channel {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);
     try {
-      await withTimeout(
-        this.client.redactEvent(roomId, eventId),
+      await this.enqueueSend(() => withTimeout(
+        this.client!.redactEvent(roomId, eventId),
         MATRIX_SEND_TIMEOUT_MS,
         'redactMessage',
-      );
+      ));
     } catch (err) {
       logger.warn({ jid, eventId, err }, 'Failed to redact Matrix message');
     }
@@ -933,11 +994,11 @@ export class MatrixChannel implements Channel {
     const roomId = toRoomId(jid);
     try {
       logger.info({ filename, mimetype, size: buffer.length }, 'Uploading image to Matrix');
-      const mxcUrl = await withTimeout(
-        this.client.uploadContent(buffer, mimetype, filename),
+      const mxcUrl = await this.enqueueSend(() => withTimeout(
+        this.client!.uploadContent(buffer, mimetype, filename),
         MATRIX_SEND_TIMEOUT_MS,
         'uploadContent(image)',
-      );
+      ));
       logger.info({ mxcUrl, filename }, 'Image uploaded, sending to room');
       const effectiveFilename = filename?.trim()
         ? filename.trim()
@@ -970,11 +1031,11 @@ export class MatrixChannel implements Channel {
         url: mxcUrl,
         info,
       };
-      const imgEventId = await withTimeout(
-        this.client.sendMessage(roomId, content),
+      const imgEventId = await this.enqueueSend(() => withTimeout(
+        this.client!.sendMessage(roomId, content),
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage(image)',
-      );
+      ));
       if (imgEventId) this.lastBotEventId.set(roomId, imgEventId);
       if (caption && caption.trim()) {
         await this.sendMessage(jid, caption.trim());
@@ -993,11 +1054,11 @@ export class MatrixChannel implements Channel {
     const roomId = toRoomId(jid);
     try {
       logger.info({ filename, mimetype, size: buffer.length }, 'Uploading file to Matrix');
-      const mxcUrl = await withTimeout(
-        this.client.uploadContent(buffer, mimetype, filename),
+      const mxcUrl = await this.enqueueSend(() => withTimeout(
+        this.client!.uploadContent(buffer, mimetype, filename),
         MATRIX_SEND_TIMEOUT_MS,
         'uploadContent(file)',
-      );
+      ));
       logger.info({ mxcUrl, filename }, 'File uploaded, sending to room');
       const effectiveFilename = filename?.trim()
         ? filename.trim()
@@ -1012,11 +1073,11 @@ export class MatrixChannel implements Channel {
           size: buffer.length,
         },
       };
-      const fileEventId = await withTimeout(
-        this.client.sendMessage(roomId, content),
+      const fileEventId = await this.enqueueSend(() => withTimeout(
+        this.client!.sendMessage(roomId, content),
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage(file)',
-      );
+      ));
       if (fileEventId) this.lastBotEventId.set(roomId, fileEventId);
       if (caption && caption.trim()) {
         await this.sendMessage(jid, caption.trim());

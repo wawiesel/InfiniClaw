@@ -549,15 +549,6 @@ export function stopBot(bot: string): void {
   unloadPlist(plistPath(bot));
 }
 
-export function installAllowlist(root: string): void {
-  const dir = path.join(os.homedir(), '.config', 'nanoclaw');
-  const file = path.join(dir, 'mount-allowlist.json');
-  if (fs.existsSync(file)) return;
-  fs.mkdirSync(dir, { recursive: true });
-  fs.copyFileSync(path.join(root, 'bots', 'config', 'mount-allowlist.json'), file);
-  console.log(`Installed mount allowlist: ${file}`);
-}
-
 // ── Top-level commands ─────────────────────────────────────────────────
 
 export function start(): void {
@@ -567,7 +558,6 @@ export function start(): void {
   fs.mkdirSync(logs, { recursive: true });
 
   ensurePodmanReady();
-  installAllowlist(root);
 
   // Unload all services first so old code stops before we build
   for (const bot of BOTS) { unloadPlist(plistPath(bot)); }

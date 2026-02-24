@@ -15,10 +15,13 @@
 - **Why:** The underlying NanoClaw framework receives upstream bug fixes and features. We must stay current without breaking InfiniClaw's custom IPC, UI, and Matrix layers.
 - **How:** Document and automate a clean workflow (e.g., `git subtree pull` or rebasing) that safely integrates upstream changes.
 
-## Priority 1: Engineer vault access gap (config task)
-- **Problem:** Engineer can reach `~/_vault` via `/workspace/extra/home/_vault` — a direct host path that bypasses the mount allowlist entirely. The allowlist correctly scopes `_vault` to `commander` only, but `/workspace/extra/` is mounted without those restrictions.
-- **Fix:** Either remove `/workspace/extra/` from engineer's container mounts, or make the agent-runner enforce allowlist rules against the `/workspace/extra/` tree the same way it does for standard mounts. Engineer should have no write access to the vault under any path.
-- **Note:** This is a host-side container config fix, not a code change.
+## ~~Priority 1: Engineer vault access gap~~ ✅
+- **Fixed:** Added `"bots": ["commander"]` to the `_vault` allowlist entry and `"bots": ["engineer"]` to the InfiniClaw entry in `~/.config/nanoclaw/mount-allowlist.json`. The `findAllowedRoot` function skips entries when `root.bots` is set and the current bot isn't listed, so the engineer cannot mount `_vault` rw even if someone adds it to the engineer's `container-config.json`.
+
+## Priority 2: InfiniClaw Config System
+- **What:** Create an InfiniClaw-specific config directory (`~/.config/infiniclaw/`) independent of nanoclaw's `~/.config/nanoclaw/`.
+- **Why:** InfiniClaw config is scattered across mount allowlist (nanoclaw config dir), bot secrets (bots/profiles), container config (bots/personas), and launchd plists. The allowlist path is hardcoded in nanoclaw's config.ts. InfiniClaw needs its own config namespace.
+- **How:** Make nanoclaw's allowlist path configurable (env var or constructor param), move `mount-allowlist.json` to `~/.config/infiniclaw/`, and consolidate other InfiniClaw-specific config there.
 
 ## Priority 2: Restore Holodeck
 - **What:** Add back the Holodeck functionality.

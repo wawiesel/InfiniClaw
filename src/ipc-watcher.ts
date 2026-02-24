@@ -57,7 +57,10 @@ async function handleTextMessage(
 ): Promise<void> {
   const registeredGroups = deps.registeredGroups();
   const targetGroup = registeredGroups[data.chatJid];
-  const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup);
+  // Allow if: main group, own registered group, or cross-bot message (any Matrix JID)
+  // Cross-bot messages are validated by the MCP server before reaching here
+  const isCrossBotTarget = data.chatJid.startsWith('matrix:');
+  const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup) || isCrossBotTarget;
 
   if (!authorized) {
     logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Unauthorized IPC message attempt blocked');

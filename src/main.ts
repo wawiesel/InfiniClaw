@@ -59,7 +59,7 @@ import {
   writeAgentSnapshots,
   wrapOnOutputForSession,
 } from 'nanoclaw/composables.js';
-import { grantTemporaryMount, revokeMount } from 'nanoclaw/mount-security.js';
+import { pruneExpired } from './allow-list.js';
 import { MatrixChannel } from './channels/matrix.js';
 import { LocalCliChannel } from './channels/local-cli.js';
 import { findChannel, formatMessages, stripInternalTags } from 'nanoclaw/router.js';
@@ -881,6 +881,20 @@ async function startMessageLoop(): Promise<void> {
   }
 }
 
+// ── System notifications ───────────────────────────────────────────────
+
+function injectSystemNotice(chatJid: string, content: string): void {
+  storeMessage({
+    id: `system-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    chat_jid: chatJid,
+    sender: 'system',
+    sender_name: 'System',
+    content,
+    timestamp: new Date().toISOString(),
+  });
+  queue.enqueueMessageCheck(chatJid);
+}
+
 // ── Recovery & resume ──────────────────────────────────────────────────
 
 function injectResumeMessage(): void {
@@ -963,7 +977,7 @@ async function main(): Promise<void> {
   ) {
     matrix = new MatrixChannel({
       onMessage: (_chatJid, msg) => {
-        if (handleOperatorCommand(msg, matrix)) return;
+        if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
         storeMessage(msg);
         if (msg.id && msg.id.startsWith('$')) {
           const group = registeredGroups[msg.chat_jid];
@@ -981,7 +995,7 @@ async function main(): Promise<void> {
   if (LOCAL_CHANNEL_ENABLED) {
     localCli = new LocalCliChannel({
       onMessage: (_chatJid, msg) => {
-        if (handleOperatorCommand(msg, matrix)) return;
+        if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
         storeMessage(msg);
       },
       onChatMetadata: (chatJid, timestamp, name) =>
@@ -1086,6 +1100,12 @@ async function main(): Promise<void> {
     }
   }, MEMORY_CHECK_INTERVAL);
   try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { }
+
+  // Prune expired allow-list entries every 5 minutes
+  setInterval(() => {
+    const count = pruneExpired();
+    if (count > 0) logger.info({ count }, 'Pruned expired allow-list entries');
+  }, 5 * 60 * 1000);
 
   // Periodic status snapshot
   const STATUS_SNAPSHOT_INTERVAL = 30_000;

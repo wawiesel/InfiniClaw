@@ -1,7 +1,1 @@
-{
-  "additionalMounts": [
-    {"hostPath": "~/_vault", "readonly": false},
-    {"hostPath": "~/2026-Nanoclaw/InfiniClaw/bots/profiles/commander", "readonly": false}
-  ],
-  "portPublish": ["9000:8000"]
-}
+{ "portPublish": ["9000:8000"] }
