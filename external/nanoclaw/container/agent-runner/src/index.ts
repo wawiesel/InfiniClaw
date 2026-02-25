@@ -19,6 +19,21 @@ import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+import {
+  MAIN_MODEL_ENV_KEY,
+  MAIN_DELEGATE_POLICY,
+  getRequestedMainModel,
+  modelMatchesRequest,
+  isOllamaAnthropicBaseUrl,
+} from './model-selection.js';
+import {
+  SANITIZE_PREFIX,
+  TOOL_PROGRESS_EMIT_MS,
+  GENERAL_PROGRESS_DEDUPE_MS,
+  createToolProgressHook,
+  createBlockBuiltinToolsHook,
+} from './progress.js';
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -26,8 +41,9 @@ interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
-  assistantName?: string;
   secrets?: Record<string, string>;
+  mcpServers?: Record<string, Record<string, unknown>>;
+  disallowedTools?: string[];
 }
 
 interface ContainerOutput {
@@ -35,6 +51,8 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  isProgress?: boolean;
+  model?: string;
 }
 
 interface SessionEntry {
@@ -57,7 +75,96 @@ interface SDKUserMessage {
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+const IPC_SENT_TEXTS_FILE = '/workspace/ipc/.sent_texts'; // Legacy — kept for file cleanup only
 const IPC_POLL_MS = 500;
+const SESSION_MAX_BYTES = 2 * 1024 * 1024; // 2 MB — rotate session when transcript exceeds this
+const SESSIONS_PROJECT_DIR = path.join(
+  process.env.HOME || '/home/node',
+  '.claude', 'projects', '-workspace-group',
+);
+const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
+const SDK_PROCESS_ENV_KEYS = [
+  'ASSISTANT_NAME',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'NANOCLAW_SKIP_TOKEN_COUNTING',
+  'NANOCLAW_CONTEXT_WINDOW',
+  'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+  'INFINICLAW_ROOT',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'SSL_CERT_FILE',
+  'NODE_EXTRA_CA_CERTS',
+  'REQUESTS_CA_BUNDLE',
+  'CURL_CA_BUNDLE',
+  'GIT_SSL_CAINFO',
+  'NODE_TLS_REJECT_UNAUTHORIZED',
+] as const;
+const DEFAULT_ALLOWED_TOOLS = [
+  'Bash',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'WebSearch',
+  'WebFetch',
+  'Task',
+  'TaskOutput',
+  'TaskStop',
+  'TodoWrite',
+  'ToolSearch',
+  'Skill',
+  'NotebookEdit',
+  'mcp__*',
+] as const;
+
+// MAIN can do direct exploratory work, then delegate scale-out.
+const MAIN_ALLOWED_TOOLS = DEFAULT_ALLOWED_TOOLS;
+
+function getAllowedTools(isMainGroup: boolean): readonly string[] {
+  return isMainGroup ? MAIN_ALLOWED_TOOLS : DEFAULT_ALLOWED_TOOLS;
+}
+
+function prependToPath(currentPath: string | undefined, prefix: string): string {
+  if (!currentPath || currentPath.trim().length === 0) return prefix;
+  const parts = currentPath.split(path.delimiter);
+  if (parts.includes(prefix)) return currentPath;
+  return `${prefix}${path.delimiter}${currentPath}`;
+}
+
+function applySdkProcessEnv(
+  sdkEnv: Record<string, string | undefined>,
+): () => void {
+  const previous: Record<string, string | undefined> = {};
+  for (const key of SDK_PROCESS_ENV_KEYS) {
+    previous[key] = process.env[key];
+    const next = sdkEnv[key];
+    if (typeof next === 'string' && next.length > 0) {
+      process.env[key] = next;
+    } else {
+      delete process.env[key];
+    }
+  }
+
+  return () => {
+    for (const key of SDK_PROCESS_ENV_KEYS) {
+      const prior = previous[key];
+      if (typeof prior === 'string') {
+        process.env[key] = prior;
+      } else {
+        delete process.env[key];
+      }
+    }
+  };
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -143,7 +250,7 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
 /**
  * Archive the full transcript to conversations/ before compaction.
  */
-function createPreCompactHook(assistantName?: string): HookCallback {
+function createPreCompactHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preCompact = input as PreCompactHookInput;
     const transcriptPath = preCompact.transcript_path;
@@ -173,7 +280,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const filename = `${date}-${name}.md`;
       const filePath = path.join(conversationsDir, filename);
 
-      const markdown = formatTranscriptMarkdown(messages, summary, assistantName);
+      const markdown = formatTranscriptMarkdown(messages, summary);
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
@@ -185,24 +292,18 @@ function createPreCompactHook(assistantName?: string): HookCallback {
   };
 }
 
-// Secrets to strip from Bash tool subprocess environments.
-// These are needed by claude-code for API auth but should never
-// be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
-
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preInput = input as PreToolUseHookInput;
     const command = (preInput.tool_input as { command?: string })?.command;
     if (!command) return {};
 
-    const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         updatedInput: {
           ...(preInput.tool_input as Record<string, unknown>),
-          command: unsetPrefix + command,
+          command: SANITIZE_PREFIX + command,
         },
       },
     };
@@ -253,7 +354,7 @@ function parseTranscript(content: string): ParsedMessage[] {
   return messages;
 }
 
-function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null, assistantName?: string): string {
+function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {
   const now = new Date();
   const formatDateTime = (d: Date) => d.toLocaleString('en-US', {
     month: 'short',
@@ -272,7 +373,7 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
   lines.push('');
 
   for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : (assistantName || 'Assistant');
+    const sender = msg.role === 'user' ? 'User' : 'Andy';
     const content = msg.content.length > 2000
       ? msg.content.slice(0, 2000) + '...'
       : msg.content;
@@ -333,13 +434,15 @@ function drainIpcInput(): string[] {
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     const poll = () => {
-      if (shouldClose()) {
-        resolve(null);
-        return;
-      }
+      // Drain messages BEFORE checking close sentinel so pre-close
+      // injected messages (e.g. memory-save prompts) are not lost.
       const messages = drainIpcInput();
       if (messages.length > 0) {
         resolve(messages.join('\n'));
+        return;
+      }
+      if (shouldClose()) {
+        resolve(null);
         return;
       }
       setTimeout(poll, IPC_POLL_MS);
@@ -365,9 +468,15 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
+  // Clean up legacy sent-texts file
+  try { fs.unlinkSync(IPC_SENT_TEXTS_FILE); } catch {}
+
+  // Poll IPC during the query. IPC messages are only piped into the stream
+  // when the SDK is idle (after a result), not mid-tool-call — pushing user
+  // messages while a tool call is in-flight hangs the SDK.
   let ipcPolling = true;
   let closedDuringQuery = false;
+  let betweenTurns = false;
   const pollIpcDuringQuery = () => {
     if (!ipcPolling) return;
     if (shouldClose()) {
@@ -377,10 +486,13 @@ async function runQuery(
       ipcPolling = false;
       return;
     }
-    const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+    if (betweenTurns) {
+      const messages = drainIpcInput();
+      for (const text of messages) {
+        log(`Piping IPC message into stream (${text.length} chars)`);
+        stream.push(text);
+        betweenTurns = false;
+      }
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -390,6 +502,8 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let consecutiveDupResults = 0;
+  let lastResultText = '';
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -398,91 +512,189 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
-  const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
-    for (const entry of fs.readdirSync(extraBase)) {
-      const fullPath = path.join(extraBase, entry);
-      if (fs.statSync(fullPath).isDirectory()) {
-        extraDirs.push(fullPath);
-      }
-    }
+  // Extra directories under /workspace/extra/ are mounted for file access only.
+  // CLAUDE.md is loaded exclusively from /workspace/group/ — no additional directories.
+
+  const anthropicBaseUrl = sdkEnv.ANTHROPIC_BASE_URL;
+  const configuredMainModel = getRequestedMainModel(sdkEnv);
+  const mainIsClaude =
+    containerInput.isMain && !isOllamaAnthropicBaseUrl(anthropicBaseUrl);
+  if (mainIsClaude && !configuredMainModel) {
+    throw new Error(
+      `${MAIN_MODEL_ENV_KEY} is required for MAIN Claude runs`,
+    );
   }
-  if (extraDirs.length > 0) {
-    log(`Additional directories: ${extraDirs.join(', ')}`);
+  const mainModel = mainIsClaude ? configuredMainModel : undefined;
+
+  const lastToolProgressAt = new Map<string, number>();
+  let lastProgressText = '';
+  let lastProgressAt = 0;
+  const emitProgress = (text: string): void => {
+    const cleaned = text.replace(/\r/g, '').trim();
+    if (!cleaned) return;
+    // Normalize whitespace only for dedup comparison
+    const dedup = cleaned.replace(/\s+/g, ' ');
+    const now = Date.now();
+    if (
+      dedup === lastProgressText &&
+      now - lastProgressAt < GENERAL_PROGRESS_DEDUPE_MS
+    ) {
+      return;
+    }
+    lastProgressText = dedup;
+    lastProgressAt = now;
+    writeOutput({
+      status: 'success',
+      result: cleaned,
+      isProgress: true,
+      newSessionId,
+      model: mainModel,
+    });
+  };
+
+  // Debug: write MCP config to file for diagnosis
+  try {
+    const debugInfo = {
+      hasMcpServers: !!containerInput.mcpServers,
+      mcpServerKeys: containerInput.mcpServers ? Object.keys(containerInput.mcpServers) : [],
+      mcpServersRaw: containerInput.mcpServers || {},
+    };
+    fs.writeFileSync('/workspace/group/mcp-debug.json', JSON.stringify(debugInfo, null, 2));
+    log(`MCP debug written: ${JSON.stringify(debugInfo.mcpServerKeys)}`);
+  } catch (e) {
+    log(`Failed to write MCP debug: ${e}`);
   }
 
-  for await (const message of query({
-    prompt: stream,
-    options: {
-      cwd: '/workspace/group',
-      additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
-      resume: sessionId,
-      resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*'
-      ],
-      env: sdkEnv,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+  const restoreSdkProcessEnv = applySdkProcessEnv(sdkEnv);
+  try {
+    for await (const message of query({
+      prompt: stream,
+      options: {
+        cwd: '/workspace/group',
+        additionalDirectories: undefined,
+        resume: sessionId,
+        resumeSessionAt: resumeAt,
+        systemPrompt: globalClaudeMd
+          ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+          : undefined,
+        model: mainModel,
+        allowedTools: [...getAllowedTools(containerInput.isMain)],
+        ...(containerInput.disallowedTools?.length ? { disallowedTools: containerInput.disallowedTools } : {}),
+        env: sdkEnv,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        settingSources: ['project', 'user'],
+        mcpServers: {
+          ...(containerInput.mcpServers || {}),
+          nanoclaw: {
+            command: 'node',
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+              ...(sdkEnv.ASSISTANT_NAME
+                ? { NANOCLAW_ASSISTANT_NAME: sdkEnv.ASSISTANT_NAME }
+                : {}),
+              ...(sdkEnv.HTTP_PROXY
+                ? { HTTP_PROXY: sdkEnv.HTTP_PROXY }
+                : {}),
+              ...(sdkEnv.HTTPS_PROXY
+                ? { HTTPS_PROXY: sdkEnv.HTTPS_PROXY }
+                : {}),
+              ...(sdkEnv.ALL_PROXY ? { ALL_PROXY: sdkEnv.ALL_PROXY } : {}),
+              ...(sdkEnv.NO_PROXY ? { NO_PROXY: sdkEnv.NO_PROXY } : {}),
+              ...(sdkEnv.SSL_CERT_FILE
+                ? { SSL_CERT_FILE: sdkEnv.SSL_CERT_FILE }
+                : {}),
+              ...(sdkEnv.NODE_EXTRA_CA_CERTS
+                ? { NODE_EXTRA_CA_CERTS: sdkEnv.NODE_EXTRA_CA_CERTS }
+                : {}),
+              ...(sdkEnv.REQUESTS_CA_BUNDLE
+                ? { REQUESTS_CA_BUNDLE: sdkEnv.REQUESTS_CA_BUNDLE }
+                : {}),
+              ...(sdkEnv.CURL_CA_BUNDLE
+                ? { CURL_CA_BUNDLE: sdkEnv.CURL_CA_BUNDLE }
+                : {}),
+              ...(sdkEnv.GIT_SSL_CAINFO
+                ? { GIT_SSL_CAINFO: sdkEnv.GIT_SSL_CAINFO }
+                : {}),
+              ...(sdkEnv.INFINICLAW_ROOT
+                ? { INFINICLAW_ROOT: sdkEnv.INFINICLAW_ROOT }
+                : {}),
+              ...(sdkEnv.NODE_TLS_REJECT_UNAUTHORIZED
+                ? {
+                    NODE_TLS_REJECT_UNAUTHORIZED:
+                      sdkEnv.NODE_TLS_REJECT_UNAUTHORIZED,
+                  }
+                : {}),
+              ...(sdkEnv.NANOCLAW_DB_PATH
+                ? { NANOCLAW_DB_PATH: sdkEnv.NANOCLAW_DB_PATH }
+                : {}),
+            },
           },
         },
-      },
-      hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
-      },
-    }
-  })) {
-    messageCount++;
-    const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
-    log(`[msg #${messageCount}] type=${msgType}`);
+        hooks: {
+          PreCompact: [{ hooks: [createPreCompactHook()] }],
+          PreToolUse: [
+            { hooks: [createBlockBuiltinToolsHook()] },
+            { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
+          ],
+          PostToolUse: [{ hooks: [createToolProgressHook(emitProgress)] }],
+        },
+      }
+    })) {
+      messageCount++;
+      const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
+      log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
-    }
+      if (message.type === 'assistant' && 'uuid' in message) {
+        lastAssistantUuid = (message as { uuid: string }).uuid;
+        betweenTurns = false; // Tool call starting — don't pipe IPC messages
+      }
 
-    if (message.type === 'system' && message.subtype === 'init') {
-      newSessionId = message.session_id;
-      log(`Session initialized: ${newSessionId}`);
-    }
+      // Assistant text is NOT emitted as progress — it arrives via the SDK's
+      // result event and gets delivered to chat by the host as the final response.
+      // Only tool-related progress is streamed.
 
-    if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-      const tn = message as { task_id: string; status: string; summary: string };
-      log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
-    }
+      if (message.type === 'system' && message.subtype === 'init') {
+        newSessionId = message.session_id;
+        log(`Session initialized: ${newSessionId}`);
+      }
 
-    if (message.type === 'result') {
-      resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
-      });
+      if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
+        const tn = message as { task_id: string; status: string; summary: string };
+        log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+      }
+
+      if (message.type === 'result') {
+        resultCount++;
+        const textResult = 'result' in message ? (message as { result?: string }).result : null;
+        log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+
+        // Dedup consecutive identical results (e.g. agent stuck repeating "Done. Awaiting orders.")
+        const normalized = (textResult || '').replace(/\s+/g, ' ').trim();
+        if (normalized && normalized === lastResultText) {
+          consecutiveDupResults++;
+          if (consecutiveDupResults >= 3) {
+            log(`Suppressed duplicate result #${consecutiveDupResults}: ${normalized.slice(0, 100)}`);
+            continue;
+          }
+        } else {
+          consecutiveDupResults = 0;
+          if (normalized) lastResultText = normalized;
+        }
+
+        writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId
+        });
+        betweenTurns = true; // Result delivered — safe to pipe IPC messages
+      }
     }
+  } finally {
+    restoreSdkProcessEnv();
   }
 
   ipcPolling = false;
@@ -514,6 +726,9 @@ async function main(): Promise<void> {
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
   }
+  if (EXTRA_PATH_PREPEND.trim().length > 0) {
+    sdkEnv.PATH = prependToPath(sdkEnv.PATH, EXTRA_PATH_PREPEND);
+  }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
@@ -521,11 +736,28 @@ async function main(): Promise<void> {
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
+  // Auto-rotate bloated sessions — start fresh with summary carried forward
+  let sessionSummary: string | undefined;
+  if (sessionId) {
+    const sessFile = path.join(SESSIONS_PROJECT_DIR, `${sessionId}.jsonl`);
+    try {
+      const size = fs.statSync(sessFile).size;
+      if (size > SESSION_MAX_BYTES) {
+        log(`Session ${sessionId} is ${(size / 1024 / 1024).toFixed(1)} MB (limit ${SESSION_MAX_BYTES / 1024 / 1024} MB), rotating`);
+        sessionSummary = getSessionSummary(sessionId, sessFile) || undefined;
+        sessionId = undefined;
+      }
+    } catch { /* file doesn't exist — session will start fresh anyway */ }
+  }
+
   // Clean up stale _close sentinel from previous container runs
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
+  if (sessionSummary) {
+    prompt = `[Previous session summary]\n${sessionSummary}\n\n${prompt}`;
+  }
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
@@ -535,13 +767,27 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
-  // Query loop: run query → wait for IPC message → run new query → repeat
+  // Query loop: run query -> wait for IPC message -> run new query -> repeat
   let resumeAt: string | undefined;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      let queryResult;
+      try {
+        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      } catch (resumeErr) {
+        // If resuming an existing session fails (e.g. missing transcript), start fresh
+        if (sessionId) {
+          const msg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
+          log(`Session resume failed (${msg}), retrying with fresh session...`);
+          sessionId = undefined;
+          resumeAt = undefined;
+          queryResult = await runQuery(prompt, undefined, mcpServerPath, containerInput, sdkEnv, undefined);
+        } else {
+          throw resumeErr;
+        }
+      }
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -575,10 +821,13 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+    // Don't output newSessionId here — runQuery threw before returning,
+    // so sessionId is still the ORIGINAL (possibly corrupted) value.
+    // Any valid session established during the query was already saved
+    // by the host's streaming output handler.
     writeOutput({
       status: 'error',
       result: null,
-      newSessionId: sessionId,
       error: errorMessage
     });
     process.exit(1);

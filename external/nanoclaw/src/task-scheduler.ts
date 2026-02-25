@@ -1,28 +1,24 @@
 import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
+import path from 'path';
 
 import {
-  ASSISTANT_NAME,
+  GROUPS_DIR,
+  IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
-import {
-  ContainerOutput,
-  runContainerAgent,
-  writeTasksSnapshot,
-} from './container-runner.js';
+import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './container-runner.js';
 import {
   getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
-  updateTask,
   updateTaskAfterRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
@@ -30,12 +26,7 @@ export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (
-    groupJid: string,
-    proc: ChildProcess,
-    containerName: string,
-    groupFolder: string,
-  ) => void;
+  onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
@@ -44,27 +35,7 @@ async function runTask(
   deps: SchedulerDependencies,
 ): Promise<void> {
   const startTime = Date.now();
-  let groupDir: string;
-  try {
-    groupDir = resolveGroupFolderPath(task.group_folder);
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
-    // Stop retry churn for malformed legacy rows.
-    updateTask(task.id, { status: 'paused' });
-    logger.error(
-      { taskId: task.id, groupFolder: task.group_folder, error },
-      'Task has invalid group folder',
-    );
-    logTaskRun({
-      task_id: task.id,
-      run_at: new Date().toISOString(),
-      duration_ms: Date.now() - startTime,
-      status: 'error',
-      result: null,
-      error,
-    });
-    return;
-  }
+  const groupDir = path.join(GROUPS_DIR, task.group_folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
   logger.info(
@@ -142,14 +113,14 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
         isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
-        if (streamedOutput.result) {
+        if (streamedOutput.result && streamedOutput.isProgress) {
+          // Forward progress (tool calls) to chat
+          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+        } else if (streamedOutput.result && !streamedOutput.isProgress) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
           scheduleClose();
         }
@@ -236,8 +207,10 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
-        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
-          runTask(currentTask, deps),
+        deps.queue.enqueueTask(
+          currentTask.chat_jid,
+          currentTask.id,
+          () => runTask(currentTask, deps),
         );
       }
     } catch (err) {
@@ -248,9 +221,4 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   };
 
   loop();
-}
-
-/** @internal - for tests only. */
-export function _resetSchedulerLoopForTests(): void {
-  schedulerRunning = false;
 }

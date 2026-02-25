@@ -69,12 +69,7 @@ describe('formatMessages', () => {
 
   it('formats multiple messages', () => {
     const msgs = [
-      makeMsg({
-        id: '1',
-        sender_name: 'Alice',
-        content: 'hi',
-        timestamp: 't1',
-      }),
+      makeMsg({ id: '1', sender_name: 'Alice', content: 'hi', timestamp: 't1' }),
       makeMsg({ id: '2', sender_name: 'Bob', content: 'hey', timestamp: 't2' }),
     ];
     const result = formatMessages(msgs);
@@ -159,7 +154,9 @@ describe('stripInternalTags', () => {
 
   it('strips multiple internal tag blocks', () => {
     expect(
-      stripInternalTags('<internal>a</internal>hello<internal>b</internal>'),
+      stripInternalTags(
+        '<internal>a</internal>hello<internal>b</internal>',
+      ),
     ).toBe('hello');
   });
 
@@ -169,17 +166,19 @@ describe('stripInternalTags', () => {
 });
 
 describe('formatOutbound', () => {
+  const dummyChannel = { name: 'test', isConnected: () => true, connect: async () => {}, disconnect: async () => {}, sendMessage: async () => {}, ownsJid: () => false } as import('./types.js').Channel;
+
   it('returns text with internal tags stripped', () => {
-    expect(formatOutbound('hello world')).toBe('hello world');
+    expect(formatOutbound(dummyChannel, 'hello world')).toBe('hello world');
   });
 
   it('returns empty string when all text is internal', () => {
-    expect(formatOutbound('<internal>hidden</internal>')).toBe('');
+    expect(formatOutbound(dummyChannel, '<internal>hidden</internal>')).toBe('');
   });
 
   it('strips internal tags from remaining text', () => {
     expect(
-      formatOutbound('<internal>thinking</internal>The answer is 42'),
+      formatOutbound(dummyChannel, '<internal>thinking</internal>The answer is 42'),
     ).toBe('The answer is 42');
   });
 });

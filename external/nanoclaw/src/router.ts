@@ -1,7 +1,7 @@
+import { ASSISTANT_NAME } from './config.js';
 import { Channel, NewMessage } from './types.js';
 
 export function escapeXml(s: string): string {
-  if (!s) return '';
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -10,10 +10,10 @@ export function escapeXml(s: string): string {
 }
 
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map(
-    (m) =>
-      `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
-  );
+  const lines = messages.map((m) => {
+    const threadAttr = m.thread_id ? ` thread_id="${escapeXml(m.thread_id)}"` : '';
+    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${threadAttr}>${escapeXml(m.content)}</message>`;
+  });
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
@@ -21,10 +21,12 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
-export function formatOutbound(rawText: string): string {
+export function formatOutbound(channel: Channel, rawText: string): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  return text;
+  const prefix =
+    channel.prefixAssistantName !== false ? `${ASSISTANT_NAME}: ` : '';
+  return `${prefix}${text}`;
 }
 
 export function routeOutbound(

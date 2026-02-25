@@ -11,7 +11,9 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
-const IPC_DIR = '/workspace/ipc';
+import { registerInfiniClawTools } from './tools.js';
+
+const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
@@ -40,29 +42,6 @@ const server = new McpServer({
 });
 
 server.tool(
-  'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
-  {
-    text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
-  },
-  async (args) => {
-    const data: Record<string, string | undefined> = {
-      type: 'message',
-      chatJid,
-      text: args.text,
-      sender: args.sender || undefined,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(MESSAGES_DIR, data);
-
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
-  },
-);
-
-server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 
@@ -76,7 +55,7 @@ If unsure which mode to use, you can ask the user. Examples:
 - "Follow up on my request" \u2192 group (needs to know what was requested)
 - "Generate a daily report" \u2192 isolated (just needs instructions in prompt)
 
-MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It can also use send_message for immediate delivery, or wrap output in <internal> tags to suppress it. Include guidance in the prompt about whether the agent should:
+MESSAGING BEHAVIOR - The task agent's final output is sent to the user or group automatically. It can wrap output in <internal> tags to suppress it. Include guidance in the prompt about whether the agent should:
 \u2022 Always send a message (e.g., reminders, daily briefings)
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
@@ -112,16 +91,10 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
         };
       }
     } else if (args.schedule_type === 'once') {
-      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
-        return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
-          isError: true,
-        };
-      }
       const date = new Date(args.schedule_value);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use ISO 8601 format like "2026-02-01T15:30:00.000Z".` }],
           isError: true,
         };
       }
@@ -279,6 +252,18 @@ Use available_groups.json to find the JID for a group. The folder name should be
     };
   },
 );
+
+// [InfiniClaw] register extended tools
+registerInfiniClawTools({
+  server,
+  writeIpcFile,
+  messagesDir: MESSAGES_DIR,
+  tasksDir: TASKS_DIR,
+  ipcDir: IPC_DIR,
+  chatJid,
+  groupFolder,
+  isMain,
+});
 
 // Start the stdio transport
 const transport = new StdioServerTransport();
