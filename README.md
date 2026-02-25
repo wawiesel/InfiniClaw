@@ -2,6 +2,8 @@
   <img src="docs/assets/infiniclaw-banner.png" alt="InfiniClaw" width="1200">
 </p>
 
+> ⚠️ **Alpha / Sandbox / Pre-release Experiment** — This project is under active development and not yet stable. Expect breaking changes, rough edges, and incomplete documentation.
+
 # InfiniClaw
 
 Multi-bot orchestration built on a maintained NanoClaw fork. Bots run on Matrix, execute tasks in Podman containers, and coordinate via IPC.
