@@ -10,10 +10,9 @@
 - **Why:** We need to reliably propagate repository skills and configurations (from `bots/personas/`) down into the active container sessions during spawn.
 - **How:** Review `syncPersona`, `loadSkillsToSession`, and `loadMcpServersToSettings`. We must be completely confident that changes made in the git repository immediately take effect upon container restart with no state drift.
 
-## Priority 1: NanoClaw Upgrades
-- **What:** Update NanoClaw to the latest upstream version and develop a simple way to do that continuously.
-- **Why:** The underlying NanoClaw framework receives upstream bug fixes and features. We must stay current without breaking InfiniClaw's custom IPC, UI, and Matrix layers.
-- **How:** Document and automate a clean workflow (e.g., `git subtree pull` or rebasing) that safely integrates upstream changes.
+## ~~Priority 1: NanoClaw Upgrades~~ ✅
+- **Done:** Merged upstream nanoclaw v1.1.3 (da61a7e, 212 commits). Used read-tree + selective restore since upstream force-pushed away the original squash base. Incorporated: group-folder path validation (security), skills engine updates, new skills (slack, gmail, update, qodo), CI improvements, setup module. InfiniClaw patches (lobe system, session rotation, IPC fix, container skills) re-applied on top. Build + all 41 tests pass. (commits 67ecff9, daf2439)
+- **Process for next time:** `git fetch upstream && git read-tree --prefix=external/nanoclaw/ -u upstream/main`, commit, then `git checkout <prev-commit> -- <infiniclaw-specific-files>`, fix any API changes, commit.
 
 ## ~~Priority 1: Engineer vault access gap~~ ✅
 - **Fixed:** Added `"bots": ["commander"]` to the `_vault` allowlist entry and `"bots": ["engineer"]` to the InfiniClaw entry in `~/.config/nanoclaw/mount-allowlist.json`. The `findAllowedRoot` function skips entries when `root.bots` is set and the current bot isn't listed, so the engineer cannot mount `_vault` rw even if someone adds it to the engineer's `container-config.json`.
