@@ -216,6 +216,7 @@ function clearWorkingIndicator(chatJid: string): void {
   }
 }
 
+
 function bumpWorkingIndicator(chatJid: string, threadId?: string): void {
   if (workingIndicatorDelays[chatJid]) {
     clearTimeout(workingIndicatorDelays[chatJid]);
@@ -490,7 +491,6 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   ctx.stopNudgeTimer();
   const ch = findChannel(channels, ctx.chatJid);
   if (ch) {
-    clearWorkingIndicator(ctx.chatJid);
     if (ch.setTyping && !isThreadContext(ctx.chatJid)) await ch.setTyping(ctx.chatJid, true);
     let sentEventId: string | undefined;
     if (ch.sendMessageReturningId) {

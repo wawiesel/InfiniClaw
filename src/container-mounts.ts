@@ -74,12 +74,8 @@ function syncMcpJson(groupsDir: string, groupFolder: string, personaBaseDir: str
   const personaGroupDir = path.join(personaBaseDir, 'groups', groupFolder);
   const personaMcpJson = path.join(personaGroupDir, '.mcp.json');
 
-  // Save-back: if container has .mcp.json, copy to persona
-  if (fs.existsSync(containerMcpJson)) {
-    fs.mkdirSync(personaGroupDir, { recursive: true });
-    fs.copyFileSync(containerMcpJson, personaMcpJson);
-  }
-  // Restore: if persona has .mcp.json, copy to container
+  // Persona is source of truth — copy to container group dir on every spawn.
+  // Bots edit their persona .mcp.json directly via writable persona mount.
   if (fs.existsSync(personaMcpJson)) {
     fs.copyFileSync(personaMcpJson, containerMcpJson);
   }

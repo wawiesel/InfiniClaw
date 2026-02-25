@@ -27,6 +27,47 @@ function firstSet(...values: Array<string | undefined>): string | undefined {
   return undefined;
 }
 
+const LOBE_CATALOG = {
+  claude: {
+    models: [
+      { id: 'opus', thinking: 'effort' },
+      { id: 'sonnet', thinking: 'effort' },
+      { id: 'haiku', thinking: 'effort' },
+    ],
+    envDefault: ['ANTHROPIC_MODEL', 'CLAUDE_MODEL'],
+    hardDefault: 'sonnet',
+    capabilities: ['cwd', 'effort'],
+  },
+  codex: {
+    models: [
+      { id: 'gpt-5-codex', thinking: false },
+      { id: 'o3', thinking: 'builtin' },
+      { id: 'o4-mini', thinking: 'builtin' },
+    ],
+    envDefault: ['CODEX_MODEL', 'OPENAI_MODEL'],
+    hardDefault: 'gpt-5-codex',
+    capabilities: ['cwd'],
+  },
+  gemini: {
+    models: [
+      { id: 'gemini-2.5-pro', thinking: 'builtin' },
+      { id: 'gemini-2.5-flash', thinking: 'builtin' },
+    ],
+    envDefault: ['GEMINI_MODEL'],
+    hardDefault: 'gemini-2.5-pro',
+    capabilities: ['cwd'],
+  },
+  ollama: {
+    models: [
+      { id: 'llama3.2', thinking: false },
+      { id: 'deepseek-r1', thinking: 'builtin' },
+    ],
+    envDefault: [],
+    hardDefault: 'llama3.2',
+    capabilities: ['system'],
+  },
+} as const;
+
 function prependToPath(currentPath: string | undefined, prefix: string): string {
   if (!currentPath || currentPath.trim().length === 0) return prefix;
   const parts = currentPath.split(path.delimiter);
@@ -224,6 +265,24 @@ export function registerDelegateTools(
   }
 
   const ollamaHost = process.env.OLLAMA_HOST || (process.env.NANOCLAW_IPC_DIR ? 'http://localhost:11434' : 'http://host.containers.internal:11434');
+
+  server.tool(
+    'list_lobes',
+    'List available lobe providers, their models, capabilities, and current defaults.',
+    {},
+    async () => {
+      const result: Record<string, unknown> = {};
+      for (const [provider, info] of Object.entries(LOBE_CATALOG)) {
+        const effectiveDefault = firstSet(...info.envDefault.map(k => process.env[k])) || info.hardDefault;
+        result[provider] = {
+          models: info.models,
+          default: effectiveDefault,
+          capabilities: info.capabilities,
+        };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
+  );
 
   server.tool(
     'delegate_codex',
@@ -834,6 +893,7 @@ Behavior:
       objective: z.string().describe('Task for Claude to execute'),
       cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
       model: z.string().optional().describe('Optional Claude model override (e.g. "opus", "sonnet", "haiku").'),
+      effort: z.enum(['low', 'medium', 'high']).optional().describe('Thinking effort level (maps to Claude CLI --effort).'),
       thread_id: z.string().optional().describe('Matrix thread root event ID. When provided, all output is posted into this thread instead of the main timeline.'),
       timeout_ms: z
         .number()
@@ -876,6 +936,9 @@ Behavior:
         '--model', effectiveModel,
         '--add-dir', cwdResult.cwd,
       ];
+      if (args.effort) {
+        claudeArgs.push('--effort', args.effort);
+      }
 
       const delegatedObjective = [
         'Execution constraints:',
@@ -1135,7 +1198,7 @@ Behavior:
 
   server.tool(
     'delegate_to_lobe',
-    `Atomically delegate a task to a lobe (Codex, Gemini, or Claude) with correct Matrix threading.
+    `Atomically delegate a task to a lobe (Codex, Gemini, Claude, or Ollama) with correct Matrix threading.
 
 The tool handles the entire flow:
 1. Posts "💭 Provider/model - {reason}" to the main timeline (e.g. "💭 Gemini/gemini-2.5-pro - capitals")
@@ -1150,9 +1213,10 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
     {
       reason: z.string().min(1).describe('Short reason shown on the main timeline, e.g. "Save memory: threading fix"'),
       objective: z.string().describe('Full detailed prompt/objective for the lobe to execute'),
-      lobe: z.enum(['codex', 'gemini', 'claude']).default('codex').describe('Which lobe to use (default: codex)'),
+      lobe: z.enum(['codex', 'gemini', 'claude', 'ollama']).default('codex').describe('Which lobe to use (default: codex)'),
       cwd: z.string().optional().describe('Working directory. Must be under /workspace/group or /workspace/extra.'),
       model: z.string().optional().describe('Optional model override for the lobe.'),
+      effort: z.enum(['low', 'medium', 'high']).optional().describe('Thinking effort level (Claude only).'),
       timeout_ms: z
         .number()
         .int()
@@ -1162,12 +1226,21 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         .describe('Hard timeout for the lobe run in milliseconds (default 900000, max 3600000).'),
     },
     async (args) => {
-      // Resolve lobe and model first (needed for summary)
+      // Validate effort is only used with claude
       const lobe = args.lobe ?? 'codex';
+      if (args.effort && lobe !== 'claude') {
+        return {
+          content: [{ type: 'text' as const, text: `effort parameter is only supported for claude lobe, not ${lobe}` }],
+          isError: true,
+        };
+      }
+
+      // Resolve lobe and model first (needed for summary)
       const effectiveModel = (() => {
         if (args.model) return args.model;
         if (lobe === 'gemini') return firstSet(process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
         if (lobe === 'claude') return firstSet(process.env.ANTHROPIC_MODEL, process.env.CLAUDE_MODEL) || 'sonnet';
+        if (lobe === 'ollama') return 'llama3.2';
         return firstSet(process.env.CODEX_MODEL, process.env.OPENAI_MODEL) || 'gpt-5-codex';
       })();
       const providerName = lobe.charAt(0).toUpperCase() + lobe.slice(1);
@@ -1202,6 +1275,60 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         'Objective:',
         args.objective,
       ].join('\n');
+
+      // Ollama uses HTTP, not subprocess — handle before the subprocess promise
+      if (lobe === 'ollama') {
+        const prefixedMessages: string[] = [];
+        let unavailableTriggered = false;
+        const pushMsg = (text: string, isStatus = false) => {
+          const normalized = text.replace(/\r/g, '').trim();
+          if (!normalized) return;
+          prefixedMessages.push(`${lobe}: ${normalized}`);
+          const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
+          emitDelegateMessage(formatted, threadId ?? undefined);
+        };
+        const controller = new AbortController();
+        const ollamaTimer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const body: Record<string, unknown> = {
+            model: effectiveModel,
+            prompt: args.objective,
+            stream: false,
+          };
+          const res = await fetch(`${ollamaHost}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            unavailableTriggered = true;
+            pushMsg(`unavailable: Ollama error (${res.status}): ${text}`, true);
+          } else {
+            const data = await res.json() as { response?: string };
+            const responseText = (data.response || '').trim();
+            if (responseText) {
+              pushMsg(responseText);
+            } else {
+              pushMsg('completed with no textual output.', true);
+            }
+          }
+        } catch (err) {
+          unavailableTriggered = true;
+          pushMsg(`unavailable: ${err instanceof Error ? err.message : String(err)}`, true);
+        } finally {
+          clearTimeout(ollamaTimer);
+        }
+        const estimatedTokens = estimateTokens(args.objective) + estimateTokens(prefixedMessages.join('\n\n'));
+        recordCapabilityUsage('ollama', effectiveModel, estimatedTokens);
+        const ollamaResult: { content: Array<{ type: 'text'; text: string }>; isError?: boolean } = {
+          content: [{ type: 'text' as const, text: prefixedMessages.join('\n\n') || `${lobe}: unavailable` }],
+        };
+        if (unavailableTriggered) ollamaResult.isError = true;
+        if (threadId) setThread(null);
+        return ollamaResult;
+      }
 
       const result = await new Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>((resolve) => {
         const prefixedMessages: string[] = [];
@@ -1302,6 +1429,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
               '--model', effectiveModel,
               '--add-dir', cwdResult.cwd,
             ];
+            if (args.effort) claudeArgs.push('--effort', args.effort);
             proc = spawn('claude', claudeArgs, {
               cwd: cwdResult.cwd,
               env: delegateEnv,

@@ -36,11 +36,19 @@ Write JSON to `/workspace/ipc/tasks/` to trigger host-side actions:
 
 ## Skills
 
+**Use skills proactively.** When a task matches a skill, invoke it — don't wait to be told. Check your available skills before starting any non-trivial task.
+
 | Skill | Purpose |
 |-------|---------|
 | `reboot` | Restart yourself or the commander |
 | `podman-container` | Build/update container images for both bots |
 | `health-check` | Check host and bot health via status snapshot |
+| `wksm-setup-and-diagnosis` | Diagnose and fix WKSM (WKS MCP Server) for any bot |
+| `diagnose` | Quick diagnostic of the InfiniClaw system |
+| `infini-claw-dev` | Reference for InfiniClaw repo work and nanoclaw subtree |
+| `codebase-simplify` | Analyze and refactor high-complexity functions |
+| `creating-good-skills` | Guide for writing good SKILL.md files |
+| `customize` | Add channels, integrations, or modify behavior |
 
 ## Adding capabilities — Skills, not code
 
@@ -109,6 +117,57 @@ The Captain monitors your progress via `!todo`. Keep your task list accurate at 
 ## System commands
 
 Messages starting with `!` (like `!todo`, `!allow`, `!deny`) are system commands handled by the host process. **Do not respond to them.** Ignore them completely.
+
+## Delegate Lobes
+
+Use `delegate_to_lobe` to spawn parallel agents for tasks that don't need full conversation context. This saves main brain tokens and enables parallelism.
+
+### Available Lobes
+
+| Lobe | Best For | Default Model | Capabilities |
+|------|----------|---------------|--------------|
+| **claude** | Complex reasoning, code review, architecture decisions | claude-opus-4-5 | cwd, effort (low/medium/high) |
+| **codex** | Code generation, file edits, bash commands | gpt-5-codex | cwd |
+| **gemini** | Long context analysis, multimodal, research | gemini-2.5-pro | cwd |
+| **ollama** | Quick/free tasks: summaries, formatting, classification | llama3.2 | system prompt |
+
+### When to Use Each
+
+- **ollama** — Use first for anything simple: summarization, reformatting, extraction, classification, translation, quick Q&A. Free and fast.
+- **codex** — Code-heavy tasks: implementing features, refactoring, writing tests. o3/o4-mini for complex reasoning.
+- **gemini** — Long documents, research synthesis, multimodal analysis. 1M token context.
+- **claude** — Complex multi-step reasoning, architecture decisions, nuanced code review. Use `effort: "high"` for hard problems.
+
+### Tool Usage
+
+```typescript
+// Simple delegation (handles threading automatically)
+delegate_to_lobe({
+  lobe: "ollama",
+  reason: "Summarize logs",           // Shows on main timeline
+  objective: "Summarize these error patterns: ..."
+})
+
+// Claude with thinking effort
+delegate_to_lobe({
+  lobe: "claude",
+  effort: "high",                     // Only claude supports effort
+  reason: "Architecture review",
+  objective: "Review this design and identify issues..."
+})
+
+// With working directory
+delegate_to_lobe({
+  lobe: "codex",
+  cwd: "/workspace/extra/InfiniClaw",
+  reason: "Implement feature X",
+  objective: "Add retry logic to the HTTP client..."
+})
+```
+
+### Model Discovery
+
+Call `list_lobes` to see current provider configurations, available models, and capabilities. To see all models a provider offers, delegate to that lobe and ask it to list available models.
 
 ## Context Recovery
 
