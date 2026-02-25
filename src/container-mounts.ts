@@ -66,20 +66,6 @@ function mountIfExists(
   }
 }
 
-// TODO: This bidirectional sync contradicts one-way sync principle.
-// Should be persona → container only, with explicit save-back command.
-function syncMcpJson(groupsDir: string, groupFolder: string, personaBaseDir: string): void {
-  const groupDir = path.join(groupsDir, groupFolder);
-  const containerMcpJson = path.join(groupDir, '.mcp.json');
-  const personaGroupDir = path.join(personaBaseDir, 'groups', groupFolder);
-  const personaMcpJson = path.join(personaGroupDir, '.mcp.json');
-
-  // Persona is source of truth — copy to container group dir on every spawn.
-  // Bots edit their persona .mcp.json directly via writable persona mount.
-  if (fs.existsSync(personaMcpJson)) {
-    fs.copyFileSync(personaMcpJson, containerMcpJson);
-  }
-}
 
 // ── Main mount builder ──────────────────────────────────────────────────
 
@@ -103,7 +89,6 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
     const personaBaseDir = path.join(rootDir, 'bots', 'personas', personaName);
     const personaSkillsDir = path.join(personaBaseDir, 'skills');
     loadSkillsToSession(skillsDst, personaSkillsDir, sharedSkillsSrc);
-    syncMcpJson(groupsDir, group.folder, personaBaseDir);
 
     // Mount persona dir writable so bots can edit their own CLAUDE.md
     mounts.push({
@@ -154,22 +139,19 @@ export function getPersonaPortPublish(): string[] {
   }
 }
 
-/** Read .mcp.json from group dir for SDK passthrough. */
-export function readGroupMcpServers(groupDir: string): Record<string, Record<string, unknown>> | undefined {
-  const mcpJsonPath = path.join(groupDir, '.mcp.json');
+/** Read .mcp.json from persona group dir for SDK passthrough. */
+export function readPersonaGroupMcpServers(personaBaseDir: string, groupFolder: string): Record<string, Record<string, unknown>> | undefined {
+  const mcpJsonPath = path.join(personaBaseDir, 'groups', groupFolder, '.mcp.json');
   try {
     if (fs.existsSync(mcpJsonPath)) {
-      let raw = fs.readFileSync(mcpJsonPath, 'utf-8');
-      // Strip trailing commas before } or ] so linters/formatters don't break JSON.parse
-      raw = raw.replace(/,\s*([}\]])/g, '$1');
+      const raw = fs.readFileSync(mcpJsonPath, 'utf-8');
       const mcpJson = JSON.parse(raw);
       if (mcpJson.mcpServers && Object.keys(mcpJson.mcpServers).length > 0) {
         return mcpJson.mcpServers;
       }
     }
   } catch (err) {
-    // Log the error so MCP failures aren't silently swallowed
-    console.error(`[readGroupMcpServers] Failed to parse ${mcpJsonPath}:`, err);
+    console.error(`[readPersonaGroupMcpServers] Failed to parse ${mcpJsonPath}:`, err);
   }
   return undefined;
 }

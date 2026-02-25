@@ -16,7 +16,7 @@ import {
   buildBotDirectory,
   buildInfiniClawMounts,
   getPersonaPortPublish,
-  readGroupMcpServers,
+  readPersonaGroupMcpServers,
 } from './container-mounts.js';
 import {
   normalizeProviderSecrets,
@@ -305,8 +305,11 @@ export async function runContainerAgent(
     fs.writeFileSync(path.join(groupIpcDir, 'bot_directory.json'), JSON.stringify(botDir));
   } catch { /* best effort */ }
 
-  // Read .mcp.json from group dir for inline SDK passthrough
-  const mcpServers = readGroupMcpServers(groupDir);
+  // Read .mcp.json from persona for SDK passthrough (single source of truth)
+  const rootDir = process.env.INFINICLAW_ROOT;
+  const personaName = process.env.PERSONA_NAME;
+  const personaBaseDir = rootDir && personaName ? path.join(rootDir, 'bots', 'personas', personaName) : undefined;
+  const mcpServers = personaBaseDir ? readPersonaGroupMcpServers(personaBaseDir, group.folder) : undefined;
   const effectiveInput: ContainerInput & { disallowedTools?: string[] } = {
     ...input,
     disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],

@@ -13,10 +13,12 @@ Add well-structured, researched people profiles to the vault.
 
 ```
 /workspace/extra/_vault/People/
-├── Firstname_Lastname.md
-├── Photos/
-│   ├── Firstname_Lastname.jpg
-│   └── _missing.txt
+├── SubjectMatterExperts/
+│   └── Firstname_Lastname.md
+├── _photos/
+│   └── Firstname_Lastname/
+│       └── 2026/
+│           └── <md5checksum>.jpg   ← content-addressable
 └── _Index.md
 ```
 
@@ -25,9 +27,33 @@ Add well-structured, researched people profiles to the vault.
 ## File Naming
 
 `Firstname_Lastname.md` — underscores, preserve hyphens in hyphenated names.
-Photos: `Firstname_Lastname.jpg` (or `.png`)
+Photos: `_photos/Firstname_Lastname/<year>/<md5checksum>.jpg` (or `.png`)
 
 Resolve initials (e.g., `K.J. Kelly`) to full name via web search before creating file.
+
+---
+
+## Photo Structure
+
+Photos are stored content-addressably by year:
+
+```
+_photos/Jean-Christophe_Sublet/
+  2026/
+    1098bbae.jpg    ← manually uploaded correct photo
+  2024/
+    b7e91a03.jpg    ← old auto-fetched (wrong person, deleted from profile)
+```
+
+**Current photo rule:** The most recent year directory that still has a file *referenced in the profile markdown* is the current photo. If a year's photo embed is deleted from the profile, it is considered discarded — the cleanup script will remove it from storage on next run.
+
+**Skill behavior on photo fetch:**
+1. Check if any file exists in `_photos/<name>/<current_year>/` AND is referenced in the profile
+2. If yes → skip fetch, do not overwrite
+3. If no → fetch, compute MD5 checksum (first 8 chars), save to `_photos/<name>/<current_year>/<checksum>.jpg`
+4. Add embed to profile (top) and Photo History section (bottom)
+
+**Never auto-verify.** Only the Captain removes/confirms photos by editing the profile in Obsidian.
 
 ---
 
@@ -36,7 +62,7 @@ Resolve initials (e.g., `K.J. Kelly`) to full name via web search before creatin
 ```markdown
 # Full Name
 
-![[Photos/Firstname_Lastname.jpg]]
+![[_photos/Firstname_Lastname/2026/<checksum>.jpg]]
 
 **Position:** title
 **Organization:** [[Organizations/<OrgName>|Organization Full Name]]
@@ -57,7 +83,14 @@ Resolve initials (e.g., `K.J. Kelly`) to full name via web search before creatin
 
 ## Related
 - [[relevant wikilinks]]
+
+---
+
+## Photo History
+![[_photos/Firstname_Lastname/2026/<checksum>.jpg]]
 ```
+
+The main photo embed at the top shows the current photo. Photo History at the bottom shows all years as thumbnails (newest first). To discard a photo, delete its embed from Photo History — the cleanup script removes the file from storage on next run.
 
 ---
 
@@ -78,16 +111,62 @@ Collect: position, institution, research focus, education, key publications (3-5
 
 ### 3. Download photo
 ```bash
-curl -L -o /workspace/extra/_vault/People/Photos/Firstname_Lastname.jpg "<photo_url>"
+# Fetch, compute checksum, save to year directory
+curl -L -o /tmp/photo_dl "<photo_url>"
+CHECKSUM=$(md5sum /tmp/photo_dl | cut -c1-8)
+YEAR=$(date +%Y)
+mkdir -p /workspace/extra/_vault/People/_photos/Firstname_Lastname/$YEAR
+mv /tmp/photo_dl /workspace/extra/_vault/People/_photos/Firstname_Lastname/$YEAR/$CHECKSUM.jpg
 ```
 - Prefer lab/university staff page photos
 - If no photo found, add name to `_missing.txt`
+- **Do not overwrite** if a referenced photo already exists for the current year
 
 ### 4. Create/update the file
 Keep it factual — don't fabricate. If uncertain, omit.
 
 ### 5. Update `_Index.md`
 Add to appropriate section.
+
+### 6. Run cleanup script (end of batch)
+Remove any photo files in `_photos/` not referenced in any profile markdown:
+
+```python
+import os, re, glob
+
+vault = "/workspace/extra/_vault/People"
+photos_dir = os.path.join(vault, "_photos")
+
+# Collect all referenced photo paths from markdown files
+referenced = set()
+for md_file in glob.glob(f"{vault}/**/*.md", recursive=True):
+    with open(md_file) as f:
+        for match in re.finditer(r'!\[\[(_photos/[^\]]+)\]\]', f.read()):
+            referenced.add(match.group(1))
+
+# Walk _photos/ and delete unreferenced files
+removed = []
+for dirpath, dirnames, filenames in os.walk(photos_dir):
+    for fname in filenames:
+        if fname == "_missing.txt":
+            continue
+        full = os.path.join(dirpath, fname)
+        rel = os.path.relpath(full, vault)
+        if rel not in referenced:
+            os.remove(full)
+            removed.append(rel)
+
+# Remove empty directories (bottom-up)
+for dirpath, dirnames, filenames in os.walk(photos_dir, topdown=False):
+    if dirpath == photos_dir:
+        continue
+    if not os.listdir(dirpath):
+        os.rmdir(dirpath)
+
+print(f"Removed {len(removed)} unreferenced photos:")
+for r in removed:
+    print(f"  {r}")
+```
 
 ---
 
@@ -98,6 +177,7 @@ Add to appropriate section.
 3. Use Gemini delegation to batch-create minimal profiles
 4. Launch parallel `general-purpose` agent batches (5-10 people each) for research + photos
 5. After all batches complete, update `_Index.md` and `_missing.txt`
+6. Run cleanup script
 
 ---
 
@@ -107,3 +187,4 @@ Add to appropriate section.
 - **Last-name-first format**: Parse `"Fondement, Valentin"` correctly
 - Always verify author names against actual presentation content
 - Use `[[wikilinks]]` for all cross-references, never plain paths
+- **Photo curation**: The Captain reviews and deletes incorrect photos directly in Obsidian. Deleted embeds = discarded. Run cleanup to purge files from storage.

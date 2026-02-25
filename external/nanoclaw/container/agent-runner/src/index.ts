@@ -77,6 +77,11 @@ const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_SENT_TEXTS_FILE = '/workspace/ipc/.sent_texts'; // Legacy — kept for file cleanup only
 const IPC_POLL_MS = 500;
+const SESSION_MAX_BYTES = 2 * 1024 * 1024; // 2 MB — rotate session when transcript exceeds this
+const SESSIONS_PROJECT_DIR = path.join(
+  process.env.HOME || '/home/node',
+  '.claude', 'projects', '-workspace-group',
+);
 const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
 const SDK_PROCESS_ENV_KEYS = [
   'ASSISTANT_NAME',
@@ -466,9 +471,12 @@ async function runQuery(
   // Clean up legacy sent-texts file
   try { fs.unlinkSync(IPC_SENT_TEXTS_FILE); } catch {}
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
+  // Poll IPC during the query. IPC messages are only piped into the stream
+  // when the SDK is idle (after a result), not mid-tool-call — pushing user
+  // messages while a tool call is in-flight hangs the SDK.
   let ipcPolling = true;
   let closedDuringQuery = false;
+  let betweenTurns = false;
   const pollIpcDuringQuery = () => {
     if (!ipcPolling) return;
     if (shouldClose()) {
@@ -478,10 +486,13 @@ async function runQuery(
       ipcPolling = false;
       return;
     }
-    const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+    if (betweenTurns) {
+      const messages = drainIpcInput();
+      for (const text of messages) {
+        log(`Piping IPC message into stream (${text.length} chars)`);
+        stream.push(text);
+        betweenTurns = false;
+      }
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -639,6 +650,7 @@ async function runQuery(
 
       if (message.type === 'assistant' && 'uuid' in message) {
         lastAssistantUuid = (message as { uuid: string }).uuid;
+        betweenTurns = false; // Tool call starting — don't pipe IPC messages
       }
 
       // Assistant text is NOT emitted as progress — it arrives via the SDK's
@@ -678,6 +690,7 @@ async function runQuery(
           result: textResult || null,
           newSessionId
         });
+        betweenTurns = true; // Result delivered — safe to pipe IPC messages
       }
     }
   } finally {
@@ -723,11 +736,28 @@ async function main(): Promise<void> {
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
+  // Auto-rotate bloated sessions — start fresh with summary carried forward
+  let sessionSummary: string | undefined;
+  if (sessionId) {
+    const sessFile = path.join(SESSIONS_PROJECT_DIR, `${sessionId}.jsonl`);
+    try {
+      const size = fs.statSync(sessFile).size;
+      if (size > SESSION_MAX_BYTES) {
+        log(`Session ${sessionId} is ${(size / 1024 / 1024).toFixed(1)} MB (limit ${SESSION_MAX_BYTES / 1024 / 1024} MB), rotating`);
+        sessionSummary = getSessionSummary(sessionId, sessFile) || undefined;
+        sessionId = undefined;
+      }
+    } catch { /* file doesn't exist — session will start fresh anyway */ }
+  }
+
   // Clean up stale _close sentinel from previous container runs
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
+  if (sessionSummary) {
+    prompt = `[Previous session summary]\n${sessionSummary}\n\n${prompt}`;
+  }
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }

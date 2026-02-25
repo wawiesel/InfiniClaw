@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 import {
   MatrixClient,
   MatrixAuth,
@@ -8,6 +11,7 @@ import {
 import { marked } from 'marked';
 
 import {
+  DATA_DIR,
   MATRIX_ACCESS_TOKEN,
   MATRIX_DEVICE_NAME,
   MATRIX_HOMESERVER,
@@ -38,6 +42,9 @@ interface MatrixLoginResponse {
   device_id?: string;
   expires_in_ms?: number;
 }
+
+const MEDIA_MSGTYPES = ['m.image', 'm.file', 'm.video', 'm.audio'];
+const MEDIA_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
 
 const STORAGE_ACCESS_TOKEN = 'matrix_access_token';
 const STORAGE_REFRESH_TOKEN = 'matrix_refresh_token';
@@ -742,7 +749,8 @@ export class MatrixChannel implements Channel {
       logger.debug({ roomId, sender: event.sender }, 'Matrix room.message event');
       if (!event.content) return;
       const content = event.content as Record<string, unknown>;
-      if (content.msgtype !== 'm.text') return;
+      const msgtype = content.msgtype as string | undefined;
+      if (msgtype !== 'm.text' && !MEDIA_MSGTYPES.includes(msgtype as string)) return;
 
       // Ignore own messages
       if (event.sender === this.botUserId) return;
@@ -766,17 +774,47 @@ export class MatrixChannel implements Channel {
       const relatesTo = content['m.relates_to'] as Record<string, unknown> | undefined;
       const threadId = relatesTo?.rel_type === 'm.thread' ? (relatesTo.event_id as string) : undefined;
 
+      let messageContent: string;
+
+      if (msgtype === 'm.text') {
+        messageContent = content.body as string;
+      } else {
+        // Media message — download and save to IPC media dir
+        const group = groups[matrixJid];
+        const filename = (content.body as string) || 'attachment';
+        const mxcUrl = content.url as string | undefined;
+        const mediaLabel = msgtype === 'm.image' ? 'image' : msgtype === 'm.video' ? 'video' : msgtype === 'm.audio' ? 'audio' : 'file';
+
+        if (mxcUrl) {
+          const containerPath = await this.downloadMedia(mxcUrl, filename, group.folder);
+          if (containerPath) {
+            messageContent = `[Uploaded ${mediaLabel}: ${filename} — saved to ${containerPath}]`;
+          } else {
+            messageContent = `[Uploaded ${mediaLabel}: ${filename} — download failed]`;
+          }
+        } else {
+          messageContent = `[Uploaded ${mediaLabel}: ${filename} — no download URL]`;
+        }
+
+        // Some clients include a caption in formatted_body distinct from the filename
+        const bodyText = content.body as string | undefined;
+        const filenameField = content.filename as string | undefined;
+        if (bodyText && filenameField && bodyText !== filenameField) {
+          messageContent += `\nCaption: ${bodyText}`;
+        }
+      }
+
       const msg: NewMessage = {
         id: event.event_id as string,
         chat_jid: matrixJid,
         sender: event.sender as string,
         sender_name: senderName,
-        content: content.body as string,
+        content: messageContent,
         timestamp,
         thread_id: threadId,
       };
 
-      logger.debug({ matrixJid, content: content.body }, 'Matrix message delivered to onMessage');
+      logger.debug({ matrixJid, content: messageContent }, 'Matrix message delivered to onMessage');
       this.opts.onMessage(matrixJid, msg);
     });
 
@@ -1115,6 +1153,39 @@ export class MatrixChannel implements Channel {
       );
     } catch {
       // Non-critical
+    }
+  }
+
+  private async downloadMedia(mxcUrl: string, filename: string, groupFolder: string): Promise<string | null> {
+    if (!this.client) return null;
+    try {
+      const { data, contentType } = await withTimeout(
+        this.client.downloadContent(mxcUrl),
+        30_000,
+        'downloadContent',
+      );
+
+      if (data.length > MEDIA_MAX_BYTES) {
+        logger.warn({ filename, size: data.length, limit: MEDIA_MAX_BYTES }, 'Media file too large, skipping download');
+        return null;
+      }
+
+      // Sanitize filename: strip path separators, limit length
+      const sanitized = filename.replace(/[/\\]/g, '_').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
+      const timestamped = `${Date.now()}-${sanitized}`;
+
+      const mediaDir = path.join(DATA_DIR, 'ipc', groupFolder, 'media');
+      fs.mkdirSync(mediaDir, { recursive: true });
+
+      const hostPath = path.join(mediaDir, timestamped);
+      fs.writeFileSync(hostPath, data);
+
+      const containerPath = `/workspace/ipc/media/${timestamped}`;
+      logger.info({ filename, contentType, size: data.length, containerPath }, 'Media downloaded to IPC');
+      return containerPath;
+    } catch (err) {
+      logger.warn({ mxcUrl, filename, err }, 'Failed to download media from Matrix');
+      return null;
     }
   }
 
