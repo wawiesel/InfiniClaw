@@ -33,9 +33,6 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
-  // [InfiniClaw] hooks for extension points
-  private preCloseHook: ((groupJid: string, inputDir: string) => void) | null = null;
-  private shutdownHook: (() => Promise<void>) | null = null;
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -58,47 +55,6 @@ export class GroupQueue {
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
-  }
-
-  // [InfiniClaw] hook setters
-  setPreCloseHook(fn: (groupJid: string, inputDir: string) => void): void {
-    this.preCloseHook = fn;
-  }
-
-  setShutdownHook(fn: () => Promise<void>): void {
-    this.shutdownHook = fn;
-  }
-
-  /** Returns a snapshot of a group's queue state for status reporting. */
-  getGroupStatus(groupJid: string): {
-    active: boolean;
-    idleWaiting: boolean;
-    hasProcess: boolean;
-    containerName: string | null;
-    pendingMessages: boolean;
-    pendingTasks: number;
-  } {
-    const state = this.groups.get(groupJid);
-    if (!state) {
-      return { active: false, idleWaiting: false, hasProcess: false, containerName: null, pendingMessages: false, pendingTasks: 0 };
-    }
-    return {
-      active: state.active,
-      idleWaiting: state.idleWaiting,
-      hasProcess: state.process !== null,
-      containerName: state.containerName,
-      pendingMessages: state.pendingMessages,
-      pendingTasks: state.pendingTasks.length,
-    };
-  }
-
-  /** Returns JIDs of all groups with active containers. */
-  getActiveGroupJids(): string[] {
-    const jids: string[] = [];
-    for (const [jid, state] of this.groups) {
-      if (state.active) jids.push(jid);
-    }
-    return jids;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -167,7 +123,12 @@ export class GroupQueue {
     );
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string, groupFolder?: string): void {
+  registerProcess(
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+    groupFolder?: string,
+  ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
@@ -192,7 +153,8 @@ export class GroupQueue {
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder || state.isTaskContainer) return false;
+    if (!state.active || !state.groupFolder || state.isTaskContainer)
+      return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
@@ -219,8 +181,6 @@ export class GroupQueue {
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
-      // [InfiniClaw] pre-close hook (e.g. memory save prompt)
-      if (this.preCloseHook) this.preCloseHook(groupJid, inputDir);
       fs.writeFileSync(path.join(inputDir, '_close'), '');
     } catch {
       // ignore
@@ -324,7 +284,10 @@ export class GroupQueue {
     if (state.pendingTasks.length > 0) {
       const task = state.pendingTasks.shift()!;
       this.runTask(groupJid, task).catch((err) =>
-        logger.error({ groupJid, taskId: task.id, err }, 'Unhandled error in runTask (drain)'),
+        logger.error(
+          { groupJid, taskId: task.id, err },
+          'Unhandled error in runTask (drain)',
+        ),
       );
       return;
     }
@@ -332,7 +295,10 @@ export class GroupQueue {
     // Then pending messages
     if (state.pendingMessages) {
       this.runForGroup(groupJid, 'drain').catch((err) =>
-        logger.error({ groupJid, err }, 'Unhandled error in runForGroup (drain)'),
+        logger.error(
+          { groupJid, err },
+          'Unhandled error in runForGroup (drain)',
+        ),
       );
       return;
     }
@@ -353,11 +319,17 @@ export class GroupQueue {
       if (state.pendingTasks.length > 0) {
         const task = state.pendingTasks.shift()!;
         this.runTask(nextJid, task).catch((err) =>
-          logger.error({ groupJid: nextJid, taskId: task.id, err }, 'Unhandled error in runTask (waiting)'),
+          logger.error(
+            { groupJid: nextJid, taskId: task.id, err },
+            'Unhandled error in runTask (waiting)',
+          ),
         );
       } else if (state.pendingMessages) {
         this.runForGroup(nextJid, 'drain').catch((err) =>
-          logger.error({ groupJid: nextJid, err }, 'Unhandled error in runForGroup (waiting)'),
+          logger.error(
+            { groupJid: nextJid, err },
+            'Unhandled error in runForGroup (waiting)',
+          ),
         );
       }
       // If neither pending, skip this group
@@ -367,14 +339,19 @@ export class GroupQueue {
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // [InfiniClaw] graceful shutdown hook (memory save, container signaling, wait)
-    if (this.shutdownHook) {
-      await this.shutdownHook();
+    // Count active containers but don't kill them — they'll finish on their own
+    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
+    // This prevents WhatsApp reconnection restarts from killing working agents.
+    const activeContainers: string[] = [];
+    for (const [jid, state] of this.groups) {
+      if (state.process && !state.process.killed && state.containerName) {
+        activeContainers.push(state.containerName);
+      }
     }
 
     logger.info(
-      { activeCount: this.activeCount },
-      'GroupQueue shutdown complete',
+      { activeCount: this.activeCount, detachedContainers: activeContainers },
+      'GroupQueue shutting down (containers detached, not killed)',
     );
   }
 }
