@@ -39,8 +39,15 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
-// Per-group delegate thread IDs — created on first delegate message, cleared when container exits
+// Per-group delegate thread IDs — created on first delegate message, cleared when set_thread(null) fires
 const delegateThreadIds: Record<string, string> = {};
+
+function clearDelegateThread(sourceGroup: string): void {
+  if (sourceGroup in delegateThreadIds) {
+    delete delegateThreadIds[sourceGroup];
+    logger.debug({ sourceGroup }, 'Delegate thread ID pruned');
+  }
+}
 
 interface TextMessageData {
   chatJid: string;
@@ -156,6 +163,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         sendMessage: deps.sendMessage,
         registeredGroups: deps.registeredGroups,
         setWorkThread: deps.setWorkThread,
+        clearDelegateThread,
       });
       if (!extHandled) {
         logger.warn({ type: data.type }, 'Unknown IPC task type');

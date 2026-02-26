@@ -50,6 +50,8 @@ export interface InfiniClawIpcContext {
   sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   setWorkThread: (chatJid: string, threadId: string | null) => void;
+  /** Clear the auto-thread entry for this source group (called when set_thread clears the thread) */
+  clearDelegateThread: (sourceGroup: string) => void;
 }
 
 export interface InfiniClawMessageContext {
@@ -511,6 +513,11 @@ function handleSetThread(data: CommandData, ctx: InfiniClawIpcContext): void {
   }
   const threadId = typeof data.threadId === 'string' && data.threadId.trim() ? data.threadId.trim() : null;
   ctx.setWorkThread(targetJid, threadId);
+  // When thread is cleared, also prune the delegate auto-thread for this source group
+  // to prevent the delegateThreadIds map from accumulating stale entries indefinitely.
+  if (threadId === null) {
+    ctx.clearDelegateThread(ctx.sourceGroup);
+  }
   logger.info({ chatJid: targetJid, threadId, sourceGroup: ctx.sourceGroup }, 'Work thread updated via IPC');
 }
 
