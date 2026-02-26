@@ -33,6 +33,11 @@ export interface ToolRegistrationContext {
   isMain: boolean;
 }
 
+/** Extract a human-readable message from an unknown error value. */
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
   const { server, writeIpcFile, messagesDir, tasksDir, ipcDir, chatJid, groupFolder, isMain } = ctx;
 
@@ -161,6 +166,27 @@ Use this when you want to post a brief summary line (e.g. "💭 Lobe delegation 
 
   // ── File sending ────────────────────────────────────────────────────
 
+  function sendFileIpc(filePath: string, ipcType: 'image' | 'file', caption?: string): { content: Array<{ type: 'text'; text: string }>; isError?: boolean } {
+    if (!fs.existsSync(filePath)) {
+      return { content: [{ type: 'text' as const, text: `File not found: ${filePath}` }], isError: true };
+    }
+    const data = fs.readFileSync(filePath).toString('base64');
+    const filename = path.basename(filePath);
+    const mimetype = guessMimeTypeFromFilename(filename);
+    const dataKey = ipcType === 'image' ? 'imageData' : 'fileData';
+    writeIpcFile(messagesDir, {
+      type: ipcType,
+      chatJid,
+      [dataKey]: data,
+      filename,
+      mimetype,
+      caption: caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: `${ipcType === 'image' ? 'Image' : 'File'} sent.` }] };
+  }
+
   server.tool(
     'send_image',
     'Send an image file to the user or group. The file must exist in the container filesystem (e.g. /workspace/group/screenshot.png). Supports PNG, JPEG, GIF, WebP.',
@@ -168,31 +194,7 @@ Use this when you want to post a brief summary line (e.g. "💭 Lobe delegation 
       file_path: z.string().describe('Absolute path to the image file in the container'),
       caption: z.string().optional().describe('Optional caption to display with the image'),
     },
-    async (args) => {
-      if (!fs.existsSync(args.file_path)) {
-        return {
-          content: [{ type: 'text' as const, text: `File not found: ${args.file_path}` }],
-          isError: true,
-        };
-      }
-
-      const imageData = fs.readFileSync(args.file_path).toString('base64');
-      const filename = path.basename(args.file_path);
-      const mimetype = guessMimeTypeFromFilename(filename);
-
-      writeIpcFile(messagesDir, {
-        type: 'image',
-        chatJid,
-        imageData,
-        filename,
-        mimetype,
-        caption: args.caption || undefined,
-        groupFolder,
-        timestamp: new Date().toISOString(),
-      });
-
-      return { content: [{ type: 'text' as const, text: 'Image sent.' }] };
-    },
+    async (args) => sendFileIpc(args.file_path, 'image', args.caption),
   );
 
   server.tool(
@@ -202,31 +204,7 @@ Use this when you want to post a brief summary line (e.g. "💭 Lobe delegation 
       file_path: z.string().describe('Absolute path to the file in the container'),
       caption: z.string().optional().describe('Optional message to send after the file'),
     },
-    async (args) => {
-      if (!fs.existsSync(args.file_path)) {
-        return {
-          content: [{ type: 'text' as const, text: `File not found: ${args.file_path}` }],
-          isError: true,
-        };
-      }
-
-      const fileData = fs.readFileSync(args.file_path).toString('base64');
-      const filename = path.basename(args.file_path);
-      const mimetype = guessMimeTypeFromFilename(filename);
-
-      writeIpcFile(messagesDir, {
-        type: 'file',
-        chatJid,
-        fileData,
-        filename,
-        mimetype,
-        caption: args.caption || undefined,
-        groupFolder,
-        timestamp: new Date().toISOString(),
-      });
-
-      return { content: [{ type: 'text' as const, text: 'File sent.' }] };
-    },
+    async (args) => sendFileIpc(args.file_path, 'file', args.caption),
   );
 
   // ── Brain mode ──────────────────────────────────────────────────────
@@ -383,7 +361,7 @@ Use this after making code changes that require a process restart.`,
         };
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `Failed to read status: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `Failed to read status: ${errMsg(err)}` }],
           isError: true,
         };
       }
@@ -418,7 +396,7 @@ Use this after making code changes that require a process restart.`,
         };
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `Failed to read brain modes: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `Failed to read brain modes: ${errMsg(err)}` }],
           isError: true,
         };
       }
@@ -447,7 +425,7 @@ Use this after making code changes that require a process restart.`,
         return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `Failed to read event IDs: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `Failed to read event IDs: ${errMsg(err)}` }],
           isError: true,
         };
       }
@@ -486,7 +464,7 @@ Use this after making code changes that require a process restart.`,
           }],
         };
       } catch (err) {
-        return { content: [{ type: 'text' as const, text: `Failed to retrieve message: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+        return { content: [{ type: 'text' as const, text: `Failed to retrieve message: ${errMsg(err)}` }], isError: true };
       }
     },
   );

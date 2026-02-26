@@ -64,6 +64,39 @@ function profileEnvPath(root: string, bot: string): string {
   return path.join(root, 'bots', 'profiles', bot, 'env');
 }
 
+/** Copy persona group .md files into an instance's groups/ directory. */
+function copyPersonaGroups(personaBase: string, instanceBase: string): void {
+  const personaGroups = path.join(personaBase, 'groups');
+  if (!fs.existsSync(personaGroups)) return;
+  for (const gname of fs.readdirSync(personaGroups)) {
+    const gdir = path.join(personaGroups, gname);
+    if (!fs.statSync(gdir).isDirectory()) continue;
+    const dst = path.join(instanceBase, 'groups', gname);
+    fs.mkdirSync(dst, { recursive: true });
+    for (const file of fs.readdirSync(gdir)) {
+      if (!file.endsWith('.md')) continue;
+      fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
+    }
+  }
+}
+
+/** Seed the registered_groups table with the main room from profile env. */
+function seedMainRoomRegistration(instanceBase: string, mainJid: string, mainGroupName: string, mainGroupFolder: string): void {
+  const storeDir = path.join(instanceBase, 'store');
+  fs.mkdirSync(storeDir, { recursive: true });
+  const seedDb = new Database(path.join(storeDir, 'messages.db'));
+  seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
+    jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
+    trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
+    container_config TEXT, requires_trigger INTEGER DEFAULT 1
+  )`);
+  seedDb.prepare(
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), 0);
+  seedDb.close();
+}
+
 // ── Env loading ────────────────────────────────────────────────────────
 
 export function loadProfileEnv(root: string, bot: string): Record<string, string> {
@@ -229,19 +262,7 @@ export function restorePersona(root: string, bot: string): void {
   }
 
   // RESTORE: seed group files from personas → instance groups
-  const personaGroups = path.join(persona, 'groups');
-  if (fs.existsSync(personaGroups)) {
-    for (const gname of fs.readdirSync(personaGroups)) {
-      const gdir = path.join(personaGroups, gname);
-      if (!fs.statSync(gdir).isDirectory()) continue;
-      const dst = path.join(instance, 'groups', gname);
-      fs.mkdirSync(dst, { recursive: true });
-      for (const file of fs.readdirSync(gdir)) {
-        if (!file.endsWith('.md')) continue;
-        fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
-      }
-    }
-  }
+  copyPersonaGroups(persona, instance);
 }
 
 // ── Deploy ─────────────────────────────────────────────────────────────
@@ -278,19 +299,7 @@ export function deployBot(root: string, bot: string): void {
   const mainGroupName = profileEnv.MAIN_GROUP_NAME;
   const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
   if (mainJid && mainGroupName) {
-    const storeDir = path.join(instance, 'store');
-    fs.mkdirSync(storeDir, { recursive: true });
-    const seedDb = new Database(path.join(storeDir, 'messages.db'));
-    seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-      jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
-      trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
-      container_config TEXT, requires_trigger INTEGER DEFAULT 1
-    )`);
-    seedDb.prepare(
-      `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), 0);
-    seedDb.close();
+    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder);
     console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
   }
 
@@ -790,19 +799,7 @@ export function holodeckCreate(bot: string, branch: string): void {
         '\n' + fs.readFileSync(personaClaude, 'utf-8'),
       );
     }
-    const personaGroups = path.join(persona, 'groups');
-    if (fs.existsSync(personaGroups)) {
-      for (const gname of fs.readdirSync(personaGroups)) {
-        const gdir = path.join(personaGroups, gname);
-        if (!fs.statSync(gdir).isDirectory()) continue;
-        const dst = path.join(instance, 'groups', gname);
-        fs.mkdirSync(dst, { recursive: true });
-        for (const file of fs.readdirSync(gdir)) {
-          if (!file.endsWith('.md')) continue;
-          fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
-        }
-      }
-    }
+    copyPersonaGroups(persona, instance);
   }
 
   // 6. Create holodeck profile (clone live bot, force terminal-only)
@@ -825,19 +822,7 @@ export function holodeckCreate(bot: string, branch: string): void {
   const mainGroupName = profileEnv.MAIN_GROUP_NAME;
   const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
   if (mainJid && mainGroupName) {
-    const storeDir = path.join(instance, 'store');
-    fs.mkdirSync(storeDir, { recursive: true });
-    const seedDb = new Database(path.join(storeDir, 'messages.db'));
-    seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-      jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
-      trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
-      container_config TEXT, requires_trigger INTEGER DEFAULT 1
-    )`);
-    seedDb.prepare(
-      `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), 0);
-    seedDb.close();
+    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder);
   }
 
   // 8. Mark instance data as current
