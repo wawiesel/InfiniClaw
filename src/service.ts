@@ -13,7 +13,6 @@ import Database from 'better-sqlite3';
 
 import { parseEnvFile } from 'nanoclaw/env-utils.js';
 import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
-import { saveMcpServersToPersona } from './mcp-sync.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -189,8 +188,10 @@ export function killRogueProcesses(): void {
 // ── Persona sync ───────────────────────────────────────────────────────
 
 /**
- * Save runtime group .md files + skills from instance → personas/ dir.
- * Consolidates common.sh sync_persona + index.ts syncPersonas.
+ * Sync persona state before redeploy.
+ * Persona CLAUDE.md is edited directly by bots via writable mount — no copy needed.
+ * Group CLAUDE.md is ONE-WAY (repo → instance) — no save-back.
+ * MCP servers are ONE-WAY (persona → session) — no save-back.
  */
 export function syncPersona(root: string, bot: string): void {
   const instance = instanceDir(root, bot);
@@ -210,22 +211,6 @@ export function syncPersona(root: string, bot: string): void {
       return;
     }
   } catch { return; }
-
-  // Group CLAUDE.md is ONE-WAY (repo → instance): no save-back here.
-  // Persona CLAUDE.md is TWO-WAY: bots edit via writable mount at runtime,
-  // changes are already in the persona dir (no copy needed).
-
-  // Save MCP server changes back to persona (skills sync is one-way: persona → session)
-  const sessionsBase = path.join(instance, 'data', 'sessions');
-  if (fs.existsSync(sessionsBase)) {
-    for (const folder of fs.readdirSync(sessionsBase)) {
-      const settingsFile = path.join(sessionsBase, folder, '.claude', 'settings.json');
-      const sessionMcpDir = path.join(sessionsBase, folder, '.claude', 'mcp-servers');
-      const personaMcpDir = path.join(persona, 'mcp-servers');
-      saveMcpServersToPersona(settingsFile, personaMcpDir, sessionMcpDir);
-      break; // Only need one session (main)
-    }
-  }
 }
 
 /**
@@ -462,7 +447,7 @@ function removeStalePlists(): void {
   const validLabels = new Set(BOTS.map((b) => `com.infiniclaw.${b}.plist`));
   try {
     for (const file of fs.readdirSync(LAUNCH_AGENTS_DIR)) {
-      if (file.startsWith('com.infiniclaw.') && file.endsWith('.plist') && !validLabels.has(file)) {
+      if (file.startsWith('com.infiniclaw.') && file.endsWith('.plist') && !validLabels.has(file) && !file.includes('-holodeck')) {
         const pp = path.join(LAUNCH_AGENTS_DIR, file);
         unloadPlist(pp);
         fs.unlinkSync(pp);
@@ -593,6 +578,14 @@ export function stop(): void {
       console.log(`${bot}: stopped and uninstalled`);
     } else {
       console.log(`${bot}: not installed`);
+    }
+
+    // Stop holodeck instance if running
+    const hdPp = plistPath(holodeckBotName(bot));
+    if (fs.existsSync(hdPp)) {
+      unloadPlist(hdPp);
+      fs.unlinkSync(hdPp);
+      console.log(`${holodeckBotName(bot)}: stopped (holodeck)`);
     }
   }
 
@@ -733,6 +726,199 @@ export async function send(room: string, message: string): Promise<void> {
   } else {
     console.log(`Matrix: sent to ${room}`);
   }
+}
+
+// ── Holodeck (blue-green test instances) ───────────────────────────────
+
+function holodeckBotName(bot: string): string {
+  return `${bot}-holodeck`;
+}
+
+export function holodeckCreate(bot: string, branch: string): void {
+  if (!(BOTS as readonly string[]).includes(bot)) {
+    throw new Error(`Unknown bot: ${bot}. Valid: ${BOTS.join(', ')}`);
+  }
+
+  const root = resolveRoot();
+  const worktree = path.join(root, '_holodeck', bot);
+  const hdBot = holodeckBotName(bot);
+  const instance = instanceDir(root, hdBot);
+
+  if (fs.existsSync(worktree)) {
+    throw new Error(`Holodeck already exists for ${bot}. Run 'holodeck teardown ${bot}' first.`);
+  }
+
+  ensurePodmanReady();
+
+  // 1. Create git worktree from branch
+  console.log(`Creating worktree for branch '${branch}'...`);
+  fs.mkdirSync(path.dirname(worktree), { recursive: true });
+  execSync(`git worktree add "${worktree}" "${branch}"`, { cwd: root, stdio: 'inherit' });
+
+  // 2. Deploy worktree code to holodeck instance
+  fs.mkdirSync(instance, { recursive: true });
+  rsyncInstance(worktree, instance);
+
+  // 3. Install deps
+  const liveMods = path.join(instanceDir(root, bot), 'node_modules');
+  if (fs.existsSync(liveMods) && !fs.existsSync(path.join(instance, 'node_modules'))) {
+    // Symlink from live bot to save time (same deps in most cases)
+    console.log(`${hdBot}: linking node_modules from live ${bot}...`);
+    fs.symlinkSync(liveMods, path.join(instance, 'node_modules'));
+  }
+  if (!fs.existsSync(path.join(instance, 'node_modules'))) {
+    console.log(`${hdBot}: installing dependencies...`);
+    execSync('npm ci', { cwd: instance, stdio: 'inherit' });
+  }
+
+  // 4. Build
+  console.log(`${hdBot}: building...`);
+  execSync('npm run build', { cwd: instance, stdio: 'inherit' });
+
+  // 5. Restore persona (from worktree, using live bot's persona name)
+  const persona = personaDir(worktree, bot);
+  if (fs.existsSync(persona)) {
+    const personaClaude = path.join(persona, 'CLAUDE.md');
+    if (fs.existsSync(personaClaude)) {
+      fs.appendFileSync(
+        path.join(instance, 'CLAUDE.md'),
+        '\n' + fs.readFileSync(personaClaude, 'utf-8'),
+      );
+    }
+    const personaGroups = path.join(persona, 'groups');
+    if (fs.existsSync(personaGroups)) {
+      for (const gname of fs.readdirSync(personaGroups)) {
+        const gdir = path.join(personaGroups, gname);
+        if (!fs.statSync(gdir).isDirectory()) continue;
+        const dst = path.join(instance, 'groups', gname);
+        fs.mkdirSync(dst, { recursive: true });
+        for (const file of fs.readdirSync(gdir)) {
+          if (!file.endsWith('.md')) continue;
+          fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
+        }
+      }
+    }
+  }
+
+  // 6. Create holodeck profile (clone live bot, force terminal-only)
+  const hdProfileDir = path.join(root, 'bots', 'profiles', hdBot);
+  fs.mkdirSync(hdProfileDir, { recursive: true });
+  fs.copyFileSync(profileEnvPath(root, bot), profileEnvPath(root, hdBot));
+  fs.appendFileSync(profileEnvPath(root, hdBot), [
+    '',
+    '# Holodeck overrides — terminal only, no Matrix',
+    'LOCAL_CHANNEL_ENABLED=1',
+    'MATRIX_HOMESERVER=',
+    'MATRIX_USERNAME=',
+    'MATRIX_PASSWORD=',
+    '',
+  ].join('\n'));
+
+  // 7. Seed main room registration
+  const profileEnv = loadProfileEnv(root, hdBot);
+  const mainJid = profileEnv.LOCAL_CHAT_JID || profileEnv.LOCAL_MIRROR_MATRIX_JID;
+  const mainGroupName = profileEnv.MAIN_GROUP_NAME;
+  const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+  if (mainJid && mainGroupName) {
+    const storeDir = path.join(instance, 'store');
+    fs.mkdirSync(storeDir, { recursive: true });
+    const seedDb = new Database(path.join(storeDir, 'messages.db'));
+    seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
+      jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
+      trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
+      container_config TEXT, requires_trigger INTEGER DEFAULT 1
+    )`);
+    seedDb.prepare(
+      `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), 0);
+    seedDb.close();
+  }
+
+  // 8. Mark instance data as current
+  const dataDir = path.join(instance, 'data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'run-id'), `${Date.now()}`);
+
+  // 9. Start launchd service
+  const logs = logDir(root);
+  fs.mkdirSync(logs, { recursive: true });
+  installPlistAndLoad(hdBot, process.execPath, instance, logs, buildLaunchdEnv(root, hdBot));
+
+  console.log(`\nHolodeck started: ${hdBot}`);
+  console.log(`  Branch: ${branch}`);
+  console.log(`  Instance: ${instance}`);
+  console.log(`  Chat: npm run cli holodeck chat ${bot}`);
+  console.log(`  Logs: tail -f ${logs}/${hdBot}.log`);
+  console.log(`  Teardown: npm run cli holodeck teardown ${bot}`);
+}
+
+export function holodeckChat(bot: string): void {
+  chat(holodeckBotName(bot));
+}
+
+export function holodeckTeardown(bot: string): void {
+  const root = resolveRoot();
+  const hdBot = holodeckBotName(bot);
+  const worktree = path.join(root, '_holodeck', bot);
+  const instance = instanceDir(root, hdBot);
+  const hdProfile = path.join(root, 'bots', 'profiles', hdBot);
+
+  // Stop service
+  const pp = plistPath(hdBot);
+  if (fs.existsSync(pp)) {
+    unloadPlist(pp);
+    fs.unlinkSync(pp);
+    console.log(`${hdBot}: stopped`);
+  }
+
+  // Kill holodeck containers
+  stopContainersByPrefix(`nanoclaw-${hdBot}-`);
+
+  // Remove instance
+  if (fs.existsSync(instance)) {
+    fs.rmSync(instance, { recursive: true });
+    console.log(`Removed instance: ${instance}`);
+  }
+
+  // Remove profile
+  if (fs.existsSync(hdProfile)) {
+    fs.rmSync(hdProfile, { recursive: true });
+    console.log(`Removed profile: ${hdProfile}`);
+  }
+
+  // Remove worktree
+  if (fs.existsSync(worktree)) {
+    execSync(`git worktree remove "${worktree}" --force`, { cwd: root, stdio: 'inherit' });
+    console.log(`Removed worktree: ${worktree}`);
+  }
+
+  console.log(`Holodeck torn down for ${bot}.`);
+}
+
+export function holodeckPromote(bot: string): void {
+  const root = resolveRoot();
+  const worktree = path.join(root, '_holodeck', bot);
+  if (!fs.existsSync(worktree)) {
+    throw new Error(`No holodeck found for ${bot}.`);
+  }
+
+  // Get branch name from worktree
+  const branch = execSync('git branch --show-current', { cwd: worktree, encoding: 'utf-8' }).trim();
+  if (!branch) throw new Error('Cannot determine holodeck branch.');
+
+  // Merge into current branch
+  console.log(`Merging '${branch}' into current branch...`);
+  execSync(`git merge "${branch}"`, { cwd: root, stdio: 'inherit' });
+
+  // Teardown holodeck
+  holodeckTeardown(bot);
+
+  // Redeploy live bot
+  console.log(`Redeploying ${bot}...`);
+  bootstrapBot(root, bot);
+
+  console.log(`\nHolodeck promoted: '${branch}' merged, ${bot} redeployed.`);
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────

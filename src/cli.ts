@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { start, stop, chat, send } from './service.js';
+import {
+  start, stop, chat, send,
+  holodeckCreate, holodeckChat, holodeckTeardown, holodeckPromote,
+} from './service.js';
 
 const [cmd, ...args] = process.argv.slice(2);
 switch (cmd) {
@@ -16,7 +19,32 @@ switch (cmd) {
       process.exit(1);
     });
     break;
+  case 'holodeck': {
+    const [sub, ...hArgs] = args;
+    switch (sub) {
+      case 'create':
+        if (hArgs.length < 2) { console.error('Usage: cli holodeck create <bot> <branch>'); process.exit(1); }
+        holodeckCreate(hArgs[0], hArgs[1]);
+        break;
+      case 'chat':
+        if (!hArgs[0]) { console.error('Usage: cli holodeck chat <bot>'); process.exit(1); }
+        holodeckChat(hArgs[0]);
+        break;
+      case 'teardown':
+        if (!hArgs[0]) { console.error('Usage: cli holodeck teardown <bot>'); process.exit(1); }
+        holodeckTeardown(hArgs[0]);
+        break;
+      case 'promote':
+        if (!hArgs[0]) { console.error('Usage: cli holodeck promote <bot>'); process.exit(1); }
+        holodeckPromote(hArgs[0]);
+        break;
+      default:
+        console.error('Usage: cli holodeck create|chat|teardown|promote');
+        process.exit(1);
+    }
+    break;
+  }
   default:
-    console.error('Usage: cli start|stop|chat|send');
+    console.error('Usage: cli start|stop|chat|send|holodeck');
     process.exit(1);
 }

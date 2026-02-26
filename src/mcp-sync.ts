@@ -2,7 +2,7 @@
  * MCP server sync: load persona MCP servers into session settings.json.
  * Each persona can have mcp-servers/{name}/ dirs containing server code + mcp.json manifest.
  * On container spawn, manifests are merged into settings.json mcpServers section.
- * On save-back, runtime MCP config changes are persisted to persona dirs.
+ * Direction is ONE-WAY: persona → session. No save-back.
  */
 import fs from 'fs';
 import path from 'path';
@@ -99,61 +99,3 @@ export function loadMcpServersToSettings(
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 }
 
-/**
- * Save runtime MCP server changes back to persona.
- * Reads mcpServers from settings.json and writes manifests + code back.
- * Skips the built-in 'nanoclaw' server.
- */
-export function saveMcpServersToPersona(
-  settingsPath: string,
-  personaMcpDir: string,
-  sessionMcpDir: string,
-  skipNames?: Set<string>,
-): void {
-  if (!fs.existsSync(settingsPath)) return;
-
-  let settings: Record<string, unknown> = {};
-  try {
-    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-  } catch {
-    return;
-  }
-
-  const mcpServers =
-    (settings.mcpServers as Record<string, McpServerConfig> | undefined) || {};
-  const serverNames = Object.keys(mcpServers).filter(
-    (name) => name !== 'nanoclaw' && !(skipNames?.has(name)),
-  );
-
-  if (serverNames.length === 0) return;
-
-  // Clean persona MCP dir (preserve .gitkeep)
-  if (fs.existsSync(personaMcpDir)) {
-    for (const entry of fs.readdirSync(personaMcpDir)) {
-      if (entry === '.gitkeep') continue;
-      fs.rmSync(path.join(personaMcpDir, entry), { recursive: true });
-    }
-  } else {
-    fs.mkdirSync(personaMcpDir, { recursive: true });
-  }
-
-  // Copy each server's code + manifest back to persona
-  for (const name of serverNames) {
-    const sessionDir = path.join(sessionMcpDir, name);
-    const personaDir = path.join(personaMcpDir, name);
-
-    if (fs.existsSync(sessionDir)) {
-      fs.cpSync(sessionDir, personaDir, { recursive: true });
-    } else {
-      fs.mkdirSync(personaDir, { recursive: true });
-    }
-
-    // Write manifest (strip container-rewritten paths)
-    const config = { ...mcpServers[name] };
-    delete config.cwd; // Container path, not meaningful on host
-    fs.writeFileSync(
-      path.join(personaDir, 'mcp.json'),
-      JSON.stringify(config, null, 2) + '\n',
-    );
-  }
-}
