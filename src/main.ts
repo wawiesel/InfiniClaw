@@ -98,7 +98,7 @@ import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
-import { handleOperatorCommand, buildTodoMessage } from './operator-commands.js';
+import { handleOperatorCommand, buildTodoMessage, readTodoItems } from './operator-commands.js';
 
 // ── Module-level state ─────────────────────────────────────────────────
 
@@ -903,6 +903,15 @@ function injectResumeMessage(): void {
     // Ensure chat entry exists (FK constraint) — fresh deploys may not have one yet
     updateChatName(chatJid, group.name);
 
+    // Build active tasks block from todo list
+    const todos = readTodoItems(group.folder);
+    const activeTodos = todos.filter((t) => t.status !== 'completed');
+    let taskBlock = '';
+    if (activeTodos.length > 0) {
+      const taskLines = activeTodos.map((t) => `- [${t.status}] ${t.content}`);
+      taskBlock = `\n\nActive tasks:\n${taskLines.join('\n')}`;
+    }
+
     const recent = getRecentMessages(chatJid, ASSISTANT_NAME, 10).reverse();
     let contextBlock = '';
     if (recent.length > 0) {
@@ -915,7 +924,7 @@ function injectResumeMessage(): void {
       chat_jid: chatJid,
       sender: 'system',
       sender_name: 'System',
-      content: `You were restarted. Review the conversation below and your memory, then resume any in-progress work. If nothing was in progress, say so briefly and wait.${contextBlock}`,
+      content: `You were restarted. Review the conversation and your active tasks below, then resume any in-progress work. If nothing was in progress, say so briefly and wait.${taskBlock}${contextBlock}`,
       timestamp: new Date().toISOString(),
     });
     queue.enqueueMessageCheck(chatJid);

@@ -111,7 +111,7 @@ const STATUS_ICON: Record<string, string> = {
     completed: '✅',
 };
 
-function readTodoItems(folder: string): TodoItem[] {
+export function readTodoItems(folder: string): TodoItem[] {
     const todosDir = path.join(DATA_DIR, 'sessions', folder, '.claude', 'todos');
     if (!fs.existsSync(todosDir)) return [];
 

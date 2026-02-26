@@ -1,14 +1,10 @@
 # NEXT — InfiniClaw Planned Work
 
-## Priority 1: Restart Robustness
-- **What:** Ensure bots always pick up where they left off after a restart.
-- **Why:** During container restarts or deployments, any active tasks or conversational context might be dropped.
-- **How:** Implement reliable logic (e.g., `injectResumeMessage()`) on startup that checks `store/messages.db` or active objectives to trigger the bot to summarize its last state and pick up pending work.
+## ~~Priority 1: Restart Robustness~~ ✅
+- **Done:** `injectResumeMessage()` now reads the bot's todo list via `readTodoItems()` and includes non-completed tasks in the resume message. Bots see their active tasks immediately on restart without rediscovering from conversation context.
 
-## Priority 1: Verify Sync Mechanisms
-- **What:** Make sure one-way sync is active for all bots.
-- **Why:** We need to reliably propagate repository skills and configurations (from `bots/personas/`) down into the active container sessions during spawn.
-- **How:** Review `syncPersona`, `loadSkillsToSession`, and `loadMcpServersToSettings`. We must be completely confident that changes made in the git repository immediately take effect upon container restart with no state drift.
+## ~~Priority 1: Verify Sync Mechanisms~~ ✅
+- **Done:** Verified all sync mechanisms are one-way (persona → container) as designed. `syncPersona`/`restorePersona` copy persona files at deploy. Skills are copied to session at spawn. MCP configs are read from persona `.mcp.json` and passed to container via `ContainerInput.mcpServers`. The only save-back is `saveMcpServersToPersona` which intentionally persists runtime MCP changes — this is by design for bots that add integrations.
 
 ## ~~Priority 1: NanoClaw Upgrades~~ ✅
 - **Done:** Merged upstream nanoclaw v1.1.3 (da61a7e, 212 commits). Used read-tree + selective restore since upstream force-pushed away the original squash base. Incorporated: group-folder path validation (security), skills engine updates, new skills (slack, gmail, update, qodo), CI improvements, setup module. InfiniClaw patches (lobe system, session rotation, IPC fix, container skills) re-applied on top. Build + all 41 tests pass. (commits 67ecff9, daf2439)
