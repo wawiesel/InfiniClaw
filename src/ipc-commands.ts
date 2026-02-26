@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 
 import Database from 'better-sqlite3';
-import { upsertEnvLine } from 'nanoclaw/env-utils.js';
+import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from 'nanoclaw/env-utils.js';
 
 import {
   ASSISTANT_ROLE,
@@ -77,43 +77,35 @@ interface CommandData {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-function resolveInfiniClawRoot(): string {
-  return resolveRoot();
+function trySync<T>(fn: () => T, fallback: (err: unknown) => T): T {
+  try { return fn(); } catch (err) { return fallback(err); }
 }
 
-function validateDeploy(bot: string): Promise<{ ok: boolean; errors: string }> {
-  return new Promise((resolve) => {
-    try {
-      const result = serviceValidateDeploy(resolveRoot(), bot);
-      resolve(result);
-    } catch (err) {
-      resolve({ ok: false, errors: err instanceof Error ? err.message : String(err) });
-    }
-  });
+function errStr(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
-function deployInstance(bot: string): Promise<{ ok: boolean; output: string }> {
-  return new Promise((resolve) => {
-    try {
-      const root = resolveRoot();
-      serviceDeployBot(root, bot);
-      serviceRebuildImage(root, bot);
-      resolve({ ok: true, output: '' });
-    } catch (err) {
-      resolve({ ok: false, output: err instanceof Error ? err.message : String(err) });
-    }
-  });
+function validateDeploy(bot: string): { ok: boolean; errors: string } {
+  return trySync(
+    () => serviceValidateDeploy(resolveRoot(), bot),
+    (err) => ({ ok: false, errors: errStr(err) }),
+  );
 }
 
-function rebuildImage(bot: string): Promise<{ ok: boolean; output: string }> {
-  return new Promise((resolve) => {
-    try {
-      serviceRebuildImage(resolveRoot(), bot);
-      resolve({ ok: true, output: '' });
-    } catch (err) {
-      resolve({ ok: false, output: err instanceof Error ? err.message : String(err) });
-    }
-  });
+function deployInstance(bot: string): { ok: boolean; output: string } {
+  return trySync(() => {
+    const root = resolveRoot();
+    serviceDeployBot(root, bot);
+    serviceRebuildImage(root, bot);
+    return { ok: true as boolean, output: '' };
+  }, (err) => ({ ok: false, output: errStr(err) }));
+}
+
+function rebuildImage(bot: string): { ok: boolean; output: string } {
+  return trySync(
+    () => { serviceRebuildImage(resolveRoot(), bot); return { ok: true as boolean, output: '' }; },
+    (err) => ({ ok: false, output: errStr(err) }),
+  );
 }
 
 function applyBrainMode(
@@ -121,7 +113,7 @@ function applyBrainMode(
   mode: 'anthropic' | 'ollama',
   model?: string,
 ): string {
-  const root = resolveInfiniClawRoot();
+  const root = resolveRoot();
   const envFile = path.join(root, 'bots', 'profiles', bot, 'env');
   if (!fs.existsSync(envFile)) {
     throw new Error(`Missing profile env: ${envFile}`);
@@ -150,26 +142,18 @@ function applyBrainMode(
 }
 
 export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'unknown'; model: string } {
-  const root = resolveInfiniClawRoot();
-  const envFile = path.join(root, 'bots', 'profiles', bot, 'env');
-  if (!fs.existsSync(envFile)) {
+  const envFile = path.join(resolveRoot(), 'bots', 'profiles', bot, 'env');
+  if (!fs.existsSync(envFile)) return { mode: 'unknown', model: '' };
+  try {
+    const vars = parseEnvFile(envFile);
+    const model = vars.BRAIN_MODEL || '';
+    if (isOllamaBaseUrl(vars.BRAIN_BASE_URL) || vars.BRAIN_AUTH_TOKEN === 'ollama') {
+      return { mode: 'ollama', model };
+    }
+    return { mode: model ? 'anthropic' : 'unknown', model };
+  } catch {
     return { mode: 'unknown', model: '' };
   }
-  const content = fs.readFileSync(envFile, 'utf-8');
-  const getValue = (key: string): string => {
-    const match = content.match(new RegExp(`^${key}=(.*)`, 'm'));
-    return match ? match[1].trim() : '';
-  };
-  const model = getValue('BRAIN_MODEL');
-  const baseUrl = getValue('BRAIN_BASE_URL');
-  const authToken = getValue('BRAIN_AUTH_TOKEN');
-  if (baseUrl && (baseUrl.includes('ollama') || baseUrl.includes('11434'))) {
-    return { mode: 'ollama', model };
-  }
-  if (authToken === 'ollama') {
-    return { mode: 'ollama', model };
-  }
-  return { mode: model ? 'anthropic' : 'unknown', model };
 }
 
 /** Parse chatJid from data, returning null if empty. */
@@ -201,53 +185,22 @@ export async function handleInfiniClawMessage(
   data: { type: string; chatJid?: string; imageData?: string; fileData?: string; filename?: string; mimetype?: string; caption?: string },
   ctx: InfiniClawMessageContext,
 ): Promise<boolean> {
-  if (data.type === 'image' && data.chatJid && data.imageData) {
-    if (ctx.authorized) {
-      const buffer = Buffer.from(data.imageData, 'base64');
-      await ctx.sendImage(
-        data.chatJid,
-        buffer,
-        data.filename || 'image.png',
-        data.mimetype || 'image/png',
-        data.caption,
-      );
-      logger.info(
-        { chatJid: data.chatJid, sourceGroup: ctx.sourceGroup, filename: data.filename },
-        'IPC image sent',
-      );
-    } else {
-      logger.warn(
-        { chatJid: data.chatJid, sourceGroup: ctx.sourceGroup },
-        'Unauthorized IPC image attempt blocked',
-      );
-    }
+  const isImage = data.type === 'image' && data.chatJid && data.imageData;
+  const isFile = data.type === 'file' && data.chatJid && data.fileData;
+  if (!isImage && !isFile) return false;
+
+  if (!ctx.authorized) {
+    logger.warn({ chatJid: data.chatJid, sourceGroup: ctx.sourceGroup }, `Unauthorized IPC ${data.type} attempt blocked`);
     return true;
   }
 
-  if (data.type === 'file' && data.chatJid && data.fileData) {
-    if (ctx.authorized) {
-      const buffer = Buffer.from(data.fileData, 'base64');
-      await ctx.sendFile(
-        data.chatJid,
-        buffer,
-        data.filename || 'attachment.bin',
-        data.mimetype || 'application/octet-stream',
-        data.caption,
-      );
-      logger.info(
-        { chatJid: data.chatJid, sourceGroup: ctx.sourceGroup, filename: data.filename },
-        'IPC file sent',
-      );
-    } else {
-      logger.warn(
-        { chatJid: data.chatJid, sourceGroup: ctx.sourceGroup },
-        'Unauthorized IPC file attempt blocked',
-      );
-    }
-    return true;
-  }
-
-  return false;
+  const buffer = Buffer.from((isImage ? data.imageData : data.fileData)!, 'base64');
+  const sendFn = isImage ? ctx.sendImage : ctx.sendFile;
+  const defaultName = isImage ? 'image.png' : 'attachment.bin';
+  const defaultMime = isImage ? 'image/png' : 'application/octet-stream';
+  await sendFn(data.chatJid!, buffer, data.filename || defaultName, data.mimetype || defaultMime, data.caption);
+  logger.info({ chatJid: data.chatJid, sourceGroup: ctx.sourceGroup, filename: data.filename }, `IPC ${data.type} sent`);
+  return true;
 }
 
 // ── Command handlers ────────────────────────────────────────────────────
@@ -303,7 +256,7 @@ async function handleRestartBot(data: CommandData, ctx: InfiniClawIpcContext): P
 
   logger.info({ bot }, 'Restart requested via IPC — validating deploy');
 
-  const { ok, errors } = await validateDeploy(bot);
+  const { ok, errors } = validateDeploy(bot);
   if (!ok) {
     logger.error({ bot, errors }, 'Deploy validation failed — aborting restart');
     if (chatJid) {
@@ -324,7 +277,7 @@ async function handleRestartBot(data: CommandData, ctx: InfiniClawIpcContext): P
 
 async function handleSelfRestart(bot: string, chatJid: string | null, ctx: InfiniClawIpcContext): Promise<void> {
   logger.info({ bot }, 'Deploy validation passed — deploying to self then restarting');
-  const deploy = await deployInstance(bot);
+  const deploy = deployInstance(bot);
   if (!deploy.ok) {
     logger.error({ bot, output: deploy.output }, 'Self-deploy failed — aborting restart');
     if (chatJid) {
@@ -447,7 +400,7 @@ async function handleRebuildImage(data: CommandData, ctx: InfiniClawIpcContext):
   if (chatJid) {
     try { await ctx.sendMessage(chatJid, `🔧 rebuilding nanoclaw-${bot}:latest...`); } catch {}
   }
-  const result = await rebuildImage(bot);
+  const result = rebuildImage(bot);
   if (!result.ok) {
     logger.error({ bot, output: result.output }, 'Image rebuild failed');
     if (chatJid) {

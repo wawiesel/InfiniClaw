@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { parseEnvLine } from 'nanoclaw/env-utils.js';
+import { parseEnvFile } from 'nanoclaw/env-utils.js';
 import { ASSISTANT_NAME, CAPTAIN_USER_ID, DATA_DIR } from 'nanoclaw/config.js';
 import { getAllRegisteredGroups, getSession } from 'nanoclaw/db.js';
 import { logger } from 'nanoclaw/logger.js';
@@ -12,13 +12,12 @@ export function getCaptainUserId(): string {
         process.env.INFINICLAW_ROOT || path.resolve(process.cwd(), '..', '..', '..'),
         'bots', 'profiles', 'engineer', 'env'
     );
-
-    if (fs.existsSync(profileEnvPath)) {
-        for (const line of fs.readFileSync(profileEnvPath, 'utf-8').split('\n')) {
-            const parsed = parseEnvLine(line);
-            if (parsed?.[0] === 'CAPTAIN_USER_ID') return parsed[1].trim();
+    try {
+        if (fs.existsSync(profileEnvPath)) {
+            const vars = parseEnvFile(profileEnvPath);
+            if (vars.CAPTAIN_USER_ID) return vars.CAPTAIN_USER_ID.trim();
         }
-    }
+    } catch { /* best effort */ }
     return CAPTAIN_USER_ID;
 }
 

@@ -15,7 +15,6 @@ interface McpServerConfig {
   url?: string;
 }
 
-
 /** Read mcp.json manifests from a persona's mcp-servers/ directory. */
 function readPersonaMcpServers(
   personaMcpDir: string,
@@ -98,4 +97,3 @@ export function loadMcpServersToSettings(
   settings.mcpServers = merged;
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 }
-
