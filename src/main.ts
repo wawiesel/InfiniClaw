@@ -898,9 +898,13 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Persistent interval handles — populated below, cleared on shutdown
+  const persistentTimers: ReturnType<typeof setInterval>[] = [];
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    for (const timer of persistentTimers) clearInterval(timer);
     for (const jid of Object.keys(registeredGroups)) {
       const ch = findChannel(channels, jid);
       if (ch?.setStatusPip) {
@@ -1035,7 +1039,7 @@ async function main(): Promise<void> {
   // Memory watchdog
   const heapLimitBytes = HEAP_LIMIT_MB * 1024 * 1024;
   const heartbeatPath = path.join(DATA_DIR, 'heartbeat');
-  setInterval(() => {
+  persistentTimers.push(setInterval(() => {
     const usage = process.memoryUsage();
     const heapMB = Math.round(usage.heapUsed / 1024 / 1024);
     const rssMB = Math.round(usage.rss / 1024 / 1024);
@@ -1045,14 +1049,14 @@ async function main(): Promise<void> {
       logger.warn({ heapMB, limitMB: HEAP_LIMIT_MB }, 'Heap limit exceeded, recycling');
       shutdown('HEAP_LIMIT');
     }
-  }, MEMORY_CHECK_INTERVAL);
+  }, MEMORY_CHECK_INTERVAL));
   try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { }
 
   // Prune expired allow-list entries every 5 minutes
-  setInterval(() => {
+  persistentTimers.push(setInterval(() => {
     const count = pruneExpired();
     if (count > 0) logger.info({ count }, 'Pruned expired allow-list entries');
-  }, 5 * 60 * 1000);
+  }, 5 * 60 * 1000));
 
   // Periodic status snapshot
   const STATUS_SNAPSHOT_INTERVAL = 30_000;
@@ -1102,7 +1106,7 @@ async function main(): Promise<void> {
     }
   };
   writeStatusSnapshot();
-  setInterval(writeStatusSnapshot, STATUS_SNAPSHOT_INTERVAL);
+  persistentTimers.push(setInterval(writeStatusSnapshot, STATUS_SNAPSHOT_INTERVAL));
 
   // Start subsystems
   startSchedulerLoop({
@@ -1210,7 +1214,7 @@ async function main(): Promise<void> {
 
   // Periodic memory-save reminder (only when bot is actively working, not idle)
   const MEMORY_SAVE_INTERVAL_MS = 10 * 60 * 1000;
-  setInterval(() => {
+  persistentTimers.push(setInterval(() => {
     for (const [chatJid, group] of Object.entries(registeredGroups)) {
       const status = queue.getGroupStatus(chatJid);
       if (!status.active || status.idleWaiting) continue;
@@ -1220,11 +1224,11 @@ async function main(): Promise<void> {
       );
       logger.debug({ chatJid, group: group.name }, 'Sent periodic memory-save reminder');
     }
-  }, MEMORY_SAVE_INTERVAL_MS);
+  }, MEMORY_SAVE_INTERVAL_MS));
 
   // Periodic todo list enforcement (every 2 minutes)
   const TODO_ENFORCE_INTERVAL_MS = 2 * 60 * 1000;
-  setInterval(() => {
+  persistentTimers.push(setInterval(() => {
     for (const [chatJid, group] of Object.entries(registeredGroups)) {
       const status = queue.getGroupStatus(chatJid);
       if (!status.active || status.idleWaiting) continue;
@@ -1261,7 +1265,7 @@ async function main(): Promise<void> {
         logger.debug({ chatJid, group: group.name }, 'Sent todo enforcement reminder (no in_progress)');
       }
     }
-  }, TODO_ENFORCE_INTERVAL_MS);
+  }, TODO_ENFORCE_INTERVAL_MS));
 
   // Boot announcement
   const bootAnnounceTimer = setInterval(async () => {

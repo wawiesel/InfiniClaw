@@ -11,7 +11,7 @@ import {
   DATA_DIR,
   MAIN_GROUP_FOLDER,
 } from 'nanoclaw/config.js';
-import { setRouterState } from 'nanoclaw/db.js';
+
 import { logger } from 'nanoclaw/logger.js';
 
 const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');

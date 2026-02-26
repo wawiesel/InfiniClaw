@@ -34,13 +34,9 @@ import { statusMessage } from './formatting.js';
 // ── Cooldown tracking ───────────────────────────────────────────────────
 
 const RESTART_COOLDOWN_MS = 60_000; // 60 seconds
-const lastRestartTimes: Record<string, number> = {};
-
 const REBUILD_COOLDOWN_MS = 5 * 60_000; // 5 minutes — image builds are expensive
-const lastRebuildTimes: Record<string, number> = {};
-
 const GIT_PUSH_COOLDOWN_MS = 60_000; // 60 seconds
-const lastGitPushTime: { t: number } = { t: 0 };
+const cooldowns: Record<string, number> = {};
 
 // ── Interfaces ──────────────────────────────────────────────────────────
 
@@ -156,6 +152,31 @@ export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'un
   }
 }
 
+/** Auth guard — returns true if blocked (unauthorized). */
+function requireMain(ctx: InfiniClawIpcContext, command: string): boolean {
+  if (ctx.isMain) return false;
+  logger.warn({ sourceGroup: ctx.sourceGroup }, `Unauthorized ${command} attempt blocked`);
+  return true;
+}
+
+/** Cooldown gate — returns a rejection message if still cooling down, or null if OK. */
+function checkCooldown(key: string, cooldownMs: number): string | null {
+  const now = Date.now();
+  const elapsed = now - (cooldowns[key] || 0);
+  if (elapsed < cooldownMs) {
+    const remaining = Math.ceil((cooldownMs - elapsed) / 1000);
+    return `⏳ Cooldown: ${key} was triggered ${Math.floor(elapsed / 1000)}s ago. Wait ${remaining}s.`;
+  }
+  cooldowns[key] = now;
+  return null;
+}
+
+/** Send a message, swallowing errors (best-effort notification). */
+async function safeSend(ctx: InfiniClawIpcContext, chatJid: string | null, text: string): Promise<void> {
+  if (!chatJid) return;
+  try { await ctx.sendMessage(chatJid, text); } catch {}
+}
+
 /** Parse chatJid from data, returning null if empty. */
 function parseChatJid(data: CommandData): string | null {
   return typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
@@ -206,10 +227,7 @@ export async function handleInfiniClawMessage(
 // ── Command handlers ────────────────────────────────────────────────────
 
 async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized set_brain_mode attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'set_brain_mode')) return;
   const validBot = data.bot === 'engineer' || data.bot === 'commander' || data.bot === 'architect';
   const validMode = data.mode === 'anthropic' || data.mode === 'ollama';
   if (!data.bot || !validBot || !data.mode || !validMode) {
@@ -231,39 +249,23 @@ async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext):
 }
 
 async function handleRestartBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized restart_bot attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'restart_bot')) return;
   const bot = parseBot(data, 'engineer');
   const chatJid = parseChatJid(data);
 
-  // Restart cooldown check — prevent restart loops
-  const now = Date.now();
-  const lastRestart = lastRestartTimes[bot] || 0;
-  const elapsed = now - lastRestart;
-  if (elapsed < RESTART_COOLDOWN_MS) {
-    const remaining = Math.ceil((RESTART_COOLDOWN_MS - elapsed) / 1000);
-    logger.warn({ bot, elapsed, remaining }, 'Restart rejected — cooldown active');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⏳ Restart cooldown: ${bot} was restarted ${Math.floor(elapsed / 1000)}s ago. Wait ${remaining}s before restarting again.`);
-      } catch {}
-    }
+  const cooldownMsg = checkCooldown(`restart:${bot}`, RESTART_COOLDOWN_MS);
+  if (cooldownMsg) {
+    logger.warn({ bot }, 'Restart rejected — cooldown active');
+    await safeSend(ctx, chatJid, cooldownMsg);
     return;
   }
-  lastRestartTimes[bot] = now;
 
   logger.info({ bot }, 'Restart requested via IPC — validating deploy');
 
   const { ok, errors } = validateDeploy(bot);
   if (!ok) {
     logger.error({ bot, errors }, 'Deploy validation failed — aborting restart');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⛔ deploy validation failed — not restarting:\n\n\`\`\`\n${truncateOutput(errors)}\n\`\`\``);
-      } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ deploy validation failed — not restarting:\n\n\`\`\`\n${truncateOutput(errors)}\n\`\`\``);
     return;
   }
 
@@ -280,16 +282,10 @@ async function handleSelfRestart(bot: string, chatJid: string | null, ctx: Infin
   const deploy = deployInstance(bot);
   if (!deploy.ok) {
     logger.error({ bot, output: deploy.output }, 'Self-deploy failed — aborting restart');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
-      } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
     return;
   }
-  if (chatJid) {
-    try { await ctx.sendMessage(chatJid, statusMessage('⭕️', 'restarting...')); } catch {}
-  }
+  await safeSend(ctx, chatJid, statusMessage('⭕️', 'restarting...'));
   try {
     serviceRefreshPlist(resolveRoot(), bot);
   } catch (err) {
@@ -334,19 +330,12 @@ async function handleCrossBotRestart(bot: string, chatJid: string | null, ctx: I
     logger.info({ bot }, 'Cross-bot bootstrap succeeded');
   } catch (err) {
     logger.error({ bot, err }, 'Cross-bot bootstrap failed');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⛔ bootstrap failed for ${bot}: ${(err as Error).message}`);
-      } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ bootstrap failed for ${bot}: ${(err as Error).message}`);
   }
 }
 
 async function handleStopBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized stop_bot attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'stop_bot')) return;
   const bot = typeof data.bot === 'string' && (BOTS as readonly string[]).includes(data.bot)
     ? data.bot
     : null;
@@ -363,64 +352,39 @@ async function handleStopBot(data: CommandData, ctx: InfiniClawIpcContext): Prom
   try {
     serviceStopBot(bot);
     logger.info({ bot }, 'Bot stopped');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `<font color="#555555">🛑 ${bot} stopped.</font>`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `<font color="#555555">🛑 ${bot} stopped.</font>`);
   } catch (err) {
     logger.error({ bot, err }, 'Failed to stop bot');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `⛔ failed to stop ${bot}: ${(err as Error).message}`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ failed to stop ${bot}: ${(err as Error).message}`);
   }
 }
 
 async function handleRebuildImage(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized rebuild_image attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'rebuild_image')) return;
   const bot = parseBot(data, 'commander');
   const chatJid = parseChatJid(data);
 
-  // Rebuild cooldown — image builds are expensive, prevent spam
-  const nowRebuild = Date.now();
-  const lastRebuild = lastRebuildTimes[bot] || 0;
-  const rebuildElapsed = nowRebuild - lastRebuild;
-  if (rebuildElapsed < REBUILD_COOLDOWN_MS) {
-    const remaining = Math.ceil((REBUILD_COOLDOWN_MS - rebuildElapsed) / 1000);
-    logger.warn({ bot, rebuildElapsed, remaining }, 'rebuild_image rejected — cooldown active');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `⏳ Rebuild cooldown: ${bot} was rebuilt ${Math.floor(rebuildElapsed / 1000)}s ago. Wait ${remaining}s.`); } catch {}
-    }
+  const cooldownMsg = checkCooldown(`rebuild:${bot}`, REBUILD_COOLDOWN_MS);
+  if (cooldownMsg) {
+    logger.warn({ bot }, 'rebuild_image rejected — cooldown active');
+    await safeSend(ctx, chatJid, cooldownMsg);
     return;
   }
-  lastRebuildTimes[bot] = nowRebuild;
 
   logger.info({ bot }, 'Container image rebuild requested via IPC');
-  if (chatJid) {
-    try { await ctx.sendMessage(chatJid, `🔧 rebuilding nanoclaw-${bot}:latest...`); } catch {}
-  }
+  await safeSend(ctx, chatJid, `🔧 rebuilding nanoclaw-${bot}:latest...`);
   const result = rebuildImage(bot);
   if (!result.ok) {
     logger.error({ bot, output: result.output }, 'Image rebuild failed');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⛔ image rebuild failed for ${bot}:\n\n\`\`\`\n${truncateOutput(result.output)}\n\`\`\``);
-      } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ image rebuild failed for ${bot}:\n\n\`\`\`\n${truncateOutput(result.output)}\n\`\`\``);
   } else {
     logger.info({ bot }, 'Image rebuild succeeded');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `✅ nanoclaw-${bot}:latest rebuilt`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `✅ nanoclaw-${bot}:latest rebuilt`);
   }
 }
 
 async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized bot_status attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'bot_status')) return;
   const bot = typeof data.bot === 'string' && ['engineer', 'commander', 'architect'].includes(data.bot)
     ? data.bot
     : 'commander';
@@ -475,10 +439,7 @@ function handleSetThread(data: CommandData, ctx: InfiniClawIpcContext): void {
 }
 
 async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized restart_wksm attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'restart_wksm')) return;
   const chatJid = parseChatJid(data);
   logger.info('restart_wksm requested via IPC');
   try {
@@ -533,7 +494,7 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
 
   // Push cooldown — prevent rapid-fire pushes
   const nowPush = Date.now();
-  const pushElapsed = nowPush - lastGitPushTime.t;
+  const pushElapsed = nowPush - (cooldowns['git_push'] || 0);
   if (pushElapsed < GIT_PUSH_COOLDOWN_MS) {
     const remaining = Math.ceil((GIT_PUSH_COOLDOWN_MS - pushElapsed) / 1000);
     logger.warn({ remote, branches, pushElapsed, remaining }, 'git_push rejected — cooldown active');
@@ -542,7 +503,7 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
     }
     return;
   }
-  lastGitPushTime.t = nowPush;
+  cooldowns['git_push'] = nowPush;
   try {
     const branchArgs = branches.join(' ');
     execSync(`git push ${remote} ${branchArgs}`, {
