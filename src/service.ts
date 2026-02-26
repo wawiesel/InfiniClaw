@@ -16,7 +16,7 @@ import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js'
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-export const BOTS = ['engineer', 'commander'] as const;
+export const BOTS = ['engineer', 'commander', 'architect'] as const;
 const LAUNCH_AGENTS_DIR = path.join(os.homedir(), 'Library', 'LaunchAgents');
 
 const RSYNC_EXCLUDES = [
@@ -662,6 +662,11 @@ const ROOM_MAP: Record<string, { bot: string; roomId: string; jid: string }> = {
     bot: 'commander',
     roomId: '!TZLtrIZdHWVhmwSqzI:matrix.org',
     jid: 'matrix:!TZLtrIZdHWVhmwSqzI:matrix.org',
+  },
+  astrometrics: {
+    bot: 'architect',
+    roomId: '!rMfJzsTiqpzNsHTXER:matrix.org',
+    jid: 'matrix:!rMfJzsTiqpzNsHTXER:matrix.org',
   },
 };
 

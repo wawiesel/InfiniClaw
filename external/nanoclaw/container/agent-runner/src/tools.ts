@@ -244,7 +244,7 @@ Modes:
 
 Note: bot restart is required for changes to take effect.`,
     {
-      bot: z.enum(['engineer', 'commander']).describe('Bot profile to update'),
+      bot: z.enum(['engineer', 'commander', 'architect']).describe('Bot profile to update'),
       mode: z.enum(['anthropic', 'ollama']).describe('Brain provider mode'),
       model: z.string().optional().describe('Optional model override for the selected mode'),
     },
@@ -336,8 +336,8 @@ The host daemon will:
 
 Use this after making code changes that require a process restart.`,
     {
-      bot: z.enum(['engineer', 'commander']).default(
-        (process.env.ASSISTANT_ROLE || 'engineer').toLowerCase() as 'engineer' | 'commander',
+      bot: z.enum(['engineer', 'commander', 'architect']).default(
+        (process.env.ASSISTANT_ROLE || 'engineer').toLowerCase() as 'engineer' | 'commander' | 'architect',
       ).describe('Which bot to restart'),
     },
     async (args) => {
@@ -488,6 +488,173 @@ Use this after making code changes that require a process restart.`,
       } catch (err) {
         return { content: [{ type: 'text' as const, text: `Failed to retrieve message: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
       }
+    },
+  );
+
+  // ── Holodeck management ────────────────────────────────────────────
+
+  server.tool(
+    'holodeck_create',
+    `Create a holodeck test instance from a git branch.
+
+Deploys the branch to an isolated instance that runs in terminal-only mode (no Matrix).
+Use holodeck_send to inject test messages and holodeck_read to check responses.`,
+    {
+      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot to create a holodeck for'),
+      branch: z.string().describe('Git branch name to deploy'),
+    },
+    async (args) => {
+      if (!isMain) {
+        return { content: [{ type: 'text' as const, text: 'Only MAIN can manage holodecks.' }], isError: true };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'holodeck_create',
+        bot: args.bot,
+        branch: args.branch,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Holodeck create queued for ${args.bot} (branch: ${args.branch}).` }] };
+    },
+  );
+
+  server.tool(
+    'holodeck_teardown',
+    'Tear down a holodeck test instance. Stops the service, removes the instance and worktree.',
+    {
+      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to tear down'),
+    },
+    async (args) => {
+      if (!isMain) {
+        return { content: [{ type: 'text' as const, text: 'Only MAIN can manage holodecks.' }], isError: true };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'holodeck_teardown',
+        bot: args.bot,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Holodeck teardown queued for ${args.bot}.` }] };
+    },
+  );
+
+  server.tool(
+    'holodeck_promote',
+    'Promote a holodeck instance — merges the feature branch into main and redeploys the live bot.',
+    {
+      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to promote'),
+    },
+    async (args) => {
+      if (!isMain) {
+        return { content: [{ type: 'text' as const, text: 'Only MAIN can manage holodecks.' }], isError: true };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'holodeck_promote',
+        bot: args.bot,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Holodeck promote queued for ${args.bot}.` }] };
+    },
+  );
+
+  server.tool(
+    'holodeck_send',
+    'Send a test message to a holodeck bot instance. Injects the message into the holodeck bot\'s message database.',
+    {
+      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to message'),
+      message: z.string().describe('The message text to inject'),
+    },
+    async (args) => {
+      if (!isMain) {
+        return { content: [{ type: 'text' as const, text: 'Only MAIN can manage holodecks.' }], isError: true };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'holodeck_send',
+        bot: args.bot,
+        message: args.message,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Message queued for ${args.bot} holodeck.` }] };
+    },
+  );
+
+  server.tool(
+    'holodeck_read',
+    'Read recent messages from a holodeck bot\'s message database. Returns the last N messages.',
+    {
+      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to read from'),
+      limit: z.number().int().positive().max(100).default(20).describe('Number of messages to read (default 20)'),
+    },
+    async (args) => {
+      if (!isMain) {
+        return { content: [{ type: 'text' as const, text: 'Only MAIN can manage holodecks.' }], isError: true };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'holodeck_read',
+        bot: args.bot,
+        limit: args.limit,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Holodeck read queued for ${args.bot} (last ${args.limit} messages).` }] };
+    },
+  );
+
+  server.tool(
+    'holodeck_status',
+    'Check the status of a holodeck test instance — whether it\'s running, its instance path, and worktree info.',
+    {
+      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to check'),
+    },
+    async (args) => {
+      if (!isMain) {
+        return { content: [{ type: 'text' as const, text: 'Only MAIN can manage holodecks.' }], isError: true };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'holodeck_status',
+        bot: args.bot,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Holodeck status check queued for ${args.bot}.` }] };
+    },
+  );
+
+  // ── Git operations ─────────────────────────────────────────────────
+
+  server.tool(
+    'git_push',
+    'Push git commits to a remote repository from the InfiniClaw root.',
+    {
+      remote: z.string().default('origin').describe('Git remote name'),
+      branches: z.array(z.string()).default(['main']).describe('Branch names to push'),
+    },
+    async (args) => {
+      if (!isMain) {
+        return {
+          content: [{ type: 'text' as const, text: 'Only MAIN can push.' }],
+          isError: true,
+        };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'git_push',
+        remote: args.remote,
+        branches: args.branches,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return {
+        content: [{ type: 'text' as const, text: `Push queued: ${args.branches.join(', ')} → ${args.remote}` }],
+      };
     },
   );
 

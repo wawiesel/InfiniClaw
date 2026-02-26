@@ -32,6 +32,7 @@ target="${1:-all}"
 case "${target}" in
   engineer)   build_image engineer ;;
   commander)  build_image commander ;;
-  all)        build_image engineer && build_image commander ;;
-  *)          echo "Usage: $0 [engineer|commander|all]" >&2; exit 1 ;;
+  architect)  build_image architect ;;
+  all)        build_image engineer && build_image commander && build_image architect ;;
+  *)          echo "Usage: $0 [engineer|commander|architect|all]" >&2; exit 1 ;;
 esac

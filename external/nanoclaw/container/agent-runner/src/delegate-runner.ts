@@ -1,5 +1,5 @@
 /**
- * InfiniClaw delegate tools: codex, gemini, ollama lobes + query_local_llm.
+ * InfiniClaw delegate tools: delegate_to_lobe + query_local_llm.
  */
 import { spawn } from 'child_process';
 import fs from 'fs';
@@ -26,47 +26,6 @@ function firstSet(...values: Array<string | undefined>): string | undefined {
   }
   return undefined;
 }
-
-const LOBE_CATALOG = {
-  claude: {
-    models: [
-      { id: 'opus', thinking: 'effort' },
-      { id: 'sonnet', thinking: 'effort' },
-      { id: 'haiku', thinking: 'effort' },
-    ],
-    envDefault: ['ANTHROPIC_MODEL', 'CLAUDE_MODEL'],
-    hardDefault: 'sonnet',
-    capabilities: ['cwd', 'effort'],
-  },
-  codex: {
-    models: [
-      { id: 'gpt-5-codex', thinking: false },
-      { id: 'o3', thinking: 'builtin' },
-      { id: 'o4-mini', thinking: 'builtin' },
-    ],
-    envDefault: ['CODEX_MODEL', 'OPENAI_MODEL'],
-    hardDefault: 'gpt-5-codex',
-    capabilities: ['cwd'],
-  },
-  gemini: {
-    models: [
-      { id: 'gemini-2.5-pro', thinking: 'builtin' },
-      { id: 'gemini-2.5-flash', thinking: 'builtin' },
-    ],
-    envDefault: ['GEMINI_MODEL'],
-    hardDefault: 'gemini-2.5-pro',
-    capabilities: ['cwd'],
-  },
-  ollama: {
-    models: [
-      { id: 'llama3.2', thinking: false },
-      { id: 'deepseek-r1', thinking: 'builtin' },
-    ],
-    envDefault: [],
-    hardDefault: 'llama3.2',
-    capabilities: ['system'],
-  },
-} as const;
 
 function prependToPath(currentPath: string | undefined, prefix: string): string {
   if (!currentPath || currentPath.trim().length === 0) return prefix;
@@ -133,15 +92,6 @@ function isIgnorableDelegateStderr(line: string): boolean {
     s.includes('node_tls_reject_unauthorized') &&
     s.includes('makes tls connections and https requests insecure')
   ) || s.includes('codex_core::rollout::list: state db missing rollout path for thread');
-}
-
-function formatDelegateSender(
-  name: string,
-  provider: 'codex' | 'gemini' | 'ollama' | 'claude',
-  llm: string,
-): string {
-  const providerName = provider.charAt(0).toUpperCase() + provider.slice(1);
-  return `💭 ${providerName}/${llm.trim()} - ${name.trim()}`;
 }
 
 function buildDelegateEnv(): DelegateEnv {
@@ -266,898 +216,14 @@ export function registerDelegateTools(
 
   const ollamaHost = process.env.OLLAMA_HOST || (process.env.NANOCLAW_IPC_DIR ? 'http://localhost:11434' : 'http://host.containers.internal:11434');
 
-  server.tool(
-    'list_lobes',
-    'List available lobe providers, their models, capabilities, and current defaults.',
-    {},
-    async () => {
-      const result: Record<string, unknown> = {};
-      for (const [provider, info] of Object.entries(LOBE_CATALOG)) {
-        const effectiveDefault = firstSet(...info.envDefault.map(k => process.env[k])) || info.hardDefault;
-        result[provider] = {
-          models: info.models,
-          default: effectiveDefault,
-          capabilities: info.capabilities,
-        };
-      }
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    },
-  );
-
-  server.tool(
-    'delegate_codex',
-    `Spawn a Codex lobe clone in the same mounted workspace.
-
-Use this when the main brain wants a tightly scoped clone to directly read/write files and run commands (including Python) inside the container.
-
-Behavior:
-- Streams lobe output back to chat prefixed as "codex: ..."
-- Returns the same prefixed text to the main brain for collapse/integration
-- If Codex cannot run (auth/quota/rate-limit/provider errors), it fails immediately and emits:
-  "codex: unavailable: ..."
-`,
-    {
-      name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Renamer").'),
-      objective: z.string().describe('Task for Codex to execute'),
-      cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
-      model: z.string().optional().describe('Optional Codex model override (e.g. "o3").'),
-      thread_id: z.string().optional().describe('Matrix thread root event ID. When provided, all output is posted into this thread instead of the main timeline.'),
-      timeout_ms: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_DELEGATE_TIMEOUT_MS)
-        .default(DEFAULT_DELEGATE_TIMEOUT_MS)
-        .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
-    },
-    async (args) => {
-      const threadId = args.thread_id?.trim() || undefined;
-      const effectiveModel =
-        firstSet(args.model, process.env.CODEX_MODEL, process.env.OPENAI_MODEL) ||
-        'gpt-5-codex';
-      const delegateHeader = formatDelegateSender(args.name, 'codex', effectiveModel);
-      emitDelegateMessage(delegateHeader, threadId);
-      if (threadId) emitDelegateMessage(args.objective, threadId);
-
-      const cwdResult = resolveDelegateCwd(args.cwd);
-      if (!cwdResult.ok) {
-        const unavailable = `unavailable: ${cwdResult.error}`;
-        const redText = `<font color="#cc0000">${unavailable}</font>`;
-        emitDelegateMessage(redText, threadId);
-        return {
-          content: [{ type: 'text' as const, text: `codex: ${unavailable}` }],
-          isError: true,
-        };
-      }
-
-      const timeoutMs = Math.max(
-        1000,
-        Math.min(args.timeout_ms ?? DEFAULT_DELEGATE_TIMEOUT_MS, MAX_DELEGATE_TIMEOUT_MS),
-      );
-
-      const codexArgs = [
-        'exec',
-        '--json',
-        '--skip-git-repo-check',
-        '--dangerously-bypass-approvals-and-sandbox',
-        '--cd',
-        cwdResult.cwd,
-      ];
-      codexArgs.push('--model', effectiveModel);
-      const delegatedObjective = [
-        'Execution constraints:',
-        '- Do NOT create Python virtual environments inside /workspace/group or /workspace/extra.',
-        '- If a Python environment is required, create it under /workspace/cache/venvs.',
-        '- Route large model/package caches under /workspace/cache.',
-        '',
-        'Objective:',
-        args.objective,
-      ].join('\n');
-      codexArgs.push(delegatedObjective);
-
-      return await new Promise<
-        { content: Array<{ type: 'text'; text: string }>; isError?: boolean }
-      >((resolve) => {
-        const prefixedMessages: string[] = [];
-        const stderrLines: string[] = [];
-        let stdoutBuffer = '';
-        let stderrBuffer = '';
-        let finalized = false;
-        let unavailableTriggered = false;
-        let timedOut = false;
-        let proc: ReturnType<typeof spawn> | null = null;
-
-        const finalize = (
-          payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean },
-        ) => {
-          if (finalized) return;
-          const estimatedTokens =
-            estimateTokens(args.objective) +
-            estimateTokens(prefixedMessages.join('\n\n'));
-          recordCapabilityUsage('codex', effectiveModel, estimatedTokens);
-          finalized = true;
-          resolve(payload);
-        };
-
-        const pushMessage = (text: string, isStatus = false) => {
-          const normalized = text.replace(/\r/g, '').trim();
-          if (!normalized) return;
-          prefixedMessages.push(`codex: ${normalized}`);
-          const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
-          emitDelegateMessage(formatted, threadId);
-        };
-
-        const failUnavailable = (reason: string) => {
-          if (unavailableTriggered) return;
-          unavailableTriggered = true;
-          pushMessage(`unavailable: ${reason}`, true);
-          if (proc && proc.exitCode === null) {
-            proc.kill('SIGTERM');
-          }
-        };
-
-        const handleStdoutLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          try {
-            const event = JSON.parse(trimmed) as {
-              type?: string;
-              message?: string;
-              item?: { type?: string; text?: string };
-            };
-            if (
-              event.type === 'item.completed' &&
-              event.item?.type === 'agent_message' &&
-              typeof event.item.text === 'string'
-            ) {
-              pushMessage(event.item.text);
-              return;
-            }
-            if (
-              event.type === 'error' &&
-              typeof event.message === 'string'
-            ) {
-              failUnavailable(event.message);
-              return;
-            }
-          } catch {
-            pushMessage(trimmed);
-            return;
-          }
-        };
-
-        const handleStderrLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          if (isIgnorableDelegateStderr(trimmed)) return;
-          stderrLines.push(trimmed);
-          if (stderrLines.length > 100) stderrLines.shift();
-          if (!unavailableTriggered && isProviderUnavailableError(trimmed)) {
-            failUnavailable(trimmed);
-          }
-        };
-
-        try {
-          const delegateEnv = buildDelegateEnv();
-          proc = spawnNpxDelegate(
-            '@openai/codex',
-            codexArgs,
-            cwdResult.cwd,
-            delegateEnv,
-          );
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          const unavailable = `unavailable: ${reason}`;
-          const redText = `<font color="#cc0000">${unavailable}</font>`;
-          emitDelegateMessage(redText, threadId);
-          finalize({
-            content: [{ type: 'text', text: `codex: ${unavailable}` }],
-            isError: true,
-          });
-          return;
-        }
-
-        const timer = setTimeout(() => {
-          timedOut = true;
-          failUnavailable(`timed out after ${timeoutMs}ms`);
-        }, timeoutMs);
-
-        proc.stdout!.on('data', (chunk: Buffer | string) => {
-          stdoutBuffer += chunk.toString();
-          while (true) {
-            const idx = stdoutBuffer.indexOf('\n');
-            if (idx === -1) break;
-            const line = stdoutBuffer.slice(0, idx);
-            stdoutBuffer = stdoutBuffer.slice(idx + 1);
-            handleStdoutLine(line);
-          }
-        });
-
-        proc.stderr!.on('data', (chunk: Buffer | string) => {
-          stderrBuffer += chunk.toString();
-          while (true) {
-            const idx = stderrBuffer.indexOf('\n');
-            if (idx === -1) break;
-            const line = stderrBuffer.slice(0, idx);
-            stderrBuffer = stderrBuffer.slice(idx + 1);
-            handleStderrLine(line);
-          }
-        });
-
-        proc.on('error', (err) => {
-          clearTimeout(timer);
-          failUnavailable(err.message);
-          finalize({
-            content: [
-              {
-                type: 'text',
-                text:
-                  prefixedMessages.join('\n\n') ||
-                  `codex: unavailable: ${err.message}`,
-              },
-            ],
-            isError: true,
-          });
-        });
-
-        proc.on('close', (code, signal) => {
-          clearTimeout(timer);
-
-          if (stdoutBuffer.trim()) handleStdoutLine(stdoutBuffer);
-          if (stderrBuffer.trim()) handleStderrLine(stderrBuffer);
-
-          if (timedOut || unavailableTriggered) {
-            finalize({
-              content: [
-                {
-                  type: 'text',
-                  text:
-                    prefixedMessages.join('\n\n') ||
-                    'codex: unavailable',
-                },
-              ],
-              isError: true,
-            });
-            return;
-          }
-
-          if (code !== 0) {
-            const detail =
-              stderrLines[stderrLines.length - 1] ||
-              `codex exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`;
-            failUnavailable(detail);
-            finalize({
-              content: [{ type: 'text', text: prefixedMessages.join('\n\n') }],
-              isError: true,
-            });
-            return;
-          }
-
-          if (prefixedMessages.length === 0) {
-            prefixedMessages.push('codex: completed with no textual output.');
-          }
-
-          finalize({
-            content: [{ type: 'text', text: prefixedMessages.join('\n\n') }],
-          });
-        });
-      });
-    },
-  );
-
-  server.tool(
-    'delegate_gemini',
-    `Spawn a Gemini lobe clone in the same mounted workspace.
-
-Use this when the main brain wants a tightly scoped clone to directly read/write files and run commands (including Python) inside the container.
-
-Behavior:
-- Streams lobe output back to chat prefixed as "gemini: ..."
-- Returns the same prefixed text to the main brain for collapse/integration
-- If Gemini cannot run (auth/quota/rate-limit/provider errors), it fails immediately and emits:
-  "gemini: unavailable: ..."
-`,
-    {
-      name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Reviewer").'),
-      objective: z.string().describe('Task for Gemini to execute'),
-      cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
-      model: z.string().optional().describe('Optional Gemini model override (e.g. "gemini-2.5-pro").'),
-      thread_id: z.string().optional().describe('Matrix thread root event ID. When provided, all output is posted into this thread instead of the main timeline.'),
-      timeout_ms: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_DELEGATE_TIMEOUT_MS)
-        .default(DEFAULT_DELEGATE_TIMEOUT_MS)
-        .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
-    },
-    async (args) => {
-      const threadId = args.thread_id?.trim() || undefined;
-      const effectiveModel =
-        firstSet(args.model, process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
-      const delegateHeader = formatDelegateSender(args.name, 'gemini', effectiveModel);
-      emitDelegateMessage(delegateHeader, threadId);
-      if (threadId) emitDelegateMessage(args.objective, threadId);
-
-      const cwdResult = resolveDelegateCwd(args.cwd);
-      if (!cwdResult.ok) {
-        const unavailable = `unavailable: ${cwdResult.error}`;
-        const redText = `<font color="#cc0000">${unavailable}</font>`;
-        emitDelegateMessage(redText, threadId);
-        return {
-          content: [{ type: 'text' as const, text: `gemini: ${unavailable}` }],
-          isError: true,
-        };
-      }
-
-      const timeoutMs = Math.max(
-        1000,
-        Math.min(args.timeout_ms ?? DEFAULT_DELEGATE_TIMEOUT_MS, MAX_DELEGATE_TIMEOUT_MS),
-      );
-
-      const delegatedObjective = [
-        'Execution constraints:',
-        '- Do NOT create Python virtual environments inside /workspace/group or /workspace/extra.',
-        '- If a Python environment is required, create it under /workspace/cache/venvs.',
-        '- Route large model/package caches under /workspace/cache.',
-        '',
-        'Objective:',
-        args.objective,
-      ].join('\n');
-
-      const geminiArgs = [
-        '--prompt',
-        delegatedObjective,
-        '--yolo',
-        '--output-format',
-        'text',
-      ];
-      geminiArgs.push('--model', effectiveModel);
-
-      return await new Promise<
-        { content: Array<{ type: 'text'; text: string }>; isError?: boolean }
-      >((resolve) => {
-        const prefixedMessages: string[] = [];
-        const stderrLines: string[] = [];
-        let stdoutBuffer = '';
-        let stderrBuffer = '';
-        let finalized = false;
-        let unavailableTriggered = false;
-        let timedOut = false;
-        let proc: ReturnType<typeof spawn> | null = null;
-
-        const finalize = (
-          payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean },
-        ) => {
-          if (finalized) return;
-          const estimatedTokens =
-            estimateTokens(args.objective) +
-            estimateTokens(prefixedMessages.join('\n\n'));
-          recordCapabilityUsage('gemini', effectiveModel, estimatedTokens);
-          finalized = true;
-          resolve(payload);
-        };
-
-        const pushMessage = (text: string, isStatus = false) => {
-          const normalized = text.replace(/\r/g, '').trim();
-          if (!normalized) return;
-          prefixedMessages.push(`gemini: ${normalized}`);
-          const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
-          emitDelegateMessage(formatted, threadId);
-        };
-
-        const failUnavailable = (reason: string) => {
-          if (unavailableTriggered) return;
-          unavailableTriggered = true;
-          pushMessage(`unavailable: ${reason}`, true);
-          if (proc && proc.exitCode === null) {
-            proc.kill('SIGTERM');
-          }
-        };
-
-        const handleStdoutLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          pushMessage(trimmed);
-        };
-
-        const handleStderrLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          if (isIgnorableDelegateStderr(trimmed)) return;
-          stderrLines.push(trimmed);
-          if (stderrLines.length > 100) stderrLines.shift();
-          if (!unavailableTriggered && isProviderUnavailableError(trimmed)) {
-            failUnavailable(trimmed);
-          }
-        };
-
-        try {
-          const delegateEnv = buildDelegateEnv();
-          proc = spawnNpxDelegate(
-            '@google/gemini-cli',
-            geminiArgs,
-            cwdResult.cwd,
-            delegateEnv,
-          );
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          const unavailable = `unavailable: ${reason}`;
-          const redText = `<font color="#cc0000">${unavailable}</font>`;
-          emitDelegateMessage(redText, threadId);
-          finalize({
-            content: [{ type: 'text', text: `gemini: ${unavailable}` }],
-            isError: true,
-          });
-          return;
-        }
-
-        const timer = setTimeout(() => {
-          timedOut = true;
-          failUnavailable(`timed out after ${timeoutMs}ms`);
-        }, timeoutMs);
-
-        proc.stdout!.on('data', (chunk: Buffer | string) => {
-          stdoutBuffer += chunk.toString();
-          while (true) {
-            const idx = stdoutBuffer.indexOf('\n');
-            if (idx === -1) break;
-            const line = stdoutBuffer.slice(0, idx);
-            stdoutBuffer = stdoutBuffer.slice(idx + 1);
-            handleStdoutLine(line);
-          }
-        });
-
-        proc.stderr!.on('data', (chunk: Buffer | string) => {
-          stderrBuffer += chunk.toString();
-          while (true) {
-            const idx = stderrBuffer.indexOf('\n');
-            if (idx === -1) break;
-            const line = stderrBuffer.slice(0, idx);
-            stderrBuffer = stderrBuffer.slice(idx + 1);
-            handleStderrLine(line);
-          }
-        });
-
-        proc.on('error', (err) => {
-          clearTimeout(timer);
-          failUnavailable(err.message);
-          finalize({
-            content: [
-              {
-                type: 'text',
-                text:
-                  prefixedMessages.join('\n\n') ||
-                  `gemini: unavailable: ${err.message}`,
-              },
-            ],
-            isError: true,
-          });
-        });
-
-        proc.on('close', (code, signal) => {
-          clearTimeout(timer);
-
-          if (stdoutBuffer.trim()) handleStdoutLine(stdoutBuffer);
-          if (stderrBuffer.trim()) handleStderrLine(stderrBuffer);
-
-          if (timedOut || unavailableTriggered) {
-            finalize({
-              content: [
-                {
-                  type: 'text',
-                  text:
-                    prefixedMessages.join('\n\n') ||
-                    'gemini: unavailable',
-                },
-              ],
-              isError: true,
-            });
-            return;
-          }
-
-          if (code !== 0) {
-            const detail =
-              stderrLines[stderrLines.length - 1] ||
-              `gemini exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`;
-            failUnavailable(detail);
-            finalize({
-              content: [{ type: 'text', text: prefixedMessages.join('\n\n') }],
-              isError: true,
-            });
-            return;
-          }
-
-          if (prefixedMessages.length === 0) {
-            prefixedMessages.push('gemini: completed with no textual output.');
-          }
-
-          finalize({
-            content: [{ type: 'text', text: prefixedMessages.join('\n\n') }],
-          });
-        });
-      });
-    },
-  );
-
-  server.tool(
-    'delegate_ollama',
-    `Spawn an Ollama lobe clone on the host machine.
-
-Behavior:
-- Sends the objective to Ollama as a tightly scoped lobe and returns output prefixed as "ollama: ..."
-- Emits the same prefixed text to chat immediately
-- On connection/auth/runtime errors, returns:
-  "ollama: unavailable: ..."
-`,
-    {
-      name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Summarizer").'),
-      objective: z.string().describe('Task/objective for Ollama to execute'),
-      model: z.string().default('llama3.2').describe('Ollama model name'),
-      system: z.string().optional().describe('Optional system prompt'),
-      thread_id: z.string().optional().describe('Matrix thread root event ID. When provided, all output is posted into this thread instead of the main timeline.'),
-      timeout_ms: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_DELEGATE_TIMEOUT_MS)
-        .default(DEFAULT_DELEGATE_TIMEOUT_MS)
-        .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
-    },
-    async (args) => {
-      const threadId = args.thread_id?.trim() || undefined;
-      const delegateHeader = formatDelegateSender(args.name, 'ollama', args.model);
-      emitDelegateMessage(delegateHeader, threadId);
-      if (threadId) emitDelegateMessage(args.objective, threadId);
-
-      const timeoutMs = Math.max(
-        1000,
-        Math.min(args.timeout_ms ?? DEFAULT_DELEGATE_TIMEOUT_MS, MAX_DELEGATE_TIMEOUT_MS),
-      );
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const body: Record<string, unknown> = {
-          model: args.model,
-          prompt: args.objective,
-          stream: false,
-        };
-        if (args.system) body.system = args.system;
-
-        const res = await fetch(`${ollamaHost}/api/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-
-        if (!res.ok) {
-          const text = await res.text();
-          const unavailable = `unavailable: Ollama error (${res.status}): ${text}`;
-          const redText = `<font color="#cc0000">${unavailable}</font>`;
-          emitDelegateMessage(redText, threadId);
-          return {
-            content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
-            isError: true,
-          };
-        }
-
-        const data = await res.json() as { response?: string };
-        const responseText = (data.response || '').trim();
-        recordCapabilityUsage(
-          'ollama',
-          args.model,
-          estimateTokens(args.objective) + estimateTokens(responseText),
-        );
-        if (!responseText) {
-          const doneText = 'completed with no textual output.';
-          emitDelegateMessage(`<font color="#888888"><em>${doneText}</em></font>`, threadId);
-          return {
-            content: [{ type: 'text' as const, text: `ollama: ${doneText}` }],
-          };
-        }
-
-        emitDelegateMessage(responseText, threadId);
-        return {
-          content: [{ type: 'text' as const, text: `ollama: ${responseText}` }],
-        };
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        const unavailable = `unavailable: ${reason}`;
-        emitDelegateMessage(unavailable, threadId);
-        return {
-          content: [{ type: 'text' as const, text: `ollama: ${unavailable}` }],
-          isError: true,
-        };
-      } finally {
-        clearTimeout(timer);
-      }
-    },
-  );
-
-  server.tool(
-    'delegate_claude',
-    `Spawn a Claude lobe clone in the same mounted workspace.
-
-Use this when the main brain wants to spawn a parallel Claude instance for reasoning tasks that don't need the full context of the current conversation.
-
-Behavior:
-- Streams lobe output back to chat prefixed as "claude: ..."
-- Returns the same prefixed text to the main brain for collapse/integration
-- If Claude cannot run (auth/quota/rate-limit/provider errors), it fails immediately and emits:
-  "claude: unavailable: ..."
-`,
-    {
-      name: z.string().min(1).describe('Lobe name (chosen by the main brain, e.g. "Reviewer").'),
-      objective: z.string().describe('Task for Claude to execute'),
-      cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
-      model: z.string().optional().describe('Optional Claude model override (e.g. "opus", "sonnet", "haiku").'),
-      effort: z.enum(['low', 'medium', 'high']).optional().describe('Thinking effort level (maps to Claude CLI --effort).'),
-      thread_id: z.string().optional().describe('Matrix thread root event ID. When provided, all output is posted into this thread instead of the main timeline.'),
-      timeout_ms: z
-        .number()
-        .int()
-        .positive()
-        .max(MAX_DELEGATE_TIMEOUT_MS)
-        .default(DEFAULT_DELEGATE_TIMEOUT_MS)
-        .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
-    },
-    async (args) => {
-      const threadId = args.thread_id?.trim() || undefined;
-      const effectiveModel =
-        firstSet(args.model, process.env.ANTHROPIC_MODEL, process.env.CLAUDE_MODEL) ||
-        'sonnet';
-      const delegateHeader = formatDelegateSender(args.name, 'claude', effectiveModel);
-      emitDelegateMessage(delegateHeader, threadId);
-      if (threadId) emitDelegateMessage(args.objective, threadId);
-
-      const cwdResult = resolveDelegateCwd(args.cwd);
-      if (!cwdResult.ok) {
-        const unavailable = `unavailable: ${cwdResult.error}`;
-        const redText = `<font color="#cc0000">${unavailable}</font>`;
-        emitDelegateMessage(redText, threadId);
-        return {
-          content: [{ type: 'text' as const, text: `claude: ${unavailable}` }],
-          isError: true,
-        };
-      }
-
-      const timeoutMs = Math.max(
-        1000,
-        Math.min(args.timeout_ms ?? DEFAULT_DELEGATE_TIMEOUT_MS, MAX_DELEGATE_TIMEOUT_MS),
-      );
-
-      const claudeArgs = [
-        '--print',
-        '--verbose',
-        '--output-format', 'stream-json',
-        '--dangerously-skip-permissions',
-        '--model', effectiveModel,
-        '--add-dir', cwdResult.cwd,
-      ];
-      if (args.effort) {
-        claudeArgs.push('--effort', args.effort);
-      }
-
-      const delegatedObjective = [
-        'Execution constraints:',
-        '- Do NOT create Python virtual environments inside /workspace/group or /workspace/extra.',
-        '- If a Python environment is required, create it under /workspace/cache/venvs.',
-        '- Route large model/package caches under /workspace/cache.',
-        '',
-        'Objective:',
-        args.objective,
-      ].join('\n');
-      // Note: objective is piped to stdin, not passed as CLI arg
-
-      return await new Promise<
-        { content: Array<{ type: 'text'; text: string }>; isError?: boolean }
-      >((resolve) => {
-        const prefixedMessages: string[] = [];
-        const stderrLines: string[] = [];
-        let stdoutBuffer = '';
-        let stderrBuffer = '';
-        let finalized = false;
-        let unavailableTriggered = false;
-        let timedOut = false;
-        let proc: ReturnType<typeof spawn> | null = null;
-
-        const finalize = (
-          payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean },
-        ) => {
-          if (finalized) return;
-          const estimatedTokens =
-            estimateTokens(args.objective) +
-            estimateTokens(prefixedMessages.join('\n\n'));
-          recordCapabilityUsage('anthropic', effectiveModel, estimatedTokens);
-          finalized = true;
-          resolve(payload);
-        };
-
-        const pushMessage = (text: string, isStatus = false) => {
-          const normalized = text.replace(/\r/g, '').trim();
-          if (!normalized) return;
-          prefixedMessages.push(`claude: ${normalized}`);
-          const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
-          emitDelegateMessage(formatted, threadId);
-        };
-
-        const failUnavailable = (reason: string) => {
-          if (unavailableTriggered) return;
-          unavailableTriggered = true;
-          pushMessage(`unavailable: ${reason}`, true);
-          if (proc && proc.exitCode === null) {
-            proc.kill('SIGTERM');
-          }
-        };
-
-        const handleStdoutLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          try {
-            const event = JSON.parse(trimmed) as {
-              type?: string;
-              message?: string;
-              content?: string;
-              result?: string;
-            };
-            // Claude stream-json emits various event types
-            // Look for assistant messages and results
-            if (event.type === 'assistant' && typeof event.content === 'string') {
-              pushMessage(event.content);
-              return;
-            }
-            if (event.type === 'result' && typeof event.result === 'string') {
-              pushMessage(event.result);
-              return;
-            }
-            if (event.type === 'error' && typeof event.message === 'string') {
-              failUnavailable(event.message);
-              return;
-            }
-            // For content_block_delta events (streaming)
-            if (event.type === 'content_block_delta') {
-              const delta = (event as Record<string, unknown>).delta as { type?: string; text?: string } | undefined;
-              if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
-                // Don't push partial deltas, they accumulate
-                return;
-              }
-            }
-          } catch {
-            // Non-JSON lines get pushed directly
-            pushMessage(trimmed);
-            return;
-          }
-        };
-
-        const handleStderrLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          if (isIgnorableDelegateStderr(trimmed)) return;
-          stderrLines.push(trimmed);
-          if (stderrLines.length > 100) stderrLines.shift();
-          if (!unavailableTriggered && isProviderUnavailableError(trimmed)) {
-            failUnavailable(trimmed);
-          }
-        };
-
-        try {
-          const delegateEnv = buildDelegateEnv();
-          proc = spawn('claude', claudeArgs, {
-            cwd: cwdResult.cwd,
-            env: delegateEnv,
-            stdio: ['pipe', 'pipe', 'pipe'],
-          });
-          // Pipe objective to stdin
-          proc.stdin!.write(delegatedObjective);
-          proc.stdin!.end();
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          const unavailable = `unavailable: ${reason}`;
-          const redText = `<font color="#cc0000">${unavailable}</font>`;
-          emitDelegateMessage(redText, threadId);
-          finalize({
-            content: [{ type: 'text', text: `claude: ${unavailable}` }],
-            isError: true,
-          });
-          return;
-        }
-
-        const timer = setTimeout(() => {
-          timedOut = true;
-          failUnavailable(`timed out after ${timeoutMs}ms`);
-        }, timeoutMs);
-
-        proc.stdout!.on('data', (chunk: Buffer | string) => {
-          stdoutBuffer += chunk.toString();
-          while (true) {
-            const idx = stdoutBuffer.indexOf('\n');
-            if (idx === -1) break;
-            const line = stdoutBuffer.slice(0, idx);
-            stdoutBuffer = stdoutBuffer.slice(idx + 1);
-            handleStdoutLine(line);
-          }
-        });
-
-        proc.stderr!.on('data', (chunk: Buffer | string) => {
-          stderrBuffer += chunk.toString();
-          while (true) {
-            const idx = stderrBuffer.indexOf('\n');
-            if (idx === -1) break;
-            const line = stderrBuffer.slice(0, idx);
-            stderrBuffer = stderrBuffer.slice(idx + 1);
-            handleStderrLine(line);
-          }
-        });
-
-        proc.on('error', (err) => {
-          clearTimeout(timer);
-          failUnavailable(err.message);
-          finalize({
-            content: [
-              {
-                type: 'text',
-                text:
-                  prefixedMessages.join('\n\n') ||
-                  `claude: unavailable: ${err.message}`,
-              },
-            ],
-            isError: true,
-          });
-        });
-
-        proc.on('close', (code, signal) => {
-          clearTimeout(timer);
-
-          if (stdoutBuffer.trim()) handleStdoutLine(stdoutBuffer);
-          if (stderrBuffer.trim()) handleStderrLine(stderrBuffer);
-
-          if (timedOut || unavailableTriggered) {
-            finalize({
-              content: [
-                {
-                  type: 'text',
-                  text:
-                    prefixedMessages.join('\n\n') ||
-                    'claude: unavailable',
-                },
-              ],
-              isError: true,
-            });
-            return;
-          }
-
-          if (code !== 0) {
-            const detail =
-              stderrLines[stderrLines.length - 1] ||
-              `claude exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`;
-            failUnavailable(detail);
-            finalize({
-              content: [{ type: 'text', text: prefixedMessages.join('\n\n') }],
-              isError: true,
-            });
-            return;
-          }
-
-          if (prefixedMessages.length === 0) {
-            prefixedMessages.push('claude: completed with no textual output.');
-          }
-
-          finalize({
-            content: [{ type: 'text', text: prefixedMessages.join('\n\n') }],
-          });
-        });
-      });
-    },
-  );
+  // ── query_local_llm ───────────────────────────────────────────────────
 
   server.tool(
     'query_local_llm',
     `Query a local Ollama LLM running on the host machine. Use this for tasks that don't need Claude's full reasoning — summarization, formatting, extraction, classification, translation, or simple Q&A. Much faster and free.`,
     {
       prompt: z.string().describe('The prompt to send to the local LLM'),
-      model: z.string().default('llama3.2').describe('Ollama model name (e.g., "llama3.2", "mistral", "gemma2")'),
+      model: z.string().default('qwen3:14b').describe('Ollama model name (e.g., "qwen3:14b", "qwen3:30b-thinking", "devstral-small-2:24b")'),
       system: z.string().optional().describe('Optional system prompt'),
     },
     async (args) => {
@@ -1194,19 +260,25 @@ Behavior:
     },
   );
 
-  // ── delegate_to_lobe ─────────────────────────────────────────────────
+  // ── delegate_to_lobe ──────────────────────────────────────────────────
 
   server.tool(
     'delegate_to_lobe',
     `Atomically delegate a task to a lobe (Codex, Gemini, Claude, or Ollama) with correct Matrix threading.
 
+Available lobes and models:
+- codex (default): gpt-5-codex (default), o3, o4-mini — file ops, code edits, shell commands
+- gemini: gemini-2.5-pro (default), gemini-2.5-flash — long-context analysis, research
+- claude: sonnet (default), opus, haiku — parallel reasoning, supports effort param
+- ollama: qwen3:30b-thinking (default, 30.5B reasoning), qwen3:14b (14.8B fast), devstral-small-2:24b (24B coding), devstral-2:latest (125B heavy), gpt-oss:20b (20.9B), nemotron-3-nano:30b (31.6B) — free local LLM, supports system param
+
 The tool handles the entire flow:
-1. Posts "💭 Provider/model - {reason}" to the main timeline (e.g. "💭 Gemini/gemini-2.5-pro - capitals")
-2. Captures that message's event ID
+1. Posts summary to the main timeline
+2. Captures that message's event ID for threading
 3. Posts the objective in the thread
 4. Runs the lobe subprocess with the objective
 5. Posts the lobe response in the thread
-6. Returns the thread to the main timeline
+6. Clears thread back to main timeline
 7. Returns the lobe output to the calling agent
 
 You never need to call send_message, set_thread, or get_last_event_id manually for delegations.`,
@@ -1217,6 +289,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
       cwd: z.string().optional().describe('Working directory. Must be under /workspace/group or /workspace/extra.'),
       model: z.string().optional().describe('Optional model override for the lobe.'),
       effort: z.enum(['low', 'medium', 'high']).optional().describe('Thinking effort level (Claude only).'),
+      system: z.string().optional().describe('Optional system prompt (Ollama only).'),
       timeout_ms: z
         .number()
         .int()
@@ -1226,11 +299,17 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         .describe('Hard timeout for the lobe run in milliseconds (default 900000, max 3600000).'),
     },
     async (args) => {
-      // Validate effort is only used with claude
+      // Validate lobe-specific params
       const lobe = args.lobe ?? 'codex';
       if (args.effort && lobe !== 'claude') {
         return {
           content: [{ type: 'text' as const, text: `effort parameter is only supported for claude lobe, not ${lobe}` }],
+          isError: true,
+        };
+      }
+      if (args.system && lobe !== 'ollama') {
+        return {
+          content: [{ type: 'text' as const, text: `system parameter is only supported for ollama lobe, not ${lobe}` }],
           isError: true,
         };
       }
@@ -1240,14 +319,13 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         if (args.model) return args.model;
         if (lobe === 'gemini') return firstSet(process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
         if (lobe === 'claude') return firstSet(process.env.ANTHROPIC_MODEL, process.env.CLAUDE_MODEL) || 'sonnet';
-        if (lobe === 'ollama') return 'llama3.2';
+        if (lobe === 'ollama') return 'qwen3:14b';
         return firstSet(process.env.CODEX_MODEL, process.env.OPENAI_MODEL) || 'gpt-5-codex';
       })();
       const providerName = lobe.charAt(0).toUpperCase() + lobe.slice(1);
 
       // Step 1+2: Post summary to main timeline and capture event ID
-      // Format: 💭 Gemini/gemini-2.5-pro - reason
-      const summaryText = `💭 ${providerName}/${effectiveModel} - ${args.reason}`;
+      const summaryText = `\u{1F4AD} ${providerName}/${effectiveModel} - ${args.reason}`;
       const threadId = await sendAndGetEventId(summaryText, 10000);
 
       // Step 3: Post the objective in the thread with markdown formatting
@@ -1295,6 +373,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
             prompt: args.objective,
             stream: false,
           };
+          if (args.system) body.system = args.system;
           const res = await fetch(`${ollamaHost}/api/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1394,6 +473,8 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
                 failUnavailable(event.message);
                 return;
               }
+              // Skip partial streaming deltas — they accumulate into final result
+              if (event.type === 'content_block_delta') return;
             } catch { pushMessage(trimmed); return; }
           } else {
             pushMessage(trimmed);

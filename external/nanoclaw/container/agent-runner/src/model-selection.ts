@@ -10,10 +10,10 @@ export const MAIN_DELEGATE_POLICY = `Main brain / lobe policy:
 - Delegation means lobe cloning, not autonomous handoff.
 - Each lobe gets a tightly-scoped objective with acceptance criteria and reports back for integration.
 - MAIN brain stays user-responsive while lobes execute.
-- For multi-step or long-running execution, launch lobes via mcp__nanoclaw__delegate_codex, mcp__nanoclaw__delegate_gemini, or mcp__nanoclaw__delegate_ollama.
+- For multi-step or long-running execution, launch lobes via mcp__nanoclaw__delegate_to_lobe (supports codex, gemini, claude, ollama).
+- For quick local LLM queries (formatting, classification), use mcp__nanoclaw__query_local_llm.
 - Lobe outputs are intermediate cognition. Collapse and integrate results back into one coherent MAIN response.
 - Own final quality: verify lobe outputs, correct drift, and take responsibility for final results.
-- Keep lobe control explicit: use delegate_list/delegate_status/delegate_cancel/delegate_amend to monitor and correct active runs.
 - If user asks "what are you doing" during active work, provide concrete state (completed, running, next) immediately.
 - Your final response text is delivered to the user automatically by the host.`;
 

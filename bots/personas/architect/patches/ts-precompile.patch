@@ -1,0 +1,42 @@
+diff --git a/bots/container/architect/Dockerfile b/bots/container/architect/Dockerfile
+index 1234567..abcdefg 100644
+--- a/bots/container/architect/Dockerfile
++++ b/bots/container/architect/Dockerfile
+@@ -65,7 +65,7 @@ RUN npm run build
+ # Create workspace directories
+ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+
+ # Create entrypoint script
+-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
++RUN printf '#!/bin/bash\nset -e\ncat > /tmp/input.json\nnode /app/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+ # Set ownership to node user (non-root) for writable directories
+ RUN chown -R node:node /workspace
+diff --git a/bots/container/commander/Dockerfile b/bots/container/commander/Dockerfile
+index 2345678..bcdefgh 100644
+--- a/bots/container/commander/Dockerfile
++++ b/bots/container/commander/Dockerfile
+@@ -79,7 +79,7 @@ RUN npm run build
+ # Create workspace directories
+ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+
+ # Create entrypoint script
+-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
++RUN printf '#!/bin/bash\nset -e\ncat > /tmp/input.json\nnode /app/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+ # Set ownership to node user (non-root) for writable directories
+ RUN chown -R node:node /workspace
+diff --git a/bots/container/engineer/Dockerfile b/bots/container/engineer/Dockerfile
+index 3456789..cdefghi 100644
+--- a/bots/container/engineer/Dockerfile
++++ b/bots/container/engineer/Dockerfile
+@@ -65,7 +65,7 @@ RUN npm run build
+ # Create workspace directories
+ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+
+ # Create entrypoint script
+-RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
++RUN printf '#!/bin/bash\nset -e\ncat > /tmp/input.json\nnode /app/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+ # Set ownership to node user (non-root) for writable directories
+ RUN chown -R node:node /workspace

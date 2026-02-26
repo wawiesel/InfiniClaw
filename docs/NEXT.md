@@ -19,6 +19,9 @@
 ## ~~Priority 2: Restore Holodeck~~ ✅
 - **Done:** Reimplemented as CLI subcommands: `holodeck create|chat|teardown|promote`. Creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), runs as its own launchd service in terminal-only mode. Promote merges the branch and redeploys the live bot. No Matrix conflicts — holodeck runs terminal-only by default.
 
+## ~~Priority 2: Albert — The Architect Bot~~ ✅
+- **Done:** Added Albert as third bot (Architect role). Lives in Astrometrics room, manages holodeck testing. Has 6 holodeck IPC tools (create, teardown, promote, send, read, status) available to all bots via MCP. Host-side handlers in `ipc-commands.ts` process the commands. Dockerfile, persona, profile, and build.sh all set up. Albert tests code from feature branches in holodeck instances — he doesn't write code.
+
 ---
 
 ## Completed ✅

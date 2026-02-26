@@ -50,13 +50,11 @@ Rooms:
 
 ### Lobes (delegate agents)
 
-Bots can spawn delegate "lobes" for parallel execution. These are **not separate personas**, but rather **multitasking threads** that operate alongside the main bot:
-- `delegate_codex` — OpenAI Codex for scoped file operations
-- `delegate_gemini` — Google Gemini for research and analysis
-- `delegate_ollama` — Local Ollama models for lightweight tasks
-- `delegate_claude` — Anthropic Claude (Planned priority)
+Bots can spawn delegate "lobes" for parallel execution via two tools:
+- `delegate_to_lobe` — Atomic delegation with Matrix threading. Supports codex (OpenAI), gemini (Google), claude (Anthropic), and ollama (local) lobes.
+- `query_local_llm` — Quiet one-shot Ollama query for formatting, classification, extraction. No chat output.
 
-Lobe output is streamed to chat and returned to the main brain for integration. While currently underutilized, the lobes system is intended to be an active part of the robust architecture.
+Lobe output is streamed to chat and returned to the main brain for integration.
 
 **Execution Rules:**
 - Any **long-running operations** must be delegated to a lobe rather than blocking the main bot.

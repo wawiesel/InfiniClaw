@@ -2,10 +2,12 @@
  * InfiniClaw IPC command handlers.
  * Extended commands delegated from the base ipc.ts processTaskIpc switch.
  */
+import crypto from 'crypto';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import Database from 'better-sqlite3';
 import { upsertEnvLine } from 'nanoclaw/env-utils.js';
 
 import {
@@ -22,6 +24,9 @@ import {
   resolveRoot,
   instanceDir,
   validateDeploy as serviceValidateDeploy,
+  holodeckCreate as serviceHolodeckCreate,
+  holodeckTeardown as serviceHolodeckTeardown,
+  holodeckPromote as serviceHolodeckPromote,
 } from './service.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { statusMessage } from './formatting.js';
@@ -57,6 +62,9 @@ interface CommandData {
   threadId?: string;
   remote?: string;
   branches?: string[];
+  branch?: string;
+  message?: string;
+  limit?: number;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -241,7 +249,7 @@ async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext):
     logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized set_brain_mode attempt blocked');
     return;
   }
-  const validBot = data.bot === 'engineer' || data.bot === 'commander';
+  const validBot = data.bot === 'engineer' || data.bot === 'commander' || data.bot === 'architect';
   const validMode = data.mode === 'anthropic' || data.mode === 'ollama';
   if (!data.bot || !validBot || !data.mode || !validMode) {
     logger.warn({ data }, 'Invalid set_brain_mode request');
@@ -437,7 +445,7 @@ async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Pr
     logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized bot_status attempt blocked');
     return;
   }
-  const bot = typeof data.bot === 'string' && ['engineer', 'commander'].includes(data.bot)
+  const bot = typeof data.bot === 'string' && ['engineer', 'commander', 'architect'].includes(data.bot)
     ? data.bot
     : 'commander';
   const chatJid = parseChatJid(data);
@@ -560,6 +568,197 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
   }
 }
 
+// ── Holodeck handlers ────────────────────────────────────────────────────
+
+async function handleHolodeckCreate(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (!ctx.isMain) {
+    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_create attempt blocked');
+    return;
+  }
+  const bot = parseBot(data, 'engineer');
+  const branch = typeof data.branch === 'string' ? data.branch.trim() : '';
+  const chatJid = parseChatJid(data);
+  if (!branch) {
+    if (chatJid) await ctx.sendMessage(chatJid, '⛔ holodeck_create: missing branch name');
+    return;
+  }
+  logger.info({ bot, branch }, 'Holodeck create requested via IPC');
+  if (chatJid) {
+    try { await ctx.sendMessage(chatJid, `🔧 Creating holodeck for ${bot} from branch '${branch}'...`); } catch {}
+  }
+  try {
+    serviceHolodeckCreate(bot, branch);
+    logger.info({ bot, branch }, 'Holodeck created');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `✅ Holodeck created for ${bot} (branch: ${branch})`); } catch {}
+    }
+  } catch (err) {
+    logger.error({ bot, branch, err }, 'Holodeck create failed');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `⛔ holodeck_create failed for ${bot}: ${(err as Error).message}`); } catch {}
+    }
+  }
+}
+
+async function handleHolodeckTeardown(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (!ctx.isMain) {
+    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_teardown attempt blocked');
+    return;
+  }
+  const bot = parseBot(data, 'engineer');
+  const chatJid = parseChatJid(data);
+  logger.info({ bot }, 'Holodeck teardown requested via IPC');
+  try {
+    serviceHolodeckTeardown(bot);
+    logger.info({ bot }, 'Holodeck torn down');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `✅ Holodeck torn down for ${bot}`); } catch {}
+    }
+  } catch (err) {
+    logger.error({ bot, err }, 'Holodeck teardown failed');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `⛔ holodeck_teardown failed for ${bot}: ${(err as Error).message}`); } catch {}
+    }
+  }
+}
+
+async function handleHolodeckPromote(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (!ctx.isMain) {
+    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_promote attempt blocked');
+    return;
+  }
+  const bot = parseBot(data, 'engineer');
+  const chatJid = parseChatJid(data);
+  logger.info({ bot }, 'Holodeck promote requested via IPC');
+  if (chatJid) {
+    try { await ctx.sendMessage(chatJid, `🔧 Promoting holodeck for ${bot} (merge + redeploy)...`); } catch {}
+  }
+  try {
+    serviceHolodeckPromote(bot);
+    logger.info({ bot }, 'Holodeck promoted');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `✅ Holodeck promoted for ${bot} — branch merged and live bot redeployed`); } catch {}
+    }
+  } catch (err) {
+    logger.error({ bot, err }, 'Holodeck promote failed');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `⛔ holodeck_promote failed for ${bot}: ${(err as Error).message}`); } catch {}
+    }
+  }
+}
+
+async function handleHolodeckSend(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (!ctx.isMain) {
+    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_send attempt blocked');
+    return;
+  }
+  const bot = parseBot(data, 'engineer');
+  const message = typeof data.message === 'string' ? data.message : '';
+  const chatJid = parseChatJid(data);
+  if (!message) {
+    if (chatJid) await ctx.sendMessage(chatJid, '⛔ holodeck_send: missing message');
+    return;
+  }
+  const hdBot = `${bot}-holodeck`;
+  const root = resolveRoot();
+  const dbPath = path.join(instanceDir(root, hdBot), 'store', 'messages.db');
+  if (!fs.existsSync(dbPath)) {
+    if (chatJid) await ctx.sendMessage(chatJid, `⛔ No holodeck instance for ${bot} (no messages.db)`);
+    return;
+  }
+  try {
+    const db = new Database(dbPath);
+    const msgId = `hd-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+    const timestamp = new Date().toISOString();
+    // Get the holodeck bot's main JID from its registered groups
+    const jidRow = db.prepare('SELECT jid FROM registered_groups LIMIT 1').get() as { jid: string } | undefined;
+    const jid = jidRow?.jid || 'local:terminal';
+    db.prepare(
+      'INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, 0)',
+    ).run(msgId, jid, 'operator', 'Captain', message, timestamp);
+    db.close();
+    logger.info({ bot: hdBot, msgId }, 'Holodeck message injected');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `✅ Message sent to ${hdBot}`); } catch {}
+    }
+  } catch (err) {
+    logger.error({ bot: hdBot, err }, 'Holodeck send failed');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `⛔ holodeck_send failed: ${(err as Error).message}`); } catch {}
+    }
+  }
+}
+
+async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (!ctx.isMain) {
+    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_read attempt blocked');
+    return;
+  }
+  const bot = parseBot(data, 'engineer');
+  const limit = typeof data.limit === 'number' && data.limit > 0 ? Math.min(data.limit, 100) : 20;
+  const chatJid = parseChatJid(data);
+  if (!chatJid) return;
+  const hdBot = `${bot}-holodeck`;
+  const root = resolveRoot();
+  const dbPath = path.join(instanceDir(root, hdBot), 'store', 'messages.db');
+  if (!fs.existsSync(dbPath)) {
+    await ctx.sendMessage(chatJid, `⛔ No holodeck instance for ${bot} (no messages.db)`);
+    return;
+  }
+  try {
+    const db = new Database(dbPath, { readonly: true });
+    const rows = db.prepare(
+      'SELECT sender_name, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ?',
+    ).all(limit) as Array<{ sender_name: string; content: string; timestamp: string }>;
+    db.close();
+    if (rows.length === 0) {
+      await ctx.sendMessage(chatJid, `No messages in ${hdBot} holodeck.`);
+      return;
+    }
+    const formatted = rows.reverse().map(
+      (r) => `[${r.timestamp}] ${r.sender_name}: ${r.content.length > 200 ? r.content.slice(0, 200) + '...' : r.content}`,
+    ).join('\n');
+    await ctx.sendMessage(chatJid, `**${hdBot} messages (last ${rows.length}):**\n\`\`\`\n${formatted}\n\`\`\``);
+  } catch (err) {
+    logger.error({ bot: hdBot, err }, 'Holodeck read failed');
+    await ctx.sendMessage(chatJid, `⛔ holodeck_read failed: ${(err as Error).message}`);
+  }
+}
+
+async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (!ctx.isMain) {
+    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_status attempt blocked');
+    return;
+  }
+  const bot = parseBot(data, 'engineer');
+  const chatJid = parseChatJid(data);
+  if (!chatJid) return;
+  const hdBot = `${bot}-holodeck`;
+  try {
+    let launchctlInfo = '';
+    try {
+      launchctlInfo = execSync(`launchctl list com.infiniclaw.${hdBot} 2>&1`, { timeout: 5_000 }).toString().trim();
+    } catch (e) {
+      launchctlInfo = e instanceof Error ? e.message : 'not running';
+    }
+    const root = resolveRoot();
+    const instance = instanceDir(root, hdBot);
+    const exists = fs.existsSync(instance);
+    const worktree = path.join(root, '_holodeck', bot);
+    const worktreeExists = fs.existsSync(worktree);
+    const parts = [
+      `**${hdBot} holodeck status:**`,
+      `Instance: ${exists ? instance : 'not deployed'}`,
+      `Worktree: ${worktreeExists ? worktree : 'none'}`,
+      `\`\`\`\n${launchctlInfo}\n\`\`\``,
+    ];
+    await ctx.sendMessage(chatJid, parts.join('\n'));
+  } catch (err) {
+    logger.error({ bot: hdBot, err }, 'Holodeck status failed');
+    await ctx.sendMessage(chatJid, `⛔ holodeck_status failed: ${(err as Error).message}`);
+  }
+}
+
 // ── Main dispatcher ─────────────────────────────────────────────────────
 
 /**
@@ -594,6 +793,24 @@ export async function handleInfiniClawCommand(
       return true;
     case 'git_push':
       await handleGitPush(data, ctx);
+      return true;
+    case 'holodeck_create':
+      await handleHolodeckCreate(data, ctx);
+      return true;
+    case 'holodeck_teardown':
+      await handleHolodeckTeardown(data, ctx);
+      return true;
+    case 'holodeck_promote':
+      await handleHolodeckPromote(data, ctx);
+      return true;
+    case 'holodeck_send':
+      await handleHolodeckSend(data, ctx);
+      return true;
+    case 'holodeck_read':
+      await handleHolodeckRead(data, ctx);
+      return true;
+    case 'holodeck_status':
+      await handleHolodeckStatus(data, ctx);
       return true;
     default:
       return false;
