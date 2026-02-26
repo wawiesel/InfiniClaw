@@ -6,6 +6,7 @@ import { execSync } from 'child_process';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { parseEnvFile, isOllamaBaseUrl } from 'nanoclaw/env-utils.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -334,31 +335,15 @@ function getTokenUsage(instanceDir: string, mainGroupFolder: string): TokenUsage
 function getBrainConfig(rootDir: string, bot: string): { model?: string; provider?: string } {
   const envPath = path.join(rootDir, 'bots', 'profiles', bot, 'env');
   if (!fs.existsSync(envPath)) return {};
-
-  const vars: Record<string, string> = {};
   try {
-    for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx < 1) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      let value = trimmed.slice(eqIdx + 1).trim();
-      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1);
-      }
-      vars[key] = value;
-    }
+    const vars = parseEnvFile(envPath);
+    return {
+      model: vars.BRAIN_MODEL || vars.ANTHROPIC_MODEL || undefined,
+      provider: isOllamaBaseUrl(vars.BRAIN_BASE_URL) ? 'ollama' : 'claude',
+    };
   } catch {
     return {};
   }
-
-  const baseUrl = vars.BRAIN_BASE_URL || '';
-  const isOllama = baseUrl.includes('ollama') || baseUrl.includes('11434');
-  const provider = isOllama ? 'ollama' : 'claude';
-  const model = vars.BRAIN_MODEL || vars.ANTHROPIC_MODEL || undefined;
-
-  return { model, provider };
 }
 
 // ── Heartbeat ───────────────────────────────────────────────────────
@@ -393,16 +378,7 @@ export function getSystemStatus(rootDir: string): SystemStatus {
     const { model, provider } = getBrainConfig(rootDir, bot);
     const instanceDir = path.join(rootDir, '_runtime', 'instances', bot);
 
-    // Match containers by bot name prefix
-    const botContainers = allContainers.filter((c) => {
-      const parts = c.name.split('-');
-      return parts.length >= 2 && parts[1] === bot.slice(0, 3);
-    });
-
-    // Special case: engineer bot tag is "cid", commander is "johnny5" or similar
-    // The container name pattern is nanoclaw-{botTag}-{group}-{ts}
-    // botTag comes from ASSISTANT_NAME lowercased stripped of non-alnum
-    // We'll match by checking the instance dir's groups instead
+    // Match containers by bot tag: engineer→"cid", commander→"johnny5"
     const botTag = bot === 'engineer' ? 'cid' : 'johnny5';
     const matchedContainers = allContainers.filter((c) => c.name.includes(`nanoclaw-${botTag}-`));
 

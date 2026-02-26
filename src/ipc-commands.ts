@@ -31,10 +31,16 @@ import {
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { statusMessage } from './formatting.js';
 
-// ── Restart cooldown tracking ───────────────────────────────────────────
+// ── Cooldown tracking ───────────────────────────────────────────────────
 
 const RESTART_COOLDOWN_MS = 60_000; // 60 seconds
 const lastRestartTimes: Record<string, number> = {};
+
+const REBUILD_COOLDOWN_MS = 5 * 60_000; // 5 minutes — image builds are expensive
+const lastRebuildTimes: Record<string, number> = {};
+
+const GIT_PUSH_COOLDOWN_MS = 60_000; // 60 seconds
+const lastGitPushTime: { t: number } = { t: 0 };
 
 // ── Interfaces ──────────────────────────────────────────────────────────
 
@@ -420,6 +426,21 @@ async function handleRebuildImage(data: CommandData, ctx: InfiniClawIpcContext):
   }
   const bot = parseBot(data, 'commander');
   const chatJid = parseChatJid(data);
+
+  // Rebuild cooldown — image builds are expensive, prevent spam
+  const nowRebuild = Date.now();
+  const lastRebuild = lastRebuildTimes[bot] || 0;
+  const rebuildElapsed = nowRebuild - lastRebuild;
+  if (rebuildElapsed < REBUILD_COOLDOWN_MS) {
+    const remaining = Math.ceil((REBUILD_COOLDOWN_MS - rebuildElapsed) / 1000);
+    logger.warn({ bot, rebuildElapsed, remaining }, 'rebuild_image rejected — cooldown active');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `⏳ Rebuild cooldown: ${bot} was rebuilt ${Math.floor(rebuildElapsed / 1000)}s ago. Wait ${remaining}s.`); } catch {}
+    }
+    return;
+  }
+  lastRebuildTimes[bot] = nowRebuild;
+
   logger.info({ bot }, 'Container image rebuild requested via IPC');
   if (chatJid) {
     try { await ctx.sendMessage(chatJid, `🔧 rebuilding nanoclaw-${bot}:latest...`); } catch {}
@@ -549,6 +570,19 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
     if (chatJid) await ctx.sendMessage(chatJid, '⛔ git_push: invalid remote or branch name');
     return;
   }
+
+  // Push cooldown — prevent rapid-fire pushes
+  const nowPush = Date.now();
+  const pushElapsed = nowPush - lastGitPushTime.t;
+  if (pushElapsed < GIT_PUSH_COOLDOWN_MS) {
+    const remaining = Math.ceil((GIT_PUSH_COOLDOWN_MS - pushElapsed) / 1000);
+    logger.warn({ remote, branches, pushElapsed, remaining }, 'git_push rejected — cooldown active');
+    if (chatJid) {
+      try { await ctx.sendMessage(chatJid, `⏳ Push cooldown: last push was ${Math.floor(pushElapsed / 1000)}s ago. Wait ${remaining}s.`); } catch {}
+    }
+    return;
+  }
+  lastGitPushTime.t = nowPush;
   try {
     const branchArgs = branches.join(' ');
     execSync(`git push ${remote} ${branchArgs}`, {

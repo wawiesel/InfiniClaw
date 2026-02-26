@@ -8,13 +8,10 @@
 import fs from 'fs';
 import path from 'path';
 
-
 import {
   ASSISTANT_NAME,
   ASSISTANT_ROLE,
-  CAPTAIN_USER_ID,
   DATA_DIR,
-  GROUPS_DIR,
   HEAP_LIMIT_MB,
   IDLE_TIMEOUT,
   LOCAL_CHANNEL_ENABLED,
@@ -76,7 +73,6 @@ import {
   defaultSenderForGroup,
   resolveConfiguredMainModel,
   normalizeMainLlm,
-  updateMainLlm,
   setMainLlm,
   maybeAutoSwitchBrainsOnQuotaError,
 } from './brain-management.js';
@@ -107,14 +103,9 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
-const QUEUED_ACK_COOLDOWN_MS = 30_000;
-const lastQueuedAckAt: Record<string, number> = {};
-const ACTIVE_PIPE_ACK_COOLDOWN_MS = 5_000;
-const lastActivePipeAckAt: Record<string, number> = {};
 const PROGRESS_CHAT_COOLDOWN_MS = 10_000;
 const lastProgressChatAt: Record<string, number> = {};
 const PIP_PULSE = ['🔵', '🔷', '🔹', '🔷'] as const;
-const pipPulseIndex: Record<string, number> = {};
 const workThreadIds: Record<string, string> = {};
 const activeReplyThreadIds: Record<string, string | undefined> = {};
 
@@ -174,105 +165,70 @@ function createAdaptiveTimer(
   return fastTimer;
 }
 
-// ── Working indicator functions ────────────────────────────────────────
+// ── Generic status indicator ───────────────────────────────────────────
 
-const workingIndicators: Record<string, StatusIndicator> = {};
-const workingIndicatorDelays: Record<string, ReturnType<typeof setTimeout>> = {};
+/** Reusable status indicator that posts, edits, and auto-escalates timing. */
+function createIndicatorSet(emoji: string, activeVerb: string, doneVerb: string, delayMs?: number) {
+  const indicators: Record<string, StatusIndicator> = {};
+  const delays: Record<string, ReturnType<typeof setTimeout>> = {};
 
-function startWorkingIndicator(chatJid: string, threadId?: string): void {
-  if (workingIndicators[chatJid] || workingIndicatorDelays[chatJid]) return;
-  const startedAt = Date.now();
-  workingIndicatorDelays[chatJid] = setTimeout(() => {
-    delete workingIndicatorDelays[chatJid];
-    if (workingIndicators[chatJid]) return;
+  function start(chatJid: string, threadId?: string): void {
+    if (indicators[chatJid] || delays[chatJid]) return;
+    const startedAt = Date.now();
+    const send = () => {
+      if (indicators[chatJid]) return;
+      const ch = findChannel(channels, chatJid);
+      if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
+      ch.sendMessageReturningId(chatJid, statusMessage(emoji, `${activeVerb}...`), threadId).then((eventId) => {
+        if (!eventId) return;
+        if (indicators[chatJid]) {
+          ch.editMessage!(chatJid, eventId, statusMessage(emoji, `${doneVerb} (${formatElapsed(startedAt)})`)).catch(() => { });
+          return;
+        }
+        const doEdit = () => ch.editMessage!(chatJid, eventId, statusMessage(emoji, `${activeVerb} (${formatElapsed(startedAt)})`)).catch(() => { });
+        const timer = createAdaptiveTimer(startedAt, doEdit, indicators, chatJid);
+        indicators[chatJid] = { eventId, startedAt, timer, chatJid };
+      }).catch(() => { });
+    };
+    if (delayMs) {
+      delays[chatJid] = setTimeout(() => { delete delays[chatJid]; send(); }, delayMs);
+    } else {
+      send();
+    }
+  }
+
+  function clear(chatJid: string): void {
+    if (delays[chatJid]) { clearTimeout(delays[chatJid]); delete delays[chatJid]; return; }
+    const indicator = indicators[chatJid];
+    if (!indicator) return;
+    if (indicator.timer) clearInterval(indicator.timer);
+    delete indicators[chatJid];
+    if (!indicator.eventId) return;
     const ch = findChannel(channels, chatJid);
-    if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
-    ch.sendMessageReturningId(chatJid, statusMessage('⏳', 'working...'), threadId).then((eventId) => {
-      if (!eventId) return;
-      if (workingIndicators[chatJid]) {
-        ch.editMessage!(chatJid, eventId, statusMessage('⏳', `worked (${formatElapsed(startedAt)})`)).catch(() => { });
-        return;
-      }
-      const doEdit = () => ch.editMessage!(chatJid, eventId, statusMessage('⏳', `working (${formatElapsed(startedAt)})`)).catch(() => { });
-      const timer = createAdaptiveTimer(startedAt, doEdit, workingIndicators, chatJid);
-      workingIndicators[chatJid] = { eventId, startedAt, timer, chatJid };
-    }).catch(() => { });
-  }, INDICATOR_DELAY_MS);
-}
-
-function clearWorkingIndicator(chatJid: string): void {
-  if (workingIndicatorDelays[chatJid]) {
-    clearTimeout(workingIndicatorDelays[chatJid]);
-    delete workingIndicatorDelays[chatJid];
-    return;
-  }
-  const indicator = workingIndicators[chatJid];
-  if (!indicator) return;
-  clearInterval(indicator.timer);
-  delete workingIndicators[chatJid];
-  const ch = findChannel(channels, chatJid);
-  if (ch?.editMessage) {
-    ch.editMessage(chatJid, indicator.eventId, statusMessage('⏳', `worked (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
-  }
-}
-
-
-function bumpWorkingIndicator(chatJid: string, threadId?: string): void {
-  if (workingIndicatorDelays[chatJid]) {
-    clearTimeout(workingIndicatorDelays[chatJid]);
-    delete workingIndicatorDelays[chatJid];
-    startWorkingIndicator(chatJid, threadId);
-    return;
-  }
-  const indicator = workingIndicators[chatJid];
-  if (!indicator) {
-    startWorkingIndicator(chatJid, threadId);
-    return;
-  }
-  const ch = findChannel(channels, chatJid);
-  if (!ch?.editMessage) return;
-  ch.editMessage(chatJid, indicator.eventId, statusMessage('⏳', `working (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
-}
-
-// ── Idle indicator functions ──────────────────────────────────────────
-
-const idleIndicators: Record<string, StatusIndicator> = {};
-
-function startIdleIndicator(chatJid: string, threadId?: string): void {
-  if (idleIndicators[chatJid]) return;
-  const ch = findChannel(channels, chatJid);
-  if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
-  const startedAt = Date.now();
-  const placeholder: StatusIndicator = { eventId: '', startedAt, timer: 0 as unknown as ReturnType<typeof setInterval>, chatJid };
-  idleIndicators[chatJid] = placeholder;
-  ch.sendMessageReturningId(chatJid, statusMessage('💤', 'idling...'), threadId).then((eventId) => {
-    if (!eventId) {
-      if (idleIndicators[chatJid] === placeholder) delete idleIndicators[chatJid];
-      return;
+    if (ch?.editMessage) {
+      ch.editMessage(chatJid, indicator.eventId, statusMessage(emoji, `${doneVerb} (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
     }
-    if (idleIndicators[chatJid] !== placeholder) {
-      ch.editMessage!(chatJid, eventId, statusMessage('💤', `idled (${formatElapsed(startedAt)})`)).catch(() => { });
-      return;
+  }
+
+  function bump(chatJid: string, threadId?: string): void {
+    if (delays[chatJid]) { clearTimeout(delays[chatJid]); delete delays[chatJid]; start(chatJid, threadId); return; }
+    const indicator = indicators[chatJid];
+    if (!indicator) { start(chatJid, threadId); return; }
+    const ch = findChannel(channels, chatJid);
+    if (ch?.editMessage) {
+      ch.editMessage(chatJid, indicator.eventId, statusMessage(emoji, `${activeVerb} (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
     }
-    placeholder.eventId = eventId;
-    const doEdit = () => ch.editMessage!(chatJid, eventId, statusMessage('💤', `idling (${formatElapsed(startedAt)})`)).catch(() => { });
-    placeholder.timer = createAdaptiveTimer(startedAt, doEdit, idleIndicators, chatJid);
-  }).catch(() => {
-    if (idleIndicators[chatJid] === placeholder) delete idleIndicators[chatJid];
-  });
+  }
+
+  return { indicators, start, clear, bump };
 }
 
-function clearIdleIndicator(chatJid: string): void {
-  const indicator = idleIndicators[chatJid];
-  if (!indicator) return;
-  if (indicator.timer) clearInterval(indicator.timer);
-  delete idleIndicators[chatJid];
-  if (!indicator.eventId) return;
-  const ch = findChannel(channels, chatJid);
-  if (ch?.editMessage) {
-    ch.editMessage(chatJid, indicator.eventId, statusMessage('💤', `idled (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
-  }
-}
+// ── Working & idle indicators ──────────────────────────────────────────
+
+const working = createIndicatorSet('⏳', 'working', 'worked', INDICATOR_DELAY_MS);
+const idle = createIndicatorSet('💤', 'idling', 'idled');
+const { start: startWorkingIndicator, clear: clearWorkingIndicator, bump: bumpWorkingIndicator } = working;
+const { start: startIdleIndicator, clear: clearIdleIndicator } = idle;
 
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
@@ -285,10 +241,6 @@ function getMainChatJid(): string | undefined {
     if (group.folder === MAIN_GROUP_FOLDER) return jid;
   }
   return undefined;
-}
-
-function formatMainMessage(body: string): string {
-  return body.trim();
 }
 
 let outgoingSeq = 0;
@@ -494,12 +446,12 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
     if (ch.setTyping && !isThreadContext(ctx.chatJid)) await ch.setTyping(ctx.chatJid, true);
     let sentEventId: string | undefined;
     if (ch.sendMessageReturningId) {
-      sentEventId = await ch.sendMessageReturningId(ctx.chatJid, formatMainMessage(text), activeReplyThreadIds[ctx.chatJid]);
+      sentEventId = await ch.sendMessageReturningId(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
     } else {
-      await ch.sendMessage(ctx.chatJid, formatMainMessage(text), activeReplyThreadIds[ctx.chatJid]);
+      await ch.sendMessage(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
     }
     if (ch.setTyping && !isThreadContext(ctx.chatJid)) await ch.setTyping(ctx.chatJid, false);
-    storeOutgoing(ctx.chatJid, formatMainMessage(text), activeReplyThreadIds[ctx.chatJid]);
+    storeOutgoing(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
     if (sentEventId) {
       const group = registeredGroups[ctx.chatJid];
       if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
@@ -593,7 +545,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   markRunStarted(chatJid);
 
   if (channel?.setStatusPip) {
-    pipPulseIndex[chatJid] = 0;
     void channel.setStatusPip(chatJid, PIP_PULSE[0]).catch(() => { });
   }
 
@@ -630,7 +581,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     onOutputSent: (text) => {
       outputSentToUser = true;
       lastResponseBody = text;
-      agentResponses.push(formatMainMessage(text));
+      agentResponses.push(text);
     },
     onError: () => { hadError = true; },
     onProgress: () => { lastRunOutputAt = Date.now(); },
@@ -675,12 +626,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!outputSentToUser && channel) {
       // OOM kills and signal-based crashes get a prominent standalone status line
       const isSignalCrash = /^⚠️ /.test(compactError);
-      const errorReply =
-        formatMainMessage(
-          isSignalCrash
-            ? compactError
-            : `I hit an error while processing that request: ${compactError}`,
-        );
+      const errorReply = isSignalCrash
+        ? compactError
+        : `I hit an error while processing that request: ${compactError}`;
       try {
         await channel.sendMessage(chatJid, errorReply, activeReplyThreadIds[chatJid]);
         storeOutgoing(chatJid, errorReply, activeReplyThreadIds[chatJid]);
@@ -822,11 +770,6 @@ async function handlePipedToActiveContainer(
   clearIdleIndicator(chatJid);
   startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
 
-  const now = Date.now();
-  if (!lastActivePipeAckAt[chatJid] || now - lastActivePipeAckAt[chatJid] >= ACTIVE_PIPE_ACK_COOLDOWN_MS) {
-    lastActivePipeAckAt[chatJid] = now;
-  }
-
   lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
   saveState();
 
@@ -837,10 +780,6 @@ async function handlePipedToActiveContainer(
 
 function handleQueuedForProcessing(chatJid: string): void {
   queue.enqueueMessageCheck(chatJid);
-  const now = Date.now();
-  if (!lastQueuedAckAt[chatJid] || now - lastQueuedAckAt[chatJid] >= QUEUED_ACK_COOLDOWN_MS) {
-    lastQueuedAckAt[chatJid] = now;
-  }
 }
 
 // ── Message loop ───────────────────────────────────────────────────────
@@ -962,7 +901,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
-    for (const [jid] of Object.entries(registeredGroups)) {
+    for (const jid of Object.keys(registeredGroups)) {
       const ch = findChannel(channels, jid);
       if (ch?.setStatusPip) {
         try { await ch.setStatusPip(jid, '🔴'); } catch { /* best-effort */ }
@@ -1018,8 +957,6 @@ async function main(): Promise<void> {
         : undefined,
     });
   }
-
-
 
   // Build channels array
   const allChannels: (Channel | null)[] = [localCli, matrix];
@@ -1152,7 +1089,7 @@ async function main(): Promise<void> {
         }),
       };
 
-      for (const [, g] of Object.entries(registeredGroups)) {
+      for (const g of Object.values(registeredGroups)) {
         const ipcDir = path.join(DATA_DIR, 'ipc', g.folder);
         if (!fs.existsSync(ipcDir)) continue;
         const statusPath = path.join(ipcDir, 'status.json');
@@ -1178,8 +1115,8 @@ async function main(): Promise<void> {
       if (!ch) return;
       const text = stripInternalTags(rawText);
       if (text) {
-        await ch.sendMessage(jid, formatMainMessage(text));
-        storeOutgoing(jid, formatMainMessage(text));
+        await ch.sendMessage(jid, text);
+        storeOutgoing(jid, text);
       }
     },
   });

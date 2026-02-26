@@ -14,11 +14,5 @@ export function isIgnoredTrigger(text: string): boolean {
 
 /** Returns true if the message should be ignored (other bot output). */
 export function shouldIgnoreMessage(msg: NewMessage): boolean {
-  if (IGNORE_SENDERS.size > 0 && IGNORE_SENDERS.has(msg.sender)) {
-    return true;
-  }
-  if (isIgnoredTrigger(msg.content.trim())) {
-    return true;
-  }
-  return false;
+  return IGNORE_SENDERS.has(msg.sender) || isIgnoredTrigger(msg.content);
 }

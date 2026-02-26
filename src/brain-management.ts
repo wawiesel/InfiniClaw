@@ -8,7 +8,6 @@ import path from 'path';
 import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from 'nanoclaw/env-utils.js';
 import {
   ASSISTANT_NAME,
-  ASSISTANT_ROLE,
   DATA_DIR,
   MAIN_GROUP_FOLDER,
 } from 'nanoclaw/config.js';
@@ -251,21 +250,12 @@ export function resolveMainLlm(): string {
 export const MAIN_PROVIDER = resolveMainProvider();
 export let mainLlm = resolveMainLlm();
 
-export function updateMainLlm(model?: string): void {
-  const normalized = normalizeMainLlm(model);
-  if (!normalized || normalized === mainLlm) return;
-  mainLlm = normalized;
-  setRouterState('main_model', mainLlm);
-  logger.info({ mainModel: mainLlm }, 'Updated MAIN model label');
-}
-
 export function setMainLlm(model: string): void {
   mainLlm = model;
 }
 
 export function mainSender(): string {
   const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
-  const role = ASSISTANT_ROLE;
   return `<font color="#888888">🧠 <em>${providerName}/${mainLlm}</em></font>`;
 }
 
