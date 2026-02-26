@@ -34,13 +34,9 @@ import { statusMessage } from './formatting.js';
 // ── Cooldown tracking ───────────────────────────────────────────────────
 
 const RESTART_COOLDOWN_MS = 60_000; // 60 seconds
-const lastRestartTimes: Record<string, number> = {};
-
 const REBUILD_COOLDOWN_MS = 5 * 60_000; // 5 minutes — image builds are expensive
-const lastRebuildTimes: Record<string, number> = {};
-
 const GIT_PUSH_COOLDOWN_MS = 60_000; // 60 seconds
-const lastGitPushTime: { t: number } = { t: 0 };
+const cooldownTimestamps: Record<string, number> = {};
 
 // ── Interfaces ──────────────────────────────────────────────────────────
 
@@ -156,6 +152,31 @@ export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'un
   }
 }
 
+/** Auth guard — returns true if blocked (unauthorized). */
+function requireMain(ctx: InfiniClawIpcContext, command: string): boolean {
+  if (ctx.isMain) return false;
+  logger.warn({ sourceGroup: ctx.sourceGroup }, `Unauthorized ${command} attempt blocked`);
+  return true;
+}
+
+/** Cooldown gate — returns a rejection message if still cooling down, or null if OK. */
+function checkCooldown(key: string, cooldownMs: number): string | null {
+  const now = Date.now();
+  const elapsed = now - (cooldownTimestamps[key] || 0);
+  if (elapsed < cooldownMs) {
+    const remaining = Math.ceil((cooldownMs - elapsed) / 1000);
+    return `⏳ Cooldown: ${key} was triggered ${Math.floor(elapsed / 1000)}s ago. Wait ${remaining}s.`;
+  }
+  cooldownTimestamps[key] = now;
+  return null;
+}
+
+/** Send a message, swallowing errors (best-effort notification). */
+async function safeSend(ctx: InfiniClawIpcContext, chatJid: string | null, text: string): Promise<void> {
+  if (!chatJid) return;
+  try { await ctx.sendMessage(chatJid, text); } catch { /* best-effort */ }
+}
+
 /** Parse chatJid from data, returning null if empty. */
 function parseChatJid(data: CommandData): string | null {
   return typeof data.chatJid === 'string' && data.chatJid.trim().length > 0
@@ -206,10 +227,7 @@ export async function handleInfiniClawMessage(
 // ── Command handlers ────────────────────────────────────────────────────
 
 async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized set_brain_mode attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'set_brain_mode')) return;
   const validBot = data.bot === 'engineer' || data.bot === 'commander' || data.bot === 'architect';
   const validMode = data.mode === 'anthropic' || data.mode === 'ollama';
   if (!data.bot || !validBot || !data.mode || !validMode) {
@@ -231,39 +249,23 @@ async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext):
 }
 
 async function handleRestartBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized restart_bot attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'restart_bot')) return;
   const bot = parseBot(data, 'engineer');
   const chatJid = parseChatJid(data);
 
-  // Restart cooldown check — prevent restart loops
-  const now = Date.now();
-  const lastRestart = lastRestartTimes[bot] || 0;
-  const elapsed = now - lastRestart;
-  if (elapsed < RESTART_COOLDOWN_MS) {
-    const remaining = Math.ceil((RESTART_COOLDOWN_MS - elapsed) / 1000);
-    logger.warn({ bot, elapsed, remaining }, 'Restart rejected — cooldown active');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⏳ Restart cooldown: ${bot} was restarted ${Math.floor(elapsed / 1000)}s ago. Wait ${remaining}s before restarting again.`);
-      } catch {}
-    }
+  const cooldownMsg = checkCooldown(`restart:${bot}`, RESTART_COOLDOWN_MS);
+  if (cooldownMsg) {
+    logger.warn({ bot }, 'Restart rejected — cooldown active');
+    await safeSend(ctx, chatJid, cooldownMsg);
     return;
   }
-  lastRestartTimes[bot] = now;
 
   logger.info({ bot }, 'Restart requested via IPC — validating deploy');
 
   const { ok, errors } = validateDeploy(bot);
   if (!ok) {
     logger.error({ bot, errors }, 'Deploy validation failed — aborting restart');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⛔ deploy validation failed — not restarting:\n\n\`\`\`\n${truncateOutput(errors)}\n\`\`\``);
-      } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ deploy validation failed — not restarting:\n\n\`\`\`\n${truncateOutput(errors)}\n\`\`\``);
     return;
   }
 
@@ -280,16 +282,10 @@ async function handleSelfRestart(bot: string, chatJid: string | null, ctx: Infin
   const deploy = deployInstance(bot);
   if (!deploy.ok) {
     logger.error({ bot, output: deploy.output }, 'Self-deploy failed — aborting restart');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
-      } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
     return;
   }
-  if (chatJid) {
-    try { await ctx.sendMessage(chatJid, statusMessage('⭕️', 'restarting...')); } catch {}
-  }
+  await safeSend(ctx, chatJid, statusMessage('⭕️', 'restarting...'));
   try {
     serviceRefreshPlist(resolveRoot(), bot);
   } catch (err) {
@@ -334,19 +330,12 @@ async function handleCrossBotRestart(bot: string, chatJid: string | null, ctx: I
     logger.info({ bot }, 'Cross-bot bootstrap succeeded');
   } catch (err) {
     logger.error({ bot, err }, 'Cross-bot bootstrap failed');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⛔ bootstrap failed for ${bot}: ${(err as Error).message}`);
-      } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ bootstrap failed for ${bot}: ${errStr(err)}`);
   }
 }
 
 async function handleStopBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized stop_bot attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'stop_bot')) return;
   const bot = typeof data.bot === 'string' && (BOTS as readonly string[]).includes(data.bot)
     ? data.bot
     : null;
@@ -363,64 +352,39 @@ async function handleStopBot(data: CommandData, ctx: InfiniClawIpcContext): Prom
   try {
     serviceStopBot(bot);
     logger.info({ bot }, 'Bot stopped');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `<font color="#555555">🛑 ${bot} stopped.</font>`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `<font color="#555555">🛑 ${bot} stopped.</font>`);
   } catch (err) {
     logger.error({ bot, err }, 'Failed to stop bot');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `⛔ failed to stop ${bot}: ${(err as Error).message}`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ failed to stop ${bot}: ${errStr(err)}`);
   }
 }
 
 async function handleRebuildImage(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized rebuild_image attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'rebuild_image')) return;
   const bot = parseBot(data, 'commander');
   const chatJid = parseChatJid(data);
 
-  // Rebuild cooldown — image builds are expensive, prevent spam
-  const nowRebuild = Date.now();
-  const lastRebuild = lastRebuildTimes[bot] || 0;
-  const rebuildElapsed = nowRebuild - lastRebuild;
-  if (rebuildElapsed < REBUILD_COOLDOWN_MS) {
-    const remaining = Math.ceil((REBUILD_COOLDOWN_MS - rebuildElapsed) / 1000);
-    logger.warn({ bot, rebuildElapsed, remaining }, 'rebuild_image rejected — cooldown active');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `⏳ Rebuild cooldown: ${bot} was rebuilt ${Math.floor(rebuildElapsed / 1000)}s ago. Wait ${remaining}s.`); } catch {}
-    }
+  const cooldownMsg = checkCooldown(`rebuild:${bot}`, REBUILD_COOLDOWN_MS);
+  if (cooldownMsg) {
+    logger.warn({ bot }, 'rebuild_image rejected — cooldown active');
+    await safeSend(ctx, chatJid, cooldownMsg);
     return;
   }
-  lastRebuildTimes[bot] = nowRebuild;
 
   logger.info({ bot }, 'Container image rebuild requested via IPC');
-  if (chatJid) {
-    try { await ctx.sendMessage(chatJid, `🔧 rebuilding nanoclaw-${bot}:latest...`); } catch {}
-  }
+  await safeSend(ctx, chatJid, `🔧 rebuilding nanoclaw-${bot}:latest...`);
   const result = rebuildImage(bot);
   if (!result.ok) {
     logger.error({ bot, output: result.output }, 'Image rebuild failed');
-    if (chatJid) {
-      try {
-        await ctx.sendMessage(chatJid, `⛔ image rebuild failed for ${bot}:\n\n\`\`\`\n${truncateOutput(result.output)}\n\`\`\``);
-      } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ image rebuild failed for ${bot}:\n\n\`\`\`\n${truncateOutput(result.output)}\n\`\`\``);
   } else {
     logger.info({ bot }, 'Image rebuild succeeded');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `✅ nanoclaw-${bot}:latest rebuilt`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `✅ nanoclaw-${bot}:latest rebuilt`);
   }
 }
 
 async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized bot_status attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'bot_status')) return;
   const bot = typeof data.bot === 'string' && ['engineer', 'commander', 'architect'].includes(data.bot)
     ? data.bot
     : 'commander';
@@ -475,10 +439,7 @@ function handleSetThread(data: CommandData, ctx: InfiniClawIpcContext): void {
 }
 
 async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized restart_wksm attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'restart_wksm')) return;
   const chatJid = parseChatJid(data);
   logger.info('restart_wksm requested via IPC');
   try {
@@ -518,31 +479,22 @@ async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): 
 }
 
 async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized git_push attempt blocked');
-    return;
-  }
-  const chatJid = parseChatJid(data) ?? '';
+  if (requireMain(ctx, 'git_push')) return;
+  const chatJid = parseChatJid(data);
   const remote = typeof data.remote === 'string' ? data.remote.trim() : 'origin';
   const branches = Array.isArray(data.branches) ? data.branches.map(String) : ['main'];
   const safeBranch = /^[a-zA-Z0-9._\-/]+$/;
   if (!safeBranch.test(remote) || branches.some((b) => !safeBranch.test(b))) {
-    if (chatJid) await ctx.sendMessage(chatJid, '⛔ git_push: invalid remote or branch name');
+    await safeSend(ctx, chatJid, '⛔ git_push: invalid remote or branch name');
     return;
   }
 
-  // Push cooldown — prevent rapid-fire pushes
-  const nowPush = Date.now();
-  const pushElapsed = nowPush - lastGitPushTime.t;
-  if (pushElapsed < GIT_PUSH_COOLDOWN_MS) {
-    const remaining = Math.ceil((GIT_PUSH_COOLDOWN_MS - pushElapsed) / 1000);
-    logger.warn({ remote, branches, pushElapsed, remaining }, 'git_push rejected — cooldown active');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `⏳ Push cooldown: last push was ${Math.floor(pushElapsed / 1000)}s ago. Wait ${remaining}s.`); } catch {}
-    }
+  const cooldownMsg = checkCooldown('git_push', GIT_PUSH_COOLDOWN_MS);
+  if (cooldownMsg) {
+    logger.warn({ remote, branches }, 'git_push rejected — cooldown active');
+    await safeSend(ctx, chatJid, cooldownMsg);
     return;
   }
-  lastGitPushTime.t = nowPush;
   try {
     const branchArgs = branches.join(' ');
     execSync(`git push ${remote} ${branchArgs}`, {
@@ -552,119 +504,87 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
       timeout: 30000,
     });
     logger.info({ remote, branches }, 'git_push succeeded');
-    if (chatJid) await ctx.sendMessage(chatJid, `✅ Pushed ${branches.join(', ')} to ${remote}`);
+    await safeSend(ctx, chatJid, `✅ Pushed ${branches.join(', ')} to ${remote}`);
   } catch (err) {
     logger.error({ err, remote, branches }, 'git_push failed');
-    if (chatJid) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await ctx.sendMessage(chatJid, `⛔ git_push failed: ${msg}`);
-    }
+    await safeSend(ctx, chatJid, `⛔ git_push failed: ${errStr(err)}`);
   }
 }
 
 // ── Holodeck handlers ────────────────────────────────────────────────────
 
 async function handleHolodeckCreate(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_create attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'holodeck_create')) return;
   const bot = parseBot(data, 'engineer');
   const branch = typeof data.branch === 'string' ? data.branch.trim() : '';
   const chatJid = parseChatJid(data);
   if (!branch) {
-    if (chatJid) await ctx.sendMessage(chatJid, '⛔ holodeck_create: missing branch name');
+    await safeSend(ctx, chatJid, '⛔ holodeck_create: missing branch name');
     return;
   }
   logger.info({ bot, branch }, 'Holodeck create requested via IPC');
-  if (chatJid) {
-    try { await ctx.sendMessage(chatJid, `🔧 Creating holodeck for ${bot} from branch '${branch}'...`); } catch {}
-  }
+  await safeSend(ctx, chatJid, `🔧 Creating holodeck for ${bot} from branch '${branch}'...`);
   try {
     serviceHolodeckCreate(bot, branch);
     logger.info({ bot, branch }, 'Holodeck created');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `✅ Holodeck created for ${bot} (branch: ${branch})`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `✅ Holodeck created for ${bot} (branch: ${branch})`);
   } catch (err) {
     logger.error({ bot, branch, err }, 'Holodeck create failed');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `⛔ holodeck_create failed for ${bot}: ${(err as Error).message}`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ holodeck_create failed for ${bot}: ${errStr(err)}`);
   }
 }
 
 async function handleHolodeckTeardown(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_teardown attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'holodeck_teardown')) return;
   const bot = parseBot(data, 'engineer');
   const chatJid = parseChatJid(data);
   logger.info({ bot }, 'Holodeck teardown requested via IPC');
   try {
     serviceHolodeckTeardown(bot);
     logger.info({ bot }, 'Holodeck torn down');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `✅ Holodeck torn down for ${bot}`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `✅ Holodeck torn down for ${bot}`);
   } catch (err) {
     logger.error({ bot, err }, 'Holodeck teardown failed');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `⛔ holodeck_teardown failed for ${bot}: ${(err as Error).message}`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ holodeck_teardown failed for ${bot}: ${errStr(err)}`);
   }
 }
 
 async function handleHolodeckPromote(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_promote attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'holodeck_promote')) return;
   const bot = parseBot(data, 'engineer');
   const chatJid = parseChatJid(data);
   logger.info({ bot }, 'Holodeck promote requested via IPC');
-  if (chatJid) {
-    try { await ctx.sendMessage(chatJid, `🔧 Promoting holodeck for ${bot} (merge + redeploy)...`); } catch {}
-  }
+  await safeSend(ctx, chatJid, `🔧 Promoting holodeck for ${bot} (merge + redeploy)...`);
   try {
     serviceHolodeckPromote(bot);
     logger.info({ bot }, 'Holodeck promoted');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `✅ Holodeck promoted for ${bot} — branch merged and live bot redeployed`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `✅ Holodeck promoted for ${bot} — branch merged and live bot redeployed`);
   } catch (err) {
     logger.error({ bot, err }, 'Holodeck promote failed');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `⛔ holodeck_promote failed for ${bot}: ${(err as Error).message}`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ holodeck_promote failed for ${bot}: ${errStr(err)}`);
   }
 }
 
 async function handleHolodeckSend(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_send attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'holodeck_send')) return;
   const bot = parseBot(data, 'engineer');
   const message = typeof data.message === 'string' ? data.message : '';
   const chatJid = parseChatJid(data);
   if (!message) {
-    if (chatJid) await ctx.sendMessage(chatJid, '⛔ holodeck_send: missing message');
+    await safeSend(ctx, chatJid, '⛔ holodeck_send: missing message');
     return;
   }
   const hdBot = `${bot}-holodeck`;
   const root = resolveRoot();
   const dbPath = path.join(instanceDir(root, hdBot), 'store', 'messages.db');
   if (!fs.existsSync(dbPath)) {
-    if (chatJid) await ctx.sendMessage(chatJid, `⛔ No holodeck instance for ${bot} (no messages.db)`);
+    await safeSend(ctx, chatJid, `⛔ No holodeck instance for ${bot} (no messages.db)`);
     return;
   }
   try {
     const db = new Database(dbPath);
     const msgId = `hd-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
     const timestamp = new Date().toISOString();
-    // Get the holodeck bot's main JID from its registered groups
     const jidRow = db.prepare('SELECT jid FROM registered_groups LIMIT 1').get() as { jid: string } | undefined;
     const jid = jidRow?.jid || 'local:terminal';
     db.prepare(
@@ -672,22 +592,15 @@ async function handleHolodeckSend(data: CommandData, ctx: InfiniClawIpcContext):
     ).run(msgId, jid, 'operator', 'Captain', message, timestamp);
     db.close();
     logger.info({ bot: hdBot, msgId }, 'Holodeck message injected');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `✅ Message sent to ${hdBot}`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `✅ Message sent to ${hdBot}`);
   } catch (err) {
     logger.error({ bot: hdBot, err }, 'Holodeck send failed');
-    if (chatJid) {
-      try { await ctx.sendMessage(chatJid, `⛔ holodeck_send failed: ${(err as Error).message}`); } catch {}
-    }
+    await safeSend(ctx, chatJid, `⛔ holodeck_send failed: ${errStr(err)}`);
   }
 }
 
 async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_read attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'holodeck_read')) return;
   const bot = parseBot(data, 'engineer');
   const limit = typeof data.limit === 'number' && data.limit > 0 ? Math.min(data.limit, 100) : 20;
   const chatJid = parseChatJid(data);
@@ -696,7 +609,7 @@ async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext):
   const root = resolveRoot();
   const dbPath = path.join(instanceDir(root, hdBot), 'store', 'messages.db');
   if (!fs.existsSync(dbPath)) {
-    await ctx.sendMessage(chatJid, `⛔ No holodeck instance for ${bot} (no messages.db)`);
+    await safeSend(ctx, chatJid, `⛔ No holodeck instance for ${bot} (no messages.db)`);
     return;
   }
   try {
@@ -706,24 +619,21 @@ async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext):
     ).all(limit) as Array<{ sender_name: string; content: string; timestamp: string }>;
     db.close();
     if (rows.length === 0) {
-      await ctx.sendMessage(chatJid, `No messages in ${hdBot} holodeck.`);
+      await safeSend(ctx, chatJid, `No messages in ${hdBot} holodeck.`);
       return;
     }
     const formatted = rows.reverse().map(
       (r) => `[${r.timestamp}] ${r.sender_name}: ${r.content.length > 200 ? r.content.slice(0, 200) + '...' : r.content}`,
     ).join('\n');
-    await ctx.sendMessage(chatJid, `**${hdBot} messages (last ${rows.length}):**\n\`\`\`\n${formatted}\n\`\`\``);
+    await safeSend(ctx, chatJid, `**${hdBot} messages (last ${rows.length}):**\n\`\`\`\n${formatted}\n\`\`\``);
   } catch (err) {
     logger.error({ bot: hdBot, err }, 'Holodeck read failed');
-    await ctx.sendMessage(chatJid, `⛔ holodeck_read failed: ${(err as Error).message}`);
+    await safeSend(ctx, chatJid, `⛔ holodeck_read failed: ${errStr(err)}`);
   }
 }
 
 async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (!ctx.isMain) {
-    logger.warn({ sourceGroup: ctx.sourceGroup }, 'Unauthorized holodeck_status attempt blocked');
-    return;
-  }
+  if (requireMain(ctx, 'holodeck_status')) return;
   const bot = parseBot(data, 'engineer');
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
@@ -746,10 +656,10 @@ async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext
       `Worktree: ${worktreeExists ? worktree : 'none'}`,
       `\`\`\`\n${launchctlInfo}\n\`\`\``,
     ];
-    await ctx.sendMessage(chatJid, parts.join('\n'));
+    await safeSend(ctx, chatJid, parts.join('\n'));
   } catch (err) {
     logger.error({ bot: hdBot, err }, 'Holodeck status failed');
-    await ctx.sendMessage(chatJid, `⛔ holodeck_status failed: ${(err as Error).message}`);
+    await safeSend(ctx, chatJid, `⛔ holodeck_status failed: ${errStr(err)}`);
   }
 }
 

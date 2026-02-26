@@ -1028,104 +1028,72 @@ export class MatrixChannel implements Channel {
   }
 
   async sendImage(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void> {
+    return this.sendMedia('image', jid, buffer, filename, mimetype, caption);
+  }
+
+  async sendFile(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void> {
+    return this.sendMedia('file', jid, buffer, filename, mimetype, caption);
+  }
+
+  private async sendMedia(
+    kind: 'image' | 'file',
+    jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string,
+  ): Promise<void> {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);
+    const isImage = kind === 'image';
+    const defaultName = isImage ? 'image' : 'attachment';
+    const msgtype = isImage ? 'm.image' : 'm.file';
     try {
-      logger.info({ filename, mimetype, size: buffer.length }, 'Uploading image to Matrix');
+      logger.info({ filename, mimetype, size: buffer.length }, `Uploading ${kind} to Matrix`);
       const mxcUrl = await this.enqueueSend(() => withTimeout(
         this.client!.uploadContent(buffer, mimetype, filename),
         MATRIX_SEND_TIMEOUT_MS,
-        'uploadContent(image)',
+        `uploadContent(${kind})`,
       ));
-      logger.info({ mxcUrl, filename }, 'Image uploaded, sending to room');
+      logger.info({ mxcUrl, filename }, `${kind} uploaded, sending to room`);
       const effectiveFilename = filename?.trim()
         ? filename.trim()
-        : `image.${defaultExtensionForMime(mimetype)}`;
-      const dimensions = inferImageDimensions(buffer);
-      const info: Record<string, unknown> = {
-        mimetype,
-        size: buffer.length,
-      };
-      if (dimensions) {
-        info.w = dimensions.width;
-        info.h = dimensions.height;
+        : `${defaultName}.${defaultExtensionForMime(mimetype)}`;
+      const info: Record<string, unknown> = { mimetype, size: buffer.length };
+      if (isImage) {
+        const dimensions = inferImageDimensions(buffer);
+        if (dimensions) {
+          info.w = dimensions.width;
+          info.h = dimensions.height;
+        }
+        // Compatibility: some Matrix clients rely on thumbnail fields to decide
+        // whether an m.image can be previewed inline.
+        info.thumbnail_url = mxcUrl;
+        const thumbnailInfo: Record<string, unknown> = { mimetype, size: buffer.length };
+        if (dimensions) {
+          thumbnailInfo.w = dimensions.width;
+          thumbnailInfo.h = dimensions.height;
+        }
+        info.thumbnail_info = thumbnailInfo;
       }
-      // Compatibility: some Matrix clients rely on thumbnail fields to decide
-      // whether an m.image can be previewed inline.
-      info.thumbnail_url = mxcUrl;
-      const thumbnailInfo: Record<string, unknown> = {
-        mimetype,
-        size: buffer.length,
-      };
-      if (dimensions) {
-        thumbnailInfo.w = dimensions.width;
-        thumbnailInfo.h = dimensions.height;
-      }
-      info.thumbnail_info = thumbnailInfo;
       const content: Record<string, unknown> = {
-        msgtype: 'm.image',
+        msgtype,
         body: effectiveFilename,
         filename: effectiveFilename,
         url: mxcUrl,
         info,
       };
-      const imgEventId = await this.enqueueSend(() => withTimeout(
+      const eventId = await this.enqueueSend(() => withTimeout(
         this.client!.sendMessage(roomId, content),
         MATRIX_SEND_TIMEOUT_MS,
-        'sendMessage(image)',
+        `sendMessage(${kind})`,
       ));
-      if (imgEventId) this.lastBotEventId.set(roomId, imgEventId);
+      if (eventId) this.lastBotEventId.set(roomId, eventId);
       if (caption && caption.trim()) {
         await this.sendMessage(jid, caption.trim());
       }
-      logger.info({ roomId, filename }, 'Image message sent');
+      logger.info({ roomId, filename }, `${kind} message sent`);
     } catch (err) {
       if (this.isAuthFailure(err)) {
-        this.markDisconnected('Matrix auth failed while sending image', err);
+        this.markDisconnected(`Matrix auth failed while sending ${kind}`, err);
       }
-      logger.warn({ jid, filename, err }, 'Failed to send Matrix image');
-    }
-  }
-
-  async sendFile(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void> {
-    if (!this.client || !this._connected) return;
-    const roomId = toRoomId(jid);
-    try {
-      logger.info({ filename, mimetype, size: buffer.length }, 'Uploading file to Matrix');
-      const mxcUrl = await this.enqueueSend(() => withTimeout(
-        this.client!.uploadContent(buffer, mimetype, filename),
-        MATRIX_SEND_TIMEOUT_MS,
-        'uploadContent(file)',
-      ));
-      logger.info({ mxcUrl, filename }, 'File uploaded, sending to room');
-      const effectiveFilename = filename?.trim()
-        ? filename.trim()
-        : `attachment.${defaultExtensionForMime(mimetype)}`;
-      const content: Record<string, unknown> = {
-        msgtype: 'm.file',
-        body: effectiveFilename,
-        filename: effectiveFilename,
-        url: mxcUrl,
-        info: {
-          mimetype,
-          size: buffer.length,
-        },
-      };
-      const fileEventId = await this.enqueueSend(() => withTimeout(
-        this.client!.sendMessage(roomId, content),
-        MATRIX_SEND_TIMEOUT_MS,
-        'sendMessage(file)',
-      ));
-      if (fileEventId) this.lastBotEventId.set(roomId, fileEventId);
-      if (caption && caption.trim()) {
-        await this.sendMessage(jid, caption.trim());
-      }
-      logger.info({ roomId, filename }, 'File message sent');
-    } catch (err) {
-      if (this.isAuthFailure(err)) {
-        this.markDisconnected('Matrix auth failed while sending file', err);
-      }
-      logger.warn({ jid, filename, err }, 'Failed to send Matrix file');
+      logger.warn({ jid, filename, err }, `Failed to send Matrix ${kind}`);
     }
   }
 
