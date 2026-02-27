@@ -44,7 +44,7 @@ git clone git@code.ornl.gov:ww5/vault.git ~/_vault
 git clone https://code.ornl.gov/ww5/aegis.git ~/2025-AEGIS
 
 # Secrets — bot env files (private)
-git clone git@code.ornl.gov:ww5/infiniclaw-secrets.git ~/2026-Nanoclaw/infiniclaw-secrets
+git clone git@code.ornl.gov:ww5/infiniclaw-secrets.git ~/.config/infiniclaw/secrets
 
 # WKS — workspace manager
 git clone https://github.com/wawiesel/wks.git ~/2025-WKS/main
@@ -71,7 +71,7 @@ Write `~/.config/infiniclaw/machine.json`:
 ```json
 {
   "bots": ["engineer", "commander", "architect"],
-  "secretsPath": "/Users/YOUR_USERNAME/2026-Nanoclaw/infiniclaw-secrets"
+  "secretsPath": "/Users/YOUR_USERNAME/.config/infiniclaw/secrets"
 }
 ```
 
@@ -128,9 +128,9 @@ Bot env files (API keys, Matrix credentials) live in a separate private repo. If
 
 To verify:
 ```bash
-ls ~/2026-Nanoclaw/infiniclaw-secrets/engineer/env
-ls ~/2026-Nanoclaw/infiniclaw-secrets/commander/env
-ls ~/2026-Nanoclaw/infiniclaw-secrets/architect/env
+ls ~/.config/infiniclaw/secrets/engineer/env
+ls ~/.config/infiniclaw/secrets/commander/env
+ls ~/.config/infiniclaw/secrets/architect/env
 ```
 
 If setting up from scratch without the secrets repo, create env files for each bot with at minimum:
@@ -181,7 +181,7 @@ podman exec minio mc mb local/infiniclaw
 ```json
 {
   "bots": ["engineer", "commander", "architect"],
-  "secretsPath": "/Users/YOUR_USERNAME/2026-Nanoclaw/infiniclaw-secrets",
+  "secretsPath": "/Users/YOUR_USERNAME/.config/infiniclaw/secrets",
   "s3": {
     "endpoint": "http://MINIO_HOST_IP:9000",
     "bucket": "infiniclaw",
