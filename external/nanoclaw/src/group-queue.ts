@@ -238,7 +238,8 @@ export class GroupQueue {
     state.pendingMessages = false;
     this.activeCount++;
 
-    logger.debug(
+    const runStartMs = Date.now();
+    logger.info(
       { groupJid, reason, activeCount: this.activeCount },
       'Starting container for group',
     );
@@ -246,6 +247,11 @@ export class GroupQueue {
     try {
       if (this.processMessagesFn) {
         const success = await this.processMessagesFn(groupJid);
+        const runDurationMs = Date.now() - runStartMs;
+        logger.info(
+          { groupJid, reason, runDurationMs, success },
+          'Container run completed',
+        );
         if (success) {
           state.retryCount = 0;
         } else {

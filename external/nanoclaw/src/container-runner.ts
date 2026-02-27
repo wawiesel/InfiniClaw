@@ -194,8 +194,17 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
     let parseBuffer = '';
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
+    let firstOutputLogged = false;
 
     container.stdout.on('data', (data) => {
+      if (!firstOutputLogged) {
+        firstOutputLogged = true;
+        const ttfoMs = Date.now() - startTime;
+        logger.info(
+          { group: opts.groupName, containerName: opts.containerName, ttfoMs },
+          'Time to first output',
+        );
+      }
       const chunk = data.toString();
 
       // Accumulate for logging
