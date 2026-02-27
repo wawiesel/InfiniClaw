@@ -43,6 +43,9 @@ git clone git@code.ornl.gov:ww5/vault.git ~/_vault
 # AEGIS — shared Python library
 git clone https://code.ornl.gov/ww5/aegis.git ~/2025-AEGIS
 
+# Secrets — bot env files (private)
+git clone git@code.ornl.gov:ww5/infiniclaw-secrets.git ~/2026-Nanoclaw/infiniclaw-secrets
+
 # WKS — workspace manager
 git clone https://github.com/wawiesel/wks.git ~/2025-WKS/main
 ```
@@ -68,7 +71,7 @@ Write `~/.config/infiniclaw/machine.json`:
 ```json
 {
   "bots": ["engineer", "commander", "architect"],
-  "secretsPath": "/Users/YOUR_USERNAME/2026-Nanoclaw/InfiniClaw/bots/profiles"
+  "secretsPath": "/Users/YOUR_USERNAME/2026-Nanoclaw/infiniclaw-secrets"
 }
 ```
 
@@ -121,57 +124,20 @@ Paths use `~` which resolves at runtime. The `expiresAt: null` means permanent. 
 
 ## 6. Set Up Secrets
 
-Each bot needs an `env` file with API keys and Matrix credentials.
+Bot env files (API keys, Matrix credentials) live in a separate private repo. If you cloned `infiniclaw-secrets` in step 2 and pointed `machine.json` `secretsPath` at it in step 4, secrets are already in place.
 
+To verify:
 ```bash
-cd ~/2026-Nanoclaw/InfiniClaw/bots/profiles
+ls ~/2026-Nanoclaw/infiniclaw-secrets/engineer/env
+ls ~/2026-Nanoclaw/infiniclaw-secrets/commander/env
+ls ~/2026-Nanoclaw/infiniclaw-secrets/architect/env
 ```
 
-For each bot (`engineer`, `commander`, `architect`):
-
-```bash
-cp <bot>/env.example <bot>/env
-# Edit <bot>/env and fill in:
-#   BRAIN_API_KEY or BRAIN_OAUTH_TOKEN — Anthropic API credentials
-#   MATRIX_HOMESERVER — https://matrix.org (or your server)
-#   MATRIX_ACCESS_TOKEN — from Matrix login
-#   MATRIX_USER_ID — e.g. @cid-bot:matrix.org
-#   MATRIX_USERNAME — e.g. cid-bot
-#   MATRIX_PASSWORD — Matrix account password
-```
-
-If the architect bot has no `env.example`, create `architect/env` manually using this template:
-
-```bash
-ASSISTANT_NAME=Albert
-ASSISTANT_ROLE=Architect
-MAIN_GROUP_NAME=Astrometrics
-CAPTAIN_USER_ID=@wawiesel:matrix.org
-
-BRAIN_MODEL=claude-opus-4-6
-BRAIN_BASE_URL=
-BRAIN_AUTH_TOKEN=
-BRAIN_API_KEY=
-BRAIN_OAUTH_TOKEN=
-BRAIN_CA_CERT_FILE=
-
-MATRIX_HOMESERVER=https://matrix.org
-MATRIX_ACCESS_TOKEN=
-MATRIX_USER_ID=
-MATRIX_USERNAME=
-MATRIX_PASSWORD=
-MATRIX_DEVICE_NAME=albert-bot
-LOCAL_CHAT_SENDER_NAME=God
-LOCAL_MIRROR_MATRIX_JID=
-
-CONTAINER_IMAGE=nanoclaw-architect:latest
-LOG_LEVEL=info
-
-# Container environment injection: CONTAINER_ENV_FOO=bar becomes -e FOO=bar in the container
-CONTAINER_ENV_PYTHONPATH=/workspace/extra/2025-AEGIS/source
-```
-
-Get the actual secret values from the Captain or copy them from the existing machine's `bots/profiles/*/env` files (never commit these).
+If setting up from scratch without the secrets repo, create env files for each bot with at minimum:
+- `BRAIN_OAUTH_TOKEN` — Anthropic OAuth token
+- `MATRIX_HOMESERVER`, `MATRIX_USERNAME`, `MATRIX_PASSWORD` — Matrix credentials
+- `CONTAINER_IMAGE` — e.g. `nanoclaw-engineer:latest`
+- `CONTAINER_ENV_PYTHONPATH=/workspace/extra/2025-AEGIS/source`
 
 ### Container Environment Injection
 
@@ -215,7 +181,7 @@ podman exec minio mc mb local/infiniclaw
 ```json
 {
   "bots": ["engineer", "commander", "architect"],
-  "secretsPath": "/Users/YOUR_USERNAME/2026-Nanoclaw/InfiniClaw/bots/profiles",
+  "secretsPath": "/Users/YOUR_USERNAME/2026-Nanoclaw/infiniclaw-secrets",
   "s3": {
     "endpoint": "http://MINIO_HOST_IP:9000",
     "bucket": "infiniclaw",
