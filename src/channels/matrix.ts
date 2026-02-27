@@ -371,11 +371,15 @@ export class MatrixChannel implements Channel {
   private lastMessageEventId = new Map<string, string>();
   private lastBotEventId = new Map<string, string>();
 
-  // Rate-limiting send queue
-  private static readonly MIN_SEND_INTERVAL_MS = 500;
+  // Rate-limiting send queue with adaptive backoff
+  private static readonly BASE_SEND_INTERVAL_MS = 500;
+  private static readonly MAX_SEND_INTERVAL_MS = 10_000;
+  private static readonly BACKOFF_DECAY_MS = 30_000; // decay back to base over 30s
   private _sendQueue: Array<() => Promise<void>> = [];
   private _sendQueueRunning = false;
   private _lastSendAt = 0;
+  private _backoffUntil = 0; // timestamp: don't send before this
+  private _currentInterval = MatrixChannel.BASE_SEND_INTERVAL_MS;
 
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
@@ -383,19 +387,22 @@ export class MatrixChannel implements Channel {
   }
 
   /**
-   * Queue a Matrix API call with minimum spacing between sends.
-   * Retries once on 429 (rate limit) using the server's retry_after_ms.
+   * Queue a Matrix API call with adaptive spacing between sends.
+   * Retries once on 429 (rate limit) using the server's retry_after_ms,
+   * then increases the inter-message interval to avoid repeated throttling.
    */
   private enqueueSend<T>(fn: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       this._sendQueue.push(async () => {
         try {
-          resolve(await fn());
+          const result = await fn();
+          this.decayBackoff();
+          resolve(result);
         } catch (err) {
-          // Retry once on rate limit
           const retryMs = this.extractRetryAfterMs(err);
           if (retryMs !== undefined) {
-            logger.debug({ retryMs }, 'Matrix 429, retrying after delay');
+            this.applyBackoff(retryMs);
+            logger.debug({ retryMs, newInterval: this._currentInterval }, 'Matrix 429, backing off');
             await new Promise(r => setTimeout(r, retryMs));
             try {
               resolve(await fn());
@@ -409,6 +416,26 @@ export class MatrixChannel implements Channel {
       });
       void this.drainSendQueue();
     });
+  }
+
+  /** Increase inter-message interval after a rate limit hit. */
+  private applyBackoff(serverRetryMs: number): void {
+    this._backoffUntil = Date.now() + serverRetryMs;
+    // Double the interval, capped at max
+    this._currentInterval = Math.min(
+      this._currentInterval * 2,
+      MatrixChannel.MAX_SEND_INTERVAL_MS,
+    );
+  }
+
+  /** Gradually decay interval back to base after successful sends. */
+  private decayBackoff(): void {
+    if (this._currentInterval <= MatrixChannel.BASE_SEND_INTERVAL_MS) return;
+    // Halve the interval on each success, floored at base
+    this._currentInterval = Math.max(
+      Math.floor(this._currentInterval * 0.75),
+      MatrixChannel.BASE_SEND_INTERVAL_MS,
+    );
   }
 
   private extractRetryAfterMs(err: unknown): number | undefined {
@@ -425,8 +452,12 @@ export class MatrixChannel implements Channel {
     if (this._sendQueueRunning) return;
     this._sendQueueRunning = true;
     while (this._sendQueue.length > 0) {
+      // Respect server backoff window
+      const backoffWait = this._backoffUntil - Date.now();
+      if (backoffWait > 0) await new Promise(r => setTimeout(r, backoffWait));
+      // Respect adaptive inter-message interval
       const elapsed = Date.now() - this._lastSendAt;
-      const wait = MatrixChannel.MIN_SEND_INTERVAL_MS - elapsed;
+      const wait = this._currentInterval - elapsed;
       if (wait > 0) await new Promise(r => setTimeout(r, wait));
       const task = this._sendQueue.shift()!;
       this._lastSendAt = Date.now();
@@ -522,6 +553,10 @@ export class MatrixChannel implements Channel {
   private isAuthFailure(err: unknown): boolean {
     const code = matrixErrCode(err);
     return code === 'M_UNKNOWN_TOKEN' || code === 'M_FORBIDDEN';
+  }
+
+  private isTooLargeError(err: unknown): boolean {
+    return matrixErrCode(err) === 'M_TOO_LARGE';
   }
 
   private markDisconnected(context: string, err?: unknown): void {
@@ -908,6 +943,15 @@ export class MatrixChannel implements Channel {
     try {
       await this.sendTextReturningId(jid, text, threadId);
     } catch (err) {
+      if (this.isTooLargeError(err) && text.length > 2000) {
+        // Truncate and retry once for oversized messages
+        const truncated = text.slice(0, 16_000) + '\n\n…(truncated — message too large for Matrix)';
+        logger.warn({ jid, originalLen: text.length }, 'Message too large, retrying truncated');
+        try {
+          await this.sendTextReturningId(jid, truncated, threadId);
+          return;
+        } catch { /* fall through to original error handling */ }
+      }
       if (this.isAuthFailure(err)) {
         this.markDisconnected('Matrix auth failed while sending message', err);
       }
@@ -976,6 +1020,23 @@ export class MatrixChannel implements Channel {
         'editMessage',
       ));
     } catch (err) {
+      if (this.isTooLargeError(err) && newText.length > 2000) {
+        const truncated = newText.slice(0, 16_000) + '\n\n…(truncated)';
+        try {
+          const truncContent: Record<string, any> = { // eslint-disable-line @typescript-eslint/no-explicit-any
+            msgtype: 'm.text',
+            body: `* ${truncated}`,
+            'm.new_content': { msgtype: 'm.text', body: truncated },
+            'm.relates_to': { rel_type: 'm.replace', event_id: eventId },
+          };
+          await this.enqueueSend(() => withTimeout(
+            this.client!.sendMessage(roomId, truncContent),
+            MATRIX_SEND_TIMEOUT_MS,
+            'editMessage(truncated)',
+          ));
+          return;
+        } catch { /* fall through */ }
+      }
       logger.warn({ jid, eventId, err }, 'Failed to edit Matrix message');
     }
   }

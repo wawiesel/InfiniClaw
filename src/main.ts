@@ -623,6 +623,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const compactError = rawError.replace(/\s+/g, ' ').slice(0, 1000);
     markError(chatJid, compactError);
 
+    const isOomKill = /OOM KILLED/.test(compactError);
+    if (isOomKill && sessions[group.folder]) {
+      deleteSession(group.folder);
+      delete sessions[group.folder];
+      logger.info({ group: group.name }, 'Cleared session after OOM kill');
+    }
+
     if (!outputSentToUser && channel) {
       // OOM kills and signal-based crashes get a prominent standalone status line
       const isSignalCrash = /^⚠️ /.test(compactError);
@@ -642,7 +649,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
     }
 
-    if (outputSentToUser) {
+    if (outputSentToUser && !isOomKill) {
       logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
       appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
       delete activeReplyThreadIds[chatJid];

@@ -736,6 +736,21 @@ async function main(): Promise<void> {
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
+  // Archive non-current session files so they don't bloat Claude Code's scan path
+  const archiveDir = path.join(SESSIONS_PROJECT_DIR, 'archive');
+  fs.mkdirSync(archiveDir, { recursive: true });
+  try {
+    for (const f of fs.readdirSync(SESSIONS_PROJECT_DIR)) {
+      if (!f.endsWith('.jsonl')) continue;
+      if (f.replace('.jsonl', '') === sessionId) continue;
+      fs.renameSync(
+        path.join(SESSIONS_PROJECT_DIR, f),
+        path.join(archiveDir, f),
+      );
+      log(`Archived stale session: ${f}`);
+    }
+  } catch { /* directory may not exist yet */ }
+
   // Auto-rotate bloated sessions — start fresh with summary carried forward
   let sessionSummary: string | undefined;
   if (sessionId) {
