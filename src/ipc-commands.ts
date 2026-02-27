@@ -36,7 +36,7 @@ import { statusMessage } from './formatting.js';
 const RESTART_COOLDOWN_MS = 60_000; // 60 seconds
 const REBUILD_COOLDOWN_MS = 5 * 60_000; // 5 minutes — image builds are expensive
 const GIT_PUSH_COOLDOWN_MS = 60_000; // 60 seconds
-const cooldownTimestamps: Record<string, number> = {};
+const cooldowns: Record<string, number> = {};
 
 // ── Interfaces ──────────────────────────────────────────────────────────
 
@@ -162,12 +162,12 @@ function requireMain(ctx: InfiniClawIpcContext, command: string): boolean {
 /** Cooldown gate — returns a rejection message if still cooling down, or null if OK. */
 function checkCooldown(key: string, cooldownMs: number): string | null {
   const now = Date.now();
-  const elapsed = now - (cooldownTimestamps[key] || 0);
+  const elapsed = now - (cooldowns[key] || 0);
   if (elapsed < cooldownMs) {
     const remaining = Math.ceil((cooldownMs - elapsed) / 1000);
     return `⏳ Cooldown: ${key} was triggered ${Math.floor(elapsed / 1000)}s ago. Wait ${remaining}s.`;
   }
-  cooldownTimestamps[key] = now;
+  cooldowns[key] = now;
   return null;
 }
 
