@@ -116,7 +116,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
   // Mount agent-runner source from host
   const agentRunnerSrc = path.join(projectRoot, 'external', 'nanoclaw', 'container', 'agent-runner', 'src');
-  mounts.push({ hostPath: agentRunnerSrc, containerPath: '/app/src', readonly: true });
+  mountIfExists(mounts, agentRunnerSrc, '/app/src', true);
 
   // Read-only mirror of host home directory
   mounts.push({ hostPath: homeDir, containerPath: homeDir, readonly: true });
