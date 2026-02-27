@@ -459,8 +459,9 @@ function removeStalePlists(): void {
     console.log('Removed legacy com.nanoclaw.plist');
   }
 
-  // Remove plists for bots no longer in active list
+  // Remove plists for bots no longer in active list (preserve non-bot services)
   const validLabels = new Set(getActiveBots().map((b) => `com.infiniclaw.${b}.plist`));
+  validLabels.add('com.infiniclaw.minio.plist');
   try {
     for (const file of fs.readdirSync(LAUNCH_AGENTS_DIR)) {
       if (file.startsWith('com.infiniclaw.') && file.endsWith('.plist') && !validLabels.has(file) && !file.includes('-holodeck')) {
