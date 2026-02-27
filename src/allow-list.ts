@@ -30,8 +30,11 @@ function expandTilde(p: string): string {
   return p;
 }
 
+// Dotfile paths that are explicitly safe for bot mounts
+const DOTFILE_ALLOWLIST = new Set(['.wks', '.config']);
+
 function hasDotfileSegment(p: string): boolean {
-  return p.split(path.sep).some(seg => seg.startsWith('.') && seg !== '.' && seg !== '..');
+  return p.split(path.sep).some(seg => seg.startsWith('.') && seg !== '.' && seg !== '..' && !DOTFILE_ALLOWLIST.has(seg));
 }
 
 export function loadAllowList(): AllowList {
