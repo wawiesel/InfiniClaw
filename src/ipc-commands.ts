@@ -478,6 +478,46 @@ async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): 
   }
 }
 
+async function handleRestartScaleman(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'restart_scaleman')) return;
+  const chatJid = parseChatJid(data);
+  logger.info('restart_scaleman requested via IPC');
+  try {
+    const home = process.env.HOME || '/Users/ww5';
+    const script = path.join(home, '2026-Nanoclaw/InfiniClaw/scripts/start-scaleman-proxy.sh');
+
+    if (chatJid) await ctx.sendMessage(chatJid, '🔄 Restarting scaleman proxy...');
+
+    const killOut = execSync(`/usr/sbin/lsof -ti:8766 | xargs kill -9 2>&1 || echo "no process on 8766"`, {
+      shell: '/bin/bash',
+      encoding: 'utf-8',
+      timeout: 10000,
+    }).trim();
+    if (chatJid) await ctx.sendMessage(chatJid, `kill: ${killOut}`);
+
+    await new Promise(r => setTimeout(r, 2000));
+
+    const startOut = execSync(`bash ${script} 2>&1`, {
+      shell: '/bin/bash',
+      encoding: 'utf-8',
+      timeout: 30000,
+    }).trim();
+    if (chatJid) await ctx.sendMessage(chatJid, `start: ${startOut}`);
+
+    await new Promise(r => setTimeout(r, 3000));
+
+    const health = execSync('curl -s http://localhost:8766/health', {
+      shell: '/bin/bash',
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
+    if (chatJid) await ctx.sendMessage(chatJid, `health: ${health}`);
+  } catch (err) {
+    logger.error({ err }, 'restart_scaleman failed');
+    if (chatJid) await ctx.sendMessage(chatJid, `⛔ restart_scaleman failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'git_push')) return;
   const chatJid = parseChatJid(data);
@@ -669,54 +709,32 @@ async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext
  * Handle InfiniClaw-specific IPC task commands.
  * Returns true if the command was handled, false if unknown.
  */
+type CommandHandler = (data: CommandData, ctx: InfiniClawIpcContext) => void | Promise<void>;
+
+const COMMAND_HANDLERS: Record<string, CommandHandler> = {
+  set_brain_mode: handleSetBrainMode,
+  restart_bot: handleRestartBot,
+  stop_bot: handleStopBot,
+  rebuild_image: handleRebuildImage,
+  bot_status: handleBotStatus,
+  set_thread: handleSetThread,
+  restart_wksm: handleRestartWksm,
+  restart_scaleman: handleRestartScaleman,
+  git_push: handleGitPush,
+  holodeck_create: handleHolodeckCreate,
+  holodeck_teardown: handleHolodeckTeardown,
+  holodeck_promote: handleHolodeckPromote,
+  holodeck_send: handleHolodeckSend,
+  holodeck_read: handleHolodeckRead,
+  holodeck_status: handleHolodeckStatus,
+};
+
 export async function handleInfiniClawCommand(
   data: CommandData,
   ctx: InfiniClawIpcContext,
 ): Promise<boolean> {
-  switch (data.type) {
-    case 'set_brain_mode':
-      await handleSetBrainMode(data, ctx);
-      return true;
-    case 'restart_bot':
-      await handleRestartBot(data, ctx);
-      return true;
-    case 'stop_bot':
-      await handleStopBot(data, ctx);
-      return true;
-    case 'rebuild_image':
-      await handleRebuildImage(data, ctx);
-      return true;
-    case 'bot_status':
-      await handleBotStatus(data, ctx);
-      return true;
-    case 'set_thread':
-      handleSetThread(data, ctx);
-      return true;
-    case 'restart_wksm':
-      await handleRestartWksm(data, ctx);
-      return true;
-    case 'git_push':
-      await handleGitPush(data, ctx);
-      return true;
-    case 'holodeck_create':
-      await handleHolodeckCreate(data, ctx);
-      return true;
-    case 'holodeck_teardown':
-      await handleHolodeckTeardown(data, ctx);
-      return true;
-    case 'holodeck_promote':
-      await handleHolodeckPromote(data, ctx);
-      return true;
-    case 'holodeck_send':
-      await handleHolodeckSend(data, ctx);
-      return true;
-    case 'holodeck_read':
-      await handleHolodeckRead(data, ctx);
-      return true;
-    case 'holodeck_status':
-      await handleHolodeckStatus(data, ctx);
-      return true;
-    default:
-      return false;
-  }
+  const handler = COMMAND_HANDLERS[data.type];
+  if (!handler) return false;
+  await handler(data, ctx);
+  return true;
 }

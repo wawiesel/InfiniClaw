@@ -64,6 +64,24 @@ function parseNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
+/** Find the model key with the highest numeric score from a { model: score|object } map. */
+function bestModelByScore(
+  entries: Record<string, unknown>,
+  scorer: (value: unknown) => number,
+): string | undefined {
+  let best: string | undefined;
+  let bestScore = -1;
+  for (const [model, value] of Object.entries(entries)) {
+    if (!model.trim()) continue;
+    const score = scorer(value);
+    if (score > bestScore) {
+      bestScore = score;
+      best = model.trim();
+    }
+  }
+  return best;
+}
+
 function getClaudeModelFromStatsCache(): string | undefined {
   const statsPath = path.join(
     DATA_DIR,
@@ -85,22 +103,13 @@ function getClaudeModelFromStatsCache(): string | undefined {
   // Prefer modelUsage since it summarizes overall token usage by model.
   const modelUsage = (parsed as { modelUsage?: unknown }).modelUsage;
   if (modelUsage && typeof modelUsage === 'object') {
-    let bestModel: string | undefined;
-    let bestScore = -1;
-    for (const [model, usage] of Object.entries(modelUsage)) {
-      if (!model.trim() || !usage || typeof usage !== 'object') continue;
-      const metrics = usage as Record<string, unknown>;
-      const score =
-        parseNumber(metrics.inputTokens) +
-        parseNumber(metrics.outputTokens) +
-        parseNumber(metrics.cacheReadInputTokens) +
-        parseNumber(metrics.cacheCreationInputTokens);
-      if (score > bestScore) {
-        bestScore = score;
-        bestModel = model.trim();
-      }
-    }
-    if (bestModel) return bestModel;
+    const result = bestModelByScore(modelUsage as Record<string, unknown>, (usage) => {
+      if (!usage || typeof usage !== 'object') return 0;
+      const m = usage as Record<string, unknown>;
+      return parseNumber(m.inputTokens) + parseNumber(m.outputTokens)
+        + parseNumber(m.cacheReadInputTokens) + parseNumber(m.cacheCreationInputTokens);
+    });
+    if (result) return result;
   }
 
   // Fallback: inspect most recent daily tokens by model.
@@ -111,17 +120,8 @@ function getClaudeModelFromStatsCache(): string | undefined {
       if (!dayEntry || typeof dayEntry !== 'object') continue;
       const tokensByModel = (dayEntry as { tokensByModel?: unknown }).tokensByModel;
       if (!tokensByModel || typeof tokensByModel !== 'object') continue;
-
-      let bestModel: string | undefined;
-      let bestTokens = -1;
-      for (const [model, tokens] of Object.entries(tokensByModel)) {
-        const tokenCount = parseNumber(tokens);
-        if (model.trim() && tokenCount > bestTokens) {
-          bestTokens = tokenCount;
-          bestModel = model.trim();
-        }
-      }
-      if (bestModel) return bestModel;
+      const result = bestModelByScore(tokensByModel as Record<string, unknown>, (v) => parseNumber(v));
+      if (result) return result;
     }
   }
 
@@ -137,27 +137,11 @@ export function resolveMainProvider(): 'claude' | 'ollama' {
 
 function isGenericClaudeModel(model: string): boolean {
   const normalized = model.trim().toLowerCase();
-  if (!normalized) return true;
+  if (!normalized || normalized === 'default') return true;
 
-  if (
-    normalized === 'default' ||
-    normalized === 'opus' ||
-    normalized === 'sonnet' ||
-    normalized === 'haiku' ||
-    normalized === 'claude-opus' ||
-    normalized === 'claude-sonnet' ||
-    normalized === 'claude-haiku'
-  ) {
-    return true;
-  }
-
-  // Treat family aliases like claude-opus, claude-opus-latest as non-specific.
+  // Family aliases like "opus", "claude-sonnet", "claude-opus-latest" are generic.
   // Any model string containing digits is considered specific (e.g. claude-opus-4-6).
-  if (/^(claude-)?(opus|sonnet|haiku)(-[a-z._-]+)?$/i.test(normalized) && !/\d/.test(normalized)) {
-    return true;
-  }
-
-  return false;
+  return /^(claude-)?(opus|sonnet|haiku)(-[a-z._-]+)?$/.test(normalized) && !/\d/.test(normalized);
 }
 
 export function normalizeMainLlm(model: string | undefined): string | undefined {
