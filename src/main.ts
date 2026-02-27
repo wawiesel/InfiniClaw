@@ -94,6 +94,7 @@ import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
+import { getActiveBots } from './service.js';
 import { handleOperatorCommand, buildTodoMessage, readTodoItems } from './operator-commands.js';
 
 // ── Module-level state ─────────────────────────────────────────────────
@@ -1077,10 +1078,9 @@ async function main(): Promise<void> {
         role: ASSISTANT_ROLE,
         model: mainLlm,
         provider: MAIN_PROVIDER,
-        brainModes: {
-          engineer: readBrainMode('engineer'),
-          commander: readBrainMode('commander'),
-        },
+        brainModes: Object.fromEntries(
+          getActiveBots().map((b) => [b, readBrainMode(b)])
+        ),
         groups: Object.entries(registeredGroups).map(([jid, g]) => {
           const queueStatus = queue.getGroupStatus(jid);
           const activity = getChatActivity(jid) || {};

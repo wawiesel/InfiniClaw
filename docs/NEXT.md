@@ -1,5 +1,54 @@
 # NEXT — InfiniClaw Planned Work
 
+## Priority 1: Multi-Computer Architecture
+
+**Goal:** Same bots, same conversations, but access to resources/filesystems on multiple machines — work vs home, Mac + Linux.
+
+**Owner:** Albert (Architect). This is his top priority.
+
+### Single-Machine Assumptions
+
+Every subsystem currently assumes co-located resources:
+
+| Category | Assumption | Key Files |
+|----------|-----------|-----------|
+| Podman | Container runtime on same machine | `container-runner.ts`, `container-spawn.ts` |
+| Podman I/O | Child process stdin/stdout pipe | `container-runner.ts` |
+| Volume mounts | All `-v` paths are local filesystem | `container-spawn.ts`, `container-mounts.ts` |
+| SQLite | Synchronous local file access | `db.ts`, all callers |
+| Cross-bot SQLite | Direct open of other bot's `.db` | `service.ts`, `ipc-commands.ts` |
+| IPC filesystem | `fs.readdirSync` polling of local dirs | `ipc.ts`, `ipc-watcher.ts` |
+| Session files | Local `.jsonl` mounted into containers | `container-spawn.ts`, agent-runner |
+| launchd | macOS-only service manager | `service.ts` |
+| Deploy | Local `rsync` + `npm ci` + `npm run build` | `service.ts` |
+| Allow-list | Local JSON file at `~/.config/infiniclaw/` | `allow-list.ts` |
+| Home mount | Real home directory mounted ro into container | `container-mounts.ts` |
+| Module state | In-memory maps (sessions, timestamps, threads) | `main.ts` |
+| Container images | Must exist in local podman image store | `container-spawn.ts` |
+
+### Design Constraints
+
+- **Simplicity mandate.** No hedging, no backward compatibility shims, no "works both ways" patterns. The multi-computer system replaces the single-computer system — it doesn't layer on top.
+- **Same bots, same rooms.** The Matrix conversations, bot identities, and room structure stay identical.
+- **Incremental delivery.** Each subsystem can be migrated independently. Don't require a big-bang cutover.
+- **Mac + Linux.** Must work on both. launchd is macOS-only — the service layer needs to be OS-agnostic.
+
+### Open Questions for Albert
+
+1. **Podman remote vs SSH tunneling vs node registry?** Podman has built-in remote support (`podman --remote`). Is that sufficient, or do we need a custom node registry that tracks which machines are available?
+2. **Volume mount strategy.** Local mounts won't work across machines. Options: NFS/SMB shares, rsync-based sync, SSHFS, or a distributed filesystem. What's the simplest that actually works?
+3. **SQLite across machines.** Direct file access breaks. Options: replicate the DB, use a network DB, or proxy reads/writes through a service. Which approach preserves simplicity?
+4. **IPC mechanism.** Filesystem polling is local-only. Replace with: message queue (NATS, Redis pub/sub), HTTP API, or Matrix itself as the IPC layer?
+5. **Service manager.** launchd → what? systemd on Linux, launchd on Mac — or something cross-platform (supervisord, custom daemon)?
+6. **Image distribution.** Container images need to exist on the machine that runs the container. Registry? Build on each machine? Push/pull from a shared store?
+7. **Which subsystems migrate first?** What's the dependency order for making each subsystem location-independent?
+
+### Architecture Design (Albert fills this in)
+
+_Albert: document your research findings and architecture decisions here as you work._
+
+---
+
 ## ~~Priority 1: Restart Robustness~~ ✅
 - **Done:** `injectResumeMessage()` now reads the bot's todo list via `readTodoItems()` and includes non-completed tasks in the resume message. Bots see their active tasks immediately on restart without rediscovering from conversation context.
 

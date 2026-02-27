@@ -5,14 +5,13 @@ import { ASSISTANT_NAME, CAPTAIN_USER_ID, DATA_DIR } from 'nanoclaw/config.js';
 import { getAllRegisteredGroups, getSession } from 'nanoclaw/db.js';
 import { logger } from 'nanoclaw/logger.js';
 import { grantMount, revokeMount } from './allow-list.js';
+import { loadMachineConfig } from './machine-config.js';
 import type { MatrixChannel } from './channels/matrix.js';
 
 export function getCaptainUserId(): string {
-    const profileEnvPath = path.join(
-        process.env.INFINICLAW_ROOT || path.resolve(process.cwd(), '..', '..', '..'),
-        'bots', 'profiles', 'engineer', 'env'
-    );
     try {
+        const config = loadMachineConfig();
+        const profileEnvPath = path.join(config.secretsPath, 'engineer', 'env');
         if (fs.existsSync(profileEnvPath)) {
             const vars = parseEnvFile(profileEnvPath);
             if (vars.CAPTAIN_USER_ID) return vars.CAPTAIN_USER_ID.trim();

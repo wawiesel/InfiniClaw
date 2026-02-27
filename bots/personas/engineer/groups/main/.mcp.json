@@ -3,6 +3,10 @@
     "wksm": {
       "type": "sse",
       "url": "http://host.containers.internal:8765/sse"
+    },
+    "scaleman": {
+      "type": "sse",
+      "url": "http://host.containers.internal:8766/sse"
     }
   }
 }

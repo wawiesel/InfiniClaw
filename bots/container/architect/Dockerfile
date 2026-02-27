@@ -10,8 +10,13 @@ RUN apt-get update && apt-get install -y \
     git \
     ripgrep \
     python3 \
+    python3-pip \
     python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Install A_GIS dependencies so the runtime mount is immediately usable.
+# PYTHONPATH is injected at runtime via CONTAINER_ENV_PYTHONPATH in the bot's profile env.
+RUN pip3 install --break-system-packages click matplotlib scipy numpy pydantic
 
 # Cap Node.js heap so processes GC instead of growing until VM OOM.
 # Applies to main brain, MCP server, and lobe spawns.

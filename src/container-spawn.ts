@@ -240,6 +240,13 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string, portPu
     args.push('-p', p);
   }
 
+  // Inject CONTAINER_ENV_* as container environment variables
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith('CONTAINER_ENV_') && value) {
+      args.push('-e', `${key.slice('CONTAINER_ENV_'.length)}=${value}`);
+    }
+  }
+
   args.push(CONTAINER_IMAGE);
 
   return args;

@@ -7,6 +7,8 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { parseEnvFile, isOllamaBaseUrl } from 'nanoclaw/env-utils.js';
+import { getActiveBots } from './service.js';
+import { loadMachineConfig } from './machine-config.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -332,8 +334,13 @@ function getTokenUsage(instanceDir: string, mainGroupFolder: string): TokenUsage
 
 // ── Brain config from profile ──────────────────────────────────────
 
-function getBrainConfig(rootDir: string, bot: string): { model?: string; provider?: string } {
-  const envPath = path.join(rootDir, 'bots', 'profiles', bot, 'env');
+function getBrainConfig(_rootDir: string, bot: string): { model?: string; provider?: string } {
+  let envPath: string;
+  try {
+    envPath = path.join(loadMachineConfig().secretsPath, bot, 'env');
+  } catch {
+    return {};
+  }
   if (!fs.existsSync(envPath)) return {};
   try {
     const vars = parseEnvFile(envPath);
@@ -373,7 +380,7 @@ export function getSystemStatus(rootDir: string): SystemStatus {
   const bots: BotStatus[] = [];
   const allContainers = getActiveContainers();
 
-  for (const bot of ['engineer', 'commander']) {
+  for (const bot of getActiveBots()) {
     const { service, pid } = getBotServiceStatus(bot);
     const { model, provider } = getBrainConfig(rootDir, bot);
     const instanceDir = path.join(rootDir, '_runtime', 'instances', bot);
@@ -463,7 +470,7 @@ export function getRecentLogLines(rootDir: string, bot: string, logType: 'error'
 export function getBotActivity(rootDir: string): Array<{ bot: string; activity: string }> {
   const result: Array<{ bot: string; activity: string }> = [];
 
-  for (const bot of ['engineer', 'commander']) {
+  for (const bot of getActiveBots()) {
     const instanceDir = path.join(rootDir, '_runtime', 'instances', bot);
     const db = openReadonlyDb(instanceDir);
     if (!db) {

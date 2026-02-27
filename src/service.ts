@@ -14,10 +14,16 @@ import Database from 'better-sqlite3';
 import { parseEnvFile } from 'nanoclaw/env-utils.js';
 import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
 
+import { loadMachineConfig } from './machine-config.js';
+import { pullAll, pushAll } from './s3-sync.js';
+
 // ── Constants ──────────────────────────────────────────────────────────
 
-export const BOTS = ['engineer', 'commander', 'architect'] as const;
 const LAUNCH_AGENTS_DIR = path.join(os.homedir(), 'Library', 'LaunchAgents');
+
+export function getActiveBots(): string[] {
+  return loadMachineConfig().bots;
+}
 
 const RSYNC_EXCLUDES = [
   'node_modules',
@@ -60,8 +66,9 @@ function personaDir(root: string, bot: string): string {
   return path.join(root, 'bots', 'personas', bot);
 }
 
-function profileEnvPath(root: string, bot: string): string {
-  return path.join(root, 'bots', 'profiles', bot, 'env');
+function profileEnvPath(_root: string, bot: string): string {
+  const config = loadMachineConfig();
+  return path.join(config.secretsPath, bot, 'env');
 }
 
 /** Copy persona group .md files into an instance's groups/ directory. */
@@ -323,7 +330,7 @@ export function validateDeploy(root: string, bot: string): { ok: boolean; errors
   // Symlink node_modules from live instance (fall back to any bot's instance for new bots)
   let instanceModules = path.join(instance, 'node_modules');
   if (!fs.existsSync(instanceModules)) {
-    for (const fallback of BOTS) {
+    for (const fallback of getActiveBots()) {
       const alt = path.join(instanceDir(root, fallback), 'node_modules');
       if (fs.existsSync(alt)) { instanceModules = alt; break; }
     }
@@ -452,8 +459,8 @@ function removeStalePlists(): void {
     console.log('Removed legacy com.nanoclaw.plist');
   }
 
-  // Remove plists for bots no longer in BOTS list
-  const validLabels = new Set(BOTS.map((b) => `com.infiniclaw.${b}.plist`));
+  // Remove plists for bots no longer in active list
+  const validLabels = new Set(getActiveBots().map((b) => `com.infiniclaw.${b}.plist`));
   try {
     for (const file of fs.readdirSync(LAUNCH_AGENTS_DIR)) {
       if (file.startsWith('com.infiniclaw.') && file.endsWith('.plist') && !validLabels.has(file) && !file.includes('-holodeck')) {
@@ -545,23 +552,29 @@ export function stopBot(bot: string): void {
 
 // ── Top-level commands ─────────────────────────────────────────────────
 
-export function start(): void {
+export async function start(): Promise<void> {
   const root = resolveRoot();
+  const bots = getActiveBots();
   const logs = logDir(root);
   fs.mkdirSync(LAUNCH_AGENTS_DIR, { recursive: true });
   fs.mkdirSync(logs, { recursive: true });
 
   ensurePodmanReady();
 
+  // Pull state from S3 before deploying (warn on failure)
+  try { await pullAll(root); } catch (err) {
+    console.warn(`S3 pull failed — continuing: ${err instanceof Error ? err.message : err}`);
+  }
+
   // Unload all services first so old code stops before we build
-  for (const bot of BOTS) { unloadPlist(plistPath(bot)); }
+  for (const bot of bots) { unloadPlist(plistPath(bot)); }
   removeStalePlists();
 
   killRogueProcesses();
   spawnSync('sleep', ['1']);
   killStaleContainers();
 
-  for (const bot of BOTS) {
+  for (const bot of bots) {
     try {
       const instance = instanceDir(root, bot);
       deployBot(root, bot);
@@ -575,10 +588,11 @@ export function start(): void {
   console.log('\nInfiniClaw running. Check status:\n  launchctl list | grep infiniclaw');
 }
 
-export function stop(): void {
+export async function stop(): Promise<void> {
   const root = resolveRoot();
+  const bots = getActiveBots();
 
-  for (const bot of BOTS) {
+  for (const bot of bots) {
     const pp = plistPath(bot);
     if (fs.existsSync(pp)) {
       try { syncPersona(root, bot); } catch { /* best effort */ }
@@ -602,7 +616,21 @@ export function stop(): void {
   killRogueProcesses();
   killStaleContainers();
 
+  // Push state to S3 after stopping (warn on failure)
+  try { await pushAll(root); } catch (err) {
+    console.warn(`S3 push failed: ${err instanceof Error ? err.message : err}`);
+  }
+
   console.log('InfiniClaw stopped.');
+}
+
+export async function sync(direction: 'push' | 'pull'): Promise<void> {
+  const root = resolveRoot();
+  if (direction === 'push') {
+    await pushAll(root);
+  } else {
+    await pullAll(root);
+  }
 }
 
 export function chat(bot: string): void {
@@ -749,8 +777,9 @@ function holodeckBotName(bot: string): string {
 }
 
 export function holodeckCreate(bot: string, branch: string): void {
-  if (!(BOTS as readonly string[]).includes(bot)) {
-    throw new Error(`Unknown bot: ${bot}. Valid: ${BOTS.join(', ')}`);
+  const activeBots = getActiveBots();
+  if (!activeBots.includes(bot)) {
+    throw new Error(`Unknown bot: ${bot}. Valid: ${activeBots.join(', ')}`);
   }
 
   const root = resolveRoot();
@@ -803,7 +832,8 @@ export function holodeckCreate(bot: string, branch: string): void {
   }
 
   // 6. Create holodeck profile (clone live bot, force terminal-only)
-  const hdProfileDir = path.join(root, 'bots', 'profiles', hdBot);
+  const config = loadMachineConfig();
+  const hdProfileDir = path.join(config.secretsPath, hdBot);
   fs.mkdirSync(hdProfileDir, { recursive: true });
   fs.copyFileSync(profileEnvPath(root, bot), profileEnvPath(root, hdBot));
   fs.appendFileSync(profileEnvPath(root, hdBot), [
@@ -852,7 +882,7 @@ export function holodeckTeardown(bot: string): void {
   const hdBot = holodeckBotName(bot);
   const worktree = path.join(root, '_holodeck', bot);
   const instance = instanceDir(root, hdBot);
-  const hdProfile = path.join(root, 'bots', 'profiles', hdBot);
+  const hdProfile = path.join(loadMachineConfig().secretsPath, hdBot);
 
   // Stop service
   const pp = plistPath(hdBot);

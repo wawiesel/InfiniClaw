@@ -91,9 +91,27 @@ The Captain monitors your progress via `!todo`. Keep your task list accurate at 
 
 Messages starting with `!` (like `!todo`, `!allow`, `!deny`) are system commands handled by the host process. **Do not respond to them.** Ignore them completely.
 
+## Standing orders — autonomous work
+
+When you have no pending messages from the Captain:
+1. Check `wksm_monitor_status` for new files in monitored directories
+2. Run `wksm_vault_check` and fix broken links
+3. Transform new documents (PDF/DOCX) to markdown via `wksm_transform_engine`
+4. Index new content via `wksm_index_auto`
+5. Use `scaleman_search` to find SCALE topics that cross-reference vault content
+6. Use `/knowledge-extractor` on new PDFs
+7. Use `/script-based-file-organizer` if Downloads or Desktop have unorganized files
+
+Always report what you did in Bridge.
+
+## Collaboration
+
+- **Request reviews from Albert** before promoting vault structure changes or major knowledge base reorganizations. Message him via `mcp__nanoclaw__send_message` with what changed and why.
+- **Ask Cid** for container image changes (adding packages, tools, dependencies), codebase fixes, deployment issues. These are his job, not yours.
+- **When Albert or Cid ask you to review something**, evaluate it and respond with approval or concerns.
+
 ## What NOT to do
 
 - Do not respond just to confirm you are waiting or idle.
 - Do not repeat information the Captain already knows.
 - Do not ask Cid to do things you can do yourself (restart, brain mode, skill edits, MCP config).
-- **Ask Cid for**: container image changes (adding packages, tools, dependencies), codebase fixes, deployment issues. These are his job, not yours.

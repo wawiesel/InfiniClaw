@@ -14,8 +14,9 @@ import {
   ASSISTANT_ROLE,
 } from 'nanoclaw/config.js';
 import { logger } from 'nanoclaw/logger.js';
+import { loadMachineConfig } from './machine-config.js';
 import {
-  BOTS,
+  getActiveBots,
   bootstrapBot as serviceBootstrapBot,
   deployBot as serviceDeployBot,
   stopBot as serviceStopBot,
@@ -109,8 +110,8 @@ function applyBrainMode(
   mode: 'anthropic' | 'ollama',
   model?: string,
 ): string {
-  const root = resolveRoot();
-  const envFile = path.join(root, 'bots', 'profiles', bot, 'env');
+  const config = loadMachineConfig();
+  const envFile = path.join(config.secretsPath, bot, 'env');
   if (!fs.existsSync(envFile)) {
     throw new Error(`Missing profile env: ${envFile}`);
   }
@@ -138,7 +139,7 @@ function applyBrainMode(
 }
 
 export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'unknown'; model: string } {
-  const envFile = path.join(resolveRoot(), 'bots', 'profiles', bot, 'env');
+  const envFile = path.join(loadMachineConfig().secretsPath, bot, 'env');
   if (!fs.existsSync(envFile)) return { mode: 'unknown', model: '' };
   try {
     const vars = parseEnvFile(envFile);
@@ -186,7 +187,7 @@ function parseChatJid(data: CommandData): string | null {
 
 /** Parse bot name, defaulting if invalid. */
 function parseBot(data: CommandData, defaultBot: string): string {
-  return typeof data.bot === 'string' && (BOTS as readonly string[]).includes(data.bot)
+  return typeof data.bot === 'string' && getActiveBots().includes(data.bot)
     ? data.bot
     : defaultBot;
 }
@@ -228,7 +229,7 @@ export async function handleInfiniClawMessage(
 
 async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'set_brain_mode')) return;
-  const validBot = data.bot === 'engineer' || data.bot === 'commander' || data.bot === 'architect';
+  const validBot = typeof data.bot === 'string' && getActiveBots().includes(data.bot);
   const validMode = data.mode === 'anthropic' || data.mode === 'ollama';
   if (!data.bot || !validBot || !data.mode || !validMode) {
     logger.warn({ data }, 'Invalid set_brain_mode request');
@@ -336,7 +337,7 @@ async function handleCrossBotRestart(bot: string, chatJid: string | null, ctx: I
 
 async function handleStopBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'stop_bot')) return;
-  const bot = typeof data.bot === 'string' && (BOTS as readonly string[]).includes(data.bot)
+  const bot = typeof data.bot === 'string' && getActiveBots().includes(data.bot)
     ? data.bot
     : null;
   if (!bot) {
@@ -385,7 +386,7 @@ async function handleRebuildImage(data: CommandData, ctx: InfiniClawIpcContext):
 
 async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'bot_status')) return;
-  const bot = typeof data.bot === 'string' && ['engineer', 'commander', 'architect'].includes(data.bot)
+  const bot = typeof data.bot === 'string' && getActiveBots().includes(data.bot)
     ? data.bot
     : 'commander';
   const chatJid = parseChatJid(data);

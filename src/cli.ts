@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 import {
-  start, stop, chat, send,
+  start, stop, chat, send, sync,
   holodeckCreate, holodeckChat, holodeckTeardown, holodeckPromote,
 } from './service.js';
 
 const [cmd, ...args] = process.argv.slice(2);
 switch (cmd) {
-  case 'start': start(); break;
-  case 'stop': stop(); break;
+  case 'start':
+    start().catch((err) => { console.error(err.message); process.exit(1); });
+    break;
+  case 'stop':
+    stop().catch((err) => { console.error(err.message); process.exit(1); });
+    break;
   case 'chat':
     if (!args[0]) { console.error('Usage: cli chat <bot>'); process.exit(1); }
     chat(args[0]);
@@ -19,6 +23,18 @@ switch (cmd) {
       process.exit(1);
     });
     break;
+  case 'sync': {
+    const direction = args[0];
+    if (direction !== 'push' && direction !== 'pull') {
+      console.error('Usage: cli sync push|pull');
+      process.exit(1);
+    }
+    sync(direction).catch((err) => {
+      console.error(err.message);
+      process.exit(1);
+    });
+    break;
+  }
   case 'holodeck': {
     const [sub, ...hArgs] = args;
     switch (sub) {
@@ -45,6 +61,6 @@ switch (cmd) {
     break;
   }
   default:
-    console.error('Usage: cli start|stop|chat|send|holodeck');
+    console.error('Usage: cli start|stop|chat|send|sync|holodeck');
     process.exit(1);
 }

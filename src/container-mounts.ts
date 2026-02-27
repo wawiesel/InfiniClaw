@@ -10,6 +10,7 @@ import { parseEnvLine } from 'nanoclaw/env-utils.js';
 import { logger } from 'nanoclaw/logger.js';
 import { loadSkillsToSession } from './skill-sync.js';
 import { mountsForBot } from './allow-list.js';
+import { loadMachineConfig } from './machine-config.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 
 interface VolumeMount {
@@ -29,9 +30,12 @@ export interface InfiniClawMountOptions {
 
 /** Build a directory of all bots: name → main room JID. */
 export function buildBotDirectory(): Record<string, string> {
-  const rootDir = process.env.INFINICLAW_ROOT;
-  if (!rootDir) return {};
-  const profilesDir = path.join(rootDir, 'bots', 'profiles');
+  let profilesDir: string;
+  try {
+    profilesDir = loadMachineConfig().secretsPath;
+  } catch {
+    return {};
+  }
   if (!fs.existsSync(profilesDir)) return {};
   const directory: Record<string, string> = {};
   try {

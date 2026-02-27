@@ -227,7 +227,7 @@ async function startMcpServer(): Promise<void> {
     'get_logs',
     'Get recent log lines from a bot.',
     {
-      bot: z.enum(['engineer', 'commander']).describe('Which bot'),
+      bot: z.string().describe('Bot name (e.g. engineer, commander, architect)'),
       log_type: z.enum(['error', 'stdout']).default('error').describe('Log type'),
       lines: z.number().int().min(1).max(200).default(50).describe('Number of lines'),
     },

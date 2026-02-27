@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from 'nanoclaw/env-utils.js';
+import { loadMachineConfig } from './machine-config.js';
 import {
   ASSISTANT_NAME,
   DATA_DIR,
@@ -197,9 +198,10 @@ export async function maybeAutoSwitchBrainsOnQuotaError(
   if (!isAnthropicQuotaError(rawError)) return;
   if (Date.now() - lastAutoBrainSwitchAt < AUTO_BRAIN_SWITCH_COOLDOWN_MS) return;
 
-  const root = process.env.INFINICLAW_ROOT?.trim() || path.resolve(process.cwd(), '..', '..', '..');
-  const engineerEnv = path.join(root, 'bots', 'profiles', 'engineer', 'env');
-  const commanderEnv = path.join(root, 'bots', 'profiles', 'commander', 'env');
+  let config;
+  try { config = loadMachineConfig(); } catch { return; }
+  const engineerEnv = path.join(config.secretsPath, 'engineer', 'env');
+  const commanderEnv = path.join(config.secretsPath, 'commander', 'env');
   if (!fs.existsSync(engineerEnv) || !fs.existsSync(commanderEnv)) return;
 
   try {

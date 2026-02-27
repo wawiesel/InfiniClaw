@@ -40,8 +40,8 @@ git clone git@github.com:wawiesel/InfiniClaw.git ~/2026-Nanoclaw/InfiniClaw
 # Vault — shared knowledge base
 git clone git@code.ornl.gov:ww5/vault.git ~/_vault
 
-# A_GIS — shared Python library (get URL from Captain — requires PAT)
-git clone <A_GIS_REPO_URL> ~/2025-A_GIS
+# AEGIS — shared Python library
+git clone https://code.ornl.gov/ww5/aegis.git ~/2025-AEGIS
 
 # WKS — workspace manager
 git clone https://github.com/wawiesel/wks.git ~/2025-WKS/main
@@ -89,7 +89,7 @@ Write `~/.config/infiniclaw/allow-list.json`:
         "expiresAt": null
       },
       {
-        "path": "~/2025-A_GIS",
+        "path": "~/2025-AEGIS",
         "expiresAt": null
       }
     ],
@@ -109,7 +109,7 @@ Write `~/.config/infiniclaw/allow-list.json`:
         "expiresAt": null
       },
       {
-        "path": "~/2025-A_GIS",
+        "path": "~/2025-AEGIS",
         "expiresAt": null
       }
     ]
@@ -166,9 +166,18 @@ LOCAL_MIRROR_MATRIX_JID=
 
 CONTAINER_IMAGE=nanoclaw-architect:latest
 LOG_LEVEL=info
+
+# Container environment injection: CONTAINER_ENV_FOO=bar becomes -e FOO=bar in the container
+CONTAINER_ENV_PYTHONPATH=/workspace/extra/2025-AEGIS/source
 ```
 
 Get the actual secret values from the Captain or copy them from the existing machine's `bots/profiles/*/env` files (never commit these).
+
+### Container Environment Injection
+
+Any env var in a bot's profile `env` file prefixed with `CONTAINER_ENV_` gets the prefix stripped and passed as `-e KEY=VALUE` to the podman container at runtime. This decouples container images from host-specific paths.
+
+For example, `CONTAINER_ENV_PYTHONPATH=/workspace/extra/2025-AEGIS/source` in the profile env becomes `-e PYTHONPATH=/workspace/extra/2025-AEGIS/source` on the podman run command.
 
 ## 7. Build Container Images
 

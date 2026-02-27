@@ -41,7 +41,10 @@ RUN apt-get update && apt-get install -y \
 # Install docling for PDF-to-markdown conversion (includes OCR via pytesseract/easyocr)
 # workspace-mcp: Google Workspace (Gmail, Calendar, Drive) MCP server
 RUN pip3 install --break-system-packages \
-    docling rapidocr-onnxruntime pymupdf workspace-mcp
+    docling rapidocr-onnxruntime pymupdf workspace-mcp \
+    click matplotlib scipy numpy pydantic
+
+# PYTHONPATH is injected at runtime via CONTAINER_ENV_PYTHONPATH in the bot's profile env.
 
 # Fix model directory permissions for node user
 RUN chmod -R 777 /usr/local/lib/python3.11/dist-packages/rapidocr/models/ || true
