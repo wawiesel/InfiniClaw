@@ -1,0 +1,335 @@
+# New Machine Setup Guide
+
+Step-by-step runbook for deploying InfiniClaw on a new Mac. Written so another Claude Code instance can execute it without external docs.
+
+## 1. Prerequisites
+
+Install these on the new machine:
+
+```bash
+# Homebrew
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Node.js 22+ via nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+nvm install 22
+nvm use 22
+
+# Podman Desktop (container runtime — no Docker)
+brew install podman-desktop
+podman machine init
+podman machine start
+
+# Claude Code CLI
+npm install -g @anthropic-ai/claude-code
+```
+
+Verify:
+```bash
+node --version    # v22+
+podman --version  # 5.x+
+claude --version
+```
+
+## 2. Clone Repos
+
+```bash
+# InfiniClaw (includes nanoclaw in external/)
+git clone git@github.com:wawiesel/InfiniClaw.git ~/2026-Nanoclaw/InfiniClaw
+
+# Vault — shared knowledge base
+git clone git@code.ornl.gov:ww5/vault.git ~/_vault
+
+# A_GIS — shared Python library (get URL from Captain — requires PAT)
+git clone <A_GIS_REPO_URL> ~/2025-A_GIS
+
+# WKS — workspace manager
+git clone https://github.com/wawiesel/wks.git ~/2025-WKS/main
+```
+
+## 3. Install Dependencies
+
+```bash
+cd ~/2026-Nanoclaw/InfiniClaw
+npm ci
+npm run build
+```
+
+## 4. Create machine.json
+
+This tells InfiniClaw which bots run on this machine and where secrets live.
+
+```bash
+mkdir -p ~/.config/infiniclaw
+```
+
+Write `~/.config/infiniclaw/machine.json`:
+
+```json
+{
+  "bots": ["engineer", "commander", "architect"],
+  "secretsPath": "/Users/YOUR_USERNAME/2026-Nanoclaw/InfiniClaw/bots/profiles"
+}
+```
+
+Replace `YOUR_USERNAME` with the actual macOS username. The `bots` array controls which bots start on this machine — remove any that should stay on the other machine.
+
+## 5. Create allow-list.json
+
+This controls which host directories each bot gets mounted read-write at `/workspace/extra/`.
+
+Write `~/.config/infiniclaw/allow-list.json`:
+
+```json
+{
+  "mounts": {
+    "engineer": [
+      {
+        "path": "~/2026-Nanoclaw/InfiniClaw",
+        "expiresAt": null
+      },
+      {
+        "path": "~/2025-A_GIS",
+        "expiresAt": null
+      }
+    ],
+    "commander": [
+      {
+        "path": "~/_vault",
+        "expiresAt": null
+      },
+      {
+        "path": "~/2026-Nanoclaw/InfiniClaw/bots/profiles/commander",
+        "expiresAt": null
+      }
+    ],
+    "architect": [
+      {
+        "path": "~/2026-Nanoclaw/InfiniClaw",
+        "expiresAt": null
+      },
+      {
+        "path": "~/2025-A_GIS",
+        "expiresAt": null
+      }
+    ]
+  }
+}
+```
+
+Paths use `~` which resolves at runtime. The `expiresAt: null` means permanent. Temporary mounts (granted via `!allow` in Matrix) get an ISO timestamp here.
+
+## 6. Set Up Secrets
+
+Each bot needs an `env` file with API keys and Matrix credentials.
+
+```bash
+cd ~/2026-Nanoclaw/InfiniClaw/bots/profiles
+```
+
+For each bot (`engineer`, `commander`, `architect`):
+
+```bash
+cp <bot>/env.example <bot>/env
+# Edit <bot>/env and fill in:
+#   BRAIN_API_KEY or BRAIN_OAUTH_TOKEN — Anthropic API credentials
+#   MATRIX_HOMESERVER — https://matrix.org (or your server)
+#   MATRIX_ACCESS_TOKEN — from Matrix login
+#   MATRIX_USER_ID — e.g. @cid-bot:matrix.org
+#   MATRIX_USERNAME — e.g. cid-bot
+#   MATRIX_PASSWORD — Matrix account password
+```
+
+If the architect bot has no `env.example`, create `architect/env` manually using this template:
+
+```bash
+ASSISTANT_NAME=Albert
+ASSISTANT_ROLE=Architect
+MAIN_GROUP_NAME=Astrometrics
+CAPTAIN_USER_ID=@wawiesel:matrix.org
+
+BRAIN_MODEL=claude-opus-4-6
+BRAIN_BASE_URL=
+BRAIN_AUTH_TOKEN=
+BRAIN_API_KEY=
+BRAIN_OAUTH_TOKEN=
+BRAIN_CA_CERT_FILE=
+
+MATRIX_HOMESERVER=https://matrix.org
+MATRIX_ACCESS_TOKEN=
+MATRIX_USER_ID=
+MATRIX_USERNAME=
+MATRIX_PASSWORD=
+MATRIX_DEVICE_NAME=albert-bot
+LOCAL_CHAT_SENDER_NAME=God
+LOCAL_MIRROR_MATRIX_JID=
+
+CONTAINER_IMAGE=nanoclaw-architect:latest
+LOG_LEVEL=info
+```
+
+Get the actual secret values from the Captain or copy them from the existing machine's `bots/profiles/*/env` files (never commit these).
+
+## 7. Build Container Images
+
+```bash
+cd ~/2026-Nanoclaw/InfiniClaw
+./bots/container/build.sh all
+```
+
+This builds `nanoclaw-engineer:latest`, `nanoclaw-commander:latest`, and `nanoclaw-architect:latest` via Podman.
+
+Verify:
+```bash
+podman images --filter reference='nanoclaw-*'
+```
+
+## 8. MinIO (Optional — Shared State Sync)
+
+Only needed if this machine will host the S3 state store, or if you want to sync bot state between machines.
+
+### On the machine hosting MinIO:
+
+```bash
+cd ~/2026-Nanoclaw/InfiniClaw
+./scripts/setup-minio.sh
+```
+
+Then create the bucket:
+```bash
+podman exec minio mc alias set local http://localhost:9000 minioadmin minioadmin
+podman exec minio mc mb local/infiniclaw
+```
+
+### Add S3 config to machine.json on BOTH machines:
+
+```json
+{
+  "bots": ["engineer", "commander", "architect"],
+  "secretsPath": "/Users/YOUR_USERNAME/2026-Nanoclaw/InfiniClaw/bots/profiles",
+  "s3": {
+    "endpoint": "http://MINIO_HOST_IP:9000",
+    "bucket": "infiniclaw",
+    "accessKeyId": "minioadmin",
+    "secretAccessKey": "minioadmin"
+  }
+}
+```
+
+Replace `MINIO_HOST_IP` with the LAN IP of the machine running MinIO (e.g. `192.168.1.x`). Both machines point to the same MinIO instance.
+
+## 9. Start Proxies
+
+WKSM and SCALEMAN are MCP proxies that run independently of InfiniClaw. Bots connect to them via SSE.
+
+### WKSM (port 8765)
+
+Requires WKS installed (`wksc` in PATH):
+```bash
+wksc mcp proxy start
+```
+
+### SCALEMAN (port 8766)
+
+Requires the SCALEMAN repo with a Python venv:
+```bash
+cd ~/2026-Nanoclaw/InfiniClaw
+./scripts/start-scaleman-proxy.sh
+```
+
+This expects:
+- `~/2026-SCALEMAN/scaleman/venv` — Python venv with scaleman installed
+- `~/2026-SCALEMAN/scaleman-index` — the SCALEMAN index directory
+
+If SCALEMAN isn't set up on this machine, bots will still work — they just won't have SCALEMAN tools.
+
+## 10. Pull State and Start
+
+If syncing from an existing machine:
+```bash
+cd ~/2026-Nanoclaw/InfiniClaw
+npm run cli sync pull    # Pull bot state from S3
+npm run cli start        # Deploy and start all bots
+```
+
+If this is a fresh deployment (no existing state):
+```bash
+cd ~/2026-Nanoclaw/InfiniClaw
+npm run cli start
+```
+
+## 11. Verify
+
+```bash
+cd ~/2026-Nanoclaw/InfiniClaw
+
+# Check bot status
+npm run cli status
+
+# Check logs for errors
+tail -20 _runtime/logs/engineer.log
+tail -20 _runtime/logs/commander.log
+tail -20 _runtime/logs/architect.log
+
+# Check containers are running
+podman ps --filter name=nanoclaw
+
+# Send a test message
+npm run cli send bridge 'Hello from the new machine'
+npm run cli send engineering '@Cid status report'
+```
+
+Bots should appear online in Matrix within a minute.
+
+## 12. Moving Bots Between Machines
+
+To move a bot from Machine A to Machine B:
+
+1. **Stop on A:**
+   ```bash
+   # On Machine A
+   cd ~/2026-Nanoclaw/InfiniClaw
+   npm run cli stop
+   npm run cli sync push
+   ```
+
+2. **Update machine.json on both machines** — remove the bot from A's `bots` array, add to B's.
+
+3. **Pull and start on B:**
+   ```bash
+   # On Machine B
+   cd ~/2026-Nanoclaw/InfiniClaw
+   npm run cli sync pull
+   npm run cli start
+   ```
+
+4. **Restart remaining bots on A:**
+   ```bash
+   # On Machine A
+   npm run cli start
+   ```
+
+## Troubleshooting
+
+**Podman machine not running:**
+```bash
+podman machine start
+```
+
+**Container build fails with "no space":**
+```bash
+podman system prune -a
+```
+
+**Bot exits with code 137 (OOM):**
+Session files grew too large. Clear them:
+```bash
+rm -f _runtime/instances/<bot>/store/sessions/*.jsonl
+npm run cli start
+```
+
+**"Cannot connect to host.containers.internal":**
+MCP proxies (WKSM/SCALEMAN) aren't running. Start them per step 9.
+
+**Matrix login failures:**
+Check `MATRIX_ACCESS_TOKEN` in the bot's env file. Tokens expire — regenerate via Matrix client if needed.
