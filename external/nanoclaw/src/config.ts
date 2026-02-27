@@ -18,7 +18,7 @@ export const ASSISTANT_TRIGGER =
   process.env.ASSISTANT_TRIGGER || ASSISTANT_NAME;
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
-export const POLL_INTERVAL = 2000;
+export const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '1000', 10);
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
@@ -58,7 +58,7 @@ export const CONTAINER_MEMORY_MB = parseInt(
 export const CONTAINER_CPUS = parseFloat(
   process.env.CONTAINER_CPUS || '0',
 ); // 0 = runtime default (no explicit limit)
-export const IPC_POLL_INTERVAL = 1000;
+export const IPC_POLL_INTERVAL = parseInt(process.env.IPC_POLL_INTERVAL || '500', 10);
 export const IDLE_TIMEOUT = parseInt(
   process.env.IDLE_TIMEOUT || '1800000',
   10,
