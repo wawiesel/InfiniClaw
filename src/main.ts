@@ -574,6 +574,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const ch = findChannel(channels, chatJid);
       if (ch?.sendReaction) {
         for (const msgId of inboundMessageIds) {
+          // Skip synthetic IDs (resume-, out-, system-, op-) — only channel-native IDs can be reacted to
+          if (/^(resume|out|system|op)-/.test(msgId)) continue;
           void ch.sendReaction(chatJid, msgId, '🔹').catch(() => { });
         }
       }
