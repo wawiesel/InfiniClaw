@@ -10,8 +10,8 @@ import path from 'path';
 export interface S3Config {
   endpoint: string;
   bucket: string;
-  accessKey: string;
-  secretKey: string;
+  accessKeyId: string;
+  secretAccessKey: string;
 }
 
 export interface MachineConfig {
@@ -55,8 +55,8 @@ export function loadMachineConfig(): MachineConfig {
   if (raw.s3) {
     const s3 = raw.s3;
     if (typeof s3.endpoint !== 'string' || typeof s3.bucket !== 'string' ||
-        typeof s3.accessKey !== 'string' || typeof s3.secretKey !== 'string') {
-      throw new Error('machine.json: "s3" requires endpoint, bucket, accessKey, secretKey');
+        typeof s3.accessKeyId !== 'string' || typeof s3.secretAccessKey !== 'string') {
+      throw new Error('machine.json: "s3" requires endpoint, bucket, accessKeyId, secretAccessKey');
     }
     config.s3 = s3 as S3Config;
   }
