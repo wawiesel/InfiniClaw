@@ -58,6 +58,8 @@ function walkDir(dir: string, base: string = dir): string[] {
   const results: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
+    // Skip broken symlinks
+    if (entry.isSymbolicLink() && !fs.existsSync(full)) continue;
     if (entry.isDirectory()) {
       results.push(...walkDir(full, base));
     } else {
