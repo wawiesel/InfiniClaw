@@ -152,7 +152,7 @@ cd ~/2026-Nanoclaw/InfiniClaw
 ./bots/container/build.sh all
 ```
 
-This builds `nanoclaw-engineer:latest`, `nanoclaw-commander:latest`, and `nanoclaw-architect:latest` via Podman.
+This builds `nanoclaw-engineer:latest`, `nanoclaw-commander:latest`, `nanoclaw-architect:latest`, and `nanoclaw-navigator:latest` via Podman.
 
 Verify:
 ```bash
@@ -217,6 +217,54 @@ This expects:
 - `~/2026-SCALEMAN/scaleman-index` — the SCALEMAN index directory
 
 If SCALEMAN isn't set up on this machine, bots will still work — they just won't have SCALEMAN tools.
+
+### Google Workspace MCP (port 8767)
+
+Provides Gmail, Calendar, and Drive tools to bots. Requires a Python venv with `workspace-mcp` installed and Google OAuth credentials.
+
+**Install:**
+```bash
+python3 -m venv ~/.venv
+~/.venv/bin/pip install workspace-mcp
+```
+
+**Google OAuth setup:**
+1. Create OAuth credentials at https://console.cloud.google.com/ (Desktop app type)
+2. Save the client JSON as `bots/profiles/commander/google-credentials.json`
+3. Run once interactively to complete the browser OAuth flow:
+   ```bash
+   GOOGLE_OAUTH_CLIENT_ID="your-client-id" \
+   GOOGLE_OAUTH_CLIENT_SECRET="your-client-secret" \
+   GOOGLE_MCP_CREDENTIALS_DIR="$HOME/2026-Nanoclaw/InfiniClaw/bots/profiles/commander" \
+   USER_GOOGLE_EMAIL="you@gmail.com" \
+   OAUTHLIB_INSECURE_TRANSPORT=1 \
+   ~/.venv/bin/workspace-mcp --tools gmail calendar drive --single-user
+   ```
+4. Complete the browser auth. A token file (`you@gmail.com.json`) will be saved to the credentials dir.
+
+**Run as launchd service:**
+
+Create `~/Library/LaunchAgents/com.wieselquist.workspace-mcp.plist` — see the existing plist on mac139160 for the full template. Key env vars:
+- `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` — from OAuth credentials
+- `GOOGLE_MCP_CREDENTIALS_DIR` — directory containing the token file
+- `USER_GOOGLE_EMAIL` — the Google account email
+- `WORKSPACE_MCP_PORT=8767`
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.wieselquist.workspace-mcp.plist
+```
+
+**Bot MCP config** (in `.mcp.json`):
+```json
+{
+  "google-workspace": {
+    "type": "streamable-http",
+    "url": "http://host.containers.internal:8767/mcp"
+  }
+}
+```
+
+If Google Workspace MCP isn't set up on this machine, bots will still work — they just won't have Gmail/Calendar/Drive tools.
 
 ## 10. Pull State and Start
 
