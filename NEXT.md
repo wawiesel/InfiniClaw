@@ -4,9 +4,9 @@
 
 ## ~~`cli send` still injects into local DB~~ FIXED (61c9412, deployed)
 
-## ~~Cid's S3 config key mismatch~~ FIXED
+## ~~Cid's S3 config key mismatch~~ RESOLVED
 
-Standardized on AWS-standard names (`accessKeyId`/`secretAccessKey`) across `machine-config.ts`, `s3-sync.ts`, and `machine.json`.
+Convention: `accessKey`/`secretKey` in machine.json, mapped to AWS SDK names in `s3-sync.ts`. SETUP.md updated to match.
 
 ## ~~Architect bot not starting~~ FIXED
 

@@ -185,8 +185,8 @@ podman exec minio mc mb local/infiniclaw
   "s3": {
     "endpoint": "http://MINIO_HOST_IP:9000",
     "bucket": "infiniclaw",
-    "accessKeyId": "minioadmin",
-    "secretAccessKey": "minioadmin"
+    "accessKey": "minioadmin",
+    "secretKey": "minioadmin"
   }
 }
 ```

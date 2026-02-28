@@ -26,11 +26,11 @@ const SYNC_PATHS = [
 function getClient(): { client: S3Client; bucket: string } | null {
   const config = loadMachineConfig();
   if (!config.s3) return null;
-  const { endpoint, bucket, accessKeyId, secretAccessKey } = config.s3;
+  const { endpoint, bucket, accessKey, secretKey } = config.s3;
   const client = new S3Client({
     endpoint,
     region: 'us-east-1',
-    credentials: { accessKeyId, secretAccessKey },
+    credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
     forcePathStyle: true,
   });
   return { client, bucket };
