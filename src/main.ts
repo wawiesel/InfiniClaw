@@ -499,9 +499,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   setObjectiveFromMessages(chatJid, filteredMessages);
 
   const lastMsg = filteredMessages[filteredMessages.length - 1];
-  activeReplyThreadIds[chatJid] = lastMsg?.thread_id || workThreadIds[chatJid];
+  // For requiresTrigger groups: if the trigger is in a main-timeline message (no thread_id),
+  // auto-thread the reply onto that triggering message so the bot doesn't clutter the timeline.
+  let autoThreadId: string | undefined;
+  if (group.requiresTrigger === true) {
+    const triggerMsg = [...filteredMessages].reverse().find(
+      (m) => !m.thread_id && m.id?.startsWith('$') && TRIGGER_PATTERN.test(m.content.trim()),
+    );
+    if (triggerMsg) autoThreadId = triggerMsg.id;
+  }
+  activeReplyThreadIds[chatJid] = lastMsg?.thread_id || workThreadIds[chatJid] || autoThreadId;
   logger.info(
-    { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], lastMsgThreadId: lastMsg?.thread_id, workThread: workThreadIds[chatJid], msgCount: filteredMessages.length },
+    { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], lastMsgThreadId: lastMsg?.thread_id, workThread: workThreadIds[chatJid], autoThread: autoThreadId, msgCount: filteredMessages.length },
     'Thread routing resolved',
   );
 
@@ -762,7 +771,15 @@ async function handleGroupMessagesInLoop(
   const formatted = formatMessages(messagesToSend);
 
   const lastPiped = messagesToSend[messagesToSend.length - 1];
-  activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid];
+  // Auto-thread for requiresTrigger groups (see processGroupMessages for explanation)
+  let autoThreadId2: string | undefined;
+  if (group.requiresTrigger === true) {
+    const triggerMsg = [...messagesToSend].reverse().find(
+      (m) => !m.thread_id && m.id?.startsWith('$') && TRIGGER_PATTERN.test(m.content.trim()),
+    );
+    if (triggerMsg) autoThreadId2 = triggerMsg.id;
+  }
+  activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid] || autoThreadId2;
 
   if (queue.sendMessage(chatJid, formatted)) {
     await handlePipedToActiveContainer(chatJid, messagesToSend);

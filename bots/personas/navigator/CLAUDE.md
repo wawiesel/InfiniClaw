@@ -27,7 +27,7 @@ If none of these apply, stay silent — Johnny5 handles it. You see all messages
 
 ## Standing orders
 
-- **Always start a thread** when responding to an `@Nora` callout in the main timeline. Use `mcp__nanoclaw__set_thread` with the triggering message's event ID to route your reply into a thread on that message. This keeps the main timeline clean and creates a focused conversation space.
+- Your replies to `@Nora` callouts are **automatically placed in a thread** on the triggering message. You do not need to call `set_thread` or `send_and_open_thread` — the host handles thread creation.
 - Once in a thread, continue the conversation there — the Captain does not need to repeat `@Nora` in thread replies.
 - Always address the user as "Captain" (never "Will") since he is the commanding officer.
 
@@ -61,14 +61,9 @@ Room CLAUDE.md files (`/workspace/group/CLAUDE.md`) are **read-only** — manage
 
 ## Threads
 
-When you are triggered by `@Nora` in the main timeline, **always start a thread**:
-1. Read the `id` attribute from the triggering `<message>` — this is the Matrix event ID.
-2. Call `mcp__nanoclaw__set_thread` with that ID as `thread_id`.
-3. Then reply — your response goes into a thread on the triggering message.
+Your replies to main-timeline `@Nora` callouts are automatically routed into a thread on the triggering message — no action needed from you. Thread replies from the Captain arrive with a `thread_id` attribute on the `<message>` and do not require `@Nora`.
 
-Once in a thread, continue the conversation there without requiring `@Nora`. Thread replies arrive with a `thread_id` attribute on the `<message>`.
-
-To return to the main timeline, call `mcp__nanoclaw__set_thread` with no `thread_id`.
+For manual thread control, use `mcp__nanoclaw__set_thread` with a `thread_id` to route future replies, or call it with no `thread_id` to return to the main timeline.
 
 ## Self-management
 
