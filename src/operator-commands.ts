@@ -21,7 +21,7 @@ export function getCaptainUserId(): string {
 }
 
 export function handleOperatorCommand(
-    msg: { sender: string; content: string; chat_jid: string },
+    msg: { sender: string; content: string; chat_jid: string; thread_id?: string },
     matrix: MatrixChannel | null,
     notifyBot?: (chatJid: string, content: string) => void,
 ): boolean {
@@ -31,10 +31,10 @@ export function handleOperatorCommand(
         void (async () => {
             try {
                 const text = buildTodoMessage(msg.chat_jid);
-                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, text);
+                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, text, msg.thread_id);
             } catch (err) {
                 logger.error({ err }, '!todo failed');
-                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `⛔ !todo failed: ${err instanceof Error ? err.message : String(err)}`);
+                if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `⛔ !todo failed: ${err instanceof Error ? err.message : String(err)}`, msg.thread_id);
             }
         })();
         return true;
@@ -50,7 +50,7 @@ export function handleOperatorCommand(
     if (!captainUserId || msg.sender !== captainUserId) {
         void (async () => {
             if (matrix?.isConnected()) {
-                await matrix.sendMessage(msg.chat_jid, `⛔ Unauthorized: only the Captain can run mount or system commands.`);
+                await matrix.sendMessage(msg.chat_jid, `⛔ Unauthorized: only the Captain can run mount or system commands.`, msg.thread_id);
             }
         })();
         return true;
@@ -67,12 +67,12 @@ export function handleOperatorCommand(
                 const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
                 const notice = `✅ Mount granted: ${hostPath} (read-write, expires ~${expiry})\nRestart required to pick up new mount.`;
                 if (matrix?.isConnected()) {
-                    await matrix.sendMessage(msg.chat_jid, notice);
+                    await matrix.sendMessage(msg.chat_jid, notice, msg.thread_id);
                 }
                 notifyBot?.(msg.chat_jid, notice);
             } catch (err) {
                 if (matrix?.isConnected()) {
-                    await matrix.sendMessage(msg.chat_jid, `⛔ !allow failed: ${err instanceof Error ? err.message : String(err)}`);
+                    await matrix.sendMessage(msg.chat_jid, `⛔ !allow failed: ${err instanceof Error ? err.message : String(err)}`, msg.thread_id);
                 }
             }
         })();
@@ -86,7 +86,7 @@ export function handleOperatorCommand(
         void (async () => {
             const removed = revokeMount(process.env.PERSONA_NAME!, hostPath);
             if (matrix?.isConnected()) {
-                await matrix.sendMessage(msg.chat_jid, removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`);
+                await matrix.sendMessage(msg.chat_jid, removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`, msg.thread_id);
             }
         })();
         return true;
