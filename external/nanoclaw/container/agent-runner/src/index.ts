@@ -78,6 +78,10 @@ const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_SENT_TEXTS_FILE = '/workspace/ipc/.sent_texts'; // Legacy — kept for file cleanup only
 const IPC_POLL_MS = 500;
 const SESSION_MAX_BYTES = 2 * 1024 * 1024; // 2 MB — rotate session when transcript exceeds this
+// JSON-escaped high surrogate (\uD800–\uDBFF) NOT followed by a JSON-escaped low surrogate (\uDC00–\uDFFF).
+const LONE_HIGH_SURROGATE_RE = /\\u[Dd][89AaBb][0-9A-Fa-f]{2}(?!\\u[Dd][CcDdEeFf][0-9A-Fa-f]{2})/g;
+// JSON-escaped low surrogate (\uDC00–\uDFFF) NOT preceded by a JSON-escaped high surrogate.
+const LONE_LOW_SURROGATE_RE = /(?<!\\u[Dd][89AaBb][0-9A-Fa-f]{2})\\u[Dd][CcDdEeFf][0-9A-Fa-f]{2}/g;
 const SESSIONS_PROJECT_DIR = path.join(
   process.env.HOME || '/home/node',
   '.claude', 'projects', '-workspace-group',
@@ -245,6 +249,31 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
   }
 
   return null;
+}
+
+/**
+ * Sanitize a session .jsonl file by removing lone JSON-escaped Unicode surrogates.
+ * Lone surrogates (e.g. \ud83d without a following \udXXX) cause
+ * "no low surrogate in string" JSON parse errors at the API.
+ * Returns true if the file was modified.
+ */
+function sanitizeSessionFile(sessFile: string): boolean {
+  try {
+    const raw = fs.readFileSync(sessFile, 'utf-8');
+    const hasHigh = LONE_HIGH_SURROGATE_RE.test(raw);
+    LONE_HIGH_SURROGATE_RE.lastIndex = 0; // reset after test()
+    const hasLow = LONE_LOW_SURROGATE_RE.test(raw);
+    LONE_LOW_SURROGATE_RE.lastIndex = 0;
+    if (!hasHigh && !hasLow) return false;
+    const clean = raw
+      .replace(LONE_HIGH_SURROGATE_RE, '\\ufffd')
+      .replace(LONE_LOW_SURROGATE_RE, '\\ufffd');
+    fs.writeFileSync(sessFile, clean, 'utf-8');
+    log(`Sanitized lone surrogates in session file: ${path.basename(sessFile)}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -763,6 +792,12 @@ async function main(): Promise<void> {
         sessionId = undefined;
       }
     } catch { /* file doesn't exist — session will start fresh anyway */ }
+  }
+
+  // Sanitize lone surrogates that cause API JSON parse errors
+  if (sessionId) {
+    const sessFile = path.join(SESSIONS_PROJECT_DIR, `${sessionId}.jsonl`);
+    sanitizeSessionFile(sessFile);
   }
 
   // Clean up stale _close sentinel from previous container runs

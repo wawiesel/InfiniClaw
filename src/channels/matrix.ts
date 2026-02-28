@@ -124,6 +124,34 @@ async function withTimeout<T>(
   }
 }
 
+/**
+ * Matrix mention pills (e.g. @Nora in Element) arrive in `body` as the bare
+ * display name ("Nora") but in `formatted_body` as an HTML link:
+ *   <a href="https://matrix.to/#/@nora-bot:matrix.org">Nora</a>
+ *
+ * This function restores the `@` prefix on mentioned display names so that
+ * trigger patterns like `@Nora\b` can match them.
+ */
+function restoreMentionPrefixes(body: string, formattedBody: string): string {
+  // Extract display names from Matrix mention pill links
+  const mentionRe = /<a\s+href="https:\/\/matrix\.to\/#\/@[^"]+">([^<]+)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  const displayNames: string[] = [];
+  while ((match = mentionRe.exec(formattedBody)) !== null) {
+    displayNames.push(match[1]);
+  }
+  if (displayNames.length === 0) return body;
+
+  let result = body;
+  for (const name of displayNames) {
+    // Only prefix if the name appears without @ already
+    // Use word boundary to avoid partial replacements
+    const re = new RegExp(`(?<!@)\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
+    result = result.replace(re, `@${name}`);
+  }
+  return result;
+}
+
 function toJid(roomId: string): string {
   return `matrix:${roomId}`;
 }
@@ -813,6 +841,12 @@ export class MatrixChannel implements Channel {
 
       if (msgtype === 'm.text') {
         messageContent = content.body as string;
+        // Matrix mention pills strip the @ prefix from display names in body.
+        // Restore it using formatted_body so trigger patterns can match @Name.
+        const formattedBody = content.formatted_body as string | undefined;
+        if (formattedBody) {
+          messageContent = restoreMentionPrefixes(messageContent, formattedBody);
+        }
       } else {
         // Media message — download and save to IPC media dir
         const group = groups[matrixJid];

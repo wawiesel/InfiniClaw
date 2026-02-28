@@ -486,7 +486,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const filteredMessages = missedMessages.filter((msg) => !shouldIgnoreMessage(msg));
   if (filteredMessages.length === 0) return true;
 
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  if (group.requiresTrigger === true || (!isMainGroup && group.requiresTrigger !== false)) {
     const hasTrigger = filteredMessages.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
     if (!hasTrigger) {
       lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
@@ -738,8 +738,8 @@ async function handleGroupMessagesInLoop(
   const filtered = groupMessages.filter((msg) => !shouldIgnoreMessage(msg));
   if (filtered.length === 0) return;
 
-  // Check trigger requirement for non-main groups
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  // Check trigger requirement
+  if (group.requiresTrigger === true || (!isMainGroup && group.requiresTrigger !== false)) {
     const hasTrigger = filtered.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
     if (!hasTrigger) {
       lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;

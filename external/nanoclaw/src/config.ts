@@ -78,7 +78,7 @@ function escapeRegex(str: string): string {
 }
 
 export const TRIGGER_PATTERN = new RegExp(
-  `^@?${escapeRegex(ASSISTANT_TRIGGER)}\\b`,
+  `@?${escapeRegex(ASSISTANT_TRIGGER)}\\b`,
   'i',
 );
 

@@ -88,7 +88,7 @@ function copyPersonaGroups(personaBase: string, instanceBase: string): void {
 }
 
 /** Seed the registered_groups table with the main room from profile env. */
-function seedMainRoomRegistration(instanceBase: string, mainJid: string, mainGroupName: string, mainGroupFolder: string): void {
+function seedMainRoomRegistration(instanceBase: string, mainJid: string, mainGroupName: string, mainGroupFolder: string, requiresTrigger: boolean): void {
   const storeDir = path.join(instanceBase, 'store');
   fs.mkdirSync(storeDir, { recursive: true });
   const seedDb = new Database(path.join(storeDir, 'messages.db'));
@@ -100,7 +100,7 @@ function seedMainRoomRegistration(instanceBase: string, mainJid: string, mainGro
   seedDb.prepare(
     `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
      VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), 0);
+  ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), requiresTrigger ? 1 : 0);
   seedDb.close();
 }
 
@@ -305,8 +305,9 @@ export function deployBot(root: string, bot: string): void {
   const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
   const mainGroupName = profileEnv.MAIN_GROUP_NAME;
   const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+  const mainRequiresTrigger = profileEnv.REQUIRES_TRIGGER === 'true';
   if (mainJid && mainGroupName) {
-    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder);
+    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, mainRequiresTrigger);
     console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
   }
 
@@ -852,8 +853,9 @@ export function holodeckCreate(bot: string, branch: string): void {
   const mainJid = profileEnv.LOCAL_CHAT_JID || profileEnv.LOCAL_MIRROR_MATRIX_JID;
   const mainGroupName = profileEnv.MAIN_GROUP_NAME;
   const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+  const hdRequiresTrigger = profileEnv.REQUIRES_TRIGGER === 'true';
   if (mainJid && mainGroupName) {
-    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder);
+    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, hdRequiresTrigger);
   }
 
   // 8. Mark instance data as current
