@@ -139,7 +139,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const hasTrigger = missedMessages.some((m) =>
       TRIGGER_PATTERN.test(m.content.trim()),
     );
-    if (!hasTrigger) return true;
+    const hasThread = missedMessages.some((m) => !!m.thread_id);
+    if (!hasTrigger && !hasThread) return true;
   }
 
   const prompt = formatMessages(missedMessages);
@@ -300,11 +301,14 @@ async function startMessageLoop(): Promise<void> {
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
+          // Thread messages bypass trigger — once a conversation moves
+          // to a thread, the bot continues without requiring a callout.
           if (needsTrigger) {
             const hasTrigger = groupMessages.some((m) =>
               TRIGGER_PATTERN.test(m.content.trim()),
             );
-            if (!hasTrigger) continue;
+            const hasThread = groupMessages.some((m) => !!m.thread_id);
+            if (!hasTrigger && !hasThread) continue;
           }
 
           // Pull all messages since lastAgentTimestamp so non-trigger
