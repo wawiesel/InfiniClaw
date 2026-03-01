@@ -385,8 +385,7 @@ export function getSystemStatus(rootDir: string): SystemStatus {
     const { model, provider } = getBrainConfig(rootDir, bot);
     const instanceDir = path.join(rootDir, '_runtime', 'instances', bot);
 
-    // Match containers by bot tag: engineer→"cid", commander→"johnny5"
-    const botTag = bot === 'engineer' ? 'cid' : 'johnny5';
+    const botTag = bot.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const matchedContainers = allContainers.filter((c) => c.name.includes(`nanoclaw-${botTag}-`));
 
     const db = openReadonlyDb(instanceDir);

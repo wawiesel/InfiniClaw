@@ -10,53 +10,53 @@ Multi-bot orchestration built on a maintained NanoClaw fork. Bots run on Matrix,
 
 ## Bots
 
-| Bot | Alias | Room | Role |
-|-----|-------|------|------|
-| `engineer` | Cid | Engineering | Infra, builds, deployments, code changes |
-| `commander` | Johnny5 | Bridge | Task execution, research, analysis |
+| Persona | Role | Room | Focus |
+|---------|------|------|-------|
+| `johnny5` | Navigator (Commander) | Bridge | Task execution, research, analysis |
+| `nora` | Navigator | Bridge | Planning, scheduling, email, calendar |
+| `cid` | Engineer | Engineering | Infra, builds, deployments, code changes |
+| `parker` | Engineer | Engineering | Health metrics, monitoring, diagnostics |
+| `albert` | Architect | Astrometrics | Architecture, refactoring, AEGIS, nanoclaw |
 
 ## Quick start
 
-1. Configure per-bot profiles:
+1. Configure secrets (env files) at `~/.config/infiniclaw/secrets/{persona}/env`
 
-```text
-bots/profiles/engineer/env
-bots/profiles/commander/env
-```
+2. Configure `~/.config/infiniclaw/machine.json` with which bots run on this machine
 
-2. Build container images:
+3. Build container images:
 
 ```bash
 ./bots/container/build.sh all
 ```
 
-3. Start all bots:
+4. Start all bots:
 
 ```bash
-node nanoclaw/dist/cli.js start
+npm run cli start
 ```
 
-4. Stop all bots:
+5. Stop all bots:
 
 ```bash
-node nanoclaw/dist/cli.js stop
+npm run cli stop
 ```
 
-5. Terminal chat (direct conversation with a bot):
+6. Terminal chat (direct conversation with a bot):
 
 ```bash
-node nanoclaw/dist/cli.js chat engineer
-node nanoclaw/dist/cli.js chat commander
+npm run cli chat cid
+npm run cli chat johnny5
 ```
 
 ### What start/stop do
 
-**`start`** — For each bot in `bots/profiles/`:
+**`start`** — For each bot in `machine.json`:
 1. Syncs persona data (skills, groups) from any previous instance back to the repo
 2. Rsyncs `nanoclaw/` into `_runtime/instances/{bot}/nanoclaw/`
 3. Appends the bot's persona CLAUDE.md to the base CLAUDE.md
 4. Restores group CLAUDE.md files into the instance
-5. Seeds the bot's main room from the profile env (`MAIN_GROUP_NAME`)
+5. Seeds the bot's main room from the env file (`MAIN_GROUP_NAME`)
 6. Installs and loads a launchd plist — the bot runs as a background service
 
 **`stop`** — For each installed bot (has a loaded plist):
@@ -90,27 +90,30 @@ Each persona also includes:
 ## Directory structure
 
 ```
-nanoclaw/                       NanoClaw fork (git subtree from wawiesel/nanoclaw)
+nanoclaw/                         NanoClaw fork (git subtree from wawiesel/nanoclaw)
 bots/
-  personas/{bot}/               Bot identity and config
-    CLAUDE.md                   Persona instructions (two-way sync)
-    skills/                     Bot-specific skills (two-way sync)
-    mcp-servers/                Bot-specific MCP servers (two-way sync)
-    container-config.json       Mounts + declarative MCP servers
-    groups/{group}/CLAUDE.md    Room context (one-way: repo → bot)
-  profiles/{bot}/env            Runtime env config (gitignored)
-  container/{bot}/Dockerfile    Per-bot container image
-  container/build.sh            Build container images
+  roles/{role}/                   Abstract capability sets
+    role.md                       Role description, rank, capabilities
+    skills/                       Shared skills for all bots with this role
+    mcp-servers/                  Shared MCP configs for all bots with this role
+  personas/{persona}/             Concrete bot identities (nora, johnny5, cid, parker, albert)
+    CLAUDE.md                     Persona instructions (two-way sync)
+    skills/                       Bot-specific skills (two-way sync)
+    mcp-servers/                  Bot-specific MCP servers (two-way sync)
+    container-config.json         Mounts + declarative MCP servers
+    groups/{group}/CLAUDE.md      Room context (one-way: repo → bot)
+  container/{persona}/Dockerfile  Per-bot container image
+  container/build.sh              Build container images
   config/
-    mount-allowlist.json        Template for host-side mount security
-groups/                         Group working directories (mounted into containers)
+    mount-allowlist.json          Template for host-side mount security
+groups/                           Group working directories (mounted into containers)
 docs/
-  DESIGN.md                     Architecture and design
-  assets/                       Images, banners
-_runtime/                       Gitignored runtime state
-  instances/                    Per-bot deployed instances
-  data/                         SQLite, sessions, IPC, cache
-  logs/                         Bot stdout/stderr logs
+  DESIGN.md                       Architecture and design
+  assets/                         Images, banners
+_runtime/                         Gitignored runtime state
+  instances/                      Per-bot deployed instances
+  data/                           SQLite, sessions, IPC, cache
+  logs/                           Bot stdout/stderr logs
 ```
 
 ## Design
@@ -120,5 +123,5 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for architecture, security model, and ope
 ## Notes
 
 - `nanoclaw/` is a git subtree from `wawiesel/nanoclaw` — editable in place, push changes back with `git subtree push`.
-- Container images are per-bot: engineer is lean, commander is full-featured (browser, Python, OCR, build tools).
+- Container images are per-persona: `nanoclaw-cid`, `nanoclaw-johnny5`, `nanoclaw-nora`, `nanoclaw-parker`, `nanoclaw-albert`.
 - Cross-bot communication: `@BotName message` in any room auto-forwards to the target bot's room.

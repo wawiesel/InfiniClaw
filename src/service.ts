@@ -693,17 +693,17 @@ export function chat(bot: string): void {
 
 const ROOM_MAP: Record<string, { bot: string; roomId: string; jid: string }> = {
   engineering: {
-    bot: 'engineer',
+    bot: 'cid',
     roomId: '!CYhZuByvtbJnpVlcUY:matrix.org',
     jid: 'matrix:!CYhZuByvtbJnpVlcUY:matrix.org',
   },
   bridge: {
-    bot: 'commander',
+    bot: 'johnny5',
     roomId: '!TZLtrIZdHWVhmwSqzI:matrix.org',
     jid: 'matrix:!TZLtrIZdHWVhmwSqzI:matrix.org',
   },
   astrometrics: {
-    bot: 'architect',
+    bot: 'albert',
     roomId: '!rMfJzsTiqpzNsHTXER:matrix.org',
     jid: 'matrix:!rMfJzsTiqpzNsHTXER:matrix.org',
   },

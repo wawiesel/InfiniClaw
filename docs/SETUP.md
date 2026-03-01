@@ -71,12 +71,12 @@ Write `~/.config/infiniclaw/machine.json`:
 
 ```json
 {
-  "bots": ["engineer", "commander", "architect"],
+  "bots": ["cid", "johnny5", "albert"],
   "secretsPath": "/Users/YOUR_USERNAME/.config/infiniclaw/secrets"
 }
 ```
 
-Replace `YOUR_USERNAME` with the actual macOS username. The `bots` array controls which bots start on this machine — remove any that should stay on the other machine.
+Replace `YOUR_USERNAME` with the actual macOS username. The `bots` array lists persona names — these must match the directory names in `bots/personas/` and `secrets/`. Remove any that should stay on the other machine.
 
 ## 5. Create allow-list.json
 
@@ -87,7 +87,7 @@ Write `~/.config/infiniclaw/allow-list.json`:
 ```json
 {
   "mounts": {
-    "engineer": [
+    "cid": [
       {
         "path": "~/2026-Nanoclaw/InfiniClaw",
         "expiresAt": null
@@ -97,17 +97,13 @@ Write `~/.config/infiniclaw/allow-list.json`:
         "expiresAt": null
       }
     ],
-    "commander": [
+    "johnny5": [
       {
         "path": "~/_vault",
         "expiresAt": null
-      },
-      {
-        "path": "~/2026-Nanoclaw/InfiniClaw/bots/profiles/commander",
-        "expiresAt": null
       }
     ],
-    "architect": [
+    "albert": [
       {
         "path": "~/2026-Nanoclaw/InfiniClaw",
         "expiresAt": null
@@ -129,15 +125,15 @@ Bot env files (API keys, Matrix credentials) live in a separate private repo. If
 
 To verify:
 ```bash
-ls ~/.config/infiniclaw/secrets/engineer/env
-ls ~/.config/infiniclaw/secrets/commander/env
-ls ~/.config/infiniclaw/secrets/architect/env
+ls ~/.config/infiniclaw/secrets/cid/env
+ls ~/.config/infiniclaw/secrets/johnny5/env
+ls ~/.config/infiniclaw/secrets/albert/env
 ```
 
 If setting up from scratch without the secrets repo, create env files for each bot with at minimum:
 - `BRAIN_OAUTH_TOKEN` — Anthropic OAuth token
 - `MATRIX_HOMESERVER`, `MATRIX_USERNAME`, `MATRIX_PASSWORD` — Matrix credentials
-- `CONTAINER_IMAGE` — e.g. `nanoclaw-engineer:latest`
+- `CONTAINER_IMAGE` — e.g. `nanoclaw-cid:latest`
 - `CONTAINER_ENV_PYTHONPATH=/workspace/extra/2025-AEGIS/source`
 
 ### Container Environment Injection
@@ -153,7 +149,7 @@ cd ~/2026-Nanoclaw/InfiniClaw
 ./bots/container/build.sh all
 ```
 
-This builds `nanoclaw-engineer:latest`, `nanoclaw-commander:latest`, `nanoclaw-architect:latest`, and `nanoclaw-navigator:latest` via Podman.
+This builds `nanoclaw-cid:latest`, `nanoclaw-johnny5:latest`, `nanoclaw-nora:latest`, `nanoclaw-parker:latest`, and `nanoclaw-albert:latest` via Podman.
 
 Verify:
 ```bash
@@ -181,7 +177,7 @@ podman exec minio mc mb local/infiniclaw
 
 ```json
 {
-  "bots": ["engineer", "commander", "architect"],
+  "bots": ["cid", "johnny5", "albert"],
   "secretsPath": "/Users/YOUR_USERNAME/.config/infiniclaw/secrets",
   "s3": {
     "endpoint": "http://MINIO_HOST_IP:9000",
@@ -217,12 +213,12 @@ python3 -m venv ~/.venv
 
 **Google OAuth setup:**
 1. Create OAuth credentials at https://console.cloud.google.com/ (Desktop app type)
-2. Save the client JSON as `bots/profiles/commander/google-credentials.json`
+2. Save the client JSON to `~/.config/infiniclaw/secrets/johnny5/google-credentials.json`
 3. Run once interactively to complete the browser OAuth flow:
    ```bash
    GOOGLE_OAUTH_CLIENT_ID="your-client-id" \
    GOOGLE_OAUTH_CLIENT_SECRET="your-client-secret" \
-   GOOGLE_MCP_CREDENTIALS_DIR="$HOME/2026-Nanoclaw/InfiniClaw/bots/profiles/commander" \
+   GOOGLE_MCP_CREDENTIALS_DIR="$HOME/.config/infiniclaw/secrets/johnny5" \
    USER_GOOGLE_EMAIL="you@gmail.com" \
    OAUTHLIB_INSECURE_TRANSPORT=1 \
    ~/.venv/bin/workspace-mcp --tools gmail calendar drive --single-user
@@ -277,16 +273,16 @@ cd ~/2026-Nanoclaw/InfiniClaw
 npm run cli status
 
 # Check logs for errors
-tail -20 _runtime/logs/engineer.log
-tail -20 _runtime/logs/commander.log
-tail -20 _runtime/logs/architect.log
+tail -20 _runtime/logs/cid.log
+tail -20 _runtime/logs/johnny5.log
+tail -20 _runtime/logs/albert.log
 
 # Check containers are running
 podman ps --filter name=nanoclaw
 
 # Send a test message
 npm run cli send bridge 'Hello from the new machine'
-npm run cli send engineering '@Cid status report'
+npm run cli send engineering '@cid status report'
 ```
 
 Bots should appear online in Matrix within a minute.

@@ -194,23 +194,23 @@ export async function maybeAutoSwitchBrainsOnQuotaError(
   chatJid: string,
   sendMessage: (jid: string, text: string) => Promise<void>,
 ): Promise<void> {
-  if (!['engineer'].includes(ASSISTANT_NAME.trim().toLowerCase())) return;
+  if (!['cid'].includes(ASSISTANT_NAME.trim().toLowerCase())) return;
   if (!isAnthropicQuotaError(rawError)) return;
   if (Date.now() - lastAutoBrainSwitchAt < AUTO_BRAIN_SWITCH_COOLDOWN_MS) return;
 
   let config;
   try { config = loadMachineConfig(); } catch { return; }
-  const engineerEnv = path.join(config.secretsPath, 'engineer', 'env');
-  const commanderEnv = path.join(config.secretsPath, 'commander', 'env');
-  if (!fs.existsSync(engineerEnv) || !fs.existsSync(commanderEnv)) return;
+  const cidEnv = path.join(config.secretsPath, 'cid', 'env');
+  const johnny5Env = path.join(config.secretsPath, 'johnny5', 'env');
+  if (!fs.existsSync(cidEnv) || !fs.existsSync(johnny5Env)) return;
 
   try {
-    applyOllamaFallbackToProfile(engineerEnv);
-    applyOllamaFallbackToProfile(commanderEnv);
+    applyOllamaFallbackToProfile(cidEnv);
+    applyOllamaFallbackToProfile(johnny5Env);
     lastAutoBrainSwitchAt = Date.now();
     await sendMessage(
       chatJid,
-      'Anthropic credits/quotas look exhausted. I switched engineer and commander brain profiles to ollama fallback. Restart both bots to apply.',
+      'Anthropic credits/quotas look exhausted. I switched Cid and Johnny5 brain profiles to ollama fallback. Restart both bots to apply.',
     );
     logger.warn('Auto-switched bot brain profiles to ollama fallback due to quota error');
   } catch (err) {

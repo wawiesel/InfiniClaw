@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-03-01T19:57:01Z",
+  "memory": { "current_mb": 334, "limit_mb": 10240, "percent": 3, "oom_kills": 0 },
+  "bots": {
+    "architect": { "restarts": 0, "errors": 16254, "ooms": 0, "uptime_hrs": 89.8, "errors_per_hr": 181.0 },
+    "commander": { "restarts": 4, "errors": 26442, "ooms": 22, "uptime_hrs": 331.1, "errors_per_hr": 79.8 },
+    "engineer": { "restarts": 11, "errors": 24317, "ooms": 22, "uptime_hrs": 339.4, "errors_per_hr": 71.6 },
+    "navigator": { "restarts": 0, "errors": 2572, "ooms": 14, "uptime_hrs": 41.2, "errors_per_hr": 62.4 },
+    "parker": { "restarts": 0, "errors": 831, "ooms": 0, "uptime_hrs": 3.8, "errors_per_hr": 218.6 }
+  },
+  "sessions": { "total_mb": 54, "parker_mb": 18 }
+}

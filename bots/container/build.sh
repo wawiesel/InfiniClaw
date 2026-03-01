@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build agent container images for both bots.
-# Usage: ./container/build.sh [engineer|commander|all]
+# Build agent container images.
+# Usage: ./container/build.sh [nora|johnny5|cid|parker|albert|all]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,11 +30,11 @@ build_image() {
 
 target="${1:-all}"
 case "${target}" in
-  engineer)   build_image engineer ;;
-  commander)  build_image commander ;;
-  architect)  build_image architect ;;
-  navigator)  build_image navigator ;;
-  parker)     build_image parker ;;
-  all)        build_image engineer && build_image commander && build_image architect && build_image navigator && build_image parker ;;
-  *)          echo "Usage: $0 [engineer|commander|architect|navigator|parker|all]" >&2; exit 1 ;;
+  nora)     build_image nora ;;
+  johnny5)  build_image johnny5 ;;
+  cid)      build_image cid ;;
+  parker)   build_image parker ;;
+  albert)   build_image albert ;;
+  all)      build_image nora && build_image johnny5 && build_image cid && build_image parker && build_image albert ;;
+  *)        echo "Usage: $0 [nora|johnny5|cid|parker|albert|all]" >&2; exit 1 ;;
 esac

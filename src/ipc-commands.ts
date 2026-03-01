@@ -281,7 +281,7 @@ async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext):
 
 async function handleRestartBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'restart_bot')) return;
-  const bot = parseBot(data, 'engineer');
+  const bot = parseBot(data, 'cid');
   const chatJid = parseChatJid(data);
 
   const cooldownMsg = checkCooldown(`restart:${bot}`, RESTART_COOLDOWN_MS);
@@ -393,7 +393,7 @@ async function handleStopBot(data: CommandData, ctx: InfiniClawIpcContext): Prom
 
 async function handleRebuildImage(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'rebuild_image')) return;
-  const bot = parseBot(data, 'commander');
+  const bot = parseBot(data, 'johnny5');
   const chatJid = parseChatJid(data);
 
   const cooldownMsg = checkCooldown(`rebuild:${bot}`, REBUILD_COOLDOWN_MS);
@@ -419,7 +419,7 @@ async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Pr
   if (requireMain(ctx, 'bot_status')) return;
   const bot = typeof data.bot === 'string' && getActiveBots().includes(data.bot)
     ? data.bot
-    : 'commander';
+    : 'johnny5';
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
 
@@ -548,7 +548,7 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
 
 async function handleHolodeckCreate(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_create')) return;
-  const bot = parseBot(data, 'engineer');
+  const bot = parseBot(data, 'cid');
   const branch = typeof data.branch === 'string' ? data.branch.trim() : '';
   const chatJid = parseChatJid(data);
   if (!branch) {
@@ -569,7 +569,7 @@ async function handleHolodeckCreate(data: CommandData, ctx: InfiniClawIpcContext
 
 async function handleHolodeckTeardown(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_teardown')) return;
-  const bot = parseBot(data, 'engineer');
+  const bot = parseBot(data, 'cid');
   const chatJid = parseChatJid(data);
   logger.info({ bot }, 'Holodeck teardown requested via IPC');
   try {
@@ -584,7 +584,7 @@ async function handleHolodeckTeardown(data: CommandData, ctx: InfiniClawIpcConte
 
 async function handleHolodeckPromote(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_promote')) return;
-  const bot = parseBot(data, 'engineer');
+  const bot = parseBot(data, 'cid');
   const chatJid = parseChatJid(data);
   logger.info({ bot }, 'Holodeck promote requested via IPC');
   await safeSend(ctx, chatJid, `🔧 Promoting holodeck for ${bot} (merge + redeploy)...`);
@@ -600,7 +600,7 @@ async function handleHolodeckPromote(data: CommandData, ctx: InfiniClawIpcContex
 
 async function handleHolodeckSend(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_send')) return;
-  const bot = parseBot(data, 'engineer');
+  const bot = parseBot(data, 'cid');
   const message = typeof data.message === 'string' ? data.message : '';
   const chatJid = parseChatJid(data);
   if (!message) {
@@ -634,7 +634,7 @@ async function handleHolodeckSend(data: CommandData, ctx: InfiniClawIpcContext):
 
 async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_read')) return;
-  const bot = parseBot(data, 'engineer');
+  const bot = parseBot(data, 'cid');
   const limit = typeof data.limit === 'number' && data.limit > 0 ? Math.min(data.limit, 100) : 20;
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
@@ -667,7 +667,7 @@ async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext):
 
 async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_status')) return;
-  const bot = parseBot(data, 'engineer');
+  const bot = parseBot(data, 'cid');
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
   const hdBot = `${bot}-holodeck`;

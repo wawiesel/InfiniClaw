@@ -55,6 +55,14 @@ export const CONTAINER_MEMORY_MB = parseInt(
   process.env.CONTAINER_MEMORY_MB || '6144',
   10,
 ); // Per-container memory cap (prevents one bot from starving the VM)
+export const CONTAINER_MEMORY_RESERVATION_MB = parseInt(
+  process.env.CONTAINER_MEMORY_RESERVATION_MB || '4096',
+  10,
+); // Soft memory limit — kernel reclaims memory more aggressively past this
+export const CONTAINER_HEAP_LIMIT_MB = parseInt(
+  process.env.CONTAINER_HEAP_LIMIT_MB || '4096',
+  10,
+); // V8 --max-old-space-size inside containers — GC kicks in before cgroup kill
 export const CONTAINER_CPUS = parseFloat(
   process.env.CONTAINER_CPUS || '0',
 ); // 0 = runtime default (no explicit limit)
@@ -68,6 +76,10 @@ export const HEAP_LIMIT_MB = parseInt(
   10,
 ); // Graceful restart threshold
 export const MEMORY_CHECK_INTERVAL = 60_000; // Check every 60s
+export const RESUME_DELAY_SECONDS = parseInt(
+  process.env.RESUME_DELAY_SECONDS || '10',
+  10,
+);
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,

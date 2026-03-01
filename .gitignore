@@ -2,7 +2,6 @@
 /_runtime/
 /_holodeck/
 .claude/
-bots/profiles/*/
 # MCP configs contain OAuth secrets — keep local only
 bots/personas/*/groups/*/.mcp.json
 # Build output

@@ -9,14 +9,7 @@ import { loadMachineConfig } from './machine-config.js';
 import type { MatrixChannel } from './channels/matrix.js';
 
 export function getCaptainUserId(): string {
-    try {
-        const config = loadMachineConfig();
-        const profileEnvPath = path.join(config.secretsPath, 'engineer', 'env');
-        if (fs.existsSync(profileEnvPath)) {
-            const vars = parseEnvFile(profileEnvPath);
-            if (vars.CAPTAIN_USER_ID) return vars.CAPTAIN_USER_ID.trim();
-        }
-    } catch { /* best effort */ }
+    // CAPTAIN_USER_ID is already loaded from the current bot's env at startup
     return CAPTAIN_USER_ID;
 }
 

@@ -17,35 +17,55 @@ Messages go to **rooms**, not to bots directly.
 Bots live on different machines. One bot / one container / one machine. 
 
 
-## Roles
+## Roles and Personas
 
-Bots have different roles. Usually you want one engineer and one navigator per machine.
-The highest ranking bot is the Commander, who is also a navigator, but outranks all other bots.
+**Roles** are abstract capability sets. **Personas** are concrete bot identities assigned to a role. Persona directories use lowercase names (`nora`, `johnny5`, `cid`, `parker`, `albert`). Role definitions live in `bots/roles/{role}/role.md` with shared skills and MCP servers. The persona→role mapping is in `roster.json` in the secrets repo.
 
-Every bot should have
+### Rank
 
-- read access to entire home directory through a mount into the container.
-- ability to modify his own persona CLAUDE.md, skills, and MCP
-- ability to restart
+Navigators outrank engineers. Engineers outrank architects. Within a role, rank is by persona:
+
+| Rank | Persona | Role | Title |
+|------|---------|------|-------|
+| 1 | Johnny5 | Navigator | Commander |
+| 2 | Nora | Navigator | |
+| 3 | Cid | Engineer | |
+| 4 | Parker | Engineer | |
+| 5 | Albert | Architect | |
+
+### Rooms
+
+| Room | Personas | Purpose |
+|------|----------|---------|
+| Bridge | Johnny5, Nora | Primary exploration, Captain interface |
+| Engineering | Cid, Parker | Maintenance, optimization, health |
+| Astrometrics | Albert | Experiments, architecture, research |
+
+### Common capabilities (all bots)
+
+- Read access to entire home directory through a read-only mount into the container
+- Ability to modify own persona CLAUDE.md, skills, and MCP
+- Ability to restart self
 
 ### Navigator
-- responsible for exploring the file system, executing tasks, and reporting back to the captain
-- cannnot modify another bot's persona, skills, or MCP
-- has write access to the knowledge vault
-- uses WKS MCP tools to manipulate/explore
-- has access to email
+- Explores the file system, executes tasks, reports to the captain
+- Cannot modify another bot's persona, skills, or MCP
+- Write access to the knowledge vault
+- Uses WKS MCP tools to manipulate/explore
+- Has access to email and calendar
 
-### Engineer 
-- responsible for maintaining and increasing performance of Infiniclaw and nanoclaw codebase
-- responsible for maintaining bot containers
-- can modify his own persona CLAUDE.md, skills, and MCP
-- can modify another bot's persona, skills, and MCP
-- write access to infiniclaw
+### Engineer
+- Maintains and improves the InfiniClaw and nanoclaw codebase
+- Maintains bot container images
+- Can modify any bot's persona, containers, skills, and MCP in order to fix/unlock them
+- Write access to InfiniClaw
+- Can restart other bots
 
 ### Architect
-- responsible for creating new bots and making drastic codebase updates and redesigns
-- can deploy and test new bots on the Holodeck
-- write access to infiniclaw, nanoclaw, WKS
+- Creates new bots and makes drastic codebase updates and redesigns
+- Writes AEGIS to be the single codebase that enables all skills and scripts to be trivial
+- Can deploy and test new bots on the Holodeck
+- Write access to InfiniClaw, nanoclaw, WKS, AEGIS
 
 ## Core Principles
 
@@ -126,7 +146,7 @@ Lobe output is streamed to chat and returned to the main brain for integration.
 
 NanoClaw's code uses "group" internally (from its WhatsApp origins: `group_folder`, `groupJid`, `GROUPS_DIR`, `registered_groups`). InfiniClaw calls these **rooms** in all human-facing text. They are the same thing — a Matrix room mapped to a NanoClaw group.
 
-The `bots/` directory is the **active roster** — the currently deployed roles, their personas, skills, and config. Each entry is a role (commander, engineer), not a specific bot identity.
+The `bots/` directory contains **roles** (abstract capability sets in `roles/`), **personas** (concrete bot identities in `personas/`), and **container** definitions (Dockerfiles in `container/`). Each persona directory is named by the bot's lowercase persona name (`nora`, `johnny5`, `cid`, `parker`, `albert`).
 
 ### CLAUDE.md layers
 
@@ -189,7 +209,7 @@ Bots edit `/workspace/extra/{bot}-persona/groups/{group}/.mcp.json` inside the c
 
 ### Security
 
-- **No credentials in git.** `.mcp.json` files (contain OAuth secrets) and `bots/profiles/*/env` are gitignored.
+- **No credentials in git.** `.mcp.json` files (contain OAuth secrets) are gitignored. Bot env files with secrets live in the separate secrets repo (`~/.config/infiniclaw/secrets/`).
 - **Mount allowlist** at `~/.config/nanoclaw/mount-allowlist.json` — stored outside the repo so containers can't tamper with it. Every mount requested by `container-config.json` is validated against this allowlist before the container spawns. The Captain can grant/revoke temporary mounts via `CAPTAIN_USER_ID`.
 - **Per-room IPC namespaces** — each room gets its own IPC directory under `_runtime/data/ipc/{room}/`. Prevents cross-room privilege escalation.
 - **Main room elevation** — only the main room's containers can run privileged IPC commands (`restart_bot`, `rebuild_image`, `git_push`, etc.). Non-main rooms are restricted to task scheduling and their own thread management.
@@ -212,8 +232,8 @@ Two-tier design: read-only access everywhere, write access where needed.
 - Validated against the host-side allowlist (`~/.config/nanoclaw/mount-allowlist.json`).
 - The Captain can grant/revoke temporary rw access via `!allow <path> [minutes]` / `!deny <path>`.
 - Each bot gets only the rw mounts it needs:
-  - Commander: `~/_vault` (rw), `~/InfiniClaw/bots/profiles/commander` (rw)
-  - Engineer: `~/2026-Nanoclaw/InfiniClaw` (rw)
+  - Johnny5: `~/_vault` (rw)
+  - Cid: `~/2026-Nanoclaw/InfiniClaw` (rw), `~/2025-AEGIS` (rw)
 
 ## Code Structure
 
