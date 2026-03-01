@@ -35,7 +35,7 @@ Write JSON to `/workspace/ipc/tasks/` to trigger host-side actions:
 | `restart_bot` | Restart another bot | `{"type":"restart_bot","bot":"commander"}` |
 | `rebuild_image` | Rebuild container image | `{"type":"rebuild_image","bot":"engineer"}` |
 | `restart_wksm` | Restart the WKSM proxy | `{"type":"restart_wksm","chatJid":"<room JID>"}` |
-| `restart_scaleman` | Restart the SCALEMAN proxy | `{"type":"restart_scaleman","chatJid":"<room JID>"}` |
+
 
 ## Skills
 

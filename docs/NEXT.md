@@ -8,7 +8,7 @@
 
 ### What's Done
 
-- [x] **IPC task system** — Bots can trigger host-side actions: `restart_bot`, `rebuild_image`, `git_push`, `restart_wksm`, `restart_scaleman`, `send_to_room`
+- [x] **IPC task system** — Bots can trigger host-side actions: `restart_bot`, `rebuild_image`, `git_push`, `restart_wksm`, `send_to_room`
 - [x] **MCP preflight** — Agent-runner validates all remote MCP servers at startup (5s timeout), drops unreachable ones, bot starts anyway
 - [x] **MCP failure reporting** — Dropped MCP servers are automatically reported to Engineering via `send_to_room` IPC
 - [x] **Session recovery** — Agent-runner recovers most recent session when host loses sessionId, preventing context loss on restart

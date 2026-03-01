@@ -480,45 +480,6 @@ async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): 
   }
 }
 
-async function handleRestartScaleman(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'restart_scaleman')) return;
-  const chatJid = parseChatJid(data);
-  logger.info('restart_scaleman requested via IPC');
-  try {
-    const home = process.env.HOME || '/Users/ww5';
-    const script = path.join(home, '2026-Nanoclaw/InfiniClaw/scripts/start-scaleman-proxy.sh');
-
-    if (chatJid) await ctx.sendMessage(chatJid, '🔄 Restarting scaleman proxy...');
-
-    const killOut = execSync(`/usr/sbin/lsof -ti:8766 | xargs kill -9 2>&1 || echo "no process on 8766"`, {
-      shell: '/bin/bash',
-      encoding: 'utf-8',
-      timeout: 10000,
-    }).trim();
-    if (chatJid) await ctx.sendMessage(chatJid, `kill: ${killOut}`);
-
-    await new Promise(r => setTimeout(r, 2000));
-
-    const startOut = execSync(`bash ${script} 2>&1`, {
-      shell: '/bin/bash',
-      encoding: 'utf-8',
-      timeout: 30000,
-    }).trim();
-    if (chatJid) await ctx.sendMessage(chatJid, `start: ${startOut}`);
-
-    await new Promise(r => setTimeout(r, 3000));
-
-    const health = execSync('curl -s http://localhost:8766/health', {
-      shell: '/bin/bash',
-      encoding: 'utf-8',
-      timeout: 5000,
-    }).trim();
-    if (chatJid) await ctx.sendMessage(chatJid, `health: ${health}`);
-  } catch (err) {
-    logger.error({ err }, 'restart_scaleman failed');
-    if (chatJid) await ctx.sendMessage(chatJid, `⛔ restart_scaleman failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
 
 async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'git_push')) return;
@@ -751,7 +712,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_thread: handleSetThread,
   send_to_room: handleSendToRoom,
   restart_wksm: handleRestartWksm,
-  restart_scaleman: handleRestartScaleman,
+
   git_push: handleGitPush,
   holodeck_create: handleHolodeckCreate,
   holodeck_teardown: handleHolodeckTeardown,

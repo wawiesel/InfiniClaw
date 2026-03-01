@@ -205,20 +205,6 @@ Requires WKS installed (`wksc` in PATH):
 wksc mcp proxy start
 ```
 
-### SCALEMAN (port 8766)
-
-Requires the SCALEMAN repo with a Python venv:
-```bash
-cd ~/2026-Nanoclaw/InfiniClaw
-./scripts/start-scaleman-proxy.sh
-```
-
-This expects:
-- `~/2026-SCALEMAN/scaleman/venv` — Python venv with scaleman installed
-- `~/2026-SCALEMAN/scaleman-index` — the SCALEMAN index directory
-
-If SCALEMAN isn't set up on this machine, bots will still work — they just won't have SCALEMAN tools.
-
 ### Google Workspace MCP (port 8767)
 
 Provides Gmail, Calendar, and Drive tools to bots. Requires a Python venv with `workspace-mcp` installed and Google OAuth credentials.
