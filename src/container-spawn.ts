@@ -343,7 +343,7 @@ export async function runContainerAgent(
     killExistingContainersForGroup(botTag, safeName);
   }
 
-  const portPublish = getPersonaPortPublish();
+  const portPublish = input.containerNameTag ? [] : getPersonaPortPublish();
   const containerArgs = buildContainerArgs(mounts, containerName, portPublish);
   const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
   const timeoutMinutes = Math.round(configTimeout / 60_000);
