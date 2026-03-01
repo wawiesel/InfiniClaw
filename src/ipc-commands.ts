@@ -13,6 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from 'nanoclaw/env-utils
 
 import {
   ASSISTANT_ROLE,
+  MAIN_GROUP_FOLDER,
 } from 'nanoclaw/config.js';
 import { logger } from 'nanoclaw/logger.js';
 import { loadMachineConfig } from './machine-config.js';
@@ -83,6 +84,13 @@ function trySync<T>(fn: () => T, fallback: (err: unknown) => T): T {
 
 function errStr(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function getMainRoomJid(ctx: InfiniClawIpcContext): string | null {
+  for (const [jid, group] of Object.entries(ctx.registeredGroups())) {
+    if (group.folder === MAIN_GROUP_FOLDER) return jid;
+  }
+  return null;
 }
 
 function botStatusLine(bot: string, emoji: string): string {
@@ -308,7 +316,8 @@ async function handleSelfRestart(bot: string, chatJid: string | null, ctx: Infin
     await safeSend(ctx, chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
     return;
   }
-  await safeSend(ctx, chatJid, botStatusLine(bot, '⭕️'));
+  const mainJid = getMainRoomJid(ctx) || chatJid;
+  await safeSend(ctx, mainJid, botStatusLine(bot, '⭕️'));
   try {
     serviceRefreshPlist(resolveRoot(), bot);
   } catch (err) {
