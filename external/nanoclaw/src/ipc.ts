@@ -312,21 +312,21 @@ export function createIpcPoller(handlers: IpcPollerHandlers): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              await handlers.onMessage(filePath, data, sourceGroup, isMain);
+              // Delete file immediately so the poll loop is never blocked
+              // by a slow send queue (e.g. Matrix rate limiting).
               fs.unlinkSync(filePath);
+              handlers.onMessage(filePath, data, sourceGroup, isMain).catch((err) => {
+                logger.error(
+                  { file, sourceGroup, err },
+                  'Error delivering IPC message',
+                );
+              });
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
                 'Error processing IPC message',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              try {
-                fs.renameSync(
-                  filePath,
-                  path.join(errorDir, `${sourceGroup}-${file}`),
-                );
-              } catch { /* file may already be gone */ }
+              try { fs.unlinkSync(filePath); } catch { /* already gone */ }
             }
           }
         }

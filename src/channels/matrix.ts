@@ -400,7 +400,7 @@ export class MatrixChannel implements Channel {
   private lastBotEventId = new Map<string, string>();
 
   // Rate-limiting send queue with adaptive backoff
-  private static readonly BASE_SEND_INTERVAL_MS = 500;
+  private static readonly BASE_SEND_INTERVAL_MS = 1000;
   private static readonly MAX_SEND_INTERVAL_MS = 10_000;
   private static readonly BACKOFF_DECAY_MS = 30_000; // decay back to base over 30s
   private _sendQueue: Array<() => Promise<void>> = [];
