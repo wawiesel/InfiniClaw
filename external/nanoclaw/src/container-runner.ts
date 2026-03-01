@@ -48,6 +48,8 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
   mcpServers?: Record<string, Record<string, unknown>>;
+  /** Optional tag for parallel containers (e.g. 'interrupt'). Prevents killing existing containers for the same group. */
+  containerNameTag?: string;
 }
 
 export interface ContainerOutput {

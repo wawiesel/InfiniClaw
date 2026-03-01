@@ -2,35 +2,50 @@
 
 ## Purpose
 
-InfiniClaw is a multi-bot orchestration layer built on a maintained NanoClaw fork. It provides cooperating bots on Matrix:
+InfiniClaw is a multi-bot orchestration layer built on a maintained NanoClaw fork. It provides cooperating bots on Matrix.
 
-Messages go to **rooms**, not to bots directly. Each room has a role; bots fill that role.
+### Rooms
 
-Rooms:
+Messages go to **rooms**, not to bots directly.
 
-1. **The Bridge** — has a commander. Current commander: **Johnny5**.
-2. **Engineering** — has an engineer. Current engineer: **Cid**.
-3. **Holodeck** — testing room for new bots (not yet active).
+1. **The Bridge** — where primary exploration takes place.
+2. **Engineering** — where maintenance and optimization takes place.
+3. **Astrometrics** — where big experiments take place.
+
+### Machines
+
+Bots live on different machines. One bot / one container / one machine. 
 
 
 ## Roles
 
-### Commander
-- Responsible for exploring the file system, executing tasks, and reporting back to the captain
-- Can modify his own persona CLAUDE.md, skills, and MCP
-- Cannnot modify another bot's persona, skills, or MCP
-- Has write access to the knowledge vault
-- Uses WKS MCP tools to manipulate/explort file system and connect in the knowledge vault
-- Has read access to entire home directory
+Bots have different roles. Usually you want one engineer and one navigator per machine.
+The highest ranking bot is the Commander, who is also a navigator, but outranks all other bots.
+
+Every bot should have
+
+- read access to entire home directory through a mount into the container.
+- ability to modify his own persona CLAUDE.md, skills, and MCP
+- ability to restart
+
+### Navigator
+- responsible for exploring the file system, executing tasks, and reporting back to the captain
+- cannnot modify another bot's persona, skills, or MCP
+- has write access to the knowledge vault
+- uses WKS MCP tools to manipulate/explore
+- has access to email
 
 ### Engineer 
-- Responsible for Infiniclaw codebase including updating nanoclaw underneath our updates
-- Responsible for maintaining bot containers
-- Can modify his own persona CLAUDE.md, skills, and MCP
-- Can modify another bot's persona, skills, and MCP
-- Can deploy and test new bots on the Holodeck
-- Has read access to entire home directory
-- Has write access to the Infiniclaw codebase
+- responsible for maintaining and increasing performance of Infiniclaw and nanoclaw codebase
+- responsible for maintaining bot containers
+- can modify his own persona CLAUDE.md, skills, and MCP
+- can modify another bot's persona, skills, and MCP
+- write access to infiniclaw
+
+### Architect
+- responsible for creating new bots and making drastic codebase updates and redesigns
+- can deploy and test new bots on the Holodeck
+- write access to infiniclaw, nanoclaw, WKS
 
 ## Core Principles
 
@@ -38,7 +53,6 @@ Rooms:
 - We layer our own logic on top of Nanoclaw
   - We use Matrix for communication
   - We use Podman for container management
-  - We use WKS MCP tools for file system manipulation
 - We have the lobe concept where a bot can spawn a delegate agent that merges back into the main bot using Matrix threads
 - Bots must be responsive at all times. Matrix features like emoji and reactions help with this.
 - The base bot is Claude based and can upgrade/downgrade his brain by himself.
@@ -180,7 +194,7 @@ Bots edit `/workspace/extra/{bot}-persona/groups/{group}/.mcp.json` inside the c
 - **Per-room IPC namespaces** — each room gets its own IPC directory under `_runtime/data/ipc/{room}/`. Prevents cross-room privilege escalation.
 - **Main room elevation** — only the main room's containers can run privileged IPC commands (`restart_bot`, `rebuild_image`, `git_push`, etc.). Non-main rooms are restricted to task scheduling and their own thread management.
 - **Container isolation** — Podman containers run with memory caps (`CONTAINER_MEMORY_MB`, default 6GB) and optional CPU limits. The podman VM memory must exceed the container limit to leave headroom for the VM kernel and page cache (e.g. 24GB VM for a 16GB container). `_runtime/` is never version-controlled.
-- **One container per bot** — There must never be multiple containers running for the same bot. `group-queue.ts` enforces one-at-a-time per room, but stale containers can accumulate from crashes or unclean shutdowns. The host process must clean up any existing container for a bot before spawning a new one.
+- **One container per bot** — There must never be multiple containers running for the same bot, with the exception of interrupt lobes (see Message Queue Architecture). `group-queue.ts` enforces one-at-a-time per room, but stale containers can accumulate from crashes or unclean shutdowns. The host process must clean up any existing container for a bot before spawning a new one. Interrupt lobes use `containerNameTag` to coexist with the main container without triggering cleanup.
 - **Secrets flow**: profile env files → loaded by host process → injected as env vars into containers via `--env`. No secrets are baked into container images.
 
 ### Mount System
@@ -267,7 +281,21 @@ We considered interrupt-style scheduling (thread messages preempt main-room work
 | FIFO (current) | Simple, predictable, no starvation | Long main task blocks thread replies |
 | Priority/interrupt | Thread feels responsive even during long tasks | Complex state management, risk of starvation, harder to reason about |
 
-FIFO is the right starting point. If latency in threads becomes a real problem, we can layer priority on top — but we don't pay that complexity cost until we need it.
+FIFO is the right starting point. The interrupt lobe (below) handles the urgent-message case without abandoning FIFO for the main queue.
+
+**Interrupt lobe**
+
+When the main container has been running for >30 seconds and a new message arrives that is either (a) a callout to the bot (`@BotName`) from anyone, or (b) any message from the Captain — the host spawns a **parallel container** to handle it immediately. The main container keeps running undisturbed.
+
+- The interrupt container uses **Claude Sonnet** (fast, cheap) regardless of the bot's configured brain model.
+- It has no session — fresh context each time. It's stateless.
+- Its `containerNameTag: 'interrupt'` prevents the normal "kill existing containers" logic from stopping the main container.
+- Output goes to the channel/thread like a normal response.
+- Fire-and-forget: the interrupt lobe doesn't block the message loop.
+
+This gives bots two-pronged responsiveness:
+1. **Persona-level**: bots are instructed to delegate long work to lobes so their main brain stays available for piped messages.
+2. **Host-level**: if the main container is busy despite (1), the host spawns an interrupt lobe as a safety net.
 
 **Threading model**
 

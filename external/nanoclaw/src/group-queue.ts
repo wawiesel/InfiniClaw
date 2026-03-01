@@ -24,6 +24,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  runStartMs: number;
 }
 
 export class GroupQueue {
@@ -50,6 +51,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        runStartMs: 0,
       };
       this.groups.set(groupJid, state);
     }
@@ -77,10 +79,11 @@ export class GroupQueue {
     containerName: string | null;
     pendingMessages: boolean;
     pendingTasks: number;
+    runStartMs: number;
   } {
     const state = this.groups.get(groupJid);
     if (!state) {
-      return { active: false, idleWaiting: false, hasProcess: false, containerName: null, pendingMessages: false, pendingTasks: 0 };
+      return { active: false, idleWaiting: false, hasProcess: false, containerName: null, pendingMessages: false, pendingTasks: 0, runStartMs: 0 };
     }
     return {
       active: state.active,
@@ -89,6 +92,7 @@ export class GroupQueue {
       containerName: state.containerName,
       pendingMessages: state.pendingMessages,
       pendingTasks: state.pendingTasks.length,
+      runStartMs: state.runStartMs,
     };
   }
 
@@ -236,9 +240,10 @@ export class GroupQueue {
     state.idleWaiting = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
+    state.runStartMs = Date.now();
     this.activeCount++;
 
-    const runStartMs = Date.now();
+    const runStartMs = state.runStartMs;
     logger.info(
       { groupJid, reason, activeCount: this.activeCount },
       'Starting container for group',
@@ -263,6 +268,7 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
+      state.runStartMs = 0;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
@@ -276,6 +282,7 @@ export class GroupQueue {
     state.active = true;
     state.idleWaiting = false;
     state.isTaskContainer = true;
+    state.runStartMs = Date.now();
     this.activeCount++;
 
     logger.debug(
@@ -289,6 +296,7 @@ export class GroupQueue {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
       state.active = false;
+      state.runStartMs = 0;
       state.isTaskContainer = false;
       state.process = null;
       state.containerName = null;

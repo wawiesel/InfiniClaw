@@ -25,7 +25,9 @@ import {
   MATRIX_USERNAME,
   POLL_INTERVAL,
   MEMORY_CHECK_INTERVAL,
+  RESUME_DELAY_SECONDS,
   TRIGGER_PATTERN,
+  CAPTAIN_USER_ID,
 } from 'nanoclaw/config.js';
 import {
   getAllChats,
@@ -110,6 +112,15 @@ const lastProgressChatAt: Record<string, number> = {};
 const PIP_PULSE = ['🔵', '🔷', '🔹', '🔷'] as const;
 const workThreadIds: Record<string, string> = {};
 const activeReplyThreadIds: Record<string, string | undefined> = {};
+let resumeGateResolve: (() => void) | null = null;
+const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
+let isResuming = false;
+
+// OOM backoff tracking — per-group consecutive OOM counter and cooldown
+const OOM_MAX_CONSECUTIVE = 3;
+const OOM_COOLDOWN_MS = 60_000; // 60s cooldown after consecutive OOMs
+const oomConsecutive: Record<string, number> = {};
+const oomCooldownUntil: Record<string, number> = {};
 
 function isThreadContext(chatJid: string): boolean {
   return Boolean(activeReplyThreadIds[chatJid]);
@@ -231,6 +242,8 @@ const working = createIndicatorSet('⏳', 'working', 'worked', INDICATOR_DELAY_M
 const idle = createIndicatorSet('💤', 'idling', 'idled');
 const { start: startWorkingIndicator, clear: clearWorkingIndicator, bump: bumpWorkingIndicator } = working;
 const { start: startIdleIndicator, clear: clearIdleIndicator } = idle;
+const resumingIndicator = createIndicatorSet('⏳', 'resuming', 'resumed');
+const { start: startResumingIndicator, clear: clearResumingIndicator } = resumingIndicator;
 
 const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
 const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
@@ -467,6 +480,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
+  // OOM backoff: if this group hit consecutive OOMs, enforce cooldown
+  const cooldownEnd = oomCooldownUntil[chatJid] || 0;
+  if (cooldownEnd > Date.now()) {
+    const remainSec = Math.round((cooldownEnd - Date.now()) / 1000);
+    logger.warn(
+      { group: group.name, consecutiveOOMs: oomConsecutive[chatJid], cooldownRemainingSec: remainSec },
+      'OOM cooldown active, deferring container spawn',
+    );
+    return false; // triggers retry with backoff in group-queue
+  }
+
   const channel = findChannel(channels, chatJid);
   if (!channel) {
     console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
@@ -544,7 +568,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'processing...');
-  startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
+  if (!isResuming) startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
   const inboundMessageIds = filteredMessages.map((m) => m.id).filter(Boolean) as string[];
   let hadError = false;
   let outputSentToUser = false;
@@ -736,6 +760,72 @@ async function runAgent(
   }
 }
 
+// ── Interrupt lobe — parallel container for urgent messages ────────────
+
+const INTERRUPT_LOBE_MODEL = 'claude-sonnet-4-6';
+const INTERRUPT_LOBE_TIMEOUT_MS = 5 * 60_000; // 5 min
+
+function spawnInterruptLobe(
+  chatJid: string,
+  group: RegisteredGroup,
+  messages: NewMessage[],
+): void {
+  const prompt = formatMessages(messages);
+  const replyThreadId = messages.find((m) => m.thread_id)?.thread_id
+    || messages.find((m) => m.id?.startsWith('$'))?.id;
+
+  logger.info(
+    { group: group.name, messageCount: messages.length, replyThreadId },
+    'Spawning interrupt lobe (Sonnet) for messages while main container is busy',
+  );
+
+  // Force Sonnet: override env before runContainerAgent collects secrets (synchronous)
+  const savedModel = process.env.ANTHROPIC_MODEL;
+  process.env.ANTHROPIC_MODEL = INTERRUPT_LOBE_MODEL;
+
+  const resultPromise = runContainerAgent(
+    group,
+    {
+      prompt,
+      groupFolder: group.folder,
+      chatJid,
+      isMain: group.folder === MAIN_GROUP_FOLDER,
+      containerNameTag: 'interrupt',
+    },
+    () => { /* no process registration — interrupt lobes are fire-and-forget */ },
+  );
+
+  // Restore env immediately — secrets already captured synchronously
+  if (savedModel !== undefined) process.env.ANTHROPIC_MODEL = savedModel;
+  else delete process.env.ANTHROPIC_MODEL;
+
+  // Fire-and-forget: handle output asynchronously
+  resultPromise.then(async (output) => {
+    if (output.result) {
+      const raw = typeof output.result === 'string' ? output.result : JSON.stringify(output.result);
+      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      if (text) {
+        const ch = findChannel(channels, chatJid);
+        if (ch) {
+          await ch.sendMessage(chatJid, text, replyThreadId);
+          storeOutgoing(chatJid, text, replyThreadId);
+        }
+      }
+    }
+    if (output.status === 'error') {
+      logger.warn({ group: group.name, error: output.error }, 'Interrupt lobe error');
+    }
+    logger.info({ group: group.name }, 'Interrupt lobe completed');
+  }).catch((err) => {
+    logger.error({ group: group.name, err }, 'Interrupt lobe failed');
+  });
+
+  // Update timestamps so the main container doesn't re-process these messages
+  const lastMsg = messages[messages.length - 1];
+  lastAgentTimestamp[chatJid] = lastMsg.timestamp;
+  saveState();
+}
+
 // ── Per-group message handling ─────────────────────────────────────────
 
 async function handleGroupMessagesInLoop(
@@ -782,6 +872,21 @@ async function handleGroupMessagesInLoop(
   }
   activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid] || autoThreadId2;
 
+  // Interrupt lobe: if container is busy >30s, spawn parallel Sonnet container
+  const groupStatus = queue.getGroupStatus(chatJid);
+  if (groupStatus.active && groupStatus.runStartMs > 0) {
+    const elapsed = Date.now() - groupStatus.runStartMs;
+    if (elapsed > 30_000) {
+      const interruptMessages = messagesToSend.filter((m) =>
+        TRIGGER_PATTERN.test(m.content.trim()) || (CAPTAIN_USER_ID && m.sender === CAPTAIN_USER_ID),
+      );
+      if (interruptMessages.length > 0) {
+        spawnInterruptLobe(chatJid, group, interruptMessages);
+        return;
+      }
+    }
+  }
+
   if (queue.sendMessage(chatJid, formatted)) {
     await handlePipedToActiveContainer(chatJid, messagesToSend);
   } else {
@@ -798,7 +903,7 @@ async function handlePipedToActiveContainer(
     'Piped messages to active container',
   );
   clearIdleIndicator(chatJid);
-  startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
+  if (!isResuming) startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
 
   lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
   saveState();
@@ -820,6 +925,7 @@ async function startMessageLoop(): Promise<void> {
     return;
   }
   messageLoopRunning = true;
+  await resumeGate;
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
@@ -867,7 +973,10 @@ function injectSystemNotice(chatJid: string, content: string): void {
 
 // ── Recovery & resume ──────────────────────────────────────────────────
 
-function injectResumeMessage(): void {
+async function injectResumeMessage(): Promise<void> {
+  isResuming = true;
+  const mainJid = getMainChatJid();
+
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     // Ensure chat entry exists (FK constraint) — fresh deploys may not have one yet
     updateChatName(chatJid, group.name);
@@ -904,6 +1013,42 @@ function injectResumeMessage(): void {
     queue.enqueueMessageCheck(chatJid);
     logger.info({ chatJid, group: group.name, recentCount: recent.length }, 'Injected resume message with context');
   }
+
+  // Start resuming indicator on main room
+  if (mainJid) {
+    startResumingIndicator(mainJid);
+  }
+
+  // Process main group resume synchronously (container runs, reviews session)
+  if (mainJid) {
+    await processGroupMessages(mainJid);
+  }
+
+  // Clear resuming indicator
+  if (mainJid) {
+    clearResumingIndicator(mainJid);
+  }
+
+  // Send updated todo list to main room
+  if (mainJid) {
+    const items = readTodoItems(MAIN_GROUP_FOLDER);
+    if (items.length > 0) {
+      const ch = findChannel(channels, mainJid);
+      if (ch) {
+        await ch.sendMessage(mainJid, buildTodoMessage(mainJid));
+      }
+    }
+  }
+
+  // Wait before opening the gate
+  if (RESUME_DELAY_SECONDS > 0) {
+    logger.info({ delaySeconds: RESUME_DELAY_SECONDS }, 'Resume delay before processing messages');
+    await new Promise((r) => setTimeout(r, RESUME_DELAY_SECONDS * 1000));
+  }
+
+  isResuming = false;
+  resumeGateResolve!();
+  logger.info('Resume complete, message loop unblocked');
 }
 
 // ── Main ───────────────────────────────────────────────────────────────
@@ -1243,8 +1388,10 @@ async function main(): Promise<void> {
     assistantName: ASSISTANT_NAME,
     enqueueCheck: (chatJid) => queue.enqueueMessageCheck(chatJid),
   });
-  injectResumeMessage();
+  // Start message loop (blocks on resumeGate until resume finishes)
   startMessageLoop();
+  // Resume flow: inject messages, run resume container, wait delay, then open gate
+  await injectResumeMessage();
 
   // Periodic memory-save reminder (only when bot is actively working, not idle)
   const MEMORY_SAVE_INTERVAL_MS = 10 * 60 * 1000;
@@ -1316,11 +1463,7 @@ async function main(): Promise<void> {
       const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
       const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname}`;
       await ch.sendMessage(mainJid, `<font color="#888888"><em>${boot}</em></font>`);
-      // Auto-send todo list only if there are active tasks
-      const items = readTodoItems(MAIN_GROUP_FOLDER);
-      if (items.length > 0) {
-        await ch.sendMessage(mainJid, buildTodoMessage(mainJid));
-      }
+      // Todo list is sent after resume flow completes (see injectResumeMessage)
     } catch (err) {
       logger.warn({ err }, 'Failed to send boot announcement');
     }

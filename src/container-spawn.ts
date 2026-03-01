@@ -29,6 +29,8 @@ import {
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_CPUS,
   CONTAINER_MEMORY_MB,
+  CONTAINER_MEMORY_RESERVATION_MB,
+  CONTAINER_HEAP_LIMIT_MB,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
@@ -226,9 +228,18 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string, portPu
 
   if (CONTAINER_MEMORY_MB > 0) {
     args.push('--memory', `${CONTAINER_MEMORY_MB}m`);
+    // Soft limit: kernel reclaims memory more aggressively past this threshold
+    if (CONTAINER_MEMORY_RESERVATION_MB > 0 && CONTAINER_MEMORY_RESERVATION_MB < CONTAINER_MEMORY_MB) {
+      args.push('--memory-reservation', `${CONTAINER_MEMORY_RESERVATION_MB}m`);
+    }
   }
   if (CONTAINER_CPUS > 0) {
     args.push('--cpus', String(CONTAINER_CPUS));
+  }
+
+  // V8 heap limit inside container — triggers GC before cgroup hard kill
+  if (CONTAINER_HEAP_LIMIT_MB > 0) {
+    args.push('-e', `NODE_OPTIONS=--max-old-space-size=${CONTAINER_HEAP_LIMIT_MB}`);
   }
   for (const mount of mounts) {
     args.push(
@@ -326,8 +337,11 @@ export async function runContainerAgent(
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const containerName = `nanoclaw-${botTag}-${safeName}-${Date.now()}`;
-  killExistingContainersForGroup(botTag, safeName);
+  const nameTag = input.containerNameTag ? `-${input.containerNameTag}` : '';
+  const containerName = `nanoclaw-${botTag}-${safeName}${nameTag}-${Date.now()}`;
+  if (!input.containerNameTag) {
+    killExistingContainersForGroup(botTag, safeName);
+  }
 
   const portPublish = getPersonaPortPublish();
   const containerArgs = buildContainerArgs(mounts, containerName, portPublish);
