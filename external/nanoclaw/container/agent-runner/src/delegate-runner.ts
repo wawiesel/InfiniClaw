@@ -266,10 +266,10 @@ export function registerDelegateTools(
     `Atomically delegate a task to a lobe (Codex, Gemini, Claude, or Ollama) with correct Matrix threading.
 
 Available lobes and models:
-- codex (default): gpt-5-codex (default), o3, o4-mini — file ops, code edits, shell commands
-- gemini: gemini-2.5-pro (default), gemini-2.5-flash — long-context analysis, research
+- codex (default): gpt-5.3-codex (default), o3, o4-mini — file ops, code edits, shell commands
+- gemini: gemini-3.1-pro-preview (default), gemini-2.5-flash — long-context analysis, research
 - claude: sonnet (default), opus, haiku — parallel reasoning, supports effort param
-- ollama: qwen3:30b-thinking (default, 30.5B reasoning), qwen3:14b (14.8B fast), devstral-small-2:24b (24B coding), devstral-2:latest (125B heavy), gpt-oss:20b (20.9B), nemotron-3-nano:30b (31.6B) — free local LLM, supports system param
+- ollama: qwen3:30b-thinking (default, 30.5B reasoning), qwen3:14b (14.8B fast), devstral-small-2:24b (24B coding), devstral-2:latest (125B heavy), gpt-oss:20b (20.9B), nemotron-3-nano:30b (31.6B) — free local LLM, last resort fallback only
 
 The tool handles the entire flow:
 1. Posts summary to the main timeline
@@ -316,10 +316,10 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
       // Resolve lobe and model first (needed for summary)
       const effectiveModel = (() => {
         if (args.model) return args.model;
-        if (lobe === 'gemini') return firstSet(process.env.GEMINI_MODEL) || 'gemini-2.5-pro';
+        if (lobe === 'gemini') return firstSet(process.env.GEMINI_MODEL) || 'gemini-3.1-pro-preview';
         if (lobe === 'claude') return firstSet(process.env.ANTHROPIC_MODEL, process.env.CLAUDE_MODEL) || 'sonnet';
         if (lobe === 'ollama') return 'qwen3:14b';
-        return firstSet(process.env.CODEX_MODEL, process.env.OPENAI_MODEL) || 'gpt-5-codex';
+        return firstSet(process.env.CODEX_MODEL, process.env.OPENAI_MODEL) || 'gpt-5.3-codex';
       })();
       const providerName = lobe.charAt(0).toUpperCase() + lobe.slice(1);
 
