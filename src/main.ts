@@ -6,6 +6,7 @@
  * dependencies — never modified by InfiniClaw.
  */
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -1309,7 +1310,16 @@ async function main(): Promise<void> {
     clearInterval(bootAnnounceTimer);
     try {
       if (ch.setPresenceStatus) await ch.setPresenceStatus('online', 'idle');
-      await ch.sendMessage(mainJid, `${statusMessage('✅', 'online.')}<br>${mainSender()}`);
+      const mainGroup = registeredGroups[mainJid];
+      const groupName = mainGroup?.name || MAIN_GROUP_FOLDER;
+      const hostname = os.hostname();
+      const bootLines = [
+        statusMessage('✅', `${ASSISTANT_NAME} online.`),
+        mainSender(),
+        statusMessage('📋', `${ASSISTANT_NAME} — ${groupName}`),
+        statusMessage('🖥️', hostname),
+      ];
+      await ch.sendMessage(mainJid, bootLines.join('<br>'));
       // Auto-send todo list so Operator sees what the bot is picking up
       const todo = buildTodoMessage(mainJid);
       await ch.sendMessage(mainJid, todo);
