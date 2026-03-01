@@ -291,6 +291,29 @@ Use this after making code changes that require a process restart.`,
   );
 
   server.tool(
+    'restart_wksm',
+    'Restart the WKSM (WKS MCP Server) SSE proxy on the host. Use when wksm is down or returning errors.',
+    {},
+    async () => {
+      if (!isMain) {
+        return {
+          content: [{ type: 'text' as const, text: 'Only MAIN can restart wksm.' }],
+          isError: true,
+        };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'restart_wksm',
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return {
+        content: [{ type: 'text' as const, text: 'WKSM restart requested. The host daemon will kill the old process and start a new one on port 8765.' }],
+      };
+    },
+  );
+
+  server.tool(
     'check_health',
     'Check the host system health and status. Returns bot status, active containers, group activity, and queue state. The host writes this snapshot every 30 seconds.',
     {},
