@@ -12,12 +12,7 @@ import {
   resolveRecipientJid,
   guessMimeTypeFromFilename,
 } from './bot-messaging.js';
-import {
-  capabilityKey,
-  loadCapabilityState,
-  saveCapabilityState,
-  listCapabilityUsageLines,
-} from './capability-budget.js';
+
 import { registerDelegateTools } from './delegate-runner.js';
 
 type WriteIpcFile = (dir: string, data: object) => string;
@@ -251,52 +246,6 @@ Note: bot restart is required for changes to take effect.`,
           type: 'text' as const,
           text: `Brain mode update queued for ${args.bot} (${args.mode}/${args.model || (args.mode === 'anthropic' ? 'claude-sonnet-4-5' : 'devstral-small-2-fast:latest')}). Restart required.`,
         }],
-      };
-    },
-  );
-
-  // ── Capability budgets ──────────────────────────────────────────────
-
-  server.tool(
-    'set_capability_budget',
-    `Set approximate token budget for a provider/model capability.
-
-These are local estimates for routing decisions, not provider-authoritative accounting.
-`,
-    {
-      provider: z.string().describe('Capability provider name (e.g. anthropic, codex, gemini, ollama)'),
-      model: z.string().describe('Model identifier'),
-      total_tokens: z.number().int().positive().describe('Approximate total token budget'),
-      reset_used: z.boolean().default(false).describe('Reset used token counter for this capability'),
-    },
-    async (args) => {
-      const key = capabilityKey(args.provider, args.model);
-      const state = loadCapabilityState();
-      state.budgets[key] = args.total_tokens;
-      if (args.reset_used) {
-        state.used[key] = 0;
-      }
-      saveCapabilityState(state);
-      return {
-        content: [{
-          type: 'text' as const,
-          text: `Budget set for ${args.provider}/${args.model}: total=${args.total_tokens} tokens.`,
-        }],
-      };
-    },
-  );
-
-  server.tool(
-    'list_capability_budgets',
-    `List approximate used and remaining tokens by provider/model capability.
-
-Use this before delegation to choose the best provider/model given remaining budget.
-`,
-    {},
-    async () => {
-      const lines = listCapabilityUsageLines();
-      return {
-        content: [{ type: 'text' as const, text: lines.join('\n') }],
       };
     },
   );

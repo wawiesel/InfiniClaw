@@ -7,7 +7,6 @@ import path from 'path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
-import { estimateTokens, recordCapabilityUsage } from './capability-budget.js';
 
 type WriteIpcFile = (dir: string, data: object) => string;
 type DelegateEnv = Record<string, string | undefined>;
@@ -399,8 +398,6 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         } finally {
           clearTimeout(ollamaTimer);
         }
-        const estimatedTokens = estimateTokens(args.objective) + estimateTokens(prefixedMessages.join('\n\n'));
-        recordCapabilityUsage('ollama', effectiveModel, estimatedTokens);
         const ollamaResult: { content: Array<{ type: 'text'; text: string }>; isError?: boolean } = {
           content: [{ type: 'text' as const, text: prefixedMessages.join('\n\n') || `${lobe}: unavailable` }],
         };
@@ -421,9 +418,6 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
 
         const finalize = (payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean }) => {
           if (finalized) return;
-          const estimatedTokens = estimateTokens(args.objective) + estimateTokens(prefixedMessages.join('\n\n'));
-          const budgetProvider = lobe === 'claude' ? 'anthropic' : lobe;
-          recordCapabilityUsage(budgetProvider, effectiveModel, estimatedTokens);
           finalized = true;
           resolve(payload);
         };
