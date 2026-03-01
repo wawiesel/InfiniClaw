@@ -50,6 +50,8 @@ export interface ContainerInput {
   mcpServers?: Record<string, Record<string, unknown>>;
   /** Optional tag for parallel containers (e.g. 'interrupt'). Prevents killing existing containers for the same group. */
   containerNameTag?: string;
+  /** Override the group/config timeout for this specific container run (ms). */
+  timeoutOverrideMs?: number;
 }
 
 export interface ContainerOutput {
@@ -137,6 +139,8 @@ export interface RunContainerOpts {
   outputChainTimeoutMs?: number;
   /** Max stderr chars in error result. 0 = unlimited. Default: 200 */
   maxErrorStderrChars?: number;
+  /** Kill container if no stdout data arrives within this many ms after spawn. 0 = disabled. Default: 0 */
+  firstOutputDeadlineMs?: number;
 }
 
 /**
@@ -166,6 +170,7 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
     // Timeout state (declared before stdout handler so callbacks can access it)
     let timedOut = false;
     let hadStreamingOutput = false;
+    let firstOutputReceived = false;
     const timeoutMs = Math.max(opts.configTimeout, opts.idleTimeout + 30_000);
 
     const killOnTimeout = () => {
@@ -192,6 +197,21 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
+    // First-output deadline: kill early if container produces zero stdout
+    const foDeadlineMs = opts.firstOutputDeadlineMs ?? 0;
+    let firstOutputTimer: ReturnType<typeof setTimeout> | null = null;
+    if (foDeadlineMs > 0) {
+      firstOutputTimer = setTimeout(() => {
+        if (!firstOutputReceived) {
+          logger.error(
+            { group: opts.groupName, containerName: opts.containerName, deadlineMs: foDeadlineMs },
+            'Container produced no output within first-output deadline, killing',
+          );
+          killOnTimeout();
+        }
+      }, foDeadlineMs);
+    }
+
     // Streaming output state
     let parseBuffer = '';
     let newSessionId: string | undefined;
@@ -199,6 +219,10 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
     let firstOutputLogged = false;
 
     container.stdout.on('data', (data) => {
+      if (!firstOutputReceived) {
+        firstOutputReceived = true;
+        if (firstOutputTimer) { clearTimeout(firstOutputTimer); firstOutputTimer = null; }
+      }
       if (!firstOutputLogged) {
         firstOutputLogged = true;
         const ttfoMs = Date.now() - startTime;
@@ -291,6 +315,7 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
 
     container.on('close', (code) => {
       clearTimeout(timeout);
+      if (firstOutputTimer) { clearTimeout(firstOutputTimer); firstOutputTimer = null; }
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -388,6 +413,24 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
 
         const signalInfo = signalExits[code ?? -1];
         const isOomKill = code === 137;
+
+        // If streaming output was already delivered, the crash happened during
+        // cleanup or while waiting for more IPC input — treat as success.
+        if (hadStreamingOutput) {
+          logger.warn(
+            {
+              group: opts.groupName,
+              code,
+              duration,
+              ...(signalInfo ? { signal: signalInfo.signal, isOomKill } : {}),
+            },
+            'Container crashed after streaming output was delivered, treating as success',
+          );
+          settleOutputChain(() => {
+            resolve({ status: 'success', result: null, newSessionId });
+          });
+          return;
+        }
 
         logger.error(
           {

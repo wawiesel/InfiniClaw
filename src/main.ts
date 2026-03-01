@@ -192,7 +192,19 @@ function createIndicatorSet(emoji: string, activeVerb: string, doneVerb: string,
       if (indicators[chatJid]) return;
       const ch = findChannel(channels, chatJid);
       if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
-      ch.sendMessageReturningId(chatJid, statusMessage(emoji, `${activeVerb}...`), threadId).then((eventId) => {
+      const sendFn = ch.sendMessageReturningId.bind(ch);
+      const sendWithRetry = async (): Promise<string | undefined> => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            return await sendFn(chatJid, statusMessage(emoji, `${activeVerb}...`), threadId);
+          } catch {
+            if (attempt < 2) await new Promise(r => setTimeout(r, 5000));
+          }
+        }
+        logger.warn({ chatJid }, `${activeVerb} indicator failed after 3 attempts`);
+        return undefined;
+      };
+      sendWithRetry().then((eventId) => {
         if (!eventId) return;
         if (indicators[chatJid]) {
           ch.editMessage!(chatJid, eventId, statusMessage(emoji, `${doneVerb} (${formatElapsed(startedAt)})`)).catch(() => { });
@@ -662,10 +674,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     markError(chatJid, compactError);
 
     const isOomKill = /OOM KILLED/.test(compactError);
-    if (isOomKill && sessions[group.folder]) {
-      deleteSession(group.folder);
-      delete sessions[group.folder];
-      logger.info({ group: group.name }, 'Cleared session after OOM kill');
+    if (isOomKill) {
+      if (sessions[group.folder]) {
+        deleteSession(group.folder);
+        delete sessions[group.folder];
+        logger.info({ group: group.name }, 'Cleared session after OOM kill');
+      }
+      // Track consecutive OOMs and enforce cooldown
+      oomConsecutive[chatJid] = (oomConsecutive[chatJid] || 0) + 1;
+      if (oomConsecutive[chatJid] >= OOM_MAX_CONSECUTIVE) {
+        oomCooldownUntil[chatJid] = Date.now() + OOM_COOLDOWN_MS;
+        logger.warn(
+          { group: group.name, consecutiveOOMs: oomConsecutive[chatJid], cooldownMs: OOM_COOLDOWN_MS },
+          'OOM cooldown activated after consecutive kills',
+        );
+      }
     }
 
     if (!outputSentToUser && channel) {
@@ -687,7 +710,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
     }
 
-    if (outputSentToUser && !isOomKill) {
+    if (outputSentToUser) {
       logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
       appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
       delete activeReplyThreadIds[chatJid];
@@ -701,6 +724,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     markRunEnded(chatJid);
     return false;
   }
+
+  // Reset OOM counter on success
+  oomConsecutive[chatJid] = 0;
+  delete oomCooldownUntil[chatJid];
 
   if (lastResponseBody) {
     markCompletion(chatJid, lastResponseBody);
@@ -783,6 +810,26 @@ function spawnInterruptLobe(
   const savedModel = process.env.ANTHROPIC_MODEL;
   process.env.ANTHROPIC_MODEL = INTERRUPT_LOBE_MODEL;
 
+  // Interrupt lobe uses streaming mode so output is delivered immediately
+  // without waiting for the container to exit (it sits in IPC polling forever).
+  let interruptOutputSent = false;
+  const interruptOnOutput = async (output: ContainerOutput) => {
+    if (interruptOutputSent || output.isProgress) return;
+    const raw = output.result;
+    if (!raw) return;
+    const text = (typeof raw === 'string' ? raw : JSON.stringify(raw))
+      .replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+    if (!text) return;
+    interruptOutputSent = true;
+    const ch = findChannel(channels, chatJid);
+    if (ch) {
+      await ch.sendMessage(chatJid, text, replyThreadId);
+      storeOutgoing(chatJid, text, replyThreadId);
+      if (ch.setTyping && !isThreadContext(chatJid)) ch.setTyping(chatJid, false).catch(() => {});
+    }
+    clearWorkingIndicator(chatJid);
+  };
+
   const resultPromise = runContainerAgent(
     group,
     {
@@ -791,17 +838,21 @@ function spawnInterruptLobe(
       chatJid,
       isMain: group.folder === MAIN_GROUP_FOLDER,
       containerNameTag: 'interrupt',
+      timeoutOverrideMs: INTERRUPT_LOBE_TIMEOUT_MS,
     },
     () => { /* no process registration — interrupt lobes are fire-and-forget */ },
+    interruptOnOutput,
   );
 
   // Restore env immediately — secrets already captured synchronously
   if (savedModel !== undefined) process.env.ANTHROPIC_MODEL = savedModel;
   else delete process.env.ANTHROPIC_MODEL;
 
-  // Fire-and-forget: handle output asynchronously
+  // Fire-and-forget: handle completion/errors asynchronously
   resultPromise.then(async (output) => {
-    if (output.result) {
+    // Streaming mode already delivered the first result via interruptOnOutput.
+    // Handle any result that wasn't caught by streaming (e.g. legacy fallback).
+    if (!interruptOutputSent && output.result) {
       const raw = typeof output.result === 'string' ? output.result : JSON.stringify(output.result);
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       if (text) {
@@ -812,11 +863,15 @@ function spawnInterruptLobe(
         }
       }
     }
+    clearWorkingIndicator(chatJid);
+    const ch = findChannel(channels, chatJid);
+    if (ch?.setTyping && !isThreadContext(chatJid)) ch.setTyping(chatJid, false).catch(() => {});
     if (output.status === 'error') {
       logger.warn({ group: group.name, error: output.error }, 'Interrupt lobe error');
     }
     logger.info({ group: group.name }, 'Interrupt lobe completed');
   }).catch((err) => {
+    clearWorkingIndicator(chatJid);
     logger.error({ group: group.name, err }, 'Interrupt lobe failed');
   });
 
@@ -881,6 +936,10 @@ async function handleGroupMessagesInLoop(
         TRIGGER_PATTERN.test(m.content.trim()) || (CAPTAIN_USER_ID && m.sender === CAPTAIN_USER_ID),
       );
       if (interruptMessages.length > 0) {
+        // Show working indicator + typing while interrupt lobe runs
+        startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
+        const ch = findChannel(channels, chatJid);
+        if (ch?.setTyping && !isThreadContext(chatJid)) ch.setTyping(chatJid, true).catch(() => {});
         spawnInterruptLobe(chatJid, group, interruptMessages);
         return;
       }
@@ -1108,7 +1167,13 @@ async function main(): Promise<void> {
     MATRIX_HOMESERVER &&
     (MATRIX_ACCESS_TOKEN || (MATRIX_USERNAME && MATRIX_PASSWORD))
   ) {
+    // CO badge: if this bot doesn't require trigger on its main room, it's the commanding officer
+    const mainGroup = Object.values(registeredGroups).find((g) => g.folder === MAIN_GROUP_FOLDER);
+    const isCommandingOfficer = mainGroup?.requiresTrigger === false;
+    const displayName = isCommandingOfficer ? `${ASSISTANT_NAME} ⭐` : ASSISTANT_NAME;
+
     matrix = new MatrixChannel({
+      displayName,
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
         storeMessage(msg);
@@ -1121,6 +1186,12 @@ async function main(): Promise<void> {
         storeChatMetadata(chatJid, timestamp, name);
       },
       registeredGroups: () => registeredGroups,
+      onRateLimitAlert: (msg) => {
+        const mainJid = LOCAL_MIRROR_MATRIX_JID;
+        if (mainJid && matrix?.isConnected()) {
+          matrix.sendMessage(mainJid, statusMessage('⚠️', msg)).catch(() => { });
+        }
+      },
     });
   }
 

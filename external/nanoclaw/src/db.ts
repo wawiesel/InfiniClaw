@@ -309,11 +309,11 @@ export function getMessagesSince(
   sinceTimestamp: string,
   botPrefix: string,
 ): NewMessage[] {
-  // Filter out bot's own messages by checking content prefix
+  // Filter out bot's own messages by is_from_me flag and content prefix
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
     FROM messages
-    WHERE chat_jid = ? AND timestamp > ? AND content NOT LIKE ?
+    WHERE chat_jid = ? AND timestamp > ? AND is_from_me = 0 AND content NOT LIKE ?
     ORDER BY timestamp
   `;
   return db

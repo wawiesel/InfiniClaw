@@ -305,7 +305,16 @@ export function deployBot(root: string, bot: string): void {
   const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
   const mainGroupName = profileEnv.MAIN_GROUP_NAME;
   const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
-  const mainRequiresTrigger = profileEnv.REQUIRES_TRIGGER === 'true';
+  let mainRequiresTrigger = profileEnv.REQUIRES_TRIGGER === 'true';
+  // Commanding officer (lowest rank among active bots on this room) never requires trigger
+  if (mainRequiresTrigger && mainGroupName) {
+    const roomMap = buildRoomMap(root);
+    const co = roomMap[mainGroupName.toLowerCase()];
+    if (co && co.bot === bot) {
+      mainRequiresTrigger = false;
+      console.log(`${bot}: promoted to commanding officer of ${mainGroupName} (trigger disabled)`);
+    }
+  }
   if (mainJid && mainGroupName) {
     seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, mainRequiresTrigger);
     console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
@@ -554,9 +563,13 @@ export function stopBot(bot: string): void {
 
 // ── Top-level commands ─────────────────────────────────────────────────
 
-export async function start(): Promise<void> {
+export async function start(onlyBot?: string): Promise<void> {
   const root = resolveRoot();
-  const bots = getActiveBots();
+  const allBots = getActiveBots();
+  const bots = onlyBot ? allBots.filter(b => b === onlyBot) : allBots;
+  if (onlyBot && bots.length === 0) {
+    throw new Error(`Bot "${onlyBot}" not found in machine.json (active: ${allBots.join(', ')})`);
+  }
   const logs = logDir(root);
   fs.mkdirSync(LAUNCH_AGENTS_DIR, { recursive: true });
   fs.mkdirSync(logs, { recursive: true });
@@ -568,10 +581,9 @@ export async function start(): Promise<void> {
     console.warn(`S3 pull failed — continuing: ${err instanceof Error ? err.message : err}`);
   }
 
-  // Unload all services first so old code stops before we build
+  // Unload targeted services so old code stops before we build
   for (const bot of bots) { unloadPlist(plistPath(bot)); }
   removeStalePlists();
-
   killRogueProcesses();
   spawnSync('sleep', ['1']);
   killStaleContainers();
@@ -590,9 +602,10 @@ export async function start(): Promise<void> {
   console.log('\nInfiniClaw running. Check status:\n  launchctl list | grep infiniclaw');
 }
 
-export async function stop(): Promise<void> {
+export async function stop(onlyBot?: string): Promise<void> {
   const root = resolveRoot();
-  const bots = getActiveBots();
+  const allBots = getActiveBots();
+  const bots = onlyBot ? allBots.filter(b => b === onlyBot) : allBots;
 
   for (const bot of bots) {
     const pp = plistPath(bot);
@@ -691,29 +704,47 @@ export function chat(bot: string): void {
 
 // ── Send (operator message to bot room) ─────────────────────────────
 
-const ROOM_MAP: Record<string, { bot: string; roomId: string; jid: string }> = {
-  engineering: {
-    bot: 'cid',
-    roomId: '!CYhZuByvtbJnpVlcUY:matrix.org',
-    jid: 'matrix:!CYhZuByvtbJnpVlcUY:matrix.org',
-  },
-  bridge: {
-    bot: 'johnny5',
-    roomId: '!TZLtrIZdHWVhmwSqzI:matrix.org',
-    jid: 'matrix:!TZLtrIZdHWVhmwSqzI:matrix.org',
-  },
-  astrometrics: {
-    bot: 'albert',
-    roomId: '!rMfJzsTiqpzNsHTXER:matrix.org',
-    jid: 'matrix:!rMfJzsTiqpzNsHTXER:matrix.org',
-  },
-};
+/** Build room map dynamically from active bots' env files.
+ *  When multiple bots share a room, the highest-ranking (lowest rank number)
+ *  bot is chosen — the commanding officer for that room. */
+function buildRoomMap(root: string): Record<string, { bot: string; roomId: string; jid: string }> {
+  const config = loadMachineConfig();
+  let roster: Record<string, { rank?: number }> = {};
+  try {
+    roster = JSON.parse(fs.readFileSync(path.join(config.secretsPath, 'roster.json'), 'utf-8'));
+  } catch { /* no roster — all bots equal */ }
+
+  const map: Record<string, { bot: string; roomId: string; jid: string; rank: number }> = {};
+  for (const bot of getActiveBots()) {
+    try {
+      const env = loadProfileEnv(root, bot);
+      const groupName = env.MAIN_GROUP_NAME;
+      const jid = env.LOCAL_MIRROR_MATRIX_JID;
+      if (!groupName || !jid) continue;
+      const roomId = jid.replace(/^matrix:/, '');
+      const rank = roster[bot]?.rank ?? 99;
+      const key = groupName.toLowerCase();
+      if (!map[key] || rank < map[key].rank) {
+        map[key] = { bot, roomId, jid, rank };
+      }
+    } catch {
+      // Skip bots with missing/broken env
+    }
+  }
+  // Strip rank from return type
+  const result: Record<string, { bot: string; roomId: string; jid: string }> = {};
+  for (const [k, v] of Object.entries(map)) {
+    result[k] = { bot: v.bot, roomId: v.roomId, jid: v.jid };
+  }
+  return result;
+}
 
 export async function send(room: string, message: string): Promise<void> {
   const root = resolveRoot();
-  const target = ROOM_MAP[room.toLowerCase()];
+  const roomMap = buildRoomMap(root);
+  const target = roomMap[room.toLowerCase()];
   if (!target) {
-    throw new Error(`Unknown room: ${room}. Valid rooms: ${Object.keys(ROOM_MAP).join(', ')}`);
+    throw new Error(`Unknown room: ${room}. Valid rooms: ${Object.keys(roomMap).join(', ')}`);
   }
 
   const instance = instanceDir(root, target.bot);

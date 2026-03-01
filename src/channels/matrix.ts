@@ -33,6 +33,9 @@ export interface MatrixChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onRateLimitAlert?: (msg: string) => void;
+  /** Display name to set on connect (e.g. "Nora ⭐" for commanding officer). */
+  displayName?: string;
 }
 
 interface MatrixLoginResponse {
@@ -408,6 +411,10 @@ export class MatrixChannel implements Channel {
   private _lastSendAt = 0;
   private _backoffUntil = 0; // timestamp: don't send before this
   private _currentInterval = MatrixChannel.BASE_SEND_INTERVAL_MS;
+  private _consecutiveRateLimits = 0;
+  private _lastRateLimitAlertAt = 0;
+  private static readonly RATE_LIMIT_ALERT_THRESHOLD = 5;
+  private static readonly RATE_LIMIT_ALERT_COOLDOWN_MS = 5 * 60_000;
 
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
@@ -424,16 +431,28 @@ export class MatrixChannel implements Channel {
       this._sendQueue.push(async () => {
         try {
           const result = await fn();
+          this._consecutiveRateLimits = 0;
           this.decayBackoff();
           resolve(result);
         } catch (err) {
           const retryMs = this.extractRetryAfterMs(err);
           if (retryMs !== undefined) {
+            this._consecutiveRateLimits++;
+            if (this._consecutiveRateLimits >= MatrixChannel.RATE_LIMIT_ALERT_THRESHOLD) {
+              const now = Date.now();
+              if (now - this._lastRateLimitAlertAt > MatrixChannel.RATE_LIMIT_ALERT_COOLDOWN_MS) {
+                this._lastRateLimitAlertAt = now;
+                logger.warn({ consecutive: this._consecutiveRateLimits }, 'Persistent rate limiting from Matrix');
+                this.opts.onRateLimitAlert?.(`Rate limited by Matrix (${this._consecutiveRateLimits} consecutive 429s, interval ${this._currentInterval}ms)`);
+              }
+            }
             this.applyBackoff(retryMs);
             logger.debug({ retryMs, newInterval: this._currentInterval }, 'Matrix 429, backing off');
             await new Promise(r => setTimeout(r, retryMs));
             try {
-              resolve(await fn());
+              const retryResult = await fn();
+              this._consecutiveRateLimits = 0;
+              resolve(retryResult);
             } catch (retryErr) {
               reject(retryErr);
             }
@@ -891,6 +910,11 @@ export class MatrixChannel implements Channel {
       await withTimeout(client.start(), MATRIX_CONNECT_TIMEOUT_MS, 'client.start');
       this._connected = true;
       logger.info('Connected to Matrix');
+      if (this.opts.displayName) {
+        client.setDisplayName(this.opts.displayName).catch((err) => {
+          logger.warn({ err }, 'Failed to set display name');
+        });
+      }
     } catch (err) {
       this.markDisconnected('Failed to connect to Matrix', err);
       throw err;

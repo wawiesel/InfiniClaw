@@ -91,9 +91,9 @@ describe('storeMessage', () => {
       is_from_me: true,
     });
 
-    // Message is stored (we can retrieve it — is_from_me doesn't affect retrieval)
+    // is_from_me messages are filtered out by getMessagesSince (echo prevention)
     const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
-    expect(messages).toHaveLength(1);
+    expect(messages).toHaveLength(0);
   });
 
   it('upserts on duplicate id+chat_jid', () => {

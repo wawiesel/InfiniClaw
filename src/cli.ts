@@ -7,10 +7,10 @@ import {
 const [cmd, ...args] = process.argv.slice(2);
 switch (cmd) {
   case 'start':
-    start().catch((err) => { console.error(err.message); process.exit(1); });
+    start(args[0]).catch((err) => { console.error(err.message); process.exit(1); });
     break;
   case 'stop':
-    stop().catch((err) => { console.error(err.message); process.exit(1); });
+    stop(args[0]).catch((err) => { console.error(err.message); process.exit(1); });
     break;
   case 'chat':
     if (!args[0]) { console.error('Usage: cli chat <bot>'); process.exit(1); }

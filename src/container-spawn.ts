@@ -345,7 +345,7 @@ export async function runContainerAgent(
 
   const portPublish = input.containerNameTag ? [] : getPersonaPortPublish();
   const containerArgs = buildContainerArgs(mounts, containerName, portPublish);
-  const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+  const configTimeout = input.timeoutOverrideMs || group.containerConfig?.timeout || CONTAINER_TIMEOUT;
   const timeoutMinutes = Math.round(configTimeout / 60_000);
 
   logger.debug(
@@ -419,5 +419,6 @@ export async function runContainerAgent(
     timeoutErrorMessage: `Task timed out after ${timeoutMinutes} minutes with no response. Try again or simplify the request.`,
     outputChainTimeoutMs: 30_000,
     maxErrorStderrChars: 0,
+    firstOutputDeadlineMs: 120_000,
   });
 }
