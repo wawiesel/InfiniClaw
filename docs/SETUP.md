@@ -18,6 +18,7 @@ nvm use 22
 # Podman Desktop (container runtime — no Docker)
 brew install podman-desktop
 podman machine init
+podman machine set --memory 24576   # 24GB VM — must exceed CONTAINER_MEMORY_MB
 podman machine start
 
 # Claude Code CLI

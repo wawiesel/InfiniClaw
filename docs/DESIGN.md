@@ -133,7 +133,8 @@ Bots edit `/workspace/extra/{bot}-persona/groups/{group}/.mcp.json` inside the c
 - **Mount allowlist** at `~/.config/nanoclaw/mount-allowlist.json` — stored outside the repo so containers can't tamper with it. Every mount requested by `container-config.json` is validated against this allowlist before the container spawns. The Captain can grant/revoke temporary mounts via `CAPTAIN_USER_ID`.
 - **Per-room IPC namespaces** — each room gets its own IPC directory under `_runtime/data/ipc/{room}/`. Prevents cross-room privilege escalation.
 - **Main room elevation** — only the main room's containers can run privileged IPC commands (`restart_bot`, `rebuild_image`, `git_push`, etc.). Non-main rooms are restricted to task scheduling and their own thread management.
-- **Container isolation** — Podman containers run with memory caps (`CONTAINER_MEMORY_MB`, default 4GB) and optional CPU limits. `_runtime/` is never version-controlled.
+- **Container isolation** — Podman containers run with memory caps (`CONTAINER_MEMORY_MB`, default 12GB) and optional CPU limits. The podman VM memory must exceed the container limit to leave headroom for the VM kernel and page cache (e.g. 24GB VM for a 16GB container). `_runtime/` is never version-controlled.
+- **One container per bot** — There must never be multiple containers running for the same bot. `group-queue.ts` enforces one-at-a-time per room, but stale containers can accumulate from crashes or unclean shutdowns. The host process must clean up any existing container for a bot before spawning a new one.
 - **Secrets flow**: profile env files → loaded by host process → injected as env vars into containers via `--env`. No secrets are baked into container images.
 
 ### Mount System
@@ -225,7 +226,7 @@ FIFO is the right starting point. If latency in threads becomes a real problem, 
 **Threading model**
 
 - Every lobe operation runs inside a Matrix thread (not on the main timeline)
-- Typing indicators are suppressed on the main room when the bot is working in a thread
+- Typing indicators are suppressed on the main room when the bot is working in a thread. This means bots that always work in threads (e.g. `requiresTrigger` bots using auto-threading) will never show "typing" in the room.
 - The bot maintains a single sequential "big brain" — lobes provide parallelism for delegated subtasks, not for splitting the main agent
 - Lobe drafts are staged to `/workspace/group/drafts/` for review before posting
 
