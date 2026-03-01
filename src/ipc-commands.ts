@@ -5,6 +5,7 @@
 import crypto from 'crypto';
 import { execSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import Database from 'better-sqlite3';
@@ -24,6 +25,7 @@ import {
   refreshPlist as serviceRefreshPlist,
   resolveRoot,
   instanceDir,
+  loadProfileEnv,
   validateDeploy as serviceValidateDeploy,
   holodeckCreate as serviceHolodeckCreate,
   holodeckTeardown as serviceHolodeckTeardown,
@@ -81,6 +83,25 @@ function trySync<T>(fn: () => T, fallback: (err: unknown) => T): T {
 
 function errStr(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function botStatusLine(bot: string, emoji: string): string {
+  try {
+    const env = loadProfileEnv(resolveRoot(), bot);
+    const name = env.ASSISTANT_NAME || bot;
+    const role = env.ASSISTANT_ROLE || 'Bot';
+    const group = env.MAIN_GROUP_NAME || 'main';
+    const rawModel = env.BRAIN_MODEL || 'unknown';
+    const provider = rawModel.startsWith('claude') ? 'Claude'
+      : rawModel.startsWith('gpt') || rawModel.startsWith('o1') || rawModel.startsWith('o3') || rawModel.startsWith('o4') ? 'OpenAI'
+      : rawModel.startsWith('gemini') ? 'Google'
+      : isOllamaBaseUrl(env.BRAIN_BASE_URL || '') ? 'Ollama' : 'Claude';
+    const model = `${provider}/${rawModel}`;
+    const hostname = os.hostname();
+    return `<font color="#888888"><em>${emoji} ${name} · 🔧 ${role} · 💬 ${group} · 🧠 ${model} · 🖥️ ${hostname}</em></font>`;
+  } catch {
+    return statusMessage(emoji, `${bot} restarting...`);
+  }
 }
 
 function validateDeploy(bot: string): { ok: boolean; errors: string } {
@@ -287,7 +308,7 @@ async function handleSelfRestart(bot: string, chatJid: string | null, ctx: Infin
     await safeSend(ctx, chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
     return;
   }
-  await safeSend(ctx, chatJid, statusMessage('⭕️', `${bot} restarting...`));
+  await safeSend(ctx, chatJid, botStatusLine(bot, '⭕️'));
   try {
     serviceRefreshPlist(resolveRoot(), bot);
   } catch (err) {
@@ -314,7 +335,7 @@ async function handleCrossBotRestart(bot: string, chatJid: string | null, ctx: I
         const msg = {
           type: 'message',
           chatJid: mainGroup.jid,
-          text: statusMessage('⭕️', `${bot} restarting...`),
+          text: botStatusLine(bot, '⭕️'),
           sender: bot,
           timestamp: new Date().toISOString(),
         };
