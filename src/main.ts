@@ -1313,13 +1313,9 @@ async function main(): Promise<void> {
       const mainGroup = registeredGroups[mainJid];
       const groupName = mainGroup?.name || MAIN_GROUP_FOLDER;
       const hostname = os.hostname();
-      const bootLines = [
-        statusMessage('✅', `${ASSISTANT_NAME} online.`),
-        mainSender(),
-        statusMessage('📋', `${ASSISTANT_NAME} — ${groupName}`),
-        statusMessage('🖥️', hostname),
-      ];
-      await ch.sendMessage(mainJid, bootLines.join('<br>'));
+      const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
+      const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname}`;
+      await ch.sendMessage(mainJid, `<font color="#888888"><em>${boot}</em></font>`);
       // Auto-send todo list so Operator sees what the bot is picking up
       const todo = buildTodoMessage(mainJid);
       await ch.sendMessage(mainJid, todo);
