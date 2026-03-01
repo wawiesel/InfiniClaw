@@ -603,31 +603,38 @@ async function runQuery(
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), MCP_PREFLIGHT_TIMEOUT);
-        const res = await fetch(serverUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json, text/event-stream',
-          },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'initialize',
-            params: {
-              protocolVersion: '2024-11-05',
-              capabilities: {},
-              clientInfo: { name: 'nanoclaw-preflight', version: '1.0' },
-            },
-            id: 1,
-          }),
-          signal: controller.signal,
-        });
+        // SSE servers only accept GET on their /sse endpoint — use a health check instead.
+        // HTTP servers accept POST with JSON-RPC.
+        const isSse = serverType === 'sse';
+        const healthUrl = isSse ? serverUrl.replace(/\/sse\/?$/, '/health') : serverUrl;
+        const fetchOpts: RequestInit = isSse
+          ? { method: 'GET', signal: controller.signal }
+          : {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json, text/event-stream',
+              },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                method: 'initialize',
+                params: {
+                  protocolVersion: '2024-11-05',
+                  capabilities: {},
+                  clientInfo: { name: 'nanoclaw-preflight', version: '1.0' },
+                },
+                id: 1,
+              }),
+              signal: controller.signal,
+            };
+        const res = await fetch(healthUrl, fetchOpts);
         clearTimeout(timer);
         if (res.ok) {
           validatedMcpServers[name] = serverConfig;
-          log(`MCP preflight OK: ${name} (${serverUrl})`);
+          log(`MCP preflight OK: ${name} (${healthUrl})`);
         } else {
           const reason = `HTTP ${res.status}`;
-          log(`MCP preflight FAILED: ${name} (${serverUrl}) — ${reason}, dropping`);
+          log(`MCP preflight FAILED: ${name} (${healthUrl}) — ${reason}, dropping`);
           mcpFailures.push({ name, url: serverUrl, reason });
         }
       } catch (e) {
