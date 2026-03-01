@@ -1,5 +1,31 @@
 # NEXT — InfiniClaw Planned Work
 
+## Priority 0: Full Bot Autonomy
+
+**Goal:** Bots handle 100% of routine operations. The Operator is an escape hatch, not a daily tool. The Captain sets direction; bots execute.
+
+**Owner:** Cid (Engineer) + Parker (Engineer)
+
+### What's Done
+
+- [x] **IPC task system** — Bots can trigger host-side actions: `restart_bot`, `rebuild_image`, `git_push`, `restart_wksm`, `restart_scaleman`, `send_to_room`
+- [x] **MCP preflight** — Agent-runner validates all remote MCP servers at startup (5s timeout), drops unreachable ones, bot starts anyway
+- [x] **MCP failure reporting** — Dropped MCP servers are automatically reported to Engineering via `send_to_room` IPC
+- [x] **Session recovery** — Agent-runner recovers most recent session when host loses sessionId, preventing context loss on restart
+- [x] **Self-restart** — Bots can restart themselves and other bots via IPC
+- [x] **Self-rebuild** — Engineers can trigger image rebuilds via `rebuild_image` IPC
+- [x] **Persona editing** — Bots can edit their own CLAUDE.md, skills, and MCP config via writable mounts
+- [x] **Transporter skill** — Engineers can move bots between machines via S3 sync + Matrix coordination
+
+### What's Next
+
+- [ ] **MCP self-healing loop** — When a bot's MCP fails preflight, the engineer on that machine should automatically diagnose (check proxy status, network, config) and fix it without human intervention. Currently engineers get the report; they need standing orders to act on it.
+- [ ] **Health metrics collection** — Parker's primary mission. Build a system where engineers on each machine collect: container spawn times, memory usage, OOM rates, restart loop frequency, API call latency, session sizes. Report to Engineering via Matrix on a schedule.
+- [ ] **Cross-machine health requests** — Engineer on machine A messages engineer on machine B via Matrix requesting health data. Receiving engineer runs diagnostics and replies. No Operator inbox needed.
+- [ ] **Automatic OOM response** — When a bot OOMs (exit 137), the engineer detects it in logs, increases `CONTAINER_MEMORY_MB` in the env file, and restarts. Currently manual.
+- [ ] **Restart loop detection** — If a bot restarts more than 3 times in 10 minutes, the engineer should halt it and report to the Captain instead of letting it burn tokens.
+- [ ] **Reduce Operator to pure escape hatch** — Remove routine operations from Operator CLAUDE.md standing orders. Operator should only activate when: (a) a bot explicitly asks for OS-level help, (b) Matrix is down, (c) Captain manually invokes it.
+
 ## Priority 1: Multi-Computer Architecture
 
 **Goal:** Same bots, same conversations, but access to resources/filesystems on multiple machines — work vs home, Mac + Linux.

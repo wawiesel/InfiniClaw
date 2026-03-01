@@ -69,6 +69,7 @@ interface CommandData {
   branches?: string[];
   branch?: string;
   message?: string;
+  room?: string;
   limit?: number;
 }
 
@@ -286,7 +287,7 @@ async function handleSelfRestart(bot: string, chatJid: string | null, ctx: Infin
     await safeSend(ctx, chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
     return;
   }
-  await safeSend(ctx, chatJid, statusMessage('⭕️', 'restarting...'));
+  await safeSend(ctx, chatJid, statusMessage('⭕️', `${bot} restarting...`));
   try {
     serviceRefreshPlist(resolveRoot(), bot);
   } catch (err) {
@@ -313,7 +314,7 @@ async function handleCrossBotRestart(bot: string, chatJid: string | null, ctx: I
         const msg = {
           type: 'message',
           chatJid: mainGroup.jid,
-          text: statusMessage('⭕️', 'restarting...'),
+          text: statusMessage('⭕️', `${bot} restarting...`),
           sender: bot,
           timestamp: new Date().toISOString(),
         };
@@ -712,6 +713,35 @@ async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext
  */
 type CommandHandler = (data: CommandData, ctx: InfiniClawIpcContext) => void | Promise<void>;
 
+// ── send_to_room ────────────────────────────────────────────────────────
+
+async function handleSendToRoom(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const room = typeof data.room === 'string' ? data.room.trim() : '';
+  const message = typeof data.message === 'string' ? data.message : '';
+  if (!room || !message) {
+    logger.warn({ sourceGroup: ctx.sourceGroup }, 'send_to_room: missing room or message');
+    return;
+  }
+
+  // Resolve room name to JID
+  const groups = ctx.registeredGroups();
+  let targetJid: string | null = null;
+  for (const [jid, group] of Object.entries(groups)) {
+    if (group.name.toLowerCase() === room.toLowerCase()) {
+      targetJid = jid;
+      break;
+    }
+  }
+
+  if (!targetJid) {
+    logger.warn({ room, sourceGroup: ctx.sourceGroup }, 'send_to_room: room not found');
+    return;
+  }
+
+  await safeSend(ctx, targetJid, message);
+  logger.info({ room, sourceGroup: ctx.sourceGroup }, 'send_to_room delivered');
+}
+
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_brain_mode: handleSetBrainMode,
   restart_bot: handleRestartBot,
@@ -719,6 +749,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   rebuild_image: handleRebuildImage,
   bot_status: handleBotStatus,
   set_thread: handleSetThread,
+  send_to_room: handleSendToRoom,
   restart_wksm: handleRestartWksm,
   restart_scaleman: handleRestartScaleman,
   git_push: handleGitPush,

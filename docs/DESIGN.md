@@ -42,11 +42,56 @@ Rooms:
 - We have the lobe concept where a bot can spawn a delegate agent that merges back into the main bot using Matrix threads
 - Bots must be responsive at all times. Matrix features like emoji and reactions help with this.
 - The base bot is Claude based and can upgrade/downgrade his brain by himself.
+- **Bots are autonomous.** They can do everything they need to improve themselves — rebuild their own images, fix broken MCP, update their own config, monitor their own health, and recover from failures — all without human intervention. The Operator (host-side agent) exists only as an escape hatch for when something goes truly sideways at the OS level. The system's goal is that bots handle 100% of routine operations themselves.
 - **Output Formatting & Math**: All tool calls are rendered as collapsible blocks showing their input and output. Escaped newlines (`\n`) are preserved. Matrix environments must natively support robust rendering for mathematical equations (e.g. MathJax) wherever the LLM outputs LaTeX equivalents.
 - **System Actions**: Any message that is not a direct response to a conversation (e.g., restarts, working hourglass, brain reload, start up) must be prefixed with an emoji.
 - **No redactions.** Status messages are never deleted or redacted. They have a "live" state while active and a "finished" state when done. This preserves a readable timeline — e.g., `⏳ working (3m)` → `⏳ worked (3m)`, `💤 idling (5m)` → `💤 idled (5m)`.
 - **Network Passthrough (SSL)**: Container agents and host processes must explicitly handle forwarding corporate variables (like `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`) and mounting the host's SSL certificates so they don't fail when routed through company TLS inspection proxies.
 - **Work with Claude Code, not against it.** Bots run on the Claude Agent SDK. When the SDK has a preferred way to do something (tools, memory, task tracking), use it or sync from it — don't fight it with competing systems. If the SDK introduces a new tool that overlaps with ours, prefer one-way sync from the SDK's system over blocking it. Blocking is a last resort.
+
+### Bot Autonomy
+
+The fleet is designed so bots are fully self-sufficient. The Captain (human) sets direction. Bots execute everything else. The Operator (host-side agent) is a fallback — not a regular part of the workflow.
+
+**What bots own:**
+
+| Capability | How | IPC Task |
+|-----------|-----|----------|
+| Rebuild own container image | Engineer writes IPC task | `rebuild_image` |
+| Restart self or other bots | Bot writes IPC task | `restart_bot` |
+| Push code to remote | Bot writes IPC task | `git_push` |
+| Fix broken MCP config | Edit persona `.mcp.json`, request restart | Self-service |
+| Monitor health | Engineers collect metrics from all bots via Matrix | Matrix messaging |
+| Move bots between machines | Transporter skill: S3 sync + Matrix coordination | Self-service |
+| Update own instructions | Edit persona CLAUDE.md via writable mount | Self-service |
+| Add/modify skills | Write SKILL.md to persona skills directory | Self-service |
+
+**What the Operator does (escape hatch only):**
+
+- Cross-machine coordination when Matrix is down
+- OS-level fixes (launchd, podman machine, network)
+- Secret rotation that requires human auth (OAuth flows)
+- Emergency intervention when bots are in a restart loop
+
+**Self-healing loop:**
+
+```
+Bot detects problem (MCP down, health check fails, OOM)
+  → Bot diagnoses root cause (read logs, check config)
+  → Bot fixes the cause (edit config, update image, adjust memory)
+  → Bot requests restart via IPC
+  → Host process restarts bot with fixed config
+  → Bot verifies fix on startup
+  → Bot reports resolution to Engineering via Matrix
+```
+
+**MCP self-healing (implemented):**
+
+Agent-runner runs a 5-second preflight check on every remote MCP server at startup. Unreachable servers are dropped — the bot starts without them. A failure report is automatically sent to Engineering via the `send_to_room` IPC task. The engineer bot sees the report, diagnoses the issue, fixes the config or proxy, and restarts the affected bot.
+
+**Cross-machine health monitoring:**
+
+Engineers (Cid on HERACLES, Parker on mac139160) collect health metrics from all bots on their machine and report to Engineering via Matrix. Any engineer can request a health report from another machine by messaging the engineer on that machine. No Operator involvement needed.
 
 ### Lobes (delegate agents)
 

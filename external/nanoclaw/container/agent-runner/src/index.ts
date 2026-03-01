@@ -581,15 +581,96 @@ async function runQuery(
     });
   };
 
+  // Pre-flight: validate remote MCP servers before passing to SDK.
+  // A misconfigured or unreachable MCP server must never prevent the bot from starting.
+  const MCP_PREFLIGHT_TIMEOUT = 5000;
+  const IPC_TASKS_DIR = '/workspace/ipc/tasks';
+  const validatedMcpServers: Record<string, Record<string, unknown>> = {};
+  const mcpFailures: Array<{ name: string; url: string; reason: string }> = [];
+  if (containerInput.mcpServers) {
+    for (const [name, config] of Object.entries(containerInput.mcpServers)) {
+      const serverConfig = config as Record<string, unknown>;
+      const serverType = serverConfig.type as string | undefined;
+      const serverUrl = serverConfig.url as string | undefined;
+
+      // Only validate remote servers (sse, http, ws — those with a url).
+      // stdio/command servers are local processes and always pass through.
+      if (!serverUrl || serverType === 'stdio') {
+        validatedMcpServers[name] = serverConfig;
+        continue;
+      }
+
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), MCP_PREFLIGHT_TIMEOUT);
+        const res = await fetch(serverUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/event-stream',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'initialize',
+            params: {
+              protocolVersion: '2024-11-05',
+              capabilities: {},
+              clientInfo: { name: 'nanoclaw-preflight', version: '1.0' },
+            },
+            id: 1,
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          validatedMcpServers[name] = serverConfig;
+          log(`MCP preflight OK: ${name} (${serverUrl})`);
+        } else {
+          const reason = `HTTP ${res.status}`;
+          log(`MCP preflight FAILED: ${name} (${serverUrl}) — ${reason}, dropping`);
+          mcpFailures.push({ name, url: serverUrl, reason });
+        }
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        log(`MCP preflight FAILED: ${name} (${serverUrl}) — ${reason}, dropping`);
+        mcpFailures.push({ name, url: serverUrl, reason });
+      }
+    }
+  }
+
+  // Report MCP failures to Engineering via IPC
+  if (mcpFailures.length > 0) {
+    const botName = sdkEnv.ASSISTANT_NAME || 'unknown';
+    const lines = mcpFailures.map(f => `- **${f.name}** (${f.url}): ${f.reason}`);
+    const message = `⚠️ **${botName}**: MCP preflight failed — dropped ${mcpFailures.length} server(s):\n${lines.join('\n')}`;
+    try {
+      fs.mkdirSync(IPC_TASKS_DIR, { recursive: true });
+      const filename = `${Date.now()}-mcp-preflight.json`;
+      const tempPath = path.join(IPC_TASKS_DIR, `${filename}.tmp`);
+      fs.writeFileSync(tempPath, JSON.stringify({
+        type: 'send_to_room',
+        room: 'Engineering',
+        message,
+      }, null, 2));
+      fs.renameSync(tempPath, path.join(IPC_TASKS_DIR, filename));
+      log(`MCP failure report queued for Engineering`);
+    } catch (e) {
+      log(`Failed to queue MCP failure report: ${e}`);
+    }
+  }
+
   // Debug: write MCP config to file for diagnosis
   try {
     const debugInfo = {
-      hasMcpServers: !!containerInput.mcpServers,
-      mcpServerKeys: containerInput.mcpServers ? Object.keys(containerInput.mcpServers) : [],
-      mcpServersRaw: containerInput.mcpServers || {},
+      hasMcpServers: Object.keys(validatedMcpServers).length > 0,
+      mcpServerKeys: Object.keys(validatedMcpServers),
+      mcpServersRaw: validatedMcpServers,
+      droppedServers: containerInput.mcpServers
+        ? Object.keys(containerInput.mcpServers).filter(k => !(k in validatedMcpServers))
+        : [],
     };
     fs.writeFileSync('/workspace/group/mcp-debug.json', JSON.stringify(debugInfo, null, 2));
-    log(`MCP debug written: ${JSON.stringify(debugInfo.mcpServerKeys)}`);
+    log(`MCP validated: ${JSON.stringify(debugInfo.mcpServerKeys)}${debugInfo.droppedServers.length ? `, dropped: ${JSON.stringify(debugInfo.droppedServers)}` : ''}`);
   } catch (e) {
     log(`Failed to write MCP debug: ${e}`);
   }
@@ -614,7 +695,7 @@ async function runQuery(
         allowDangerouslySkipPermissions: true,
         settingSources: ['project', 'user'],
         mcpServers: {
-          ...(containerInput.mcpServers || {}),
+          ...validatedMcpServers,
           nanoclaw: {
             command: 'node',
             args: [mcpServerPath],
@@ -764,6 +845,24 @@ async function main(): Promise<void> {
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+
+  // If no sessionId provided, recover the most recent session file
+  if (!sessionId) {
+    try {
+      const jsonlFiles = fs.readdirSync(SESSIONS_PROJECT_DIR)
+        .filter((f: string) => f.endsWith('.jsonl'))
+        .map((f: string) => ({
+          name: f,
+          id: f.replace('.jsonl', ''),
+          mtime: fs.statSync(path.join(SESSIONS_PROJECT_DIR, f)).mtimeMs,
+        }))
+        .sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime);
+      if (jsonlFiles.length > 0) {
+        sessionId = jsonlFiles[0].id;
+        log(`Recovered most recent session: ${sessionId}`);
+      }
+    } catch { /* directory may not exist yet */ }
+  }
 
   // Archive non-current session files so they don't bloat Claude Code's scan path
   const archiveDir = path.join(SESSIONS_PROJECT_DIR, 'archive');

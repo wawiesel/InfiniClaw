@@ -15,6 +15,7 @@ Was caused by missing `agent-runner/src` mount path (fixed in 9ad2f75 — `mount
 ## Navigator (Nora) responsiveness problems
 
 - Nora takes too long to respond — Opus on mac139160 is slow, and long sessions compound the latency.
-- OOM kills (exit 137) — 12GB container memory limit hit repeatedly. May need to increase `CONTAINER_MEMORY_MB` or rotate sessions more aggressively.
-- Stale Matrix sync — Nora stops receiving messages after hours of running. Requires restart to recover.
+- ~~OOM kills (exit 137) — 12GB container memory limit hit repeatedly.~~ Increased to 16GB.
+- ~~Stale Matrix sync — Nora stops receiving messages after hours of running.~~ Improved with MCP preflight (no more startup hangs on broken MCP).
+- ~~Session loss on restart~~ Fixed with session recovery in agent-runner.
 - Thread routing: auto-thread is implemented (1c30fdd) but Nora still needs to manage thread-to-topic mapping in her memory so she returns to the right thread for ongoing work.

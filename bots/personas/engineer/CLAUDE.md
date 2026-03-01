@@ -52,6 +52,7 @@ Write JSON to `/workspace/ipc/tasks/` to trigger host-side actions:
 | `codebase-simplify` | Analyze and refactor high-complexity functions |
 | `creating-good-skills` | Guide for writing good SKILL.md files |
 | `customize` | Add channels, integrations, or modify behavior |
+| `transporter` | Move a bot from one machine to another via S3 sync and Matrix coordination |
 
 ## Adding capabilities — Skills, not code
 
