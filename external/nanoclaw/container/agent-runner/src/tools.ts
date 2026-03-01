@@ -49,6 +49,31 @@ export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
     writeIpcFile(messagesDir, data);
   };
 
+  // ── Crew roster ────────────────────────────────────────────────────
+
+  server.tool(
+    'crew_roster',
+    'Show the crew roster: who is present, their rank, role, and who is the commanding officer of each room.',
+    {},
+    async () => {
+      const statusPath = '/workspace/project/data/crew-status.json';
+      try {
+        const data = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
+        const lines: string[] = [];
+        const you = data.thisBot;
+        for (const member of data.crew) {
+          const badge = member.isCommandingOfficer ? ' ⭐ CO' : '';
+          const presence = member.present ? '✅' : '❌';
+          const self = member.name.toLowerCase() === (process.env.NANOCLAW_ASSISTANT_NAME || '').toLowerCase() ? ' (you)' : '';
+          lines.push(`${presence} **${member.name}**${self} — ${member.title || member.role} (rank ${member.rank}, ${member.room})${badge}`);
+        }
+        return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+      } catch {
+        return { content: [{ type: 'text' as const, text: 'Crew roster unavailable.' }] };
+      }
+    },
+  );
+
   // ── Bot directory & messaging ───────────────────────────────────────
 
   server.tool(

@@ -256,6 +256,91 @@ export function syncPersona(root: string, bot: string): void {
 /**
  * Append persona CLAUDE.md to instance base CLAUDE.md and seed group files.
  */
+/** Write local presence file and generate crew-status.json from all machines' presence. */
+function writeCrewStatus(root: string, thisBot: string, dataDir: string): void {
+  const config = loadMachineConfig();
+  const hostname = os.hostname();
+
+  // Write this machine's presence
+  const presenceDir = path.join(config.secretsPath, 'operator', 'presence');
+  fs.mkdirSync(presenceDir, { recursive: true });
+  const localPresence = { hostname, bots: getActiveBots(), updatedAt: new Date().toISOString() };
+  fs.writeFileSync(path.join(presenceDir, `${hostname}.json`), JSON.stringify(localPresence, null, 2));
+
+  // Read all machines' presence to build fleet-wide active set
+  const allPresent = new Set<string>();
+  try {
+    for (const file of fs.readdirSync(presenceDir)) {
+      if (!file.endsWith('.json')) continue;
+      try {
+        const p = JSON.parse(fs.readFileSync(path.join(presenceDir, file), 'utf-8'));
+        for (const bot of p.bots || []) allPresent.add(bot);
+      } catch { /* skip corrupt files */ }
+    }
+  } catch { /* no presence dir */ }
+
+  let roster: Record<string, { role?: string; rank?: number; title?: string }> = {};
+  try {
+    roster = JSON.parse(fs.readFileSync(path.join(config.secretsPath, 'roster.json'), 'utf-8'));
+  } catch { /* no roster */ }
+
+  // Build room map from ALL present bots (not just this machine)
+  // For CO determination, we need to consider the full fleet
+  const crewByRoom: Record<string, { bot: string; rank: number }[]> = {};
+  const crew: {
+    name: string;
+    role: string;
+    rank: number;
+    title?: string;
+    room: string;
+    present: boolean;
+    isCommandingOfficer: boolean;
+  }[] = [];
+
+  for (const [botId, info] of Object.entries(roster)) {
+    const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
+    const room = env?.MAIN_GROUP_NAME || 'unknown';
+    const rank = info.rank ?? 99;
+    const present = allPresent.has(botId);
+
+    if (present) {
+      const key = room.toLowerCase();
+      if (!crewByRoom[key]) crewByRoom[key] = [];
+      crewByRoom[key].push({ bot: botId, rank });
+    }
+
+    crew.push({
+      name: env?.ASSISTANT_NAME || botId,
+      role: info.role || 'unknown',
+      rank,
+      title: info.title,
+      room,
+      present,
+      isCommandingOfficer: false, // set below
+    });
+  }
+
+  // Mark CO for each room (lowest rank among present bots)
+  for (const members of Object.values(crewByRoom)) {
+    members.sort((a, b) => a.rank - b.rank);
+    const coBotId = members[0]?.bot;
+    if (coBotId) {
+      const env = (() => { try { return loadProfileEnv(root, coBotId); } catch { return null; } })();
+      const coName = env?.ASSISTANT_NAME || coBotId;
+      const entry = crew.find((c) => c.name === coName);
+      if (entry) entry.isCommandingOfficer = true;
+    }
+  }
+
+  crew.sort((a, b) => a.rank - b.rank);
+
+  fs.writeFileSync(path.join(dataDir, 'crew-status.json'), JSON.stringify({
+    thisBot,
+    generatedAt: new Date().toISOString(),
+    crew,
+  }, null, 2));
+}
+
 export function restorePersona(root: string, bot: string): void {
   const instance = instanceDir(root, bot);
   const persona = personaDir(root, bot);
@@ -320,9 +405,12 @@ export function deployBot(root: string, bot: string): void {
     console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
   }
 
-  // Mark instance as fresh so syncPersona knows data is current
+  // Write crew status so container tools can report roster
   const dataDir = path.join(instance, 'data');
   fs.mkdirSync(dataDir, { recursive: true });
+  writeCrewStatus(root, bot, dataDir);
+
+  // Mark instance as fresh so syncPersona knows data is current
   fs.writeFileSync(path.join(dataDir, 'run-id'), `${Date.now()}`);
 }
 
