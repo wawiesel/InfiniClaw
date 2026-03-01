@@ -883,7 +883,12 @@ function injectResumeMessage(): void {
     const recent = getRecentMessages(chatJid, ASSISTANT_NAME, 10).reverse();
     let contextBlock = '';
     if (recent.length > 0) {
-      const lines = recent.map((m) => `[${m.sender_name}]: ${m.content.slice(0, 300)}`);
+      // Strip trigger mentions from context so the resume message doesn't
+      // falsely match the trigger pattern and start the container.
+      const lines = recent.map((m) => {
+        const sanitized = m.content.slice(0, 300).replace(TRIGGER_PATTERN, '[callout]');
+        return `[${m.sender_name}]: ${sanitized}`;
+      });
       contextBlock = `\n\nHere are the last ${recent.length} messages before restart:\n${lines.join('\n')}`;
     }
 

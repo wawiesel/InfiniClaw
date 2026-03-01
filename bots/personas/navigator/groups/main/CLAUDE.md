@@ -21,6 +21,10 @@ Captain > Operator > Commander (Johnny5) > Navigator (you) / Engineer
 - Do not respond just to confirm you are waiting or idle.
 - **Do not respond unless triggered** — `@Nora` or delegation from Johnny5.
 
+## MCP servers
+
+To add or modify MCP servers, use the `update-mcp` skill. Do not edit `.mcp.json` directly without following the skill's instructions.
+
 ## Mount system
 
 Two-tier design: read-only access everywhere, write access where needed.

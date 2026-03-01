@@ -90,7 +90,42 @@ The agent sees **all three** — base+persona as the instance-level CLAUDE.md (l
 
 **Deploy flow:** `rsyncInstance()` copies code → `restorePersona()` appends persona to base and seeds group files.
 
-**Restart flow:** `syncPersona()` saves MCP changes back to persona dir (skills are one-way: persona → session). Then redeploy runs `restorePersona()` again with the latest persona content.
+**Restart flow:** `syncPersona()` runs (currently a guard only), then redeploy runs `restorePersona()` again with the latest persona content. Skills are one-way (persona → session). MCP config is read from persona at spawn time (see MCP Configuration below).
+
+### MCP Configuration
+
+**Source of truth:** `bots/personas/{bot}/groups/{group}/.mcp.json`
+
+This is the ONE file that matters. Bots can edit it (writable persona mount). The operator can edit it on the host. There is no merge — **last writer wins**.
+
+**How it flows:**
+
+```
+Persona .mcp.json (on disk)
+  ↓ read at spawn time by readPersonaGroupMcpServers()
+  ↓ passed as mcpServers in ContainerInput JSON via stdin
+  ↓ agent-runner passes to Claude SDK query()
+  → Claude connects to MCP servers
+```
+
+**Two config mechanisms (don't confuse them):**
+
+| Mechanism | Source | What it configures | When read |
+|-----------|--------|-------------------|-----------|
+| SDK passthrough | Persona `.mcp.json` `mcpServers` | SSE/URL-based servers (host-side services) | Container spawn |
+| `mcp-sync.ts` | Persona `mcp-servers/{name}/mcp.json` | Command-based servers (in-container) | Deploy (`loadMcpServersToSettings`) |
+
+Both merge into the SDK's `mcpServers` at different stages. The persona `.mcp.json` is for external servers (SSE endpoints on the host). The `mcp-servers/` directory is for servers that run inside the container.
+
+**Bot edits:**
+
+Bots edit `/workspace/extra/{bot}-persona/groups/{group}/.mcp.json` inside the container. This is a bind mount to the real persona file — edits persist immediately to the host filesystem. Changes take effect on the next container spawn (the running container already has its SDK config baked in from spawn time).
+
+**Rules:**
+- The persona `.mcp.json` is authoritative. Never override it with a stale copy.
+- `enableAllProjectMcpServers: true` in `settings.json` also causes Claude Code to discover `.mcp.json` files in the project tree. These are additive, not a separate source of truth.
+- `container-config.json` holds non-MCP container config (ports, mounts). Not MCP servers.
+- On restart, the host re-reads the persona `.mcp.json`. Whatever the bot last wrote is what the next container gets.
 
 ### Security
 
