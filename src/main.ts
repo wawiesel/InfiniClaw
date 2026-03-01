@@ -1316,9 +1316,11 @@ async function main(): Promise<void> {
       const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
       const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname}`;
       await ch.sendMessage(mainJid, `<font color="#888888"><em>${boot}</em></font>`);
-      // Auto-send todo list so Operator sees what the bot is picking up
-      const todo = buildTodoMessage(mainJid);
-      await ch.sendMessage(mainJid, todo);
+      // Auto-send todo list only if there are active tasks
+      const items = readTodoItems(MAIN_GROUP_FOLDER);
+      if (items.length > 0) {
+        await ch.sendMessage(mainJid, buildTodoMessage(mainJid));
+      }
     } catch (err) {
       logger.warn({ err }, 'Failed to send boot announcement');
     }
