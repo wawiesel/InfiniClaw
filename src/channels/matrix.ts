@@ -854,6 +854,10 @@ export class MatrixChannel implements Channel {
 
       // Extract thread ID from m.relates_to (MSC3440)
       const relatesTo = content['m.relates_to'] as Record<string, unknown> | undefined;
+
+      // Ignore edit events (m.replace) — these are status indicator updates, not new messages
+      if (relatesTo?.rel_type === 'm.replace') return;
+
       const threadId = relatesTo?.rel_type === 'm.thread' ? (relatesTo.event_id as string) : undefined;
 
       let messageContent: string;
