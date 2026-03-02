@@ -828,6 +828,7 @@ function spawnInterruptLobe(
       .replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
     if (!text) return;
     interruptOutputSent = true;
+    activeInterruptLobes.delete(chatJid);
     const ch = findChannel(channels, chatJid);
     if (ch) {
       await ch.sendMessage(chatJid, text, replyThreadId);
