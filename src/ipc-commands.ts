@@ -12,6 +12,7 @@ import Database from 'better-sqlite3';
 import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from 'nanoclaw/env-utils.js';
 
 import {
+  ASSISTANT_NAME,
   ASSISTANT_ROLE,
   MAIN_GROUP_FOLDER,
 } from 'nanoclaw/config.js';
@@ -215,11 +216,11 @@ function parseChatJid(data: CommandData): string | null {
     : null;
 }
 
-/** Parse bot name, defaulting if invalid. */
-function parseBot(data: CommandData, defaultBot: string): string {
+/** Parse bot name from IPC data, defaulting to calling bot's own name. */
+function parseBot(data: CommandData): string {
   return typeof data.bot === 'string' && getActiveBots().includes(data.bot)
     ? data.bot
-    : defaultBot;
+    : ASSISTANT_NAME.toLowerCase();
 }
 
 /** Truncate long output for chat display. */
@@ -273,7 +274,7 @@ async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext):
     );
     logger.info({ bot: data.bot, mode: data.mode }, 'Brain mode updated via IPC');
     const chatJid = parseChatJid(data);
-    if (chatJid) await ctx.sendMessage(chatJid, `engineer:\n\n${summary}`);
+    if (chatJid) await ctx.sendMessage(chatJid, `${data.bot || ASSISTANT_NAME.toLowerCase()}:\n\n${summary}`);
   } catch (err) {
     logger.error({ err, data }, 'Failed to apply set_brain_mode');
   }
@@ -281,7 +282,7 @@ async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext):
 
 async function handleRestartBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'restart_bot')) return;
-  const bot = parseBot(data, 'cid');
+  const bot = parseBot(data);
   const chatJid = parseChatJid(data);
 
   const cooldownMsg = checkCooldown(`restart:${bot}`, RESTART_COOLDOWN_MS);
@@ -300,7 +301,7 @@ async function handleRestartBot(data: CommandData, ctx: InfiniClawIpcContext): P
     return;
   }
 
-  const selfBot = ASSISTANT_ROLE.toLowerCase();
+  const selfBot = ASSISTANT_NAME.toLowerCase();
   if (bot === selfBot) {
     await handleSelfRestart(bot, chatJid, ctx);
   } else {
@@ -375,7 +376,7 @@ async function handleStopBot(data: CommandData, ctx: InfiniClawIpcContext): Prom
     logger.warn({ data }, 'Invalid stop_bot request — missing or invalid bot name');
     return;
   }
-  if (bot === ASSISTANT_ROLE.toLowerCase()) {
+  if (bot === ASSISTANT_NAME.toLowerCase()) {
     logger.warn({ bot }, 'Cannot stop self via stop_bot — use restart_self instead');
     return;
   }
@@ -393,7 +394,7 @@ async function handleStopBot(data: CommandData, ctx: InfiniClawIpcContext): Prom
 
 async function handleRebuildImage(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'rebuild_image')) return;
-  const bot = parseBot(data, 'johnny5');
+  const bot = parseBot(data);
   const chatJid = parseChatJid(data);
 
   const cooldownMsg = checkCooldown(`rebuild:${bot}`, REBUILD_COOLDOWN_MS);
@@ -417,9 +418,7 @@ async function handleRebuildImage(data: CommandData, ctx: InfiniClawIpcContext):
 
 async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'bot_status')) return;
-  const bot = typeof data.bot === 'string' && getActiveBots().includes(data.bot)
-    ? data.bot
-    : 'johnny5';
+  const bot = parseBot(data);
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
 
@@ -548,7 +547,7 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
 
 async function handleHolodeckCreate(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_create')) return;
-  const bot = parseBot(data, 'cid');
+  const bot = parseBot(data);
   const branch = typeof data.branch === 'string' ? data.branch.trim() : '';
   const chatJid = parseChatJid(data);
   if (!branch) {
@@ -569,7 +568,7 @@ async function handleHolodeckCreate(data: CommandData, ctx: InfiniClawIpcContext
 
 async function handleHolodeckTeardown(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_teardown')) return;
-  const bot = parseBot(data, 'cid');
+  const bot = parseBot(data);
   const chatJid = parseChatJid(data);
   logger.info({ bot }, 'Holodeck teardown requested via IPC');
   try {
@@ -584,7 +583,7 @@ async function handleHolodeckTeardown(data: CommandData, ctx: InfiniClawIpcConte
 
 async function handleHolodeckPromote(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_promote')) return;
-  const bot = parseBot(data, 'cid');
+  const bot = parseBot(data);
   const chatJid = parseChatJid(data);
   logger.info({ bot }, 'Holodeck promote requested via IPC');
   await safeSend(ctx, chatJid, `🔧 Promoting holodeck for ${bot} (merge + redeploy)...`);
@@ -600,7 +599,7 @@ async function handleHolodeckPromote(data: CommandData, ctx: InfiniClawIpcContex
 
 async function handleHolodeckSend(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_send')) return;
-  const bot = parseBot(data, 'cid');
+  const bot = parseBot(data);
   const message = typeof data.message === 'string' ? data.message : '';
   const chatJid = parseChatJid(data);
   if (!message) {
@@ -634,7 +633,7 @@ async function handleHolodeckSend(data: CommandData, ctx: InfiniClawIpcContext):
 
 async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_read')) return;
-  const bot = parseBot(data, 'cid');
+  const bot = parseBot(data);
   const limit = typeof data.limit === 'number' && data.limit > 0 ? Math.min(data.limit, 100) : 20;
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
@@ -667,7 +666,7 @@ async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext):
 
 async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'holodeck_status')) return;
-  const bot = parseBot(data, 'cid');
+  const bot = parseBot(data);
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
   const hdBot = `${bot}-holodeck`;

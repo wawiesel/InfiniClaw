@@ -31,7 +31,7 @@ export function loadMachineConfig(): MachineConfig {
     throw new Error(
       `Missing machine config: ${CONFIG_PATH}\n` +
       'Create it with at minimum:\n' +
-      '{\n  "bots": ["engineer", "commander", "architect"],\n  "secretsPath": "/path/to/secrets/profiles"\n}',
+      '{\n  "bots": ["bot1", "bot2"],\n  "secretsPath": "/path/to/secrets"\n}',
     );
   }
 

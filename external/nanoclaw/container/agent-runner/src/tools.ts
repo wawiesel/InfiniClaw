@@ -242,7 +242,7 @@ Modes:
 
 Note: bot restart is required for changes to take effect.`,
     {
-      bot: z.enum(['engineer', 'commander', 'architect']).describe('Bot profile to update'),
+      bot: z.string().describe('Persona name of the bot (e.g. nora, cid, johnny5)'),
       mode: z.enum(['anthropic', 'ollama']).describe('Brain provider mode'),
       model: z.string().optional().describe('Optional model override for the selected mode'),
     },
@@ -288,9 +288,9 @@ The host daemon will:
 
 Use this after making code changes that require a process restart.`,
     {
-      bot: z.enum(['engineer', 'commander', 'architect']).default(
-        (process.env.ASSISTANT_ROLE || 'engineer').toLowerCase() as 'engineer' | 'commander' | 'architect',
-      ).describe('Which bot to restart'),
+      bot: z.string().default(
+        (process.env.NANOCLAW_ASSISTANT_NAME || 'bot').toLowerCase(),
+      ).describe('Persona name of the bot to restart (e.g. nora, cid, johnny5)'),
     },
     async (args) => {
       if (!isMain) {
@@ -475,7 +475,7 @@ Use this after making code changes that require a process restart.`,
 Deploys the branch to an isolated instance that runs in terminal-only mode (no Matrix).
 Use holodeck_send to inject test messages and holodeck_read to check responses.`,
     {
-      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot to create a holodeck for'),
+      bot: z.string().describe('Persona name of the bot to create a holodeck for'),
       branch: z.string().describe('Git branch name to deploy'),
     },
     async (args) => {
@@ -498,7 +498,7 @@ Use holodeck_send to inject test messages and holodeck_read to check responses.`
     'holodeck_teardown',
     'Tear down a holodeck test instance. Stops the service, removes the instance and worktree.',
     {
-      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to tear down'),
+      bot: z.string().describe('Persona name of the bot holodeck to tear down'),
     },
     async (args) => {
       if (!isMain) {
@@ -519,7 +519,7 @@ Use holodeck_send to inject test messages and holodeck_read to check responses.`
     'holodeck_promote',
     'Promote a holodeck instance — merges the feature branch into main and redeploys the live bot.',
     {
-      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to promote'),
+      bot: z.string().describe('Persona name of the bot holodeck to promote'),
     },
     async (args) => {
       if (!isMain) {
@@ -540,7 +540,7 @@ Use holodeck_send to inject test messages and holodeck_read to check responses.`
     'holodeck_send',
     'Send a test message to a holodeck bot instance. Injects the message into the holodeck bot\'s message database.',
     {
-      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to message'),
+      bot: z.string().describe('Persona name of the bot holodeck to message'),
       message: z.string().describe('The message text to inject'),
     },
     async (args) => {
@@ -563,7 +563,7 @@ Use holodeck_send to inject test messages and holodeck_read to check responses.`
     'holodeck_read',
     'Read recent messages from a holodeck bot\'s message database. Returns the last N messages.',
     {
-      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to read from'),
+      bot: z.string().describe('Persona name of the bot holodeck to read from'),
       limit: z.number().int().positive().max(100).default(20).describe('Number of messages to read (default 20)'),
     },
     async (args) => {
@@ -586,7 +586,7 @@ Use holodeck_send to inject test messages and holodeck_read to check responses.`
     'holodeck_status',
     'Check the status of a holodeck test instance — whether it\'s running, its instance path, and worktree info.',
     {
-      bot: z.enum(['engineer', 'commander', 'architect']).describe('Which bot holodeck to check'),
+      bot: z.string().describe('Persona name of the bot holodeck to check'),
     },
     async (args) => {
       if (!isMain) {
