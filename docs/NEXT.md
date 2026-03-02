@@ -1,5 +1,35 @@
 # NEXT — InfiniClaw Planned Work
 
+## Engineering Backlog
+
+These are real problems. Simplify, don't add complexity.
+
+### Duplicate working indicator
+
+`⏳ working...` appears twice when the interrupt lobe handles a message and then the main container re-processes it. The indicator system (`createIndicatorSet` in `main.ts`) is overbuilt with retry logic, adaptive timers, and bump functions. It should be one message that gets edited. Strip it down.
+
+### No streaming to Matrix
+
+Bots produce nothing visible while thinking, then dump the full response. The agent-runner emits output markers only when Claude calls `send_message`. Matrix supports message editing (`m.replace`), so progressive display is possible — send a placeholder, edit as tokens arrive. This requires streaming raw LLM tokens from the container to the host.
+
+### `restorePersona()` is redundant
+
+Persona directories are now bind-mounted into containers. The `restorePersona()` function in `service.ts` that copies persona content into the instance is legacy. Remove it. Deploy flow should be: rsync nanoclaw → write crew status → start launchd.
+
+### `syncPersona()` is fragile
+
+With direct bind mounts, bot edits already persist to the repo. The sync-back step on stop is a no-op for mounted paths and a bug source for everything else. Remove it.
+
+### Scheduled task mount error
+
+Scheduled tasks fail with `statfs .../container/agent-runner/src: no such file or directory`. The agent-runner source mount path is only valid during development. Scheduled task containers need the same mount resolution as regular containers.
+
+### Rate limit visibility
+
+Matrix SDK initial sync causes 429s distinct from outbound message rate limits. The existing alerting only tracks outbound sends. Initial sync rate limits are silent. Log initial sync duration.
+
+---
+
 ## Priority 0: Full Bot Autonomy
 
 **Goal:** Bots handle 100% of routine operations. The Operator is an escape hatch, not a daily tool. The Captain sets direction; bots execute.
