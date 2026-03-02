@@ -71,6 +71,13 @@ IPC command → container writes JSON to /workspace/ipc/output/
   → ipc-watcher.ts polls directory → processes command → writes response
 ```
 
+### Message Filtering
+
+Before processing, messages pass through filtering (`message-filtering.ts`):
+- **Echo prevention** — bots ignore messages from themselves and other bots (`IGNORE_SENDERS`). Prevents feedback loops in shared rooms.
+- **Deduplication** — duplicate messages (same content, same sender, within a time window) are dropped.
+- **Pattern filtering** — messages matching `IGNORE_PATTERNS` (system noise, status messages) are skipped.
+
 ### Message Queue
 
 FIFO per room. One container at a time. `group-queue.ts` enforces this with overflow queueing and retry backoff.
@@ -94,6 +101,28 @@ Every lobe runs in a Matrix thread. The main brain stays sequential — lobes ha
 - Every lobe operation runs in a thread, not on the main timeline.
 - Typing indicators are suppressed when the bot is working in a thread.
 - Bots with `requiresTrigger` use auto-threading: the triggering message becomes the thread root.
+
+### Status Indicators
+
+Three indicator types, all following the no-redaction principle (edit in place, never delete):
+
+| Indicator | Meaning | Live state | Finished state |
+|-----------|---------|------------|----------------|
+| `⏳` | Bot is processing | `⏳ working (3m)` | `⏳ worked (3m)` |
+| `💤` | Bot is waiting for input | `💤 idling (5m)` | `💤 idled (5m)` |
+| `⏳` | Bot is resuming session | `⏳ resuming...` | `⏳ resumed (Xs)` |
+
+Indicators are sent as a message, then edited in place with elapsed time. On boot/restart, bots announce themselves with a single-line status: emoji + name + role + room + model + hostname.
+
+### Brain Management
+
+Each bot's LLM is configured via env (`BRAIN_MODEL`, `BRAIN_OAUTH_TOKEN` / `BRAIN_API_KEY`). Bots can switch models at runtime via the `set_brain_mode` MCP tool + restart.
+
+**Quota fallback:** When the primary provider returns a quota/credit error, the system automatically falls back to Ollama (local model), rewrites the bot's env file, and notifies the Captain. 10-minute cooldown prevents thrashing.
+
+### Session Continuity
+
+On restart, the agent-runner recovers the most recent session to avoid losing conversation context. The host injects a resume message that includes the bot's current todo list so it picks up where it left off without rediscovering tasks from conversation history.
 
 ## Configuration
 
@@ -144,11 +173,45 @@ Two-tier design: read-only everywhere, write access where needed.
 - **Secrets flow:** profile env files → loaded by host process → injected as `--env` into containers. Nothing baked into images.
 - **Mount allowlist** is stored outside the repo (`~/.config/nanoclaw/mount-allowlist.json`) so containers can't tamper with it.
 
+### Operator Commands
+
+The Captain controls the fleet via `!` commands in Matrix, processed by the host (not the bot):
+
+| Command | Effect |
+|---------|--------|
+| `!allow <path> [minutes]` | Grant temporary rw mount access for a bot. Requires restart. |
+| `!deny <path>` | Revoke a mount grant. |
+| `!todo` | Show the bot's current task list. |
+
+### Chat Activity Tracking
+
+The host tracks per-room state: current objective, last progress, last completion, last error — all with timestamps, persisted to the database. This provides state continuity across restarts and powers the todo enforcement system.
+
+**Todo enforcement:** Every 2 minutes, the host checks if the bot has an active task list. If the list is empty or has no in-progress items, a reminder is injected into the message loop.
+
+### Holodeck
+
+Architects can test changes in isolation before deploying to production. The holodeck creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), and runs as its own launchd service in terminal-only mode (no Matrix). CLI commands: `holodeck create|chat|teardown|promote`. Promote merges the branch and redeploys the live bot.
+
+## Safety
+
+### OOM Handling
+
+When a container exits with OOM (code 137), the system tracks consecutive OOMs per room. After 3 consecutive OOMs, a 60-second cooldown is enforced before the next container spawn. This prevents runaway token burn from restart loops.
+
+### Restart Cooldown
+
+60-second cooldown enforced between restarts of the same bot via IPC. Prevents bots from burning context in rapid restart cycles.
+
+### Rate Limit Handling
+
+Matrix 429 errors trigger adaptive backoff in the send queue. Messages that exceed Matrix size limits (`M_TOO_LARGE`) are automatically truncated rather than failing.
+
 ## Security
 
 - **Container isolation** — Podman containers with memory caps, optional CPU limits. No network egress to arbitrary hosts.
 - **Per-room IPC namespaces** — Each room gets its own IPC directory (`_runtime/data/ipc/{room}/`). Prevents cross-room privilege escalation.
-- **Main room elevation** — Only the main room's containers can run privileged IPC commands (`restart_bot`, `rebuild_image`, `git_push`). Other rooms are restricted to task scheduling and thread management.
+- **Main room elevation** — Only the main room's containers can run privileged IPC commands (`restart_bot`, `rebuild_image`, `git_push`). Other rooms are restricted to task scheduling and thread management. IPC commands also have per-command cooldowns.
 - **One container per bot** — `group-queue.ts` enforces this. Stale containers from crashes are cleaned up before spawning. Interrupt lobes coexist via `containerNameTag`.
 - **MCP preflight** — Agent-runner runs a 5-second check on every remote MCP server at startup. Unreachable servers are dropped. Failure reports go to Engineering automatically.
 
