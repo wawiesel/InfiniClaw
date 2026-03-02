@@ -35,6 +35,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getRecentMessages,
+  getThreadMessages,
   getRouterState,
   getSession,
   initDatabase,
@@ -64,7 +65,7 @@ import {
 import { pruneExpired } from './allow-list.js';
 import { MatrixChannel } from './channels/matrix.js';
 import { LocalCliChannel } from './channels/local-cli.js';
-import { findChannel, formatMessages, stripInternalTags } from 'nanoclaw/router.js';
+import { findChannel, formatMessages, formatThreadContext, stripInternalTags } from 'nanoclaw/router.js';
 import { syncPersona } from './service.js';
 import { startSchedulerLoop } from 'nanoclaw/task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from 'nanoclaw/types.js';
@@ -122,6 +123,13 @@ const OOM_MAX_CONSECUTIVE = 3;
 const OOM_COOLDOWN_MS = 60_000; // 60s cooldown after consecutive OOMs
 const oomConsecutive: Record<string, number> = {};
 const oomCooldownUntil: Record<string, number> = {};
+
+// Standing order work cycle — re-trigger bot after completing work
+const STANDING_ORDER_COOLDOWN_MS = parseInt(process.env.STANDING_ORDER_COOLDOWN_MS || '60000', 10);
+const STANDING_ORDER_MAX_CONSECUTIVE = parseInt(process.env.STANDING_ORDER_MAX_CONSECUTIVE || '10', 10);
+const STANDING_ORDER_REST_MS = parseInt(process.env.STANDING_ORDER_REST_MS || '1800000', 10);
+const standingOrderCycles: Record<string, number> = {};
+const standingOrderRestUntil: Record<string, number> = {};
 
 function isThreadContext(chatJid: string): boolean {
   return Boolean(activeReplyThreadIds[chatJid]);
@@ -553,10 +561,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   const basePrompt = formatMessages(filteredMessages);
+  const threadContext = buildThreadContextBlock(chatJid, filteredMessages);
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
   const parts: string[] = [];
   if (missionContext) parts.push(missionContext);
+  if (threadContext) parts.push(threadContext);
   parts.push(basePrompt);
   const prompt = parts.join('\n\n');
 
@@ -735,6 +745,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
   delete activeReplyThreadIds[chatJid];
   markRunEnded(chatJid);
+  if (isMainGroup) scheduleStandingOrderCycle(chatJid);
 
   appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
   return true;
@@ -805,7 +816,9 @@ function spawnInterruptLobe(
   }
   activeInterruptLobes.add(chatJid);
 
-  const prompt = formatMessages(messages);
+  const interruptThreadCtx = buildThreadContextBlock(chatJid, messages);
+  const interruptBase = formatMessages(messages);
+  const prompt = interruptThreadCtx ? `${interruptThreadCtx}\n\n${interruptBase}` : interruptBase;
   const replyThreadId = messages.find((m) => m.thread_id)?.thread_id
     || messages.find((m) => m.id?.startsWith('$'))?.id;
 
@@ -914,6 +927,11 @@ async function handleGroupMessagesInLoop(
   const filtered = groupMessages.filter((msg) => !shouldIgnoreMessage(msg));
   if (filtered.length === 0) return;
 
+  // Reset standing order cycle counter on real (non-system) messages
+  if (filtered.some(m => m.sender !== 'system')) {
+    standingOrderCycles[chatJid] = 0;
+  }
+
   // Check trigger requirement (thread messages bypass trigger)
   if (group.requiresTrigger === true || (!isMainGroup && group.requiresTrigger !== false)) {
     const hasTrigger = filtered.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
@@ -934,7 +952,9 @@ async function handleGroupMessagesInLoop(
   const messagesToSend = allPending.length > 0 ? allPending : filtered;
 
   setObjectiveFromMessages(chatJid, messagesToSend);
-  const formatted = formatMessages(messagesToSend);
+  const threadCtx = buildThreadContextBlock(chatJid, messagesToSend);
+  const rawFormatted = formatMessages(messagesToSend);
+  const formatted = threadCtx ? `${threadCtx}\n\n${rawFormatted}` : rawFormatted;
 
   const lastPiped = messagesToSend[messagesToSend.length - 1];
   // Auto-thread for requiresTrigger groups (see processGroupMessages for explanation)
@@ -1037,6 +1057,42 @@ async function startMessageLoop(): Promise<void> {
 }
 
 // ── System notifications ───────────────────────────────────────────────
+
+function scheduleStandingOrderCycle(chatJid: string): void {
+  if ((standingOrderRestUntil[chatJid] || 0) > Date.now()) return;
+
+  const activity = ensureChatActivity(chatJid);
+  if (activity.lastCompletion && /\b(idle|nothing to do|waiting|no tasks|no pending)\b/i.test(activity.lastCompletion)) {
+    standingOrderCycles[chatJid] = 0;
+    return;
+  }
+
+  const cycles = standingOrderCycles[chatJid] || 0;
+  if (cycles >= STANDING_ORDER_MAX_CONSECUTIVE) {
+    standingOrderRestUntil[chatJid] = Date.now() + STANDING_ORDER_REST_MS;
+    standingOrderCycles[chatJid] = 0;
+    logger.info({ chatJid, cycles }, 'Standing order max cycles reached, resting');
+    return;
+  }
+
+  setTimeout(() => {
+    const state = queue.getGroupStatus(chatJid);
+    if (state.active || state.pendingMessages || state.pendingTasks > 0) return;
+    standingOrderCycles[chatJid] = cycles + 1;
+    injectSystemNotice(chatJid, '[Standing orders] No pending messages. Continue your standing orders.');
+  }, STANDING_ORDER_COOLDOWN_MS);
+}
+
+function buildThreadContextBlock(chatJid: string, messages: NewMessage[]): string {
+  const threadIds = new Set(messages.map(m => m.thread_id).filter(Boolean) as string[]);
+  if (threadIds.size === 0) return '';
+  const newMessageIds = new Set(messages.map(m => m.id).filter(Boolean) as string[]);
+  let allThreadMessages: import('nanoclaw/types.js').NewMessage[] = [];
+  for (const tid of threadIds) {
+    allThreadMessages = allThreadMessages.concat(getThreadMessages(chatJid, tid));
+  }
+  return formatThreadContext(allThreadMessages, newMessageIds);
+}
 
 function injectSystemNotice(chatJid: string, content: string): void {
   storeMessage({

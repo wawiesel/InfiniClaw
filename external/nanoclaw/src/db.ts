@@ -28,6 +28,7 @@ function createSchema(database: Database.Database): void {
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_thread_id ON messages(chat_jid, thread_id);
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -337,6 +338,14 @@ export function getRecentMessages(
   return db
     .prepare(sql)
     .all(chatJid, `${botPrefix}:%`, safeLimit) as NewMessage[];
+}
+
+export function getThreadMessages(chatJid: string, threadId: string, limit = 20): NewMessage[] {
+  return db.prepare(`
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
+    FROM messages WHERE chat_jid = ? AND (thread_id = ? OR id = ?)
+    ORDER BY timestamp ASC LIMIT ?
+  `).all(chatJid, threadId, threadId, Math.min(limit, 50)) as NewMessage[];
 }
 
 export function createTask(
