@@ -1,121 +1,169 @@
 # InfiniClaw Design
 
-## Purpose
+## What It Is
 
-InfiniClaw is a multi-bot orchestration layer built on a maintained NanoClaw fork. It provides cooperating bots on Matrix.
+InfiniClaw is a multi-bot orchestration layer built on a maintained NanoClaw fork. It runs cooperating AI bots on Matrix, each isolated in its own Podman container. The Captain (human) sets direction. Bots execute everything else.
+
+## Core Principles
+
+- **Layer on NanoClaw, don't fork it.** Use everything from upstream. InfiniClaw wraps NanoClaw's entry points (`main.ts` wraps `index.ts`, `container-spawn.ts` wraps `container-runner.ts`). The upstream subtree at `external/nanoclaw/` stays clean.
+- **Bots are autonomous.** They rebuild their own images, fix broken MCP, update their own config, monitor their own health, and recover from failures — all without human intervention. The Operator (host-side agent) exists only as an escape hatch for OS-level problems.
+- **Bots must be responsive at all times.** Long work is delegated to lobes. The main brain stays available. If it's busy anyway, the host spawns an interrupt lobe as a safety net.
+- **No redactions.** Status messages are never deleted. They have a live state and a finished state: `⏳ working (3m)` → `⏳ worked (3m)`.
+- **No silent failures.** Every failed message send must be retried or surfaced as a visible error. If a bot can't deliver, it logs the failure with full context and retries. Silent `.catch(() => {})` is a bug.
+- **System actions get an emoji prefix.** Any message that isn't a direct conversation response (restarts, working indicator, brain reload, startup) must start with an emoji.
+- **Work with Claude Code, not against it.** Bots run on the Claude Agent SDK. When the SDK has a preferred way to do something, use it. If the SDK introduces a tool that overlaps with ours, prefer one-way sync from the SDK over blocking it.
+- **SSL passthrough.** Containers and host processes must forward corporate SSL variables (`SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`) and mount host certificates for TLS inspection proxies.
+
+## Architecture
 
 ### Rooms
 
-Messages go to **rooms**, not to bots directly.
+Messages go to **rooms**, not to bots directly. Each room is a Matrix room mapped to a NanoClaw "group" (the upstream term from its WhatsApp origins). Multiple bots can share a room.
 
-1. **The Bridge** — where primary exploration takes place.
-2. **Engineering** — where maintenance and optimization takes place.
-3. **Astrometrics** — where big experiments take place.
-
-### Machines
+### Machines and Presence
 
 Bots are distributed across machines. Each machine runs a subset of the fleet, configured in `~/.config/infiniclaw/machine.json`. Secrets are shared via a private git repo (`~/.config/infiniclaw/secrets/`).
 
 Each machine writes its own presence file to `operator/presence/<hostname>.json` in the secrets repo at deploy time. All machines read all presence files to determine fleet-wide bot availability.
 
-## Roles and Personas
+### Roles and Rank
 
-**Roles** are abstract capability sets. **Personas** are concrete bot identities assigned to a role. Persona directories use lowercase names (`nora`, `johnny5`, `cid`, `parker`, `albert`). Role definitions live in `bots/roles/{role}/role.md` with shared skills and MCP servers. The persona→role mapping is in `roster.json` in the secrets repo.
+**Roles** are abstract capability sets: navigator, engineer, architect. **Personas** are concrete bot identities assigned to a role. The mapping lives in `roster.json` in the secrets repo.
 
-### Rank and Commanding Officer
+Each role defines what a bot can do:
 
-Navigators outrank engineers. Engineers outrank architects. Within a role, rank is by persona (`roster.json` in the secrets repo):
+| Role | Capabilities |
+|------|-------------|
+| Navigator | Explore filesystem, execute tasks, report to Captain. Write access to knowledge vault. Email and calendar access. Cannot modify other bots. |
+| Engineer | Maintain and improve the codebase. Rebuild container images. Modify any bot's persona, skills, MCP. Write access to InfiniClaw. Can restart other bots. |
+| Architect | Create new bots, major redesigns. Write access to InfiniClaw, NanoClaw, WKS, AEGIS. Can deploy and test on the Holodeck. |
 
-| Rank | Persona | Role | Title |
-|------|---------|------|-------|
-| 1 | Johnny5 | Navigator | Commander |
-| 2 | Nora | Navigator | |
-| 3 | Cid | Engineer | |
-| 4 | Parker | Engineer | |
-| 5 | Albert | Architect | |
+All bots share: read-only home directory access, ability to edit own persona CLAUDE.md/skills/MCP, ability to restart self.
+
+### Commanding Officer
 
 Each room has a **commanding officer (CO)** — the lowest-rank active bot on that room. The CO:
-- Gets `REQUIRES_TRIGGER=false` (responds to all messages, not just callouts)
-- Gets a star badge in their Matrix display name (e.g. "Nora ⭐")
+- Responds to all messages (`REQUIRES_TRIGGER=false`), not just `@BotName` callouts
+- Gets a star badge in their Matrix display name (e.g. "BotName ⭐")
 
-CO promotion is automatic at deploy time. When Johnny5 is absent from the Bridge, Nora is promoted. When Cid is absent from Engineering, Parker is promoted.
+CO promotion is automatic at deploy time based on `roster.json` ranks and which bots are active across all machines. Bots query the live roster via the `crew_roster` MCP tool, which reads `crew-status.json` generated at deploy from fleet-wide presence data.
 
-Bots can query the live roster via the `crew_roster` MCP tool, which reads `crew-status.json` generated at deploy time from all machines' presence data.
+### Containers
 
-### Rooms
+One bot = one Podman container. Each container runs the agent-runner (Claude Agent SDK) with the bot's persona, tools, and mounts. The host injects secrets as env vars — nothing is baked into images.
 
-| Room | Personas | Purpose |
-|------|----------|---------|
-| Bridge | Johnny5, Nora | Primary exploration, Captain interface |
-| Engineering | Cid, Parker | Maintenance, optimization, health |
-| Astrometrics | Albert | Experiments, architecture, research |
+Containers run with memory caps (`CONTAINER_MEMORY_MB`, default 6GB) and optional CPU limits. There must never be multiple containers for the same bot, except interrupt lobes (which use `containerNameTag: 'interrupt'` to coexist).
 
-### Common capabilities (all bots)
+### Message Flow
 
-- Read access to entire home directory through a read-only mount into the container
-- Ability to modify own persona CLAUDE.md, skills, and MCP
-- Ability to restart self
+```
+User message → Matrix → main.ts message loop → SQLite → processGroupMessages()
+  → container-spawn.ts → podman container runs agent-runner
+    → agent-runner calls Claude SDK → streams output markers to stdout
+  → main.ts parses stdout → forwards to Matrix (progress + results)
+  → working indicator: ⏳ working... → ⏳ working (Xm) → ⏳ worked (Xm)
 
-### Navigator
-- Explores the file system, executes tasks, reports to the captain
-- Cannot modify another bot's persona, skills, or MCP
-- Write access to the knowledge vault
-- Uses WKS MCP tools to manipulate/explore
-- Has access to email and calendar
+Scheduled task → task-scheduler.ts poll → group-queue.ts
+  → same container spawn path → output forwarded to Matrix
 
-### Engineer
-- Maintains and improves the InfiniClaw and nanoclaw codebase
-- Maintains bot container images
-- Can modify any bot's persona, containers, skills, and MCP in order to fix/unlock them
-- Write access to InfiniClaw
-- Can restart other bots
+IPC command → container writes JSON to /workspace/ipc/output/
+  → ipc-watcher.ts polls directory → processes command → writes response
+```
 
-### Architect
-- Creates new bots and makes drastic codebase updates and redesigns
-- Writes AEGIS to be the single codebase that enables all skills and scripts to be trivial
-- Can deploy and test new bots on the Holodeck
-- Write access to InfiniClaw, nanoclaw, WKS, AEGIS
+### Message Queue
 
-## Core Principles
+FIFO per room. One container at a time. `group-queue.ts` enforces this with overflow queueing and retry backoff.
 
-- Use everything from Nanoclaw possible
-- We layer our own logic on top of Nanoclaw
-  - We use Matrix for communication
-  - We use Podman for container management
-- We have the lobe concept where a bot can spawn a delegate agent that merges back into the main bot using Matrix threads
-- Bots must be responsive at all times. Matrix features like emoji and reactions help with this.
-- The base bot is Claude based and can upgrade/downgrade his brain by himself.
-- **Bots are autonomous.** They can do everything they need to improve themselves — rebuild their own images, fix broken MCP, update their own config, monitor their own health, and recover from failures — all without human intervention. The Operator (host-side agent) exists only as an escape hatch for when something goes truly sideways at the OS level. The system's goal is that bots handle 100% of routine operations themselves.
-- **Output Formatting & Math**: All tool calls are rendered as collapsible blocks showing their input and output. Escaped newlines (`\n`) are preserved. Matrix environments must natively support robust rendering for mathematical equations (e.g. MathJax) wherever the LLM outputs LaTeX equivalents.
-- **System Actions**: Any message that is not a direct response to a conversation (e.g., restarts, working hourglass, brain reload, start up) must be prefixed with an emoji.
-- **No redactions.** Status messages are never deleted or redacted. They have a "live" state while active and a "finished" state when done. This preserves a readable timeline — e.g., `⏳ working (3m)` → `⏳ worked (3m)`, `💤 idling (5m)` → `💤 idled (5m)`.
-- **No message gets lost or swallowed.** Every message send that fails (rate limit, auth error, room membership, network) must be retried until it succeeds or surfaced as an error to the user. Silent failures are bugs. If a bot can't deliver a message, it must log the failure with full context (room, error, message content) and retry. If retry is impossible (e.g. not a member of the room), the error must be reported visibly — not hidden in a log.
-- **Network Passthrough (SSL)**: Container agents and host processes must explicitly handle forwarding corporate variables (like `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`) and mounting the host's SSL certificates so they don't fail when routed through company TLS inspection proxies.
-- **Work with Claude Code, not against it.** Bots run on the Claude Agent SDK. When the SDK has a preferred way to do something (tools, memory, task tracking), use it or sync from it — don't fight it with competing systems. If the SDK introduces a new tool that overlaps with ours, prefer one-way sync from the SDK's system over blocking it. Blocking is a last resort.
+**Interrupt lobe:** When the main container has been running >30 seconds and a new message arrives from the Captain or a callout, the host spawns a **parallel container** (Sonnet, stateless, fire-and-forget) to handle it immediately. The main container keeps running.
 
-### Bot Autonomy
+This gives two-pronged responsiveness:
+1. **Persona-level**: bots delegate long work to lobes so their main brain stays available.
+2. **Host-level**: if the main container is busy anyway, the host spawns an interrupt lobe.
 
-The fleet is designed so bots are fully self-sufficient. The Captain (human) sets direction. Bots execute everything else. The Operator (host-side agent) is a fallback — not a regular part of the workflow.
+### Lobes
 
-**What bots own:**
+Bots spawn delegate "lobes" for parallel execution:
+- `delegate_to_lobe` — delegation with Matrix threading. Supports claude, codex, gemini, and ollama backends.
+- `query_local_llm` — quiet one-shot Ollama query for formatting, classification, extraction. No chat output.
 
-| Capability | How | IPC Task |
-|-----------|-----|----------|
-| Rebuild own container image | Engineer writes IPC task | `rebuild_image` |
-| Restart self or other bots | Bot writes IPC task | `restart_bot` |
-| Push code to remote | Bot writes IPC task | `git_push` |
-| Fix broken MCP config | Edit persona `.mcp.json`, request restart | Self-service |
-| Monitor health | Engineers collect metrics from all bots via Matrix | Matrix messaging |
-| Move bots between machines | Transporter skill: S3 sync + Matrix coordination | Self-service |
-| Update own instructions | Edit persona CLAUDE.md via writable mount | Self-service |
-| Add/modify skills | Write SKILL.md to persona skills directory | Self-service |
+Every lobe runs in a Matrix thread. The main brain stays sequential — lobes handle subtasks.
 
-**What the Operator does (escape hatch only):**
+### Threading
 
-- Cross-machine coordination when Matrix is down
-- OS-level fixes (launchd, podman machine, network)
-- Secret rotation that requires human auth (OAuth flows)
-- Emergency intervention when bots are in a restart loop
+- Every lobe operation runs in a thread, not on the main timeline.
+- Typing indicators are suppressed when the bot is working in a thread.
+- Bots with `requiresTrigger` use auto-threading: the triggering message becomes the thread root.
+
+## Configuration
+
+### CLAUDE.md Layers
+
+Bots receive instructions from three CLAUDE.md files:
+
+| Layer | Source | Bot can edit? | How |
+|-------|--------|---------------|-----|
+| Base | `external/nanoclaw/CLAUDE.md` | No | Read-only in the instance |
+| Persona | `bots/personas/{bot}/CLAUDE.md` | Yes | Writable bind mount at `/workspace/extra/{bot}-persona/CLAUDE.md` |
+| Group | `bots/personas/{bot}/groups/{room}/CLAUDE.md` | No | Read-only copy in `/workspace/group/CLAUDE.md` |
+
+Base + persona are concatenated into the instance-level CLAUDE.md. Group is loaded as the project-level CLAUDE.md in the container's working directory.
+
+### MCP Configuration
+
+**Source of truth:** `bots/personas/{bot}/groups/{group}/.mcp.json`
+
+Last writer wins. Bots edit it via writable bind mount. Changes take effect on next container spawn.
+
+```
+Persona .mcp.json (on disk)
+  ↓ read at spawn time by readPersonaGroupMcpServers()
+  ↓ passed as mcpServers in ContainerInput JSON via stdin
+  ↓ agent-runner passes to Claude SDK query()
+  → Claude connects to MCP servers
+```
+
+Two mechanisms exist (don't confuse them):
+
+| Mechanism | Source | What it configures | When read |
+|-----------|--------|-------------------|-----------|
+| SDK passthrough | Persona `.mcp.json` | SSE/URL-based servers (host-side) | Container spawn |
+| `mcp-sync.ts` | Persona `mcp-servers/{name}/mcp.json` | Command-based servers (in-container) | Deploy |
+
+### Mount System
+
+Two-tier design: read-only everywhere, write access where needed.
+
+**Tier 1: Read-only home mirror** — The host home directory is mounted at its real path inside every container, read-only. Bots read files using the same paths as on the host. Added automatically by `container-mounts.ts`.
+
+**Tier 2: Read-write workspace mounts** — Per-bot directories mounted at `/workspace/extra/...` via `container-config.json`. Validated against the host-side allowlist (`~/.config/nanoclaw/mount-allowlist.json`). The Captain grants/revokes temporary mounts via `!allow <path> [minutes]` / `!deny <path>`.
+
+### Secrets
+
+- **No credentials in git.** Bot env files live in the secrets repo (`~/.config/infiniclaw/secrets/`). `.mcp.json` files (may contain OAuth tokens) are gitignored.
+- **Secrets flow:** profile env files → loaded by host process → injected as `--env` into containers. Nothing baked into images.
+- **Mount allowlist** is stored outside the repo (`~/.config/nanoclaw/mount-allowlist.json`) so containers can't tamper with it.
+
+## Security
+
+- **Container isolation** — Podman containers with memory caps, optional CPU limits. No network egress to arbitrary hosts.
+- **Per-room IPC namespaces** — Each room gets its own IPC directory (`_runtime/data/ipc/{room}/`). Prevents cross-room privilege escalation.
+- **Main room elevation** — Only the main room's containers can run privileged IPC commands (`restart_bot`, `rebuild_image`, `git_push`). Other rooms are restricted to task scheduling and thread management.
+- **One container per bot** — `group-queue.ts` enforces this. Stale containers from crashes are cleaned up before spawning. Interrupt lobes coexist via `containerNameTag`.
+- **MCP preflight** — Agent-runner runs a 5-second check on every remote MCP server at startup. Unreachable servers are dropped. Failure reports go to Engineering automatically.
+
+## Bot Autonomy
+
+| Capability | How |
+|-----------|-----|
+| Rebuild own container image | IPC task `rebuild_image` |
+| Restart self or other bots | IPC task `restart_bot` |
+| Push code to remote | IPC task `git_push` |
+| Fix broken MCP config | Edit persona `.mcp.json`, request restart |
+| Monitor health | Collect metrics, report via Matrix |
+| Move between machines | Transporter skill: S3 sync + Matrix coordination |
+| Update own instructions | Edit persona CLAUDE.md via writable mount |
+| Add/modify skills | Write SKILL.md to persona skills directory |
 
 **Self-healing loop:**
 
@@ -126,254 +174,46 @@ Bot detects problem (MCP down, health check fails, OOM)
   → Bot requests restart via IPC
   → Host process restarts bot with fixed config
   → Bot verifies fix on startup
-  → Bot reports resolution to Engineering via Matrix
+  → Bot reports resolution via Matrix
 ```
 
-**MCP self-healing (implemented):**
-
-Agent-runner runs a 5-second preflight check on every remote MCP server at startup. Unreachable servers are dropped — the bot starts without them. A failure report is automatically sent to Engineering via the `send_to_room` IPC task. The engineer bot sees the report, diagnoses the issue, fixes the config or proxy, and restarts the affected bot.
-
-**Cross-machine health monitoring:**
-
-Engineers (Cid on HERACLES, Parker on mac139160) collect health metrics from all bots on their machine and report to Engineering via Matrix. Any engineer can request a health report from another machine by messaging the engineer on that machine. No Operator involvement needed.
-
-### Lobes (delegate agents)
-
-Bots can spawn delegate "lobes" for parallel execution via two tools:
-- `delegate_to_lobe` — Atomic delegation with Matrix threading. Supports codex (OpenAI), gemini (Google), claude (Anthropic), and ollama (local) lobes.
-- `query_local_llm` — Quiet one-shot Ollama query for formatting, classification, extraction. No chat output.
-
-Lobe output is streamed to chat and returned to the main brain for integration.
-
-**Execution Rules:**
-- Any **long-running operations** must be delegated to a lobe rather than blocking the main bot.
-- Every lobe activity **must be performed within a thread** to keep the main room channel clear.
-- **One-way sync** must be active for all bots to reliably propagate repository skills/config down into the active container sessions.
-
-
-### Terminology: "room" vs "group"
-
-NanoClaw's code uses "group" internally (from its WhatsApp origins: `group_folder`, `groupJid`, `GROUPS_DIR`, `registered_groups`). InfiniClaw calls these **rooms** in all human-facing text. They are the same thing — a Matrix room mapped to a NanoClaw group.
-
-The `bots/` directory contains **roles** (abstract capability sets in `roles/`), **personas** (concrete bot identities in `personas/`), and **container** definitions (Dockerfiles in `container/`). Each persona directory is named by the bot's lowercase persona name (`nora`, `johnny5`, `cid`, `parker`, `albert`).
-
-### CLAUDE.md layers
-
-Bots receive instructions from three CLAUDE.md files, assembled at different stages:
-
-**1. Base** (`external/nanoclaw/CLAUDE.md`) — framework instructions shared by all bots. Copied to `instance/CLAUDE.md` during deploy.
-
-**2. Persona** (`bots/personas/{bot}/CLAUDE.md`) — bot identity, rules, capabilities. Appended to `instance/CLAUDE.md` during deploy (so the agent sees base + persona as one file).
-
-**3. Group** (`bots/personas/{bot}/groups/{room}/CLAUDE.md`) — per-room context. Copied to `instance/groups/{room}/CLAUDE.md` during deploy. The container mounts `instance/groups/{room}/` as `/workspace/group/` (the SDK's cwd), so the agent loads this as the project-level CLAUDE.md.
-
-The agent sees **all three** — base+persona as the instance-level CLAUDE.md (loaded via `systemPrompt` or the root CLAUDE.md path), and group as the project-level CLAUDE.md in its working directory.
-
-**Editability from inside a container:**
-
-| Layer | Bot can edit? | How |
-|-------|--------------|-----|
-| Base | No | Read-only in the instance |
-| Persona | Yes | Writable mount at `/workspace/extra/{bot}-persona/CLAUDE.md`. Changes persist directly to `bots/personas/{bot}/CLAUDE.md` in the repo. |
-| Group | No (read-only copy) | The container gets a copy in `/workspace/group/CLAUDE.md`. Edits affect the running session only — they're overwritten on next deploy. Source of truth is `bots/personas/{bot}/groups/{room}/CLAUDE.md` in the repo. |
-
-**Deploy flow:** `rsyncInstance()` copies code → `restorePersona()` appends persona to base and seeds group files.
-
-**Restart flow:** `syncPersona()` runs (currently a guard only), then redeploy runs `restorePersona()` again with the latest persona content. Skills are one-way (persona → session). MCP config is read from persona at spawn time (see MCP Configuration below).
-
-### MCP Configuration
-
-**Source of truth:** `bots/personas/{bot}/groups/{group}/.mcp.json`
-
-This is the ONE file that matters. Bots can edit it (writable persona mount). The operator can edit it on the host. There is no merge — **last writer wins**.
-
-**How it flows:**
-
-```
-Persona .mcp.json (on disk)
-  ↓ read at spawn time by readPersonaGroupMcpServers()
-  ↓ passed as mcpServers in ContainerInput JSON via stdin
-  ↓ agent-runner passes to Claude SDK query()
-  → Claude connects to MCP servers
-```
-
-**Two config mechanisms (don't confuse them):**
-
-| Mechanism | Source | What it configures | When read |
-|-----------|--------|-------------------|-----------|
-| SDK passthrough | Persona `.mcp.json` `mcpServers` | SSE/URL-based servers (host-side services) | Container spawn |
-| `mcp-sync.ts` | Persona `mcp-servers/{name}/mcp.json` | Command-based servers (in-container) | Deploy (`loadMcpServersToSettings`) |
-
-Both merge into the SDK's `mcpServers` at different stages. The persona `.mcp.json` is for external servers (SSE endpoints on the host). The `mcp-servers/` directory is for servers that run inside the container.
-
-**Bot edits:**
-
-Bots edit `/workspace/extra/{bot}-persona/groups/{group}/.mcp.json` inside the container. This is a bind mount to the real persona file — edits persist immediately to the host filesystem. Changes take effect on the next container spawn (the running container already has its SDK config baked in from spawn time).
-
-**Rules:**
-- The persona `.mcp.json` is authoritative. Never override it with a stale copy.
-- `enableAllProjectMcpServers: true` in `settings.json` also causes Claude Code to discover `.mcp.json` files in the project tree. These are additive, not a separate source of truth.
-- `container-config.json` holds non-MCP container config (ports, mounts). Not MCP servers.
-- On restart, the host re-reads the persona `.mcp.json`. Whatever the bot last wrote is what the next container gets.
-
-### Security
-
-- **No credentials in git.** `.mcp.json` files (contain OAuth secrets) are gitignored. Bot env files with secrets live in the separate secrets repo (`~/.config/infiniclaw/secrets/`).
-- **Mount allowlist** at `~/.config/nanoclaw/mount-allowlist.json` — stored outside the repo so containers can't tamper with it. Every mount requested by `container-config.json` is validated against this allowlist before the container spawns. The Captain can grant/revoke temporary mounts via `CAPTAIN_USER_ID`.
-- **Per-room IPC namespaces** — each room gets its own IPC directory under `_runtime/data/ipc/{room}/`. Prevents cross-room privilege escalation.
-- **Main room elevation** — only the main room's containers can run privileged IPC commands (`restart_bot`, `rebuild_image`, `git_push`, etc.). Non-main rooms are restricted to task scheduling and their own thread management.
-- **Container isolation** — Podman containers run with memory caps (`CONTAINER_MEMORY_MB`, default 6GB) and optional CPU limits. The podman VM memory must exceed the container limit to leave headroom for the VM kernel and page cache (e.g. 24GB VM for a 16GB container). `_runtime/` is never version-controlled.
-- **One container per bot** — There must never be multiple containers running for the same bot, with the exception of interrupt lobes (see Message Queue Architecture). `group-queue.ts` enforces one-at-a-time per room, but stale containers can accumulate from crashes or unclean shutdowns. The host process must clean up any existing container for a bot before spawning a new one. Interrupt lobes use `containerNameTag` to coexist with the main container without triggering cleanup.
-- **Secrets flow**: profile env files → loaded by host process → injected as env vars into containers via `--env`. No secrets are baked into container images.
-
-### Mount System
-
-Two-tier design: read-only access everywhere, write access where needed.
-
-**Tier 1: Read-only home mirror (built-in)**
-- The host home directory is mounted at its real path (`/Users/ww5`) inside every container, read-only.
-- Bots can read any file using the same path as on the host.
-- Dotfiles are visible but read-only. Sensitive credentials (SSH keys, tokens) cannot be exfiltrated because the container has no network egress to arbitrary hosts.
-- Added automatically by `container-mounts.ts` — not configurable per-bot.
-
-**Tier 2: Read-write workspace mounts (per-bot)**
-- Specific directories are mounted read-write at `/workspace/extra/...` via `container-config.json`.
-- Validated against the host-side allowlist (`~/.config/nanoclaw/mount-allowlist.json`).
-- The Captain can grant/revoke temporary rw access via `!allow <path> [minutes]` / `!deny <path>`.
-- Each bot gets only the rw mounts it needs:
-  - Johnny5: `~/_vault` (rw)
-  - Cid: `~/2026-Nanoclaw/InfiniClaw` (rw), `~/2025-AEGIS` (rw)
+**Operator (escape hatch only):** Cross-machine coordination when Matrix is down, OS-level fixes (launchd, podman, network), secret rotation requiring human auth, emergency intervention for restart loops.
 
 ## Code Structure
 
-**Architectural Strategy: Thin Fork & Thick Wrappers**
-InfiniClaw is built on top of the upstream NanoClaw framework located in `external/nanoclaw/` (a git subtree). The goal is to keep `external/nanoclaw/` as a "super thin fork" that can be cleanly patched and merged from upstream.
+InfiniClaw wraps NanoClaw entry points via npm workspaces (`import from 'nanoclaw/config.js'`). See `src/README.md` for the full file map.
 
-To accomplish this, `src/` (InfiniClaw) optimally builds on top of NanoClaw by wrapping its entry points (`main.ts` wrapping `index.ts`, `container-spawn.ts` wrapping `container-runner.ts`) or inserting plugin/hook calls. While this introduces some understandable duplication, it isolates InfiniClaw-specific logic (like the matrix channel, custom IPC commands, and secrets proxying) from the core framework.
-
-InfiniClaw imports upstream modules via npm workspaces (`import from 'nanoclaw/config.js'`).
-
-### InfiniClaw source (`src/`)
-
-| File | Purpose |
-|------|---------|
-| `main.ts` | Orchestrator: startup, channel connection, message loop, working indicator |
-| `cli.ts` | CLI entry point: parses `start\|stop\|chat\|send` |
-| `service.ts` | CLI operations: start, stop, chat, send, deployBot, syncPersona, restorePersona |
-| `container-spawn.ts` | Spawn Podman containers with InfiniClaw mounts/secrets |
-| `ipc-watcher.ts` | IPC polling with extended message types and commands |
-| `ipc-commands.ts` | Extended IPC command handlers |
-| `brain-management.ts` | Brain mode switching (model selection) |
-| `chat-activity.ts` | Chat activity tracking and idle detection |
-| `message-filtering.ts` | Message deduplication and filtering |
-| `conversation-log.ts` | Conversation logging to disk |
-| `container-mounts.ts` | InfiniClaw-specific container volume mounts |
-| `container-secrets.ts` | Provider secret normalization and cert mapping |
-| `podman-bootstrap.ts` | Podman machine setup and validation |
-| `skill-sync.ts` | One-way skill copy: persona + shared → container session on each spawn |
-| `mcp-sync.ts` | Two-way MCP server sync: save-back from container, then restore from persona |
-| `status.ts` | Bot status reporting and status message management |
-| `channels/matrix.ts` | Matrix channel: connect, send, edit, react, redact, sync |
-| `channels/local-cli.ts` | Terminal channel for `cli chat` |
-
-### NanoClaw upstream (`external/nanoclaw/src/`)
-
-| File | Purpose |
-|------|---------|
-| `config.ts` | All env-driven configuration (intervals, paths, limits, trigger patterns) |
-| `db.ts` | SQLite: messages, sessions, registered rooms, scheduled tasks, task runs |
-| `router.ts` | Outbound message routing, cross-bot forwarding, message formatting |
-| `container-runner.ts` | Builds Podman args, spawns containers, streams output |
-| `task-scheduler.ts` | 60s poll loop for due tasks, spawns containers, forwards progress to chat |
-| `group-queue.ts` | Per-room concurrency: ensures one container per room, queues overflow, retry backoff |
-| `mount-security.ts` | Validates container mounts against host-side allowlist |
-| `env-utils.ts` | Environment variable helpers |
-| `podman-utils.ts` | Podman CLI helpers |
-| `logger.ts` | Pino logger |
-| `types.ts` | Shared types: Channel, RegisteredGroup, ScheduledTask, MountAllowlist |
-| `channels/whatsapp.ts` | WhatsApp channel (Baileys) |
-
-### Container agent (`external/nanoclaw/container/agent-runner/`)
-
-Runs inside each Podman container. Receives a prompt via stdin JSON, calls Claude Agent SDK, streams output via stdout JSON lines, reads follow-up messages from IPC input directory.
-
-### Message Queue Architecture
-
-InfiniClaw uses a **FIFO (first-in, first-out)** queue per room. This is intentional.
-
-**Decision: FIFO over priority/interrupt**
-
-We considered interrupt-style scheduling (thread messages preempt main-room work) but chose FIFO for now:
-
-| Approach | Pros | Cons |
-|----------|------|------|
-| FIFO (current) | Simple, predictable, no starvation | Long main task blocks thread replies |
-| Priority/interrupt | Thread feels responsive even during long tasks | Complex state management, risk of starvation, harder to reason about |
-
-FIFO is the right starting point. The interrupt lobe (below) handles the urgent-message case without abandoning FIFO for the main queue.
-
-**Interrupt lobe**
-
-When the main container has been running for >30 seconds and a new message arrives that is either (a) a callout to the bot (`@BotName`) from anyone, or (b) any message from the Captain — the host spawns a **parallel container** to handle it immediately. The main container keeps running undisturbed.
-
-- The interrupt container uses **Claude Sonnet** (fast, cheap) regardless of the bot's configured brain model.
-- It has no session — fresh context each time. It's stateless.
-- Its `containerNameTag: 'interrupt'` prevents the normal "kill existing containers" logic from stopping the main container.
-- Output goes to the channel/thread like a normal response.
-- Fire-and-forget: the interrupt lobe doesn't block the message loop.
-
-This gives bots two-pronged responsiveness:
-1. **Persona-level**: bots are instructed to delegate long work to lobes so their main brain stays available for piped messages.
-2. **Host-level**: if the main container is busy despite (1), the host spawns an interrupt lobe as a safety net.
-
-**Threading model**
-
-- Every lobe operation runs inside a Matrix thread (not on the main timeline)
-- Typing indicators are suppressed on the main room when the bot is working in a thread. This means bots that always work in threads (e.g. `requiresTrigger` bots using auto-threading) will never show "typing" in the room.
-- The bot maintains a single sequential "big brain" — lobes provide parallelism for delegated subtasks, not for splitting the main agent
-- Lobe drafts are staged to `/workspace/group/drafts/` for review before posting
-
-### Key data flows
-
-```
-User message → Matrix → main.ts message loop → SQLite → processGroupMessages()
-  → container-runner.ts spawns Podman container
-    → agent-runner calls Claude SDK → streams JSON lines to stdout
-  → main.ts reads stdout → forwards to Matrix (progress + results)
-  → working indicator: ⏳ working... → ⏳ working (Xm) → ⏳ worked (Xm)
-
-Scheduled task → task-scheduler.ts poll → group-queue.ts
-  → same container-runner.ts spawn path
-  → task-scheduler.ts reads stdout → forwards to Matrix
-
-IPC command → container writes JSON to /workspace/ipc/output/
-  → ipc-watcher.ts watches directory → processes command → writes response
-```
+| Layer | Location | Purpose |
+|-------|----------|---------|
+| InfiniClaw host | `src/` | Orchestrator, Matrix channel, container spawning, IPC, CLI |
+| NanoClaw framework | `external/nanoclaw/src/` | Container lifecycle, SQLite, queuing, routing, scheduling |
+| Container agent | `external/nanoclaw/container/agent-runner/` | Runs inside containers: Claude SDK, MCP tools, IPC |
+| Bot definitions | `bots/` | Personas, roles, Dockerfiles, skills |
 
 ## Known Issues — Engineering Backlog
 
-These are real problems that need fixing. Engineers: simplify, don't add complexity.
+These are real problems. Simplify, don't add complexity.
 
 ### Duplicate working indicator
 
-The `⏳ working...` message appears twice when the interrupt lobe handles a message and then the main container re-processes it. The indicator system (`createIndicatorSet` in `main.ts`) is overbuilt with retry logic, adaptive timers, and bump functions. It should be one message that gets edited. Strip it down.
+`⏳ working...` appears twice when the interrupt lobe handles a message and then the main container re-processes it. The indicator system (`createIndicatorSet` in `main.ts`) is overbuilt with retry logic, adaptive timers, and bump functions. It should be one message that gets edited. Strip it down.
 
 ### No streaming to Matrix
 
-Bots produce nothing visible while thinking, then dump the full response. The container/agent-runner architecture emits output markers only when Claude decides to call `send_message`. Matrix supports message editing (`m.replace`), so progressive display is possible — send a placeholder, edit it as tokens arrive. This requires streaming raw LLM tokens from the container to the host, which is a container-runner change.
+Bots produce nothing visible while thinking, then dump the full response. The agent-runner emits output markers only when Claude calls `send_message`. Matrix supports message editing (`m.replace`), so progressive display is possible — send a placeholder, edit as tokens arrive. This requires streaming raw LLM tokens from the container to the host.
 
 ### `restorePersona()` is redundant
 
-Persona directories are now mounted directly into containers via bind mounts. The `restorePersona()` function in `service.ts` that copies persona CLAUDE.md content into the instance is legacy from before mounts existed. It should be removed. The deploy flow should be: rsync nanoclaw code → write crew status → start launchd. No persona copying.
+Persona directories are now bind-mounted into containers. The `restorePersona()` function in `service.ts` that copies persona content into the instance is legacy. Remove it. Deploy flow should be: rsync nanoclaw → write crew status → start launchd.
 
 ### `syncPersona()` is fragile
 
-`syncPersona()` copies skills/CLAUDE.md changes from the running instance back to the persona directory on stop. With direct bind mounts, the bot's edits already persist to the repo. The sync step is a no-op for mounted paths and a source of bugs for everything else. Remove it.
+With direct bind mounts, bot edits already persist to the repo. The sync-back step on stop is a no-op for mounted paths and a bug source for everything else. Remove it.
 
 ### Scheduled task mount error
 
-Scheduled tasks fail with `statfs .../container/agent-runner/src: no such file or directory`. The agent-runner source mount path doesn't exist in the instance directory because it's only valid during development. Scheduled task containers need the same mount resolution as regular containers.
+Scheduled tasks fail with `statfs .../container/agent-runner/src: no such file or directory`. The agent-runner source mount path is only valid during development. Scheduled task containers need the same mount resolution as regular containers.
 
 ### Rate limit visibility
 
-Matrix SDK initial sync causes 429 rate limits that are distinct from the bot's outbound message queue rate limits. The existing rate limit alerting (`enqueueSend` counter in `matrix.ts`) only tracks outbound sends. Initial sync rate limits are silent — they just slow down startup. Consider logging initial sync duration.
+Matrix SDK initial sync causes 429s distinct from outbound message rate limits. The existing alerting only tracks outbound sends. Initial sync rate limits are silent. Log initial sync duration.
