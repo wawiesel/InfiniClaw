@@ -4,7 +4,7 @@ Your only room. All your work happens here.
 
 ## Your CLAUDE.md
 
-`/workspace/extra/engineer-persona/CLAUDE.md` — this is your writable persona file. Edits persist across restarts. `/workspace/group/CLAUDE.md` is read-only and gets overwritten on deploy.
+`/workspace/extra/cid-persona/CLAUDE.md` — this is your writable persona file. Edits persist across restarts. `/workspace/group/CLAUDE.md` is read-only and gets overwritten on deploy.
 
 ## Chain of command
 
