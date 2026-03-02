@@ -5,6 +5,7 @@
  * Upstream files (index.ts, container-runner.ts, ipc.ts) are read-only
  * dependencies — never modified by InfiniClaw.
  */
+import { execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -817,9 +818,11 @@ function spawnInterruptLobe(
   const savedModel = process.env.ANTHROPIC_MODEL;
   process.env.ANTHROPIC_MODEL = INTERRUPT_LOBE_MODEL;
 
-  // Interrupt lobe uses streaming mode so output is delivered immediately
-  // without waiting for the container to exit (it sits in IPC polling forever).
+  // Interrupt lobe uses streaming mode so output is delivered immediately.
+  // After first output, kill the container — it would otherwise sit in IPC polling
+  // until the timeout, wasting resources and accumulating zombie containers.
   let interruptOutputSent = false;
+  let interruptContainerName: string | undefined;
   const interruptOnOutput = async (output: ContainerOutput) => {
     if (interruptOutputSent || output.isProgress) return;
     const raw = output.result;
@@ -836,6 +839,13 @@ function spawnInterruptLobe(
       if (ch.setTyping && !isThreadContext(chatJid)) ch.setTyping(chatJid, false).catch(() => {});
     }
     clearWorkingIndicator(chatJid);
+    // Kill the container now — its job is done
+    if (interruptContainerName) {
+      try {
+        execSync(`podman stop "${interruptContainerName}"`, { stdio: 'pipe', timeout: 10_000 });
+      } catch { /* container may have already exited */ }
+      logger.info({ containerName: interruptContainerName }, 'Interrupt lobe container stopped after first output');
+    }
   };
 
   const resultPromise = runContainerAgent(
@@ -848,7 +858,7 @@ function spawnInterruptLobe(
       containerNameTag: 'interrupt',
       timeoutOverrideMs: INTERRUPT_LOBE_TIMEOUT_MS,
     },
-    () => { /* no process registration — interrupt lobes are fire-and-forget */ },
+    (_proc, containerName) => { interruptContainerName = containerName; },
     interruptOnOutput,
   );
 
