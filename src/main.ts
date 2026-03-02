@@ -791,12 +791,19 @@ async function runAgent(
 
 const INTERRUPT_LOBE_MODEL = 'claude-sonnet-4-6';
 const INTERRUPT_LOBE_TIMEOUT_MS = 5 * 60_000; // 5 min
+const activeInterruptLobes = new Set<string>(); // per-group: max 1 concurrent
 
 function spawnInterruptLobe(
   chatJid: string,
   group: RegisteredGroup,
   messages: NewMessage[],
 ): void {
+  if (activeInterruptLobes.has(chatJid)) {
+    logger.info({ group: group.name }, 'Interrupt lobe already active, skipping');
+    return;
+  }
+  activeInterruptLobes.add(chatJid);
+
   const prompt = formatMessages(messages);
   const replyThreadId = messages.find((m) => m.thread_id)?.thread_id
     || messages.find((m) => m.id?.startsWith('$'))?.id;
@@ -870,8 +877,10 @@ function spawnInterruptLobe(
       logger.warn({ group: group.name, error: output.error }, 'Interrupt lobe error');
     }
     logger.info({ group: group.name }, 'Interrupt lobe completed');
+    activeInterruptLobes.delete(chatJid);
   }).catch((err) => {
     clearWorkingIndicator(chatJid);
+    activeInterruptLobes.delete(chatJid);
     logger.error({ group: group.name, err }, 'Interrupt lobe failed');
   });
 

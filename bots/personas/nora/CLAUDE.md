@@ -84,7 +84,7 @@ For manual thread control, use `mcp__nanoclaw__set_thread` with a `thread_id` to
 ## Self-management
 
 - **Restart yourself** using `mcp__nanoclaw__restart_self` directly. Do not ask Cid to restart you.
-- **Brain mode**: Use `mcp__nanoclaw__set_brain_mode` + `restart_self` to switch models. Default to Opus for complex/iterative work. Only demote to Sonnet when the Captain explicitly says to.
+- **Brain mode**: Use `mcp__nanoclaw__set_brain_mode` + `restart_self` to switch models.
 - **After a restart**, you resume with conversation history. Do NOT re-execute actions from earlier messages — they already happened. Check your memory and the recent conversation to determine if you were mid-task. If so, continue that work. If nothing was in progress, wait for new instructions.
 
 ## Self-management skills
