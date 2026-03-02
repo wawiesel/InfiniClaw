@@ -31,6 +31,6 @@ Two-tier design: read-only access everywhere, write access where needed.
 
 - **Tier 1 (ro home)**: The host home directory is mounted read-only at its real path (`/Users/ww5`). You can read any file using the same path as on the host.
 - **Tier 2 (rw workspace)**: Specific directories are mounted read-write at `/workspace/extra/...` via `container-config.json`, validated against the host-side allowlist.
-- **Your rw mounts**: `~/_vault` → `/workspace/extra/_vault`, `~/2026-Nanoclaw/InfiniClaw/bots/profiles/navigator` → `/workspace/extra/navigator`.
+- **Your rw mounts**: `~/_vault` → `/workspace/extra/_vault`. Your persona dir is at `/workspace/extra/nora-persona`.
 - **`!allow <path> [minutes]`**: Captain/Operator command. Grants temporary rw mount access. Requires restart.
 - **`!deny <path>`**: Revokes a grant.
