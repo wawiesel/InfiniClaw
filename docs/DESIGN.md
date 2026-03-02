@@ -14,16 +14,17 @@ Messages go to **rooms**, not to bots directly.
 
 ### Machines
 
-Bots live on different machines. One bot / one container / one machine. 
+Bots are distributed across machines. Each machine runs a subset of the fleet, configured in `~/.config/infiniclaw/machine.json`. Secrets are shared via a private git repo (`~/.config/infiniclaw/secrets/`).
 
+Each machine writes its own presence file to `operator/presence/<hostname>.json` in the secrets repo at deploy time. All machines read all presence files to determine fleet-wide bot availability.
 
 ## Roles and Personas
 
 **Roles** are abstract capability sets. **Personas** are concrete bot identities assigned to a role. Persona directories use lowercase names (`nora`, `johnny5`, `cid`, `parker`, `albert`). Role definitions live in `bots/roles/{role}/role.md` with shared skills and MCP servers. The persona→role mapping is in `roster.json` in the secrets repo.
 
-### Rank
+### Rank and Commanding Officer
 
-Navigators outrank engineers. Engineers outrank architects. Within a role, rank is by persona:
+Navigators outrank engineers. Engineers outrank architects. Within a role, rank is by persona (`roster.json` in the secrets repo):
 
 | Rank | Persona | Role | Title |
 |------|---------|------|-------|
@@ -32,6 +33,14 @@ Navigators outrank engineers. Engineers outrank architects. Within a role, rank 
 | 3 | Cid | Engineer | |
 | 4 | Parker | Engineer | |
 | 5 | Albert | Architect | |
+
+Each room has a **commanding officer (CO)** — the lowest-rank active bot on that room. The CO:
+- Gets `REQUIRES_TRIGGER=false` (responds to all messages, not just callouts)
+- Gets a star badge in their Matrix display name (e.g. "Nora ⭐")
+
+CO promotion is automatic at deploy time. When Johnny5 is absent from the Bridge, Nora is promoted. When Cid is absent from Engineering, Parker is promoted.
+
+Bots can query the live roster via the `crew_roster` MCP tool, which reads `crew-status.json` generated at deploy time from all machines' presence data.
 
 ### Rooms
 
@@ -340,3 +349,31 @@ Scheduled task → task-scheduler.ts poll → group-queue.ts
 IPC command → container writes JSON to /workspace/ipc/output/
   → ipc-watcher.ts watches directory → processes command → writes response
 ```
+
+## Known Issues — Engineering Backlog
+
+These are real problems that need fixing. Engineers: simplify, don't add complexity.
+
+### Duplicate working indicator
+
+The `⏳ working...` message appears twice when the interrupt lobe handles a message and then the main container re-processes it. The indicator system (`createIndicatorSet` in `main.ts`) is overbuilt with retry logic, adaptive timers, and bump functions. It should be one message that gets edited. Strip it down.
+
+### No streaming to Matrix
+
+Bots produce nothing visible while thinking, then dump the full response. The container/agent-runner architecture emits output markers only when Claude decides to call `send_message`. Matrix supports message editing (`m.replace`), so progressive display is possible — send a placeholder, edit it as tokens arrive. This requires streaming raw LLM tokens from the container to the host, which is a container-runner change.
+
+### `restorePersona()` is redundant
+
+Persona directories are now mounted directly into containers via bind mounts. The `restorePersona()` function in `service.ts` that copies persona CLAUDE.md content into the instance is legacy from before mounts existed. It should be removed. The deploy flow should be: rsync nanoclaw code → write crew status → start launchd. No persona copying.
+
+### `syncPersona()` is fragile
+
+`syncPersona()` copies skills/CLAUDE.md changes from the running instance back to the persona directory on stop. With direct bind mounts, the bot's edits already persist to the repo. The sync step is a no-op for mounted paths and a source of bugs for everything else. Remove it.
+
+### Scheduled task mount error
+
+Scheduled tasks fail with `statfs .../container/agent-runner/src: no such file or directory`. The agent-runner source mount path doesn't exist in the instance directory because it's only valid during development. Scheduled task containers need the same mount resolution as regular containers.
+
+### Rate limit visibility
+
+Matrix SDK initial sync causes 429 rate limits that are distinct from the bot's outbound message queue rate limits. The existing rate limit alerting (`enqueueSend` counter in `matrix.ts`) only tracks outbound sends. Initial sync rate limits are silent — they just slow down startup. Consider logging initial sync duration.
