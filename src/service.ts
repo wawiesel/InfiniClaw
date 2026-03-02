@@ -793,9 +793,11 @@ export function chat(bot: string): void {
 
 // ── Send (operator message to bot room) ─────────────────────────────
 
-/** Build room map dynamically from active bots' env files.
+/** Build room map dynamically from ALL bots' env files (fleet-wide).
  *  When multiple bots share a room, the highest-ranking (lowest rank number)
- *  bot is chosen — the commanding officer for that room. */
+ *  bot is chosen — the commanding officer for that room.
+ *  Uses the roster (not just local machine.json bots) so the CO election
+ *  is consistent across machines. */
 function buildRoomMap(root: string): Record<string, { bot: string; roomId: string; jid: string }> {
   const config = loadMachineConfig();
   let roster: Record<string, { rank?: number }> = {};
@@ -803,8 +805,11 @@ function buildRoomMap(root: string): Record<string, { bot: string; roomId: strin
     roster = JSON.parse(fs.readFileSync(path.join(config.secretsPath, 'roster.json'), 'utf-8'));
   } catch { /* no roster — all bots equal */ }
 
+  // Consider all bots in the roster, not just local ones
+  const allBots = Object.keys(roster).length > 0 ? Object.keys(roster) : getActiveBots();
+
   const map: Record<string, { bot: string; roomId: string; jid: string; rank: number }> = {};
-  for (const bot of getActiveBots()) {
+  for (const bot of allBots) {
     try {
       const env = loadProfileEnv(root, bot);
       const groupName = env.MAIN_GROUP_NAME;
