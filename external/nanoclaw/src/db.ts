@@ -28,7 +28,6 @@ function createSchema(database: Database.Database): void {
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
-    CREATE INDEX IF NOT EXISTS idx_thread_id ON messages(chat_jid, thread_id);
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -95,6 +94,8 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+  // Create thread index (must come after thread_id migration for existing DBs)
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_thread_id ON messages(chat_jid, thread_id)`);
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
