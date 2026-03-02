@@ -202,8 +202,9 @@ export function ensurePodmanReady(): void {
   }
 }
 
-export function killStaleContainers(): void {
-  const stopped = stopContainersByPrefix('nanoclaw-', 5);
+export function killStaleContainers(onlyBot?: string): void {
+  const prefix = onlyBot ? `nanoclaw-${onlyBot}-` : 'nanoclaw-';
+  const stopped = stopContainersByPrefix(prefix, 5);
   for (const name of stopped) {
     console.log(`Stopping stale container: ${name}`);
   }
@@ -716,8 +717,8 @@ export async function stop(onlyBot?: string): Promise<void> {
   }
 
   removeStalePlists();
-  killRogueProcesses();
-  killStaleContainers();
+  if (!onlyBot) killRogueProcesses();
+  killStaleContainers(onlyBot);
 
   // Push state to S3 after stopping (warn on failure)
   try { await pushAll(root); } catch (err) {
