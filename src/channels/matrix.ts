@@ -909,22 +909,10 @@ export class MatrixChannel implements Channel {
     // Reduce sync traffic: don't send/receive presence updates
     client.syncingPresence = 'offline' as any;
 
-    // Build a sync filter scoped to rooms we care about
-    const groups = this.opts.registeredGroups();
-    const roomIds = Object.keys(groups).map(toRoomId);
-    const syncFilter = roomIds.length > 0 ? {
-      presence: { not_types: ['*'] },
-      room: {
-        rooms: roomIds,
-        ephemeral: { not_types: ['*'] },
-        state: { lazy_load_members: true },
-      },
-    } : undefined;
-
     try {
-      await withTimeout(client.start(syncFilter), MATRIX_CONNECT_TIMEOUT_MS, 'client.start');
+      await withTimeout(client.start(), MATRIX_CONNECT_TIMEOUT_MS, 'client.start');
       this._connected = true;
-      logger.info({ syncFilter: !!syncFilter, roomCount: roomIds.length }, 'Connected to Matrix');
+      logger.info('Connected to Matrix');
       if (this.opts.displayName) {
         client.setDisplayName(this.opts.displayName).catch((err) => {
           logger.warn({ err }, 'Failed to set display name');

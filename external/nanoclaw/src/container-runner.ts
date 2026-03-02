@@ -416,7 +416,9 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
 
         // If streaming output was already delivered, the crash happened during
         // cleanup or while waiting for more IPC input — treat as success.
-        if (hadStreamingOutput) {
+        // Exception: OOM kills (137) always go through the error path so the
+        // caller can clear the toxic session and avoid an infinite resume loop.
+        if (hadStreamingOutput && !isOomKill) {
           logger.warn(
             {
               group: opts.groupName,
