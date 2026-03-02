@@ -53,10 +53,10 @@ const STORAGE_ACCESS_TOKEN = 'matrix_access_token';
 const STORAGE_REFRESH_TOKEN = 'matrix_refresh_token';
 const STORAGE_DEVICE_ID = 'matrix_device_id';
 const STORAGE_USER_ID = 'matrix_user_id';
-const MATRIX_SEND_TIMEOUT_MS = 4_000;
-const MATRIX_TYPING_TIMEOUT_MS = 1_500;
-const MATRIX_META_TIMEOUT_MS = 2_500;
-const MATRIX_HEALTH_TIMEOUT_MS = 5_000;
+const MATRIX_SEND_TIMEOUT_MS = 10_000;
+const MATRIX_TYPING_TIMEOUT_MS = 3_000;
+const MATRIX_META_TIMEOUT_MS = 5_000;
+const MATRIX_HEALTH_TIMEOUT_MS = 10_000;
 const MATRIX_CONNECT_TIMEOUT_MS = 60_000;
 let matrixSdkLoggerConfigured = false;
 
