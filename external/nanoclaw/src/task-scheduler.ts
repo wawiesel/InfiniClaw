@@ -10,7 +10,7 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
-import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import { ContainerInput, ContainerOutput, runContainerAgent as defaultRunContainerAgent, writeTasksSnapshot } from './container-runner.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -28,6 +28,12 @@ export interface SchedulerDependencies {
   queue: GroupQueue;
   onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  runContainerAgent?: (
+    group: RegisteredGroup,
+    input: ContainerInput,
+    onProcess: (proc: ChildProcess, containerName: string) => void,
+    onOutput?: (output: ContainerOutput) => Promise<void>,
+  ) => Promise<ContainerOutput>;
 }
 
 async function runTask(
@@ -104,7 +110,8 @@ async function runTask(
   };
 
   try {
-    const output = await runContainerAgent(
+    const runFn = deps.runContainerAgent || defaultRunContainerAgent;
+    const output = await runFn(
       group,
       {
         prompt: task.prompt,
