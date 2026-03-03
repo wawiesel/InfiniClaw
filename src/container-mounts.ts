@@ -158,7 +158,7 @@ export function readPersonaGroupMcpServers(personaBaseDir: string, groupFolder: 
       }
     }
   } catch (err) {
-    console.error(`[readPersonaGroupMcpServers] Failed to parse ${mcpJsonPath}:`, err);
+    logger.warn({ err, mcpJsonPath }, 'Failed to parse persona group .mcp.json');
   }
   return undefined;
 }
