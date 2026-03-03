@@ -99,9 +99,133 @@ Every subsystem currently assumes co-located resources:
 6. **Image distribution.** Container images need to exist on the machine that runs the container. Registry? Build on each machine? Push/pull from a shared store?
 7. **Which subsystems migrate first?** What's the dependency order for making each subsystem location-independent?
 
-### Architecture Design (Albert fills this in)
+### Architecture Design
 
-_Albert: document your research findings and architecture decisions here as you work._
+_Research completed 2026-03-02. Findings and recommendations below._
+
+#### Q1: Container Runtime — SSH-wrapped Podman
+
+**Recommendation: `ssh host podman run ...` via the existing `runContainer()` abstraction.**
+
+Podman remote (`podman --remote`) has critical bugs: stdin/stdout piping is broken (#15818), and volume mounts reference server paths only. But the architecture doesn't need Podman's remote protocol — we already spawn `podman` as a child process with `child_process.spawn()`. We can spawn `ssh host podman run -i --rm ...` instead. stdin/stdout piping works natively over SSH.
+
+**Implementation:** Add a `host?: string` field to `RunContainerOpts`. When set, `runContainer()` prefixes the command with `ssh -o StrictHostKeyChecking=accept-new host`. The timeout, output parsing, and sentinel markers all work identically — they operate on the process streams, not the transport.
+
+**Node registry:** Not needed initially. Start with a `machine.json` config that maps bot → host. If we later need dynamic scheduling, add a health-check loop.
+
+#### Q2: Volume Mounts — NFS for Home, Syncthing for State
+
+**Recommendation: Two-tier mount strategy.**
+
+| What | Mechanism | Why |
+|------|-----------|-----|
+| Home directory (ro) | NFS | Native on Mac+Linux, best LAN performance, reliable |
+| Group workspaces (rw) | Local to execution host | Each bot runs on one machine; its workspace is local |
+| Persona files (rw) | Syncthing (send-only) | Replicated across machines, ~2s latency is fine |
+| IPC directories | Eliminated (see Q4) | Replaced by Matrix-based IPC |
+
+**NFS setup:** Export home directory read-only from each machine. Mount on the other machine at the same path (e.g., `/Users/ww5` on Linux mounts the Mac's home). Use `-o ro,resvport` on macOS client. One-time setup per machine pair.
+
+**SSHFS rejected:** Unreliable under sustained load, hangs on SSH drops. Not acceptable for container mounts.
+
+**SQLite over NFS rejected:** Official SQLite docs warn against it. `fcntl()` locking is unreliable on NFS. Risk of silent corruption.
+
+#### Q3: SQLite — Single-Writer with Litestream Backup
+
+**Recommendation: Keep SQLite as single-writer per bot, add Litestream for disaster recovery.**
+
+Each bot already has its own `messages.db`. Since each bot runs on exactly one machine at a time, there's no concurrent-writer problem. The current architecture is already single-writer.
+
+**Cross-bot DB access** (service.ts `send()` command, IPC task scheduling) currently opens another bot's DB file directly. This breaks across machines. Fix: route cross-bot operations through Matrix (the bots are already in shared rooms) or through a thin HTTP proxy on each machine.
+
+**Litestream:** Runs as a sidecar, continuously streams WAL pages to S3. If a bot moves to a different machine, restore from S3. ~450ms p99 replication latency. Actively maintained, low complexity.
+
+**PostgreSQL rejected:** Operational overhead not justified for our scale (3 bots, <100k messages).
+
+#### Q4: IPC — Matrix as the IPC Layer
+
+**Recommendation: Replace filesystem IPC with Matrix messages.**
+
+The bots already communicate through Matrix rooms. The IPC filesystem (`data/ipc/<group>/messages/*.json` + 500ms polling) duplicates what Matrix already does. Eliminating filesystem IPC removes the biggest single-machine assumption.
+
+**How:** IPC commands (restart_bot, set_brain_mode, holodeck_*, git_push) become Matrix messages with a structured prefix (e.g., `!ipc restart_bot engineer`). The host process on each machine watches its bots' rooms for IPC commands and executes locally. This is already how the `!restart` command works.
+
+**Benefits:**
+- No shared filesystem needed for IPC
+- Commands automatically cross machine boundaries via Matrix
+- Audit trail in Matrix history
+- Existing `createIpcPoller()` abstraction can be adapted to poll Matrix instead of filesystem
+
+**What stays local:** The `data/sessions/` and `data/cache/` directories remain local to each bot's execution host. They don't need cross-machine access.
+
+#### Q5: Service Manager — PM2 on Both Platforms
+
+**Recommendation: PM2.**
+
+- Works on macOS and Linux identically
+- Already requires Node.js (which InfiniClaw uses)
+- `pm2 startup` generates launchd plists on Mac and systemd units on Linux
+- Built-in log rotation, monitoring, auto-restart
+- Manages non-Node processes too (Podman machine, Syncthing, etc.)
+- Replaces the 150+ lines of launchd plist generation in `service.ts`
+
+**Migration:** Replace `refreshPlist()` + `launchctl load` with `pm2 start ecosystem.config.js`. The ecosystem config file replaces the per-bot plist files.
+
+#### Q6: Image Distribution — Build on Each Machine
+
+**Recommendation: Build locally from shared git repo.**
+
+Container images are small (Node.js + agent-runner). Build time is ~30 seconds. The Dockerfile and build context are in the git repo, which is already synced across machines.
+
+**Flow:** `git pull` + `podman build` on each machine. The existing `rebuild_image` IPC command already does this. No registry needed.
+
+**Content-hash check** (`image-hash-<bot>`) already prevents unnecessary rebuilds. This works identically on each machine.
+
+#### Q7: Migration Order
+
+**Dependency-driven order (each step is independently deployable):**
+
+| Phase | Subsystem | Depends On | Effort |
+|-------|-----------|-----------|--------|
+| 1 | **Service manager** (launchd → PM2) | Nothing | Low — config change only |
+| 2 | **IPC** (filesystem → Matrix) | Nothing | Medium — rewrite `ipc-watcher.ts` |
+| 3 | **Container runtime** (local → SSH) | Phase 2 (IPC commands routed via Matrix) | Low — add `host` to `runContainer()` |
+| 4 | **Volume mounts** (local → NFS + local) | Phase 3 (containers run remotely) | Medium — NFS setup + mount path logic |
+| 5 | **Cross-bot DB** (direct → proxied) | Phase 2 (Matrix IPC available) | Low — route through Matrix |
+| 6 | **State sync** (manual → Litestream) | Phase 3 (bots on multiple machines) | Low — add Litestream sidecar |
+| 7 | **Deploy** (local rsync → remote rsync) | Phase 3 | Low — `ssh host` prefix on deploy commands |
+
+**Phase 1-2 can be done on the current single machine** without breaking anything. They're pure improvements even without multi-machine.
+
+### Architecture Summary
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    MACHINE A (Mac)                     │
+│                                                        │
+│  PM2 ──► engineer (podman, local workspace)            │
+│       ──► NFS server (exports ~/Users/ww5 ro)          │
+│       ──► Litestream (streams engineer.db → S3)        │
+│       ──► Syncthing (persona files ↔ Machine B)        │
+│                                                        │
+│  Matrix ◄──── IPC commands ────► Matrix                │
+│                                                        │
+└──────────────────────────────────────────────────────┘
+                         │ SSH
+                         ▼
+┌──────────────────────────────────────────────────────┐
+│                   MACHINE B (Linux)                    │
+│                                                        │
+│  PM2 ──► commander (podman, local workspace)           │
+│       ──► architect (podman, local workspace)          │
+│       ──► NFS client (mounts Mac's home ro)            │
+│       ──► Litestream (streams commander.db → S3)       │
+│       ──► Syncthing (persona files ↔ Machine A)        │
+│                                                        │
+└──────────────────────────────────────────────────────┘
+```
+
+**Key principle:** Each bot runs on exactly one machine. No shared-nothing clustering. Matrix is the universal transport. Local filesystems stay local. Cross-machine access is via NFS (read-only) or Matrix (commands).
 
 ---
 
