@@ -102,6 +102,7 @@ import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots } from './service.js';
 import { handleOperatorCommand, buildTodoMessage, readTodoItems } from './operator-commands.js';
+import { getSystemStatus } from './status.js';
 
 // ── Module-level state ─────────────────────────────────────────────────
 
@@ -1710,6 +1711,93 @@ async function main(): Promise<void> {
     }
   }, TODO_ENFORCE_INTERVAL_MS));
 
+  // ── Startup checklist ──────────────────────────────────────────────
+  function buildStartupChecklist(): string {
+    const sessionDir = path.join(DATA_DIR, 'sessions', MAIN_GROUP_FOLDER);
+
+    // Skills
+    const skillsDir = path.join(sessionDir, '.claude', 'skills');
+    let skillRows = '';
+    try {
+      const skillNames = fs.existsSync(skillsDir)
+        ? fs.readdirSync(skillsDir).filter((e) => {
+            try { return fs.statSync(path.join(skillsDir, e)).isDirectory(); } catch { return false; }
+          }).sort()
+        : [];
+      skillRows = skillNames.length > 0
+        ? skillNames.map((s) => `| 🔧 ${s} |`).join('\n')
+        : '| _(none)_ |';
+    } catch { skillRows = '| _(error reading skills)_ |'; }
+
+    // MCP tools
+    const settingsFile = path.join(sessionDir, '.claude', 'settings.json');
+    let mcpRows = '';
+    try {
+      if (fs.existsSync(settingsFile)) {
+        const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+        const mcpNames = Object.keys(settings.mcpServers || {}).sort();
+        mcpRows = mcpNames.length > 0
+          ? mcpNames.map((m) => `| 🔌 ${m} |`).join('\n')
+          : '| _(none)_ |';
+      } else {
+        mcpRows = '| _(none)_ |';
+      }
+    } catch { mcpRows = '| _(error reading MCP)_ |'; }
+
+    // Todos
+    const todos = readTodoItems(MAIN_GROUP_FOLDER);
+    const activeTodos = todos.filter((t) => t.status !== 'completed');
+    let todoRows = '';
+    if (activeTodos.length > 0) {
+      const statusEmoji: Record<string, string> = { in_progress: '🔄', pending: '⏳' };
+      todoRows = activeTodos.map((t) => `| ${statusEmoji[t.status] ?? '❓'} ${t.content} | ${t.status} |`).join('\n');
+    } else {
+      todoRows = '| _(empty)_ | — |';
+    }
+
+    // Machine health (quick snapshot — containers + bot service states)
+    let healthRows = '';
+    try {
+      const status = getSystemStatus(process.cwd());
+      const lines: string[] = [];
+      for (const bot of status.bots) {
+        const svc = bot.service === 'running' ? '🟢' : '🔴';
+        const containers = bot.containers.length > 0
+          ? bot.containers.map((c) => c.uptime).join(', ')
+          : '—';
+        const lastErr = bot.lastErrorAt
+          ? `${Math.round((Date.now() - new Date(bot.lastErrorAt).getTime()) / 60000)}m ago`
+          : '—';
+        lines.push(`| ${bot.name} | ${svc} ${bot.service} | ${bot.model ?? '?'} | ${containers} | ${lastErr} |`);
+      }
+      healthRows = lines.length > 0 ? lines.join('\n') : '| _(no bots)_ | — | — | — | — |';
+    } catch { healthRows = '| _(error reading health)_ | — | — | — | — |'; }
+
+    return [
+      `## 🚀 ${ASSISTANT_NAME} startup checklist`,
+      '',
+      '### 🔧 Skills',
+      '| Skill |',
+      '|-------|',
+      skillRows,
+      '',
+      '### 🔌 MCP Servers',
+      '| Server |',
+      '|--------|',
+      mcpRows,
+      '',
+      '### ✅ Active Todos',
+      '| Task | Status |',
+      '|------|--------|',
+      todoRows,
+      '',
+      '### 🏥 Machine Health',
+      `| Bot | Service | Model | Containers | Last Error |`,
+      `|-----|---------|-------|------------|------------|`,
+      healthRows,
+    ].join('\n');
+  }
+
   // Boot announcement
   const bootAnnounceTimer = setInterval(async () => {
     const mainJid = getMainChatJid();
@@ -1725,6 +1813,13 @@ async function main(): Promise<void> {
       const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
       const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname}`;
       await ch.sendMessage(mainJid, `<font color="#888888"><em>${boot}</em></font>`);
+      // Send startup checklist (skills, MCP tools, todos, health)
+      try {
+        const checklist = buildStartupChecklist();
+        await ch.sendMessage(mainJid, checklist);
+      } catch (checklistErr) {
+        logger.warn({ err: checklistErr }, 'Failed to send startup checklist');
+      }
       // Todo list is sent after resume flow completes (see injectResumeMessage)
     } catch (err) {
       logger.warn({ err }, 'Failed to send boot announcement');
