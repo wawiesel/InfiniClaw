@@ -130,7 +130,9 @@ export function mountsForBot(bot: string): VolumeMount[] {
 
     let basename = path.basename(expanded);
     if (usedBasenames.has(basename)) {
-      basename = `${basename}-${usedBasenames.size}`;
+      let n = 2;
+      while (usedBasenames.has(`${basename}-${n}`)) n++;
+      basename = `${basename}-${n}`;
     }
     usedBasenames.add(basename);
 
