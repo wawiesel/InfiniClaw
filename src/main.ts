@@ -116,6 +116,8 @@ const lastProgressChatAt: Record<string, number> = {};
 const PIP_PULSE = ['🔵', '🔷', '🔹', '🔷'] as const;
 const workThreadIds: Record<string, string> = {};
 const activeReplyThreadIds: Record<string, string | undefined> = {};
+// Per-turn thread for tool call <details> blocks when on main timeline
+const progressToolCallThreadIds: Record<string, string | undefined> = {};
 let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
@@ -473,12 +475,52 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
     if (!isToolCall) lastProgressChatAt[ctx.chatJid] = now;
     const ch = findChannel(channels, ctx.chatJid);
     if (ch) {
-      const formatted = isToolCall ? text : `<small><em>${text}</em></small>`;
-      void ch.sendMessage(ctx.chatJid, formatted, activeReplyThreadIds[ctx.chatJid]).then(() => {
-        bumpWorkingIndicator(ctx.chatJid, activeReplyThreadIds[ctx.chatJid]);
-      }).catch((err) => {
-        logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send progress to chat');
-      });
+      if (isToolCall) {
+        const activeThread = activeReplyThreadIds[ctx.chatJid];
+        if (activeThread) {
+          // Already in a thread — send <details> collapsible in-thread (desktop renders it; mobile shows inline but off main timeline)
+          void ch.sendMessage(ctx.chatJid, text, activeThread).then(() => {
+            bumpWorkingIndicator(ctx.chatJid, activeThread);
+          }).catch((err) => {
+            logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call progress to thread');
+          });
+        } else {
+          // Main timeline — route tool calls to a dedicated per-turn thread
+          const sendToToolThread = (threadId: string) => {
+            void ch.sendMessage(ctx.chatJid, text, threadId).then(() => {
+              bumpWorkingIndicator(ctx.chatJid, threadId);
+            }).catch((err) => {
+              logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call to dedicated thread');
+            });
+          };
+          if (progressToolCallThreadIds[ctx.chatJid]) {
+            sendToToolThread(progressToolCallThreadIds[ctx.chatJid]!);
+          } else if (ch.sendMessageReturningId) {
+            // Open a new thread with an anchor message, then post tool call into it
+            void ch.sendMessageReturningId(ctx.chatJid, '<font color="#888888"><em>🔧 Tool calls</em></font>').then((anchorId) => {
+              if (anchorId) {
+                progressToolCallThreadIds[ctx.chatJid] = anchorId;
+                sendToToolThread(anchorId);
+              } else {
+                // Fallback: send inline if we couldn't get an anchor ID
+                void ch.sendMessage(ctx.chatJid, text).catch(() => {});
+              }
+            }).catch((err) => {
+              logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to open tool call thread anchor');
+            });
+          } else {
+            // Channel doesn't support returning IDs — send inline as fallback
+            void ch.sendMessage(ctx.chatJid, text).catch(() => {});
+          }
+        }
+      } else {
+        const formatted = `<small><em>${text}</em></small>`;
+        void ch.sendMessage(ctx.chatJid, formatted, activeReplyThreadIds[ctx.chatJid]).then(() => {
+          bumpWorkingIndicator(ctx.chatJid, activeReplyThreadIds[ctx.chatJid]);
+        }).catch((err) => {
+          logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send progress to chat');
+        });
+      }
     }
   }
 }
@@ -708,6 +750,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Clear work thread after each response — thread context is per-turn, derived from
   // the incoming message's thread_id. set_thread() only overrides for a single response.
   delete workThreadIds[chatJid];
+  // Clear per-turn tool call thread so next turn opens a fresh anchor
+  delete progressToolCallThreadIds[chatJid];
   if (channel?.setTyping && !isThreadContext(chatJid)) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   if (channel?.setStatusPip) {
@@ -1887,11 +1931,13 @@ async function main(): Promise<void> {
       const hostname = os.hostname();
       const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
       const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname}`;
-      await ch.sendMessage(mainJid, `<span style="color:#888888"><em>${boot}</em></span>`);
-      // Send startup checklist (skills, MCP tools, todos, health)
+      const bootEventId = ch.sendMessageReturningId
+        ? await ch.sendMessageReturningId(mainJid, `<font color="#888888"><em>${boot}</em></font>`)
+        : (await ch.sendMessage(mainJid, `<font color="#888888"><em>${boot}</em></font>`), undefined);
+      // Send startup checklist in a thread off the boot message (keeps mobile timeline clean)
       try {
         const checklist = buildStartupChecklist();
-        await ch.sendMessage(mainJid, checklist);
+        await ch.sendMessage(mainJid, checklist, bootEventId);
       } catch (checklistErr) {
         logger.warn({ err: checklistErr }, 'Failed to send startup checklist');
       }

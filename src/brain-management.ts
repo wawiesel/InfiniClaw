@@ -249,7 +249,7 @@ export function setMainLlm(model: string): void {
 
 export function mainSender(): string {
   const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
-  return `<span style="color:#888888">🧠 <em>${providerName}/${mainLlm}</em></span>`;
+  return `<font color="#888888">🧠 <em>${providerName}/${mainLlm}</em></font>`;
 }
 
 export function defaultSenderForGroup(

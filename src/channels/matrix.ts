@@ -989,15 +989,22 @@ export class MatrixChannel implements Channel {
     if (!this.client || !this._connected) return;
     const roomId = toRoomId(jid);
     try {
+      const normalizedEdit = normalizeSenderPrefixForMarkdown(newText);
+      const isPreformattedHtml = /^<[a-z]/i.test(newText.trimStart());
+      let editHtml: string;
+      if (isPreformattedHtml) {
+        editHtml = newText;
+      } else {
+        editHtml = await marked(normalizedEdit, { breaks: true, gfm: true }) as string;
+        editHtml = editHtml.trim();
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const newContent: Record<string, any> = {
         msgtype: 'm.text',
         body: newText,
+        format: 'org.matrix.custom.html',
+        formatted_body: editHtml,
       };
-      if (/^<[a-z]/i.test(newText.trimStart())) {
-        newContent['format'] = 'org.matrix.custom.html';
-        newContent['formatted_body'] = newText;
-      }
       const content = {
         msgtype: 'm.text',
         body: `* ${newText}`,
