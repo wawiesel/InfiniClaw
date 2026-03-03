@@ -114,6 +114,21 @@ export function loadProfileEnv(root: string, bot: string): Record<string, string
   return parseEnvFile(envFile);
 }
 
+/** Collect MATRIX_USER_ID from all bot env files in the secrets directory. */
+export function collectBotMatrixUserIds(): Set<string> {
+  const config = loadMachineConfig();
+  const ids = new Set<string>();
+  try {
+    for (const bot of fs.readdirSync(config.secretsPath)) {
+      const envFile = path.join(config.secretsPath, bot, 'env');
+      if (!fs.existsSync(envFile)) continue;
+      const env = parseEnvFile(envFile);
+      if (env.MATRIX_USER_ID) ids.add(env.MATRIX_USER_ID);
+    }
+  } catch { /* best effort */ }
+  return ids;
+}
+
 export function applyBrainEnv(env: Record<string, string>): Record<string, string> {
   const out = { ...env };
 

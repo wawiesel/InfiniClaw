@@ -341,6 +341,13 @@ export function getRecentMessages(
     .all(chatJid, `${botPrefix}:%`, safeLimit) as NewMessage[];
 }
 
+export function botParticipatesInThread(chatJid: string, threadId: string): boolean {
+  const row = db.prepare(
+    `SELECT 1 FROM messages WHERE chat_jid = ? AND thread_id = ? AND is_from_me = 1 LIMIT 1`,
+  ).get(chatJid, threadId);
+  return !!row;
+}
+
 export function getThreadMessages(chatJid: string, threadId: string, limit = 20): NewMessage[] {
   return db.prepare(`
     SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id

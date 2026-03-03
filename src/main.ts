@@ -32,6 +32,7 @@ import {
 } from 'nanoclaw/config.js';
 import {
   getAllChats,
+  botParticipatesInThread,
   getMessagesSince,
   getNewMessages,
   getRecentMessages,
@@ -66,7 +67,7 @@ import { pruneExpired } from './allow-list.js';
 import { MatrixChannel } from './channels/matrix.js';
 import { LocalCliChannel } from './channels/local-cli.js';
 import { findChannel, formatMessages, formatThreadContext, stripInternalTags } from 'nanoclaw/router.js';
-import { syncPersona } from './service.js';
+import { syncPersona, collectBotMatrixUserIds } from './service.js';
 import { startSchedulerLoop } from 'nanoclaw/task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from 'nanoclaw/types.js';
 import { logger } from 'nanoclaw/logger.js';
@@ -133,6 +134,10 @@ const standingOrderCycles: Record<string, number> = {};
 const standingOrderRestUntil: Record<string, number> = {};
 const METRICS_HISTORY_FILE = path.join(DATA_DIR, 'metrics-history.jsonl');
 const METRICS_HISTORY_MAX_LINES = 10_000;
+
+// All bot Matrix user IDs — populated at startup from secrets env files.
+// Used to distinguish human vs bot messages for response routing.
+let botMatrixUserIds: Set<string> = new Set();
 
 function isThreadContext(chatJid: string): boolean {
   return Boolean(activeReplyThreadIds[chatJid]);
@@ -538,36 +543,65 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const filteredMessages = missedMessages.filter((msg) => !shouldIgnoreMessage(msg));
   if (filteredMessages.length === 0) return true;
 
+  // Separate human messages from bot messages — only humans can trigger a response
+  const humanMessages = filteredMessages.filter(m => !botMatrixUserIds.has(m.sender));
+  if (humanMessages.length === 0) {
+    // Only bot messages — advance cursor, don't respond
+    lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    return true;
+  }
+
+  // Response decision: only human messages trigger responses
+  const hasTrigger = humanMessages.some(m => TRIGGER_PATTERN.test(m.content.trim()));
+  const hasParticipatingThread = humanMessages.some(
+    m => m.thread_id && botParticipatesInThread(chatJid, m.thread_id),
+  );
+
   if (group.requiresTrigger === true || (!isMainGroup && group.requiresTrigger !== false)) {
-    const hasTrigger = filteredMessages.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
-    const hasThread = filteredMessages.some((m) => !!m.thread_id);
-    if (!hasTrigger && !hasThread) {
+    // Non-CO: need explicit callout or participating thread
+    if (!hasTrigger && !hasParticipatingThread) {
+      lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+      saveState();
+      return true;
+    }
+  } else {
+    // CO: respond to main timeline human messages OR callouts OR participating threads
+    const hasMainTimeline = humanMessages.some(m => !m.thread_id);
+    if (!hasMainTimeline && !hasTrigger && !hasParticipatingThread) {
       lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
       saveState();
       return true;
     }
   }
 
-  setObjectiveFromMessages(chatJid, filteredMessages);
+  // Filter context by thread participation — exclude threads bot isn't part of
+  const contextMessages = filteredMessages.filter(m => {
+    if (!m.thread_id) return true;
+    return botParticipatesInThread(chatJid, m.thread_id)
+      || TRIGGER_PATTERN.test(m.content.trim());
+  });
 
-  const lastMsg = filteredMessages[filteredMessages.length - 1];
+  setObjectiveFromMessages(chatJid, contextMessages);
+
+  const lastMsg = contextMessages[contextMessages.length - 1];
   // For requiresTrigger groups: if the trigger is in a main-timeline message (no thread_id),
   // auto-thread the reply onto that triggering message so the bot doesn't clutter the timeline.
   let autoThreadId: string | undefined;
   if (group.requiresTrigger === true) {
-    const triggerMsg = [...filteredMessages].reverse().find(
+    const triggerMsg = [...contextMessages].reverse().find(
       (m) => !m.thread_id && m.id?.startsWith('$') && TRIGGER_PATTERN.test(m.content.trim()),
     );
     if (triggerMsg) autoThreadId = triggerMsg.id;
   }
   activeReplyThreadIds[chatJid] = lastMsg?.thread_id || workThreadIds[chatJid] || autoThreadId;
   logger.info(
-    { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], lastMsgThreadId: lastMsg?.thread_id, workThread: workThreadIds[chatJid], autoThread: autoThreadId, msgCount: filteredMessages.length },
+    { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], lastMsgThreadId: lastMsg?.thread_id, workThread: workThreadIds[chatJid], autoThread: autoThreadId, msgCount: contextMessages.length },
     'Thread routing resolved',
   );
 
-  const basePrompt = formatMessages(filteredMessages);
-  const threadContext = buildThreadContextBlock(chatJid, filteredMessages);
+  const basePrompt = formatMessages(contextMessages);
+  const threadContext = buildThreadContextBlock(chatJid, contextMessages);
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
   const parts: string[] = [];
@@ -582,7 +616,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: filteredMessages.length },
+    { group: group.name, messageCount: contextMessages.length },
     'Processing messages',
   );
 
@@ -598,7 +632,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'processing...');
   if (!isResuming) startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
-  const inboundMessageIds = filteredMessages.map((m) => m.id).filter(Boolean) as string[];
+  const inboundMessageIds = contextMessages.map((m) => m.id).filter(Boolean) as string[];
   let hadError = false;
   let outputSentToUser = false;
   const agentResponses: string[] = [];
@@ -931,23 +965,52 @@ async function handleGroupMessagesInLoop(
     standingOrderCycles[chatJid] = 0;
   }
 
-  // Check trigger requirement (thread messages bypass trigger)
+  // Separate human messages from bot messages — only humans can trigger a response
+  const humanMessages = filtered.filter(m => !botMatrixUserIds.has(m.sender));
+  if (humanMessages.length === 0) {
+    // Only bot messages — advance cursor, don't respond
+    lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
+    saveState();
+    return;
+  }
+
+  // Response decision: only human messages trigger responses
+  const hasTrigger = humanMessages.some(m => TRIGGER_PATTERN.test(m.content.trim()));
+  const hasParticipatingThread = humanMessages.some(
+    m => m.thread_id && botParticipatesInThread(chatJid, m.thread_id),
+  );
+
   if (group.requiresTrigger === true || (!isMainGroup && group.requiresTrigger !== false)) {
-    const hasTrigger = filtered.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
-    const hasThread = filtered.some((m) => !!m.thread_id);
-    if (!hasTrigger && !hasThread) {
+    // Non-CO: need explicit callout or participating thread
+    if (!hasTrigger && !hasParticipatingThread) {
+      lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
+      saveState();
+      return;
+    }
+  } else {
+    // CO: respond to main timeline human messages OR callouts OR participating threads
+    const hasMainTimeline = humanMessages.some(m => !m.thread_id);
+    if (!hasMainTimeline && !hasTrigger && !hasParticipatingThread) {
       lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
       saveState();
       return;
     }
   }
 
-  // Collect all pending messages since last agent response
+  // Collect all pending messages since last agent response, filtered by thread participation
   const allPending = getMessagesSince(
     chatJid,
     lastAgentTimestamp[chatJid] || '',
     ASSISTANT_NAME,
-  ).filter((msg) => !shouldIgnoreMessage(msg));
+  ).filter((msg) => {
+    if (shouldIgnoreMessage(msg)) return false;
+    // Include main timeline messages; for threads, only include if bot participates
+    if (msg.thread_id) {
+      return botParticipatesInThread(chatJid, msg.thread_id)
+        || TRIGGER_PATTERN.test(msg.content.trim());
+    }
+    return true;
+  });
   const messagesToSend = allPending.length > 0 ? allPending : filtered;
 
   setObjectiveFromMessages(chatJid, messagesToSend);
@@ -1211,6 +1274,14 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Populate bot Matrix user IDs for human-vs-bot message filtering
+  try {
+    botMatrixUserIds = collectBotMatrixUserIds();
+    logger.info({ count: botMatrixUserIds.size, ids: [...botMatrixUserIds] }, 'Loaded bot Matrix user IDs');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to collect bot Matrix user IDs, bot-filtering disabled');
+  }
 
   // Persistent interval handles — populated below, cleared on shutdown
   const persistentTimers: ReturnType<typeof setInterval>[] = [];
