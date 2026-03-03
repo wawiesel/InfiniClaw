@@ -118,6 +118,10 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
   const agentRunnerSrc = path.join(projectRoot, 'external', 'nanoclaw', 'container', 'agent-runner', 'src');
   mountIfExists(mounts, agentRunnerSrc, '/app/src', true);
 
+  // Mount ~/.ssh writable so git can use SSH keys and update known_hosts
+  // (home dir is mounted ro below, which would shadow this if not mounted separately)
+  mountIfExists(mounts, path.join(homeDir, '.ssh'), '/home/node/.ssh', false);
+
   // Read-only mirror of host home directory
   mounts.push({ hostPath: homeDir, containerPath: homeDir, readonly: true });
 
