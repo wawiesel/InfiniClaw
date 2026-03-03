@@ -526,7 +526,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const channel = findChannel(channels, chatJid);
   if (!channel) {
-    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+    logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
     return true;
   }
 
