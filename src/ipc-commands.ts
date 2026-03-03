@@ -148,11 +148,11 @@ function applyBrainMode(
   }
 
   if (mode === 'anthropic') {
-    upsertEnvLine(envFile, 'BRAIN_MODEL', model || 'claude-sonnet-4-5');
+    upsertEnvLine(envFile, 'BRAIN_MODEL', model || 'claude-sonnet-4-6');
     upsertEnvLine(envFile, 'BRAIN_BASE_URL', '');
     upsertEnvLine(envFile, 'BRAIN_AUTH_TOKEN', '');
     upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
-    const effectiveModel = model || 'claude-sonnet-4-5';
+    const effectiveModel = model || 'claude-sonnet-4-6';
     return `Updated ${bot} to anthropic/${effectiveModel}. Restart required.`;
   }
 
@@ -429,14 +429,14 @@ async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Pr
       ? fs.readFileSync(errorLogPath, 'utf8').split('\n').slice(-50).join('\n').trim()
       : '(no error log)';
 
-    let launchctlInfo = '';
+    let pm2Info = '';
     try {
-      launchctlInfo = execSync(`launchctl list com.infiniclaw.${bot} 2>&1`, { timeout: 5_000 }).toString().trim();
+      pm2Info = execSync(`pm2 show infiniclaw-${bot} 2>&1`, { timeout: 5_000 }).toString().trim();
     } catch (e) {
-      launchctlInfo = e instanceof Error ? e.message : 'unknown';
+      pm2Info = e instanceof Error ? e.message : 'unknown';
     }
 
-    const parts = [`**${bot} status:**\n\`\`\`\n${launchctlInfo}\n\`\`\``];
+    const parts = [`**${bot} status:**\n\`\`\`\n${pm2Info}\n\`\`\``];
     if (lastErrors && lastErrors !== '(no error log)') {
       parts.push(`**Last errors:**\n\`\`\`\n${truncateOutput(lastErrors)}\n\`\`\``);
     }
@@ -674,11 +674,11 @@ async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext
   if (!chatJid) return;
   const hdBot = `${bot}-holodeck`;
   try {
-    let launchctlInfo = '';
+    let pm2Info = '';
     try {
-      launchctlInfo = execSync(`launchctl list com.infiniclaw.${hdBot} 2>&1`, { timeout: 5_000 }).toString().trim();
+      pm2Info = execSync(`pm2 show infiniclaw-${hdBot} 2>&1`, { timeout: 5_000 }).toString().trim();
     } catch (e) {
-      launchctlInfo = e instanceof Error ? e.message : 'not running';
+      pm2Info = e instanceof Error ? e.message : 'not running';
     }
     const root = resolveRoot();
     const instance = instanceDir(root, hdBot);
@@ -689,7 +689,7 @@ async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext
       `**${hdBot} holodeck status:**`,
       `Instance: ${exists ? instance : 'not deployed'}`,
       `Worktree: ${worktreeExists ? worktree : 'none'}`,
-      `\`\`\`\n${launchctlInfo}\n\`\`\``,
+      `\`\`\`\n${pm2Info}\n\`\`\``,
     ];
     await safeSend(ctx, chatJid, parts.join('\n'));
   } catch (err) {
