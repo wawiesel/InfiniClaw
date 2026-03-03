@@ -71,12 +71,25 @@ IPC command → container writes JSON to /workspace/ipc/output/
   → ipc-watcher.ts polls directory → processes command → writes response
 ```
 
+### Message Routing
+
+Bots see all room messages as context but only **respond** when it's their job. The host collects all bot Matrix user IDs at startup (`collectBotMatrixUserIds`) and uses them to distinguish human from bot messages.
+
+**Response triggers (human messages only):**
+- **Callout** — a human message contains `@BotName`
+- **Participating thread** — a human posts in a thread the bot previously sent a message in
+- **CO main timeline** — the commanding officer responds to any unaddressed human message on the main timeline
+
+**Bot messages never trigger a response.** They are included in the prompt as context so bots know what other bots said, but they don't cause a container spawn.
+
+**Thread participation** — a bot "participates" in a thread if it has previously sent a message there (`is_from_me = 1`). Messages from threads the bot doesn't participate in are excluded from context.
+
 ### Message Filtering
 
-Before processing, messages pass through filtering (`message-filtering.ts`):
-- **Echo prevention** — bots ignore messages from themselves and other bots (`IGNORE_SENDERS`). Prevents feedback loops in shared rooms.
-- **Deduplication** — duplicate messages (same content, same sender, within a time window) are dropped.
+Before routing, messages pass through filtering (`message-filtering.ts`):
+- **Self-echo** — bots ignore their own messages (`is_from_me` flag + content prefix).
 - **Pattern filtering** — messages matching `IGNORE_PATTERNS` (system noise, status messages) are skipped.
+- **Sender filtering** — messages from `IGNORE_SENDERS` are hidden entirely (optional, for edge cases).
 
 ### Message Queue
 
@@ -241,6 +254,22 @@ Bot detects problem (MCP down, health check fails, OOM)
 ```
 
 **Operator (escape hatch only):** Cross-machine coordination when Matrix is down, OS-level fixes (launchd, podman, network), secret rotation requiring human auth, emergency intervention for restart loops.
+
+### Intercom System
+
+Cross-room communication uses **intercom relay accounts** — dedicated Matrix accounts, one per room. When a bot or operator sends a message to a different room, it goes through that room's intercom account.
+
+| Room | Intercom Account |
+|------|-----------------|
+| Bridge | `bridge-intercom` |
+| Engineering | `engineering-intercom` |
+| Astrometrics | `astrometrics-intercom` |
+
+**Operator usage:** `bash operator/intercom-send.sh <room> "<message>"`. Messages appear as `Operator (<hostname>): <message>`.
+
+**Bot usage (planned):** When a bot calls `send_message` targeting a different room, the host relays through the target room's intercom account. Messages appear as `<BotName> (<SourceRoom>): <message>`.
+
+Intercom credentials are stored in `operator/intercom.json` in the secrets repo. Accounts must be joined to their respective rooms on the Matrix homeserver.
 
 ## Code Structure
 
