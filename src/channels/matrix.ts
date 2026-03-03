@@ -33,7 +33,6 @@ export interface MatrixChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
-  onRateLimitAlert?: (msg: string) => void;
   /** Display name to set on connect (e.g. "Nora ⭐" for commanding officer). */
   displayName?: string;
 }
@@ -402,19 +401,10 @@ export class MatrixChannel implements Channel {
   private lastMessageEventId = new Map<string, string>();
   private lastBotEventId = new Map<string, string>();
 
-  // Rate-limiting send queue with adaptive backoff
-  private static readonly BASE_SEND_INTERVAL_MS = 1000;
-  private static readonly MAX_SEND_INTERVAL_MS = 10_000;
-  private static readonly BACKOFF_DECAY_MS = 30_000; // decay back to base over 30s
+  // Sequential send queue — prevents concurrent Matrix API calls from racing.
+  // No rate limit handling needed: private homeserver (Continuwuity) has no rate limits.
   private _sendQueue: Array<() => Promise<void>> = [];
   private _sendQueueRunning = false;
-  private _lastSendAt = 0;
-  private _backoffUntil = 0; // timestamp: don't send before this
-  private _currentInterval = MatrixChannel.BASE_SEND_INTERVAL_MS;
-  private _consecutiveRateLimits = 0;
-  private _lastRateLimitAlertAt = 0;
-  private static readonly RATE_LIMIT_ALERT_THRESHOLD = 5;
-  private static readonly RATE_LIMIT_ALERT_COOLDOWN_MS = 5 * 60_000;
 
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
@@ -422,92 +412,28 @@ export class MatrixChannel implements Channel {
   }
 
   /**
-   * Queue a Matrix API call with adaptive spacing between sends.
-   * Retries once on 429 (rate limit) using the server's retry_after_ms,
-   * then increases the inter-message interval to avoid repeated throttling.
+   * Queue a Matrix API call for sequential execution.
+   * Prevents concurrent sends from racing — no rate limit handling needed
+   * since the private homeserver (Continuwuity) has no rate limits.
    */
   private enqueueSend<T>(fn: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       this._sendQueue.push(async () => {
         try {
-          const result = await fn();
-          this._consecutiveRateLimits = 0;
-          this.decayBackoff();
-          resolve(result);
+          resolve(await fn());
         } catch (err) {
-          const retryMs = this.extractRetryAfterMs(err);
-          if (retryMs !== undefined) {
-            this._consecutiveRateLimits++;
-            if (this._consecutiveRateLimits >= MatrixChannel.RATE_LIMIT_ALERT_THRESHOLD) {
-              const now = Date.now();
-              if (now - this._lastRateLimitAlertAt > MatrixChannel.RATE_LIMIT_ALERT_COOLDOWN_MS) {
-                this._lastRateLimitAlertAt = now;
-                logger.warn({ consecutive: this._consecutiveRateLimits }, 'Persistent rate limiting from Matrix');
-                this.opts.onRateLimitAlert?.(`Rate limited by Matrix (${this._consecutiveRateLimits} consecutive 429s, interval ${this._currentInterval}ms)`);
-              }
-            }
-            this.applyBackoff(retryMs);
-            logger.debug({ retryMs, newInterval: this._currentInterval }, 'Matrix 429, backing off');
-            await new Promise(r => setTimeout(r, retryMs));
-            try {
-              const retryResult = await fn();
-              this._consecutiveRateLimits = 0;
-              resolve(retryResult);
-            } catch (retryErr) {
-              reject(retryErr);
-            }
-          } else {
-            reject(err);
-          }
+          reject(err);
         }
       });
       void this.drainSendQueue();
     });
   }
 
-  /** Increase inter-message interval after a rate limit hit. */
-  private applyBackoff(serverRetryMs: number): void {
-    this._backoffUntil = Date.now() + serverRetryMs;
-    // Double the interval, capped at max
-    this._currentInterval = Math.min(
-      this._currentInterval * 2,
-      MatrixChannel.MAX_SEND_INTERVAL_MS,
-    );
-  }
-
-  /** Gradually decay interval back to base after successful sends. */
-  private decayBackoff(): void {
-    if (this._currentInterval <= MatrixChannel.BASE_SEND_INTERVAL_MS) return;
-    // Halve the interval on each success, floored at base
-    this._currentInterval = Math.max(
-      Math.floor(this._currentInterval * 0.75),
-      MatrixChannel.BASE_SEND_INTERVAL_MS,
-    );
-  }
-
-  private extractRetryAfterMs(err: unknown): number | undefined {
-    if (!err || typeof err !== 'object') return undefined;
-    const record = err as Record<string, unknown>;
-    const body = record.body as Record<string, unknown> | undefined;
-    const errcode = body?.errcode ?? record.errcode;
-    if (errcode !== 'M_LIMIT_EXCEEDED') return undefined;
-    const ms = body?.retry_after_ms ?? record.retry_after_ms;
-    return typeof ms === 'number' ? ms : 3000;
-  }
-
   private async drainSendQueue(): Promise<void> {
     if (this._sendQueueRunning) return;
     this._sendQueueRunning = true;
     while (this._sendQueue.length > 0) {
-      // Respect server backoff window
-      const backoffWait = this._backoffUntil - Date.now();
-      if (backoffWait > 0) await new Promise(r => setTimeout(r, backoffWait));
-      // Respect adaptive inter-message interval
-      const elapsed = Date.now() - this._lastSendAt;
-      const wait = this._currentInterval - elapsed;
-      if (wait > 0) await new Promise(r => setTimeout(r, wait));
       const task = this._sendQueue.shift()!;
-      this._lastSendAt = Date.now();
       await task();
     }
     this._sendQueueRunning = false;

@@ -1265,12 +1265,6 @@ async function main(): Promise<void> {
         storeChatMetadata(chatJid, timestamp, name);
       },
       registeredGroups: () => registeredGroups,
-      onRateLimitAlert: (msg) => {
-        const mainJid = LOCAL_MIRROR_MATRIX_JID;
-        if (mainJid && matrix?.isConnected()) {
-          matrix.sendMessage(mainJid, statusMessage('⚠️', msg)).catch(() => { });
-        }
-      },
     });
   }
 
