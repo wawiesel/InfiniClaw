@@ -1714,8 +1714,12 @@ async function main(): Promise<void> {
   // ── Startup checklist ──────────────────────────────────────────────
   function buildStartupChecklist(): string {
     const sessionDir = path.join(DATA_DIR, 'sessions', MAIN_GROUP_FOLDER);
+    const role = (ASSISTANT_ROLE || '').toLowerCase();
+    const isEngineer = role === 'engineer';
+    const isNavigator = role === 'navigator';
+    const sections: string[] = [];
 
-    // Skills
+    // ── Skills (all bots) ──
     const skillsDir = path.join(sessionDir, '.claude', 'skills');
     let skillRows = '';
     let skillHeader = '| Skill |';
@@ -1743,8 +1747,9 @@ async function main(): Promise<void> {
         skillRows = '| _(none)_ |';
       }
     } catch { skillRows = '| _(error reading skills)_ |'; }
+    sections.push(['### 🔧 Skills', skillHeader, skillSep, skillRows].join('\n'));
 
-    // MCP tools
+    // ── MCP Servers (all bots) ──
     const settingsFile = path.join(sessionDir, '.claude', 'settings.json');
     let mcpRows = '';
     try {
@@ -1758,8 +1763,9 @@ async function main(): Promise<void> {
         mcpRows = '| _(none)_ |';
       }
     } catch { mcpRows = '| _(error reading MCP)_ |'; }
+    sections.push(['### 🔌 MCP Servers', '| Server |', '|--------|', mcpRows].join('\n'));
 
-    // Todos
+    // ── Active Todos (all bots) ──
     const todos = readTodoItems(MAIN_GROUP_FOLDER);
     const activeTodos = todos.filter((t) => t.status !== 'completed');
     let todoRows = '';
@@ -1769,48 +1775,70 @@ async function main(): Promise<void> {
     } else {
       todoRows = '| _(empty)_ | — |';
     }
+    sections.push(['### ✅ Active Todos', '| Task | Status |', '|------|--------|', todoRows].join('\n'));
 
-    // Machine health (quick snapshot — containers + bot service states)
-    let healthRows = '';
-    try {
-      const status = getSystemStatus(process.cwd());
-      const lines: string[] = [];
-      for (const bot of status.bots) {
-        const svc = bot.service === 'running' ? '🟢' : '🔴';
-        const containers = bot.containers.length > 0
-          ? bot.containers.map((c) => c.uptime).join(', ')
-          : '—';
-        const lastErr = bot.lastErrorAt
-          ? `${Math.round((Date.now() - new Date(bot.lastErrorAt).getTime()) / 60000)}m ago`
-          : '—';
-        lines.push(`| ${bot.name} | ${svc} ${bot.service} | ${bot.model ?? '?'} | ${containers} | ${lastErr} |`);
-      }
-      healthRows = lines.length > 0 ? lines.join('\n') : '| _(no bots)_ | — | — | — | — |';
-    } catch { healthRows = '| _(error reading health)_ | — | — | — | — |'; }
+    // ── Machine Health (engineers only) ──
+    if (isEngineer) {
+      const machineName = os.hostname().toUpperCase();
+      let healthRows = '';
+      try {
+        const status = getSystemStatus(process.cwd());
+        const lines: string[] = [];
+        for (const bot of status.bots) {
+          const svc = bot.service === 'running' ? '🟢' : '🔴';
+          const containers = bot.containers.length > 0
+            ? bot.containers.map((c) => c.uptime).join(', ')
+            : '—';
+          const lastErr = bot.lastErrorAt
+            ? `${Math.round((Date.now() - new Date(bot.lastErrorAt).getTime()) / 60000)}m ago`
+            : '—';
+          lines.push(`| ${bot.name} | ${svc} ${bot.service} | ${bot.model ?? '?'} | ${containers} | ${lastErr} |`);
+        }
+        healthRows = lines.length > 0 ? lines.join('\n') : '| _(no bots)_ | — | — | — | — |';
+      } catch { healthRows = '| _(error reading health)_ | — | — | — | — |'; }
+      sections.push([
+        `### 🏥 Machine Health — ${machineName}`,
+        '| Bot | Service | Model | Containers | Last Error |',
+        '|-----|---------|-------|------------|------------|',
+        healthRows,
+      ].join('\n'));
+    }
 
-    return [
-      `## 🚀 ${ASSISTANT_NAME} startup checklist`,
-      '',
-      '### 🔧 Skills',
-      skillHeader,
-      skillSep,
-      skillRows,
-      '',
-      '### 🔌 MCP Servers',
-      '| Server |',
-      '|--------|',
-      mcpRows,
-      '',
-      '### ✅ Active Todos',
-      '| Task | Status |',
-      '|------|--------|',
-      todoRows,
-      '',
-      '### 🏥 Machine Health',
-      `| Bot | Service | Model | Containers | Last Error |`,
-      `|-----|---------|-------|------------|------------|`,
-      healthRows,
-    ].join('\n');
+    // ── Weekly Goals + Knowledge Search (navigators only) ──
+    if (isNavigator) {
+      // Weekly goals — read from well-known file if present
+      let goalRows = '| _(not configured)_ |';
+      const goalsFile = path.join(DATA_DIR, 'weekly-goals.md');
+      try {
+        if (fs.existsSync(goalsFile)) {
+          const lines = fs.readFileSync(goalsFile, 'utf-8').trim().split('\n').filter(Boolean);
+          goalRows = lines.map((l) => `| ${l.replace(/\|/g, '\\|')} |`).join('\n') || '| _(empty)_ |';
+        }
+      } catch { goalRows = '| _(error reading goals)_ |'; }
+      sections.push(['### 🎯 Weekly Goals', '| Goal |', '|------|', goalRows].join('\n'));
+
+      // Knowledge search latest entry
+      let knowledgeEntry = '_(not configured)_';
+      const knowledgeDir = path.join(DATA_DIR, 'knowledge');
+      try {
+        if (fs.existsSync(knowledgeDir)) {
+          const files = fs.readdirSync(knowledgeDir)
+            .filter((f) => f.endsWith('.md'))
+            .map((f) => ({ f, mtime: fs.statSync(path.join(knowledgeDir, f)).mtimeMs }))
+            .sort((a, b) => b.mtime - a.mtime);
+          if (files.length > 0) {
+            const latest = files[0].f;
+            const content = fs.readFileSync(path.join(knowledgeDir, latest), 'utf-8');
+            const firstLine = content.split('\n').find((l) => l.trim()) || latest;
+            knowledgeEntry = `\`${latest}\`: ${firstLine.replace(/^#+\s*/, '').slice(0, 80)}`;
+          }
+        }
+      } catch { knowledgeEntry = '_(error reading knowledge)_'; }
+      sections.push(`### 📚 Knowledge (latest)\n${knowledgeEntry}`);
+    }
+
+    const body = sections.join('\n\n');
+    return `<details>\n<summary>🚀 ${ASSISTANT_NAME} startup checklist</summary>\n\n${body}\n\n</details>`;
   }
 
   // Boot announcement
