@@ -6,7 +6,8 @@ Bot uptime: derived from a local heartbeat log (uptime.db) that periodically
 records each bot's liveness status. Uses the MetricOfSadness algorithm:
 downtime is confirmed only when two consecutive pings are both down.
 
-Machine uptime: derived from MetricOfSadness SQLite databases.
+Machine uptime: local (always up) and heracles (SSH port 22 liveness check).
+Both use the same two-consecutive-downs algorithm via machine_pings table.
 
 Usage:
   python3 rolling_uptime.py             # report current rolling uptime
@@ -17,8 +18,6 @@ import json
 import os
 import sqlite3
 import sys
-import time
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -26,9 +25,8 @@ RUNTIME = Path(os.environ.get("INFINICLAW_RUNTIME", "/workspace/extra/InfiniClaw
 INSTANCES_DIR = RUNTIME / "instances"
 HEALTH_DIR = Path("/workspace/extra/parker-persona/health")
 UPTIME_DB = HEALTH_DIR / "uptime.db"
-MOS_DIR = Path("/Users/ww5/2026-MetricOfSadness")
 
-BOTS = ["architect", "commander", "engineer", "navigator", "parker"]
+BOTS = ["cid", "johnny5", "albert", "parker"]
 HEARTBEAT_STALE_S = 180  # 3 minutes — matches InfiniClaw's threshold
 
 
@@ -144,63 +142,96 @@ def compute_bot_uptime():
     return result
 
 
-# ── Machine uptime (MetricOfSadness) ────────────────────────────────
+# ── Machine uptime ─────────────────────────────────────────────────
+# Machines: local (mac139160) and heracles.
+# Local is always up if we're running. Heracles is tracked via ping DB.
+
+def _init_machine_table(conn):
+    """Create machine_pings table if needed."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS machine_pings (
+            timestamp TEXT,
+            machine TEXT,
+            status TEXT,
+            PRIMARY KEY (timestamp, machine)
+        )
+    """)
+
+
+def record_machine_ping():
+    """Record liveness for each machine. Local is always up.
+    Heracles: check if SSH is reachable (port 22) with a 3s timeout."""
+    now = now_utc()
+    ts = now.isoformat()
+
+    with sqlite3.connect(str(UPTIME_DB)) as conn:
+        _init_machine_table(conn)
+
+        # Local — always up (we're running on it)
+        conn.execute(
+            "INSERT OR REPLACE INTO machine_pings VALUES (?, ?, ?)",
+            (ts, "local", "up"),
+        )
+
+        # Heracles — try TCP connect to port 22
+        heracles_status = "down"
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(3)
+            result = sock.connect_ex(("heracles", 22))
+            if result == 0:
+                heracles_status = "up"
+            sock.close()
+        except Exception:
+            pass
+        conn.execute(
+            "INSERT OR REPLACE INTO machine_pings VALUES (?, ?, ?)",
+            (ts, "heracles", heracles_status),
+        )
+
+    # Prune old machine pings too
+    cutoff = (now - timedelta(days=10)).isoformat()
+    with sqlite3.connect(str(UPTIME_DB)) as conn:
+        conn.execute("DELETE FROM machine_pings WHERE timestamp < ?", (cutoff,))
+
 
 def compute_machine_uptime():
-    machines = {}
+    """Compute 1d and 7d rolling uptime for each machine from ping database."""
+    now = now_utc()
+    machines_list = ["local", "heracles"]
+    result = {}
 
-    # Local machine — always up
-    machines["local"] = {
-        "ssh_uptime_1d": 100.0,
-        "ssh_uptime_7d": 100.0,
-        "dirs_uptime_1d": None,
-        "dirs_uptime_7d": None,
-    }
+    if not UPTIME_DB.exists():
+        for m in machines_list:
+            result[m] = {"uptime_1d": None, "uptime_7d": None, "status": "unknown"}
+        return result
 
-    # scaledev — from MetricOfSadness
-    ssh_db = MOS_DIR / "ssh.db"
-    dirs_db = MOS_DIR / "dirs.db"
+    with sqlite3.connect(str(UPTIME_DB)) as conn:
+        _init_machine_table(conn)
+        for m in machines_list:
+            rows = conn.execute(
+                "SELECT timestamp, status FROM machine_pings WHERE machine = ? ORDER BY timestamp",
+                (m,),
+            ).fetchall()
 
-    if ssh_db.exists() and dirs_db.exists():
-        sd = {
-            "ssh_uptime_1d": None, "ssh_uptime_7d": None,
-            "dirs_uptime_1d": None, "dirs_uptime_7d": None,
-        }
+            if not rows:
+                result[m] = {"uptime_1d": None, "uptime_7d": None, "status": "unknown"}
+                continue
 
-        try:
-            with sqlite3.connect(str(ssh_db)) as c:
-                rows = c.execute(
-                    "SELECT timestamp, ssh_status FROM ssh ORDER BY timestamp"
-                ).fetchall()
-            if rows:
-                events = [(parse_ts(r[0]), r[1] == "available") for r in rows]
-                last = events[-1][0]
-                sd["ssh_uptime_1d"] = uptime_pct(events, last - timedelta(days=1), last)
-                sd["ssh_uptime_7d"] = uptime_pct(events, last - timedelta(days=7), last)
-        except Exception:
-            pass
+            events = [(parse_ts(r[0]), r[1] == "up") for r in rows]
+            last_status = "up" if events[-1][1] else "down"
 
-        try:
-            with sqlite3.connect(str(dirs_db)) as c:
-                rows = c.execute(
-                    "SELECT timestamp, path, status, seconds FROM dir_checks ORDER BY timestamp"
-                ).fetchall()
-            if rows:
-                by_ts = defaultdict(lambda: True)
-                for ts, path, status, sec in rows:
-                    if status != "available":
-                        by_ts[ts] = False
-                agg = [(parse_ts(ts), is_up) for ts, is_up in sorted(by_ts.items())]
-                if agg:
-                    last = agg[-1][0]
-                    sd["dirs_uptime_1d"] = uptime_pct(agg, last - timedelta(days=1), last)
-                    sd["dirs_uptime_7d"] = uptime_pct(agg, last - timedelta(days=7), last)
-        except Exception:
-            pass
+            up_1d = uptime_pct(events, now - timedelta(days=1), now)
+            up_7d = uptime_pct(events, now - timedelta(days=7), now)
 
-        machines["scaledev"] = sd
+            result[m] = {
+                "uptime_1d": up_1d,
+                "uptime_7d": up_7d,
+                "status": last_status,
+            }
 
-    return machines
+    return result
 
 
 # ── Main ─────────────────────────────────────────────────────────────
@@ -212,6 +243,7 @@ def main():
 
     if do_ping:
         record_ping()
+        record_machine_ping()
 
     result = {
         "timestamp": now_utc().isoformat(),

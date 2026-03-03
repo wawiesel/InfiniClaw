@@ -37,7 +37,7 @@ fi
 # ── Per-bot log stats with rates ─────────────────────────────────────
 now_epoch=$(date +%s)
 bot_json=""
-for bot in architect commander engineer navigator parker; do
+for bot in cid johnny5 albert parker; do
   log="$LOGS_DIR/$bot.log"
   errlog="$LOGS_DIR/$bot.error.log"
 
