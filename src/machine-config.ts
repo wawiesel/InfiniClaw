@@ -35,7 +35,12 @@ export function loadMachineConfig(): MachineConfig {
     );
   }
 
-  const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  } catch (err) {
+    throw new Error(`machine.json: invalid JSON in ${CONFIG_PATH}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   if (!Array.isArray(raw.bots) || raw.bots.length === 0) {
     throw new Error(`machine.json: "bots" must be a non-empty array`);
@@ -53,12 +58,12 @@ export function loadMachineConfig(): MachineConfig {
   };
 
   if (raw.s3) {
-    const s3 = raw.s3;
+    const s3 = raw.s3 as Record<string, unknown>;
     if (typeof s3.endpoint !== 'string' || typeof s3.bucket !== 'string' ||
         typeof s3.accessKey !== 'string' || typeof s3.secretKey !== 'string') {
       throw new Error('machine.json: "s3" requires endpoint, bucket, accessKey, secretKey');
     }
-    config.s3 = s3 as S3Config;
+    config.s3 = s3 as unknown as S3Config;
   }
 
   cached = config;
