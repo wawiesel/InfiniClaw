@@ -12,15 +12,15 @@ Convention: `accessKey`/`secretKey` in machine.json, mapped to AWS SDK names in 
 
 Was caused by missing `agent-runner/src` mount path (fixed in 9ad2f75 — `mountIfExists` guard).
 
-## Private homeserver simplifications
+## ~~Private homeserver simplifications~~ DONE
 
-Now that the fleet runs on `matrix.a-gis.org` (Continuwuity) instead of matrix.org, several defensive workarounds can be removed:
+Now that the fleet runs on `matrix.a-gis.org` (Continuwuity) instead of matrix.org, several defensive workarounds have been removed:
 
-- **m.replace event filtering** (`src/channels/matrix.ts` ~line 857, `src/message-filtering.ts` STATUS_INDICATOR_RE) — the feedback loop was caused by matrix.org latency amplifying edit events. On a private server with no rate limits, status indicator edits are harmless. Consider removing the filter or rethinking status indicators entirely.
-- **Rate limit retry/backoff logic** — any `M_LIMIT_EXCEEDED` handling or retry-after delays in the Matrix client layer are unnecessary on a private server with 6 users.
-- **Corporate CA cert for Matrix** (`BRAIN_CA_CERT_FILE` referenced in env files) — the private homeserver uses a public Let's Encrypt cert via the Synology NAS reverse proxy, so no custom CA bundle is needed for Matrix connections. May still be needed for the Anthropic API if that goes through corporate proxy.
-- **`send` CLI DB injection** — already removed; send now goes through Matrix only. But the old `buildRoomMap` rank-based bot selection is still used elsewhere and could be simplified since the room topology is now self-contained on the private server.
-- **Sync token / filter complexity** — matrix.org required careful sync filter management to avoid hitting rate limits. Private server can use simpler, more aggressive sync settings.
+- ~~**m.replace event filtering**~~ — Kept intentionally: bots should never react to edits regardless of server. `STATUS_INDICATOR_RE` in `message-filtering.ts` correctly filters initial status indicator sends. No change needed.
+- ~~**Rate limit retry/backoff logic**~~ — **Removed** (c59b11c). Stripped `M_LIMIT_EXCEEDED` handling, adaptive backoff, 1s inter-message delay, and all retry state. `enqueueSend` is now a simple sequential queue.
+- ~~**Corporate CA cert for Matrix**~~ — Private homeserver uses Let's Encrypt (no custom CA needed). `BRAIN_CA_CERT_FILE` → `NODE_EXTRA_CA_CERTS` mapping kept for Anthropic API (may go through corporate proxy). No change needed.
+- ~~**`send` CLI DB injection**~~ — Already removed (61c9412). `buildRoomMap` rank-based selection kept for CO election, which is still correct.
+- ~~**Sync token / filter complexity**~~ — No complex filter management found; `matrix-bot-sdk` handles sync internally. `syncingPresence = 'offline'` kept (reduces unnecessary traffic). No change needed.
 
 ## Navigator (Nora) responsiveness problems
 
