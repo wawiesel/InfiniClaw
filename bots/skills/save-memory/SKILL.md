@@ -47,3 +47,43 @@ delegate_to_lobe:
 - When you realize something you assumed was wrong
 - After receiving corrections from the Captain
 - Periodically during long sessions (every 5-10 exchanges)
+
+## Session Recovery (after OOM kill or session reset)
+
+When your session is cleared, conversation history is lost but session files remain. Use this to extract key learnings and restore context.
+
+**Delegate to a lobe** — session JSONL files can be 1MB+.
+
+### Session file location
+
+```
+/Users/ww5/2026-Nanoclaw/InfiniClaw/_runtime/instances/<persona>/data/sessions/main/.claude/projects/-workspace-group/
+```
+
+Replace `<persona>` with your bot name (e.g. `cid`, `johnny5`).
+
+### Lobe instructions
+
+```
+1. List session files at the session location above
+2. Write a Python script to extract a condensed summary from the most recent JSONL:
+   - Parse line by line (do NOT load whole file)
+   - Extract [USER], [ASSISTANT], [TOOL_CALL], [TOOL_RESULT] entries
+   - Truncate long texts (>1000 chars for assistant, >2000 for user)
+3. Run: python3 script.py <session.jsonl> /tmp/session-summary.txt
+4. Read the summary and extract:
+   - Key decisions and why
+   - Tasks completed and outcomes
+   - Standing orders or Captain preferences
+   - Important file paths, architecture notes
+   - Errors and how resolved
+   - Unfinished work for follow-up
+5. Write findings to /workspace/extra/<persona>-persona/memory/session-recovery-<date>.md
+```
+
+### After recovery
+
+1. Review what the lobe extracted
+2. Merge key items into MEMORY.md
+3. Delete the session-recovery file once merged
+4. Add unfinished work to your todo list
