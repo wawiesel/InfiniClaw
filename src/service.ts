@@ -269,9 +269,6 @@ export function syncPersona(root: string, bot: string): void {
   } catch { return; }
 }
 
-/**
- * Append persona CLAUDE.md to instance base CLAUDE.md and seed group files.
- */
 /** Write local presence file and generate crew-status.json from all machines' presence. */
 function writeCrewStatus(root: string, thisBot: string, dataDir: string): void {
   const config = loadMachineConfig();
