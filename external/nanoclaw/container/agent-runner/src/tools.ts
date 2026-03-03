@@ -94,28 +94,30 @@ export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
 
   server.tool(
     'send_message',
-    'Send a text message. Defaults to the current chat room. Use recipient to send to another bot by name (e.g., "Johnny5" or "Cid"). Use thread_id to reply within a Matrix thread.',
+    'Send a text message to another bot by name (e.g., "Johnny5" or "Cid"). Use thread_id to reply within a Matrix thread.',
     {
       text: z.string().describe('The message text to send'),
-      recipient: z.string().optional().describe('Bot name to send to (e.g., "Johnny5", "Cid"). Omit to send to current chat.'),
+      recipient: z.string().describe('Bot name to send to (e.g., "Johnny5", "Cid")'),
       thread_id: z.string().optional().describe('Matrix thread root event ID to reply in a thread (MSC3440)'),
     },
     async (args) => {
-      let targetJid = chatJid;
-      if (args.recipient) {
-        const resolved = resolveRecipientJid(args.recipient, ipcDir);
-        if (!resolved) {
-          const dir = loadBotDirectory(ipcDir);
-          const available = Object.keys(dir).join(', ') || 'none';
-          return {
-            content: [{ type: 'text' as const, text: `Unknown recipient "${args.recipient}". Available: ${available}` }],
-            isError: true,
-          };
-        }
-        targetJid = resolved;
+      const resolved = resolveRecipientJid(args.recipient, ipcDir);
+      if (!resolved) {
+        const dir = loadBotDirectory(ipcDir);
+        const available = Object.keys(dir).join(', ') || 'none';
+        return {
+          content: [{ type: 'text' as const, text: `Unknown recipient "${args.recipient}". Available: ${available}` }],
+          isError: true,
+        };
       }
-      emitChatMessageTo(targetJid, args.text, undefined, args.thread_id);
-      return { content: [{ type: 'text' as const, text: args.recipient ? `Message sent to ${args.recipient}.` : 'Message sent.' }] };
+      if (resolved === chatJid) {
+        return {
+          content: [{ type: 'text' as const, text: `Cannot send to ${args.recipient} — they are in your own room. Just speak in the conversation instead.` }],
+          isError: true,
+        };
+      }
+      emitChatMessageTo(resolved, args.text, undefined, args.thread_id);
+      return { content: [{ type: 'text' as const, text: `Message sent to ${args.recipient}.` }] };
     },
   );
 
