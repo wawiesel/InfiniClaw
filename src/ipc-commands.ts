@@ -618,14 +618,18 @@ async function handleHolodeckSend(data: CommandData, ctx: InfiniClawIpcContext):
   }
   try {
     const db = new Database(dbPath);
-    const msgId = `hd-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-    const timestamp = new Date().toISOString();
-    const jidRow = db.prepare('SELECT jid FROM registered_groups LIMIT 1').get() as { jid: string } | undefined;
-    const jid = jidRow?.jid || 'local:terminal';
-    db.prepare(
-      'INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, 0)',
-    ).run(msgId, jid, 'operator', 'Captain', message, timestamp);
-    db.close();
+    let msgId: string;
+    try {
+      msgId = `hd-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+      const timestamp = new Date().toISOString();
+      const jidRow = db.prepare('SELECT jid FROM registered_groups LIMIT 1').get() as { jid: string } | undefined;
+      const jid = jidRow?.jid || 'local:terminal';
+      db.prepare(
+        'INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, 0)',
+      ).run(msgId, jid, 'operator', 'Captain', message, timestamp);
+    } finally {
+      db.close();
+    }
     logger.info({ bot: hdBot, msgId }, 'Holodeck message injected');
     await safeSend(ctx, chatJid, `✅ Message sent to ${hdBot}`);
   } catch (err) {
@@ -649,10 +653,14 @@ async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext):
   }
   try {
     const db = new Database(dbPath, { readonly: true });
-    const rows = db.prepare(
-      'SELECT sender_name, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ?',
-    ).all(limit) as Array<{ sender_name: string; content: string; timestamp: string }>;
-    db.close();
+    let rows: Array<{ sender_name: string; content: string; timestamp: string }>;
+    try {
+      rows = db.prepare(
+        'SELECT sender_name, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ?',
+      ).all(limit) as Array<{ sender_name: string; content: string; timestamp: string }>;
+    } finally {
+      db.close();
+    }
     if (rows.length === 0) {
       await safeSend(ctx, chatJid, `No messages in ${hdBot} holodeck.`);
       return;
