@@ -117,22 +117,28 @@ export async function pullBot(root: string, bot: string): Promise<void> {
     const prefix = `${bot}/${syncPath}`;
     const fullPath = path.join(instance, syncPath);
 
-    // List objects under this prefix
-    const listed = await s3.client.send(new ListObjectsV2Command({
-      Bucket: s3.bucket,
-      Prefix: prefix,
-    }));
+    // List all objects under this prefix (handles pagination for >1000 keys)
+    let continuationToken: string | undefined;
+    do {
+      const listed = await s3.client.send(new ListObjectsV2Command({
+        Bucket: s3.bucket,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }));
 
-    if (!listed.Contents || listed.Contents.length === 0) continue;
+      if (listed.Contents) {
+        for (const obj of listed.Contents) {
+          if (!obj.Key) continue;
+          // Compute local path from key
+          const relativeToBot = obj.Key.slice(`${bot}/`.length);
+          const localPath = path.join(instance, relativeToBot);
+          await downloadFile(s3.client, s3.bucket, obj.Key, localPath);
+          count++;
+        }
+      }
 
-    for (const obj of listed.Contents) {
-      if (!obj.Key) continue;
-      // Compute local path from key
-      const relativeToBot = obj.Key.slice(`${bot}/`.length);
-      const localPath = path.join(instance, relativeToBot);
-      await downloadFile(s3.client, s3.bucket, obj.Key, localPath);
-      count++;
-    }
+      continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+    } while (continuationToken);
   }
 
   console.log(`${bot}: pulled ${count} files from S3`);
