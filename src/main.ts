@@ -1838,7 +1838,7 @@ async function main(): Promise<void> {
     }
 
     const body = sections.join('\n\n');
-    return `<details>\n<summary>🚀 ${ASSISTANT_NAME} startup checklist</summary>\n\n${body}\n\n</details>`;
+    return `## 🚀 ${ASSISTANT_NAME} startup checklist\n\n${body}`;
   }
 
   // Boot announcement
