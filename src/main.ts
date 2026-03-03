@@ -118,6 +118,13 @@ let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
 
+// Exit-137 (SIGKILL) backoff — prevents tight respawn loops when containers are killed externally.
+// We can't know if it's OOM or a host kill, but we should still back off to avoid hammering resources.
+const KILL_137_COOLDOWN_MS = parseInt(process.env.KILL_137_COOLDOWN_MS || '60000', 10);
+const KILL_137_MAX_CONSECUTIVE = parseInt(process.env.KILL_137_MAX_CONSECUTIVE || '3', 10);
+const kill137Consecutive: Record<string, number> = {};
+const kill137CooldownUntil: Record<string, number> = {};
+
 // Standing order work cycle — re-trigger bot after completing work
 const STANDING_ORDER_COOLDOWN_MS = parseInt(process.env.STANDING_ORDER_COOLDOWN_MS || '60000', 10);
 const STANDING_ORDER_MAX_CONSECUTIVE = parseInt(process.env.STANDING_ORDER_MAX_CONSECUTIVE || '10', 10);
@@ -498,6 +505,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
+  // Exit-137 backoff: if we hit repeated SIGKILL exits, pause before respawning
+  const killCooldownEnd = kill137CooldownUntil[chatJid] || 0;
+  if (killCooldownEnd > Date.now()) {
+    const remainSec = Math.round((killCooldownEnd - Date.now()) / 1000);
+    logger.warn(
+      { group: group.name, consecutiveKills: kill137Consecutive[chatJid], cooldownRemainingSec: remainSec },
+      'Exit-137 cooldown active, deferring container spawn',
+    );
+    return false;
+  }
+
   const channel = findChannel(channels, chatJid);
   if (!channel) {
     console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
@@ -669,6 +687,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     });
     const compactError = rawError.replace(/\s+/g, ' ').slice(0, 1000);
     markError(chatJid, compactError);
+
+    // Track exit-137 (SIGKILL) kills and apply backoff after consecutive hits
+    const isSigKill = /exit 137/.test(compactError) || /SIGKILL/.test(compactError);
+    if (isSigKill) {
+      kill137Consecutive[chatJid] = (kill137Consecutive[chatJid] || 0) + 1;
+      if (kill137Consecutive[chatJid] >= KILL_137_MAX_CONSECUTIVE) {
+        kill137CooldownUntil[chatJid] = Date.now() + KILL_137_COOLDOWN_MS;
+        logger.warn(
+          { group: group.name, consecutiveKills: kill137Consecutive[chatJid], cooldownMs: KILL_137_COOLDOWN_MS },
+          'Repeated exit-137 kills — applying respawn cooldown',
+        );
+        kill137Consecutive[chatJid] = 0; // reset counter after engaging cooldown
+      }
+    } else {
+      kill137Consecutive[chatJid] = 0; // reset on any clean run
+    }
 
     if (!outputSentToUser && channel) {
       const isSignalCrash = /^⚠️ /.test(compactError);
