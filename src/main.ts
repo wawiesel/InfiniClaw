@@ -1536,6 +1536,18 @@ async function main(): Promise<void> {
         }),
       };
 
+      // Add verification summary to snapshot
+      const vPath = path.join(process.cwd(), '_runtime', 'data', 'verifications.json');
+      try {
+        if (fs.existsSync(vPath)) {
+          const vRecords = JSON.parse(fs.readFileSync(vPath, 'utf-8')) as Array<{ status: string }>;
+          const pending = vRecords.filter((v) => v.status === 'pending').length;
+          const verified = vRecords.filter((v) => v.status === 'verified').length;
+          const failed = vRecords.filter((v) => v.status === 'failed').length;
+          (snapshot as Record<string, unknown>).verifications = { pending, verified, failed, total: vRecords.length };
+        }
+      } catch { /* ok */ }
+
       for (const g of Object.values(registeredGroups)) {
         const ipcDir = path.join(DATA_DIR, 'ipc', g.folder);
         if (!fs.existsSync(ipcDir)) continue;
@@ -1712,6 +1724,22 @@ async function main(): Promise<void> {
         injectSystemNotice(chatJid, '[System] TodoWrite reminder: Your todo list has no in_progress items. Please update it to reflect what you are currently working on.');
         logger.debug({ chatJid, group: group.name }, 'Sent todo enforcement reminder (no in_progress)');
       }
+
+      // Check for pending verifications assigned to this bot
+      const vFilePath = path.join(process.cwd(), '_runtime', 'data', 'verifications.json');
+      try {
+        if (fs.existsSync(vFilePath)) {
+          const vData = JSON.parse(fs.readFileSync(vFilePath, 'utf-8')) as Array<{
+            id: string; assigned_to: string; status: string; task_description: string; requested_by: string;
+          }>;
+          const myName = ASSISTANT_NAME;
+          const pendingForMe = vData.filter((v) => v.status === 'pending' && v.assigned_to.toLowerCase() === myName.toLowerCase());
+          if (pendingForMe.length > 0) {
+            const list = pendingForMe.map((v) => `- ${v.id}: "${v.task_description}" (from ${v.requested_by})`).join('\n');
+            injectSystemNotice(chatJid, `[System] You have ${pendingForMe.length} pending verification request(s) assigned to you:\n${list}\nUse \`submit_verification\` after reviewing each task.`);
+          }
+        }
+      } catch { /* ok */ }
     }
   }, TODO_ENFORCE_INTERVAL_MS));
 

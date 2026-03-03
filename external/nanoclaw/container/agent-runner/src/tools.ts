@@ -651,6 +651,137 @@ Use holodeck_send to inject test messages and holodeck_read to check responses.`
     },
   );
 
+  // ── Cross-bot verification ──────────────────────────────────────────
+
+  server.tool(
+    'request_verification',
+    `Request another bot to verify your completed work. The verifier must independently confirm the task meets the acceptance criteria before it can be considered done.
+
+Use this after completing a task that requires cross-bot verification. The assigned verifier will receive a notification.`,
+    {
+      task_description: z.string().describe('What was done — clear description of the completed work'),
+      criteria: z.string().describe('Acceptance criteria — what "done" looks like, how the verifier should check'),
+      assigned_to: z.string().describe('Bot name to verify (e.g., "Albert", "Cid")'),
+    },
+    async (args) => {
+      if (!isMain) {
+        return { content: [{ type: 'text' as const, text: 'Verification requests can only be created from the main group.' }], isError: true };
+      }
+      const id = `v-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      writeIpcFile(tasksDir, {
+        type: 'request_verification',
+        id,
+        task_description: args.task_description,
+        criteria: args.criteria,
+        requested_by: process.env.NANOCLAW_ASSISTANT_NAME || 'unknown',
+        assigned_to: args.assigned_to,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return {
+        content: [{ type: 'text' as const, text: `Verification requested: ${id}\nAssigned to: ${args.assigned_to}\nCriteria: ${args.criteria}` }],
+      };
+    },
+  );
+
+  server.tool(
+    'submit_verification',
+    `Submit a verification result for a pending verification request. Use after you have independently checked the work against the acceptance criteria.`,
+    {
+      verification_id: z.string().describe('The verification ID (e.g., "v-1234567890-abc123")'),
+      passed: z.boolean().describe('true if the work meets all acceptance criteria, false if it does not'),
+      evidence: z.string().describe('Evidence supporting your decision — what you checked and what you found'),
+    },
+    async (args) => {
+      writeIpcFile(tasksDir, {
+        type: 'submit_verification',
+        id: args.verification_id,
+        passed: args.passed,
+        evidence: args.evidence,
+        submitted_by: process.env.NANOCLAW_ASSISTANT_NAME || 'unknown',
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return {
+        content: [{ type: 'text' as const, text: `Verification ${args.verification_id}: ${args.passed ? '✅ PASSED' : '❌ FAILED'}\nEvidence: ${args.evidence}` }],
+      };
+    },
+  );
+
+  server.tool(
+    'check_verification',
+    'Check the status of a specific verification request by ID.',
+    {
+      verification_id: z.string().describe('The verification ID to check'),
+    },
+    async (args) => {
+      // Read from the shared verification status file
+      const statusFile = '/workspace/project/data/verifications.json';
+      try {
+        const data = JSON.parse(fs.readFileSync(statusFile, 'utf-8')) as Array<{
+          id: string; task_description: string; criteria: string;
+          requested_by: string; assigned_to: string; status: string;
+          evidence?: string; requested_at: string; resolved_at?: string;
+        }>;
+        const record = data.find((v) => v.id === args.verification_id);
+        if (!record) {
+          return { content: [{ type: 'text' as const, text: `Verification ${args.verification_id} not found.` }], isError: true };
+        }
+        const lines = [
+          `**Verification ${record.id}**`,
+          `Status: ${record.status}`,
+          `Task: ${record.task_description}`,
+          `Criteria: ${record.criteria}`,
+          `Requested by: ${record.requested_by}`,
+          `Assigned to: ${record.assigned_to}`,
+          `Requested at: ${record.requested_at}`,
+        ];
+        if (record.evidence) lines.push(`Evidence: ${record.evidence}`);
+        if (record.resolved_at) lines.push(`Resolved at: ${record.resolved_at}`);
+        return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+      } catch {
+        return { content: [{ type: 'text' as const, text: 'Verification data unavailable.' }], isError: true };
+      }
+    },
+  );
+
+  server.tool(
+    'list_verifications',
+    'List all verification requests, optionally filtered by status.',
+    {
+      status: z.enum(['pending', 'verified', 'failed', 'all']).default('all').describe('Filter by verification status'),
+      assigned_to: z.string().optional().describe('Filter by assigned verifier bot name'),
+    },
+    async (args) => {
+      const statusFile = '/workspace/project/data/verifications.json';
+      try {
+        let data = JSON.parse(fs.readFileSync(statusFile, 'utf-8')) as Array<{
+          id: string; task_description: string; criteria: string;
+          requested_by: string; assigned_to: string; status: string;
+          evidence?: string; requested_at: string; resolved_at?: string;
+        }>;
+        if (args.status !== 'all') {
+          data = data.filter((v) => v.status === args.status);
+        }
+        if (args.assigned_to) {
+          data = data.filter((v) => v.assigned_to.toLowerCase() === args.assigned_to.toLowerCase());
+        }
+        if (data.length === 0) {
+          return { content: [{ type: 'text' as const, text: 'No verification requests found matching criteria.' }] };
+        }
+        const lines = data.map((v) => {
+          const icon = v.status === 'verified' ? '✅' : v.status === 'failed' ? '❌' : '⏳';
+          return `${icon} **${v.id}** — ${v.task_description.slice(0, 60)}${v.task_description.length > 60 ? '...' : ''}\n   ${v.status} | by ${v.requested_by} → ${v.assigned_to}`;
+        });
+        return { content: [{ type: 'text' as const, text: lines.join('\n\n') }] };
+      } catch {
+        return { content: [{ type: 'text' as const, text: 'No verification data available.' }] };
+      }
+    },
+  );
+
   // ── Delegate tools ──────────────────────────────────────────────────
 
   registerDelegateTools(server, {

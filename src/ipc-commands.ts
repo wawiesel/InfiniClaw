@@ -75,6 +75,17 @@ interface CommandData {
   message?: string;
   room?: string;
   limit?: number;
+  id?: string;
+  task_description?: string;
+  criteria?: string;
+  requested_by?: string;
+  assigned_to?: string;
+  timestamp?: string;
+  groupFolder?: string;
+  passed?: boolean;
+  evidence?: string;
+  submitted_by?: string;
+  [key: string]: unknown;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -743,6 +754,106 @@ async function handleSendToRoom(data: CommandData, ctx: InfiniClawIpcContext): P
   logger.info({ room, sourceGroup: ctx.sourceGroup }, 'send_to_room delivered');
 }
 
+// ── Verification helpers ────────────────────────────────────────────
+
+function verificationsPath(root: string): string {
+  return path.join(root, '_runtime', 'data', 'verifications.json');
+}
+
+interface VerificationRecord {
+  id: string;
+  task_description: string;
+  criteria: string;
+  requested_by: string;
+  assigned_to: string;
+  status: 'pending' | 'verified' | 'failed';
+  evidence?: string;
+  requested_at: string;
+  resolved_at?: string;
+  source_group: string;
+}
+
+function readVerifications(root: string): VerificationRecord[] {
+  const filePath = verificationsPath(root);
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function writeVerifications(root: string, records: VerificationRecord[]): void {
+  const filePath = verificationsPath(root);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(records, null, 2));
+}
+
+/** Sync verifications.json into a bot's instance data dir for container read access. */
+function syncVerificationsToInstance(root: string, bot: string): void {
+  const src = verificationsPath(root);
+  if (!fs.existsSync(src)) return;
+  const dst = path.join(instanceDir(root, bot), 'data', 'verifications.json');
+  try {
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.copyFileSync(src, dst);
+  } catch { /* best effort */ }
+}
+
+async function handleRequestVerification(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const root = resolveRoot();
+  const record: VerificationRecord = {
+    id: data.id as string,
+    task_description: data.task_description as string,
+    criteria: data.criteria as string,
+    requested_by: data.requested_by as string,
+    assigned_to: data.assigned_to as string,
+    status: 'pending',
+    requested_at: (data.timestamp as string) || new Date().toISOString(),
+    source_group: data.groupFolder as string,
+  };
+
+  const records = readVerifications(root);
+  records.push(record);
+  writeVerifications(root, records);
+
+  // Sync to all active bot instances so containers can read verifications.json
+  for (const bot of getActiveBots()) {
+    syncVerificationsToInstance(root, bot);
+  }
+
+  await safeSend(ctx, parseChatJid(data), `✅ Verification requested: ${record.id}\nAssigned to: ${record.assigned_to}\nCriteria: ${record.criteria}`);
+}
+
+async function handleSubmitVerification(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const root = resolveRoot();
+  const records = readVerifications(root);
+  const record = records.find((r) => r.id === (data.id as string));
+
+  if (!record) {
+    await safeSend(ctx, parseChatJid(data), `❌ Verification ${data.id as string} not found.`);
+    return;
+  }
+
+  if (record.status !== 'pending') {
+    await safeSend(ctx, parseChatJid(data), `Verification ${data.id as string} is already ${record.status}.`);
+    return;
+  }
+
+  record.status = (data.passed as boolean) ? 'verified' : 'failed';
+  record.evidence = data.evidence as string;
+  record.resolved_at = new Date().toISOString();
+
+  writeVerifications(root, records);
+
+  // Sync to all active bot instances
+  for (const bot of getActiveBots()) {
+    syncVerificationsToInstance(root, bot);
+  }
+
+  const icon = record.status === 'verified' ? '✅' : '❌';
+  await safeSend(ctx, parseChatJid(data), `${icon} Verification ${record.id}: ${record.status.toUpperCase()}\nEvidence: ${record.evidence}`);
+}
+
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_brain_mode: handleSetBrainMode,
   restart_bot: handleRestartBot,
@@ -752,6 +863,8 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_thread: handleSetThread,
   send_to_room: handleSendToRoom,
   restart_wksm: handleRestartWksm,
+  request_verification: handleRequestVerification,
+  submit_verification: handleSubmitVerification,
 
   git_push: handleGitPush,
   holodeck_create: handleHolodeckCreate,
