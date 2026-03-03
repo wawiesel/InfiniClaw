@@ -1718,15 +1718,30 @@ async function main(): Promise<void> {
     // Skills
     const skillsDir = path.join(sessionDir, '.claude', 'skills');
     let skillRows = '';
+    let skillHeader = '| Skill |';
+    let skillSep = '|-------|';
     try {
       const skillNames = fs.existsSync(skillsDir)
         ? fs.readdirSync(skillsDir).filter((e) => {
             try { return fs.statSync(path.join(skillsDir, e)).isDirectory(); } catch { return false; }
           }).sort()
         : [];
-      skillRows = skillNames.length > 0
-        ? skillNames.map((s) => `| 🔧 ${s} |`).join('\n')
-        : '| _(none)_ |';
+      if (skillNames.length > 0) {
+        skillHeader = '| Skill | Description |';
+        skillSep = '|-------|-------------|';
+        skillRows = skillNames.map((s) => {
+          const skillMd = path.join(skillsDir, s, 'SKILL.md');
+          let desc = '';
+          try {
+            const content = fs.readFileSync(skillMd, 'utf-8');
+            const m = content.match(/^description:\s*(.+)$/m);
+            if (m) desc = m[1].trim().replace(/\|/g, '\\|').slice(0, 60);
+          } catch { /* no description */ }
+          return `| \`${s}\` | ${desc} |`;
+        }).join('\n');
+      } else {
+        skillRows = '| _(none)_ |';
+      }
     } catch { skillRows = '| _(error reading skills)_ |'; }
 
     // MCP tools
@@ -1777,8 +1792,8 @@ async function main(): Promise<void> {
       `## 🚀 ${ASSISTANT_NAME} startup checklist`,
       '',
       '### 🔧 Skills',
-      '| Skill |',
-      '|-------|',
+      skillHeader,
+      skillSep,
       skillRows,
       '',
       '### 🔌 MCP Servers',
