@@ -131,6 +131,8 @@ const STANDING_ORDER_MAX_CONSECUTIVE = parseInt(process.env.STANDING_ORDER_MAX_C
 const STANDING_ORDER_REST_MS = parseInt(process.env.STANDING_ORDER_REST_MS || '1800000', 10);
 const standingOrderCycles: Record<string, number> = {};
 const standingOrderRestUntil: Record<string, number> = {};
+const METRICS_HISTORY_FILE = path.join(DATA_DIR, 'metrics-history.jsonl');
+const METRICS_HISTORY_MAX_LINES = 10_000;
 
 function isThreadContext(chatJid: string): boolean {
   return Boolean(activeReplyThreadIds[chatJid]);
@@ -1378,6 +1380,54 @@ async function main(): Promise<void> {
 
   // Periodic status snapshot
   const STATUS_SNAPSHOT_INTERVAL = 30_000;
+  const appendMetricsHistory = () => {
+    try {
+      const ts = Date.now();
+      const usage = process.memoryUsage();
+      const heapMB = Math.round(usage.heapUsed / 1024 / 1024);
+      const rssMB = Math.round(usage.rss / 1024 / 1024);
+      const metrics = {
+        ts,
+        groups: Object.entries(registeredGroups).map(([jid, g]) => {
+          const queueStatus = queue.getGroupStatus(jid);
+          const activity = getChatActivity(jid) || {};
+          const consecutiveKills = kill137Consecutive[jid] || 0;
+          const cooldownUntil = kill137CooldownUntil[jid] || 0;
+          return {
+            jid,
+            name: g.name,
+            kills137: consecutiveKills,
+            killCooldownActive: cooldownUntil > ts,
+            consecutiveKills,
+            pendingMessages: queueStatus.pendingMessages,
+            pendingTasks: queueStatus.pendingTasks,
+            active: queueStatus.active,
+            lastErrorAt: activity.lastErrorAt ?? null,
+          };
+        }),
+        heapMB,
+        rssMB,
+      };
+
+      const existing = fs.existsSync(METRICS_HISTORY_FILE)
+        ? fs.readFileSync(METRICS_HISTORY_FILE, 'utf-8')
+        : '';
+      const lines = existing
+        .split('\n')
+        .filter((line) => line.length > 0);
+      lines.push(JSON.stringify(metrics));
+
+      const trimmed = lines.length > METRICS_HISTORY_MAX_LINES
+        ? lines.slice(-METRICS_HISTORY_MAX_LINES)
+        : lines;
+      const tmpPath = `${METRICS_HISTORY_FILE}.tmp`;
+      fs.writeFileSync(tmpPath, `${trimmed.join('\n')}\n`);
+      fs.renameSync(tmpPath, METRICS_HISTORY_FILE);
+    } catch (err) {
+      logger.warn({ err }, 'Failed to append metrics history');
+    }
+  };
+
   const writeStatusSnapshot = () => {
     try {
       const snapshot = {
@@ -1418,6 +1468,8 @@ async function main(): Promise<void> {
         fs.writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2));
         fs.renameSync(tmpPath, statusPath);
       }
+
+      appendMetricsHistory();
     } catch (err) {
       logger.warn({ err }, 'Failed to write status snapshot');
     }
