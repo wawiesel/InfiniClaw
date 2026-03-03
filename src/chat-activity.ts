@@ -99,22 +99,24 @@ function setCurrentObjective(chatJid: string, objective: string): void {
   persistChatActivity(chatJid);
 }
 
-function recordUserContext(chatJid: string, text: string): void {
+function recordUserContext(activity: ChatActivity, text: string): void {
   const compact = compactMessage(text, 220);
   if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
   const existing = activity.recentUserContext || [];
-  const next = [...existing.filter((v) => v !== compact), compact].slice(-6);
-  activity.recentUserContext = next;
-  persistChatActivity(chatJid);
+  activity.recentUserContext = [...existing.filter((v) => v !== compact), compact].slice(-6);
 }
 
 export function setObjectiveFromMessages(chatJid: string, messages: NewMessage[]): void {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const content = messages[i].content.trim();
     if (!content) continue;
-    recordUserContext(chatJid, content);
-    setCurrentObjective(chatJid, content);
+    const compactObj = compactMessage(content, 180);
+    if (!compactObj) continue;
+    const activity = ensureChatActivity(chatJid);
+    recordUserContext(activity, content);
+    activity.currentObjective = compactObj;
+    activity.currentObjectiveAt = Date.now();
+    persistChatActivity(chatJid);
     return;
   }
 }
