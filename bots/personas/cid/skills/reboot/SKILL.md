@@ -46,36 +46,61 @@ npm run build          # builds nanoclaw first, then InfiniClaw
 npm test               # runs InfiniClaw tests
 ```
 
-**What goes where:**
-
-| Change | Location |
-|--------|----------|
-| Bot capabilities | `bots/personas/{bot}/skills/` |
-| Bot identity/rules | `bots/personas/{bot}/CLAUDE.md` |
-| Room context | `bots/personas/{bot}/groups/{room}/CLAUDE.md` |
-| InfiniClaw orchestrator | `src/` |
-| Upstream nanoclaw fixes | `external/nanoclaw/src/` |
-| Container image | `external/nanoclaw/container/` + `bots/container/` |
+Compiles TypeScript: nanoclaw `src/` → `external/nanoclaw/dist/`, InfiniClaw `src/` → `dist/`. The host runs `node dist/cli.js start|stop|chat <bot>`.
 
 ## Repo Layout
 
 ```
-$INFINICLAW_ROOT/
-├── src/                    <- InfiniClaw source (orchestrator, channels, deploy)
-│   ├── main.ts             <- startup, message loop
-│   ├── service.ts          <- deploy, restart, sync, build logic
-│   ├── container-spawn.ts  <- podman container management
-│   ├── ipc-commands.ts     <- extended IPC command handlers
-│   ├── channels/matrix.ts  <- Matrix channel
-│   └── ...
-├── external/nanoclaw/      <- git subtree (upstream framework)
-│   ├── src/                <- upstream source
-│   └── container/          <- agent-runner, skills
-├── bots/
-│   ├── personas/{bot}/     <- CLAUDE.md, skills, groups, container-config
-│   └── container/{bot}/    <- Dockerfiles
-└── _runtime/               <- gitignored (instances, logs, data)
+$INFINICLAW_ROOT/          <- git root
+├── package.json                      <- workspace root (npm workspaces)
+├── tsconfig.json                     <- InfiniClaw build config
+├── vitest.config.ts                  <- InfiniClaw test config
+├── src/                              <- InfiniClaw source
+│   ├── main.ts                       <- orchestrator: startup, message loop
+│   ├── cli.ts                        <- CLI entry: start|stop|chat|send
+│   ├── service.ts                    <- deploy, restart, sync, build logic
+│   ├── container-spawn.ts            <- podman container management
+│   ├── ipc-watcher.ts                <- IPC polling with extended types
+│   ├── ipc-commands.ts               <- extended IPC command handlers
+│   ├── brain-management.ts           <- model selection
+│   ├── chat-activity.ts              <- activity tracking
+│   ├── container-mounts.ts           <- InfiniClaw container volumes
+│   ├── container-secrets.ts          <- provider secret normalization
+│   ├── channels/matrix.ts            <- Matrix channel
+│   ├── channels/local-cli.ts         <- Terminal channel
+│   ├── skill-sync.ts, mcp-sync.ts    <- skill/MCP sync
+│   └── __tests__/                    <- InfiniClaw tests
+├── dist/                             <- InfiniClaw compiled output
+├── external/
+│   └── nanoclaw/                     <- subtree (upstream framework)
+│       ├── src/                      <- upstream source
+│       │   ├── config.ts, db.ts, types.ts, router.ts, logger.ts
+│       │   ├── container-runner.ts, task-scheduler.ts, group-queue.ts
+│       │   ├── mount-security.ts, env-utils.ts, podman-utils.ts
+│       │   └── channels/whatsapp.ts
+│       ├── container/                <- agent-runner/, skills/, build.sh
+│       ├── CLAUDE.md                 <- base instructions (all bots)
+│       ├── package.json              <- with "exports" field
+│       └── dist/                     <- upstream compiled output
+├── bots/                             <- personas, skills, config, container
+│   ├── personas/{bot}/CLAUDE.md      <- persona identity
+│   ├── personas/{bot}/groups/        <- room-level CLAUDE.md
+│   ├── personas/{bot}/skills/        <- persona-specific skills
+│   └── container/{bot}/Dockerfile    <- container images
+└── _runtime/                         <- gitignored (instances, logs, data)
 ```
+
+## What Goes Where
+
+| Change | Location | Notes |
+|--------|----------|-------|
+| Bot capabilities | `bots/personas/{bot}/skills/` | Skills, not code |
+| Bot identity/rules | `bots/personas/{bot}/CLAUDE.md` | Persona layer |
+| Room context | `bots/personas/{bot}/groups/{room}/CLAUDE.md` | Group layer |
+| Shared skills | `external/nanoclaw/container/skills/` | All bots get these |
+| InfiniClaw source | `src/` | Main orchestrator, channels, deploy |
+| Upstream fixes | `external/nanoclaw/src/` | Captain approval needed |
+| Container image | `external/nanoclaw/container/` + `bots/container/` | Rebuild via image task |
 
 ## Git Subtree Operations
 
@@ -89,11 +114,13 @@ git subtree pull --prefix=external/nanoclaw https://github.com/wawiesel/nanoclaw
 git subtree push --prefix=external/nanoclaw https://github.com/wawiesel/nanoclaw main
 ```
 
-Always `--squash` on pull to keep InfiniClaw history clean. Commit InfiniClaw-level and nanoclaw-level changes separately when possible.
+- Subtree metadata lives in commit messages (`git-subtree-dir`, `git-subtree-split`), not config files.
+- Always `--squash` on pull to keep InfiniClaw history clean.
+- Commit InfiniClaw-level and nanoclaw-level changes separately when possible — makes subtree push cleaner.
 
 ## Rules
 
-- **Skills over code** — add bot capabilities as skills, not source changes.
+- **Skills over code** — add bot capabilities as skills, not source changes. Only touch source for bug fixes or core infrastructure with Captain approval.
 - **Build after changes** — always `npm run build` after modifying source.
 - **Commit separately** — keep nanoclaw source changes in their own commits for clean subtree push.
 - **Never edit `/workspace/project/`** — that's the deployed copy, overwritten on restart.
