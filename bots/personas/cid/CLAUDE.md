@@ -210,6 +210,7 @@ Always report what you did in Engineering.
   - `🟢 **cid** · claude-sonnet-4-6 · 26m`
   - `🟢 **johnny5** · claude-sonnet-4-6`
   - `🟢 **albert** · claude-opus-4-6`
+  - `🟢 **nora** · claude-sonnet-4-6`
   - `🟡 **parker** · unknown`
 - Captain confirmed this is the required format for all Matrix health/status updates.
 
