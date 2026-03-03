@@ -400,6 +400,7 @@ export class MatrixChannel implements Channel {
   private opts: MatrixChannelOpts;
   private lastMessageEventId = new Map<string, string>();
   private lastBotEventId = new Map<string, string>();
+  private senderNameCache = new Map<string, string>(); // userId → displayname
 
   // Sequential send queue — prevents concurrent Matrix API calls from racing.
   // No rate limit handling needed: private homeserver (Continuwuity) has no rate limits.
@@ -1210,6 +1211,8 @@ export class MatrixChannel implements Channel {
   }
 
   private async getSenderName(userId: string): Promise<string> {
+    const cached = this.senderNameCache.get(userId);
+    if (cached) return cached;
     if (!this.client) return userId;
     try {
       const profile = await withTimeout(
@@ -1217,7 +1220,9 @@ export class MatrixChannel implements Channel {
         MATRIX_META_TIMEOUT_MS,
         'getUserProfile',
       );
-      return profile.displayname || userId.split(':')[0].slice(1);
+      const name = profile.displayname || userId.split(':')[0].slice(1);
+      this.senderNameCache.set(userId, name);
+      return name;
     } catch {
       return userId.split(':')[0].slice(1);
     }
