@@ -835,45 +835,52 @@ function buildRoomMap(root: string): Record<string, { bot: string; roomId: strin
 
 export async function send(room: string, message: string): Promise<void> {
   const root = resolveRoot();
-  const roomMap = buildRoomMap(root);
-  const target = roomMap[room.toLowerCase()];
-  if (!target) {
-    throw new Error(`Unknown room: ${room}. Valid rooms: ${Object.keys(roomMap).join(', ')}`);
+  const config = loadMachineConfig();
+  const localBots = config.bots;
+
+  // Find the room's Matrix room ID and homeserver from any local bot's config
+  let roomId: string | undefined;
+  let homeserver: string | undefined;
+  for (const bot of localBots) {
+    try {
+      const env = loadProfileEnv(root, bot);
+      if (env.MAIN_GROUP_NAME?.toLowerCase() === room.toLowerCase()) {
+        const jid = env.LOCAL_MIRROR_MATRIX_JID;
+        roomId = jid?.replace(/^matrix:/, '');
+        homeserver = env.MATRIX_HOMESERVER;
+        if (roomId) break;
+      }
+    } catch { /* skip */ }
+  }
+  if (!roomId) {
+    throw new Error(`Unknown room: ${room}. No local bot has MAIN_GROUP_NAME matching it.`);
   }
 
-  const instance = instanceDir(root, target.bot);
-  const dbPath = path.join(instance, 'store', 'messages.db');
-  if (!fs.existsSync(dbPath)) {
-    throw new Error(`No message DB for ${target.bot}. Run 'start' first.`);
-  }
-
-  // Load bot profile for Matrix credentials
-  const profileEnv = loadProfileEnv(root, target.bot);
-  const homeserver = profileEnv.MATRIX_HOMESERVER;
-  if (!homeserver) throw new Error(`No MATRIX_HOMESERVER in ${target.bot} profile`);
-
-  // Read stored Matrix access token
-  const storageFile = path.join(instance, 'store', 'matrix-bot.json');
+  // Find a local bot with a valid Matrix access token to send from
   let accessToken: string | undefined;
-  if (fs.existsSync(storageFile)) {
-    const storage = JSON.parse(fs.readFileSync(storageFile, 'utf-8'));
-    accessToken = storage.kvStore?.matrix_access_token;
+  let senderBot: string | undefined;
+  for (const bot of localBots) {
+    const inst = instanceDir(root, bot);
+    const storageFile = path.join(inst, 'store', 'matrix-bot.json');
+    if (fs.existsSync(storageFile)) {
+      const storage = JSON.parse(fs.readFileSync(storageFile, 'utf-8'));
+      const token = storage.kvStore?.matrix_access_token;
+      if (token) {
+        accessToken = token;
+        senderBot = bot;
+        const env = loadProfileEnv(root, bot);
+        if (env.MATRIX_HOMESERVER) homeserver = env.MATRIX_HOMESERVER;
+        break;
+      }
+    }
   }
-  if (!accessToken) throw new Error(`No stored Matrix access token for ${target.bot}. Bot must have connected to Matrix at least once.`);
+  if (!accessToken || !senderBot || !homeserver) {
+    throw new Error('No local bot with a stored Matrix access token. Run \'start\' first.');
+  }
 
-  // 1. Insert into DB so bot processes it
-  const db = new Database(dbPath);
-  const msgId = `op-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-  const timestamp = new Date().toISOString();
-  db.prepare(
-    'INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, 0)',
-  ).run(msgId, target.jid, 'operator', 'Captain', message, timestamp);
-  db.close();
-  console.log(`DB: injected message to ${target.bot} (${room})`);
-
-  // 2. Send to Matrix so it's visible in the room
+  // Send to Matrix — bots pick it up via room sync
   const txnId = `op-${Date.now()}`;
-  const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(target.roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`;
+  const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`;
   const resp = await fetch(url, {
     method: 'PUT',
     headers: {
@@ -890,11 +897,9 @@ export async function send(room: string, message: string): Promise<void> {
 
   if (!resp.ok) {
     const body = await resp.text();
-    console.error(`Matrix send failed (${resp.status}): ${body}`);
-    console.log('Message was still injected into DB — bot will process it.');
-  } else {
-    console.log(`Matrix: sent to ${room}`);
+    throw new Error(`Matrix send failed (${resp.status}): ${body}`);
   }
+  console.log(`Sent to ${room} (via ${senderBot})`);
 }
 
 // ── Holodeck (blue-green test instances) ───────────────────────────────
