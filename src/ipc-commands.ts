@@ -3,7 +3,7 @@
  * Extended commands delegated from the base ipc.ts processTaskIpc switch.
  */
 import crypto from 'crypto';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -488,21 +488,24 @@ async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): 
 
     await new Promise(r => setTimeout(r, 2000));
 
-    const startOut = execSync(`${wksc} mcp proxy start 2>&1`, {
+    // wksc mcp proxy start is a blocking server process — must use spawn with detached
+    const child = spawn(wksc, ['mcp', 'proxy', 'start'], {
+      detached: true,
+      stdio: 'ignore',
+      shell: false,
+    });
+    child.unref();
+    logger.info({ pid: child.pid }, 'wksm proxy spawned');
+
+    // Wait for it to come up then verify
+    await new Promise(r => setTimeout(r, 3000));
+
+    const health = execSync('curl -s --max-time 3 http://localhost:8765/health 2>&1 || echo "not ready"', {
       shell: '/bin/bash',
       encoding: 'utf-8',
-      timeout: 15000,
+      timeout: 8000,
     }).trim();
-    if (chatJid) await ctx.sendMessage(chatJid, `start: ${startOut}`);
-
-    await new Promise(r => setTimeout(r, 2000));
-
-    const health = execSync('curl -s http://localhost:8765/health', {
-      shell: '/bin/bash',
-      encoding: 'utf-8',
-      timeout: 5000,
-    }).trim();
-    if (chatJid) await ctx.sendMessage(chatJid, `health: ${health}`);
+    if (chatJid) await ctx.sendMessage(chatJid, `✅ wksm started (pid ${child.pid}), health: ${health}`);
   } catch (err) {
     logger.error({ err }, 'restart_wksm failed');
     if (chatJid) await ctx.sendMessage(chatJid, `⛔ restart_wksm failed: ${err instanceof Error ? err.message : String(err)}`);
