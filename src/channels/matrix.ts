@@ -401,6 +401,7 @@ export class MatrixChannel implements Channel {
   private lastMessageEventId = new Map<string, string>();
   private lastBotEventId = new Map<string, string>();
   private senderNameCache = new Map<string, string>(); // userId → displayname
+  private roomNameCache = new Map<string, string>(); // roomId → display name
 
   // Sequential send queue — prevents concurrent Matrix API calls from racing.
   // No rate limit handling needed: private homeserver (Continuwuity) has no rate limits.
@@ -1229,6 +1230,8 @@ export class MatrixChannel implements Channel {
   }
 
   private async getRoomName(roomId: string): Promise<string> {
+    const cached = this.roomNameCache.get(roomId);
+    if (cached) return cached;
     if (!this.client) return roomId;
     try {
       const state = await withTimeout(
@@ -1236,7 +1239,9 @@ export class MatrixChannel implements Channel {
         MATRIX_META_TIMEOUT_MS,
         'getRoomStateEvent(m.room.name)',
       );
-      return state.name || roomId;
+      const name = state.name || roomId;
+      this.roomNameCache.set(roomId, name);
+      return name;
     } catch {
       return roomId;
     }
