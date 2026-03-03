@@ -766,7 +766,8 @@ Use this after completing a task that requires cross-bot verification. The assig
           data = data.filter((v) => v.status === args.status);
         }
         if (args.assigned_to) {
-          data = data.filter((v) => v.assigned_to.toLowerCase() === args.assigned_to.toLowerCase());
+          const assignedTo = args.assigned_to;
+          data = data.filter((v) => v.assigned_to.toLowerCase() === assignedTo.toLowerCase());
         }
         if (data.length === 0) {
           return { content: [{ type: 'text' as const, text: 'No verification requests found matching criteria.' }] };
