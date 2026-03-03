@@ -77,9 +77,15 @@ export function handleOperatorCommand(
         const hostPath = revoke[1];
         logger.info({ hostPath }, '!deny command');
         void (async () => {
-            const removed = revokeMount(process.env.PERSONA_NAME!, hostPath);
-            if (matrix?.isConnected()) {
-                await matrix.sendMessage(msg.chat_jid, removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`, msg.thread_id);
+            try {
+                const removed = revokeMount(process.env.PERSONA_NAME!, hostPath);
+                if (matrix?.isConnected()) {
+                    await matrix.sendMessage(msg.chat_jid, removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`, msg.thread_id);
+                }
+            } catch (err) {
+                if (matrix?.isConnected()) {
+                    await matrix.sendMessage(msg.chat_jid, `⛔ !deny failed: ${err instanceof Error ? err.message : String(err)}`, msg.thread_id);
+                }
             }
         })();
         return true;
