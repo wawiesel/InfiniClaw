@@ -1222,6 +1222,7 @@ export class MatrixChannel implements Channel {
         'getUserProfile',
       );
       const name = profile.displayname || userId.split(':')[0].slice(1);
+      if (this.senderNameCache.size >= 500) this.senderNameCache.clear();
       this.senderNameCache.set(userId, name);
       return name;
     } catch {
@@ -1240,6 +1241,7 @@ export class MatrixChannel implements Channel {
         'getRoomStateEvent(m.room.name)',
       );
       const name = state.name || roomId;
+      if (this.roomNameCache.size >= 200) this.roomNameCache.clear();
       this.roomNameCache.set(roomId, name);
       return name;
     } catch {
