@@ -423,7 +423,7 @@ async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Pr
   if (!chatJid) return;
 
   try {
-    const logDir = path.resolve(process.env.INFINICLAW_ROOT || process.cwd(), 'logs');
+    const logDir = path.resolve(process.env.INFINICLAW_ROOT || process.cwd(), '_runtime', 'logs');
     const errorLogPath = path.join(logDir, `${bot}.error.log`);
     const lastErrors = fs.existsSync(errorLogPath)
       ? fs.readFileSync(errorLogPath, 'utf8').split('\n').slice(-50).join('\n').trim()
