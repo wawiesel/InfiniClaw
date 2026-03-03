@@ -8,7 +8,6 @@
  */
 import { ChildProcess, execSync } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import { parseEnvLine } from 'nanoclaw/env-utils.js';
@@ -290,13 +289,11 @@ export async function runContainerAgent(
   fs.mkdirSync(groupDir, { recursive: true });
   const projectRoot = process.cwd();
 
-  // Expose DB path (as container-side path) so the in-container MCP server can do direct DB lookups
+  // Expose DB path (as container-side path) so the in-container MCP server can do direct DB lookups.
+  // The home dir is mounted ro at its real host path (e.g. /Users/ww5 → /Users/ww5), so the
+  // container-side path is identical to the host path — no remapping needed.
   const hostDbPath = path.join(STORE_DIR, 'messages.db');
-  const homeDir = os.homedir();
-  const containerDbPath = hostDbPath.startsWith(homeDir + path.sep)
-    ? path.join('/workspace/extra/home', hostDbPath.slice(homeDir.length + 1))
-    : hostDbPath;
-  process.env.NANOCLAW_DB_PATH = containerDbPath;
+  process.env.NANOCLAW_DB_PATH = hostDbPath;
 
   const secrets = normalizeProviderSecrets(collectContainerSecrets(projectRoot));
   const mounts = buildVolumeMounts(group, input.isMain, secrets);

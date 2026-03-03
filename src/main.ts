@@ -1735,7 +1735,7 @@ async function main(): Promise<void> {
           try {
             const content = fs.readFileSync(skillMd, 'utf-8');
             const m = content.match(/^description:\s*(.+)$/m);
-            if (m) desc = m[1].trim().replace(/\|/g, '\\|').slice(0, 60);
+            if (m) desc = m[1].trim().replace(/\|/g, '\\|').slice(0, 120);
           } catch { /* no description */ }
           return `| \`${s}\` | ${desc} |`;
         }).join('\n');
