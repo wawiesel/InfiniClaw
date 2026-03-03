@@ -856,23 +856,27 @@ export async function send(room: string, message: string): Promise<void> {
     throw new Error(`Unknown room: ${room}. No local bot has MAIN_GROUP_NAME matching it.`);
   }
 
-  // Find a local bot with a valid Matrix access token to send from
+  // Find a local bot that's in this room and has a valid Matrix access token
   let accessToken: string | undefined;
   let senderBot: string | undefined;
   for (const bot of localBots) {
-    const inst = instanceDir(root, bot);
-    const storageFile = path.join(inst, 'store', 'matrix-bot.json');
-    if (fs.existsSync(storageFile)) {
-      const storage = JSON.parse(fs.readFileSync(storageFile, 'utf-8'));
-      const token = storage.kvStore?.matrix_access_token;
-      if (token) {
-        accessToken = token;
-        senderBot = bot;
-        const env = loadProfileEnv(root, bot);
-        if (env.MATRIX_HOMESERVER) homeserver = env.MATRIX_HOMESERVER;
-        break;
+    try {
+      const env = loadProfileEnv(root, bot);
+      const botJid = env.LOCAL_MIRROR_MATRIX_JID?.replace(/^matrix:/, '');
+      if (botJid !== roomId) continue;
+      const inst = instanceDir(root, bot);
+      const storageFile = path.join(inst, 'store', 'matrix-bot.json');
+      if (fs.existsSync(storageFile)) {
+        const storage = JSON.parse(fs.readFileSync(storageFile, 'utf-8'));
+        const token = storage.kvStore?.matrix_access_token;
+        if (token) {
+          accessToken = token;
+          senderBot = bot;
+          if (env.MATRIX_HOMESERVER) homeserver = env.MATRIX_HOMESERVER;
+          break;
+        }
       }
-    }
+    } catch { /* skip */ }
   }
   if (!accessToken || !senderBot || !homeserver) {
     throw new Error('No local bot with a stored Matrix access token. Run \'start\' first.');
