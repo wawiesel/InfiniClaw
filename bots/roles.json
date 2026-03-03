@@ -1,0 +1,44 @@
+{
+  "navigator": [
+    "agent-browser",
+    "diagnose-google-workspace",
+    "explore-vault",
+    "knowledge-extractor",
+    "linkedin-login",
+    "obsidian-vault-generate-meeting",
+    "obsidian-vault-generate-person",
+    "recover-session",
+    "save-memory",
+    "script-based-file-organizer",
+    "update-directives",
+    "update-mcp",
+    "wks-based-management"
+  ],
+  "engineer": [
+    "agent-browser",
+    "codebase-simplify",
+    "customize",
+    "diagnose",
+    "health-check",
+    "reboot",
+    "recover-session",
+    "save-memory",
+    "transporter",
+    "tune",
+    "update-directives",
+    "update-lobes",
+    "update-mcp"
+  ],
+  "architect": [
+    "agent-browser",
+    "codebase-simplify",
+    "creating-good-skills",
+    "diagnose",
+    "infini-claw-dev",
+    "recover-session",
+    "save-memory",
+    "transporter",
+    "update-directives",
+    "update-mcp"
+  ]
+}
