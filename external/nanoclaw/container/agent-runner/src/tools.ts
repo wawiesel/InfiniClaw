@@ -144,7 +144,7 @@ export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
 Use this when you want to post a brief summary line (e.g. "💭 Lobe delegation - reason") and then put all detail/output in a thread. Returns { event_id } on success.`,
     {
       text: z.string().describe('The message text to post on the main timeline'),
-      timeout_ms: z.number().int().positive().max(15000).default(8000).describe('How long to wait for the event ID to be written (default 8s)'),
+      timeout_ms: z.number().int().positive().max(30000).default(15000).describe('How long to wait for the event ID to be written (default 15s)'),
     },
     async (args) => {
       const idsFile = path.join(ipcDir, 'last_event_ids.json');
@@ -158,7 +158,7 @@ Use this when you want to post a brief summary line (e.g. "💭 Lobe delegation 
 
       emitChatMessageTo(chatJid, args.text);
 
-      const timeoutMs = Math.max(1000, Math.min(args.timeout_ms ?? 8000, 15000));
+      const timeoutMs = Math.max(1000, Math.min(args.timeout_ms ?? 15000, 30000));
       const deadline = Date.now() + timeoutMs;
       const pollIntervalMs = 200;
 
