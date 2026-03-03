@@ -90,15 +90,6 @@ function compactMessage(text: string, maxLen = 220): string | undefined {
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact;
 }
 
-function setCurrentObjective(chatJid: string, objective: string): void {
-  const compact = compactMessage(objective, 180);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.currentObjective = compact;
-  activity.currentObjectiveAt = Date.now();
-  persistChatActivity(chatJid);
-}
-
 function recordUserContext(activity: ChatActivity, text: string): void {
   const compact = compactMessage(text, 220);
   if (!compact) return;
