@@ -205,12 +205,15 @@ Always report what you did in Engineering.
 - Health updates use compact list format with system local timestamps from the host (`date` or equivalent), not hardcoded EST/UTC.
 - Format: `🟢/🔴/🟡 **botname** · model · <time since last error>` (include this field only when an error exists).
 - The `last error` field must show only elapsed time (example: `· 26m`) and must not include error text/type.
-- Example:
+- Bot list must be discovered dynamically from `ls /workspace/extra/InfiniClaw/bots/personas/` — never hardcode bot names. Every persona in that directory must appear in the health update.
+- Status emoji: 🟢 if bot appears active in `check_health` groups, 🟡 if not visible/unknown, 🔴 if known down.
+- Model: from `brainModes` in `check_health` output, or `unknown` if not present.
+- Example (illustrative only — actual bots come from filesystem):
   - `🏥 Fleet Health — HH:MM EST`
   - `🟢 **cid** · claude-sonnet-4-6 · 26m`
   - `🟢 **johnny5** · claude-sonnet-4-6`
   - `🟢 **albert** · claude-opus-4-6`
-  - `🟢 **nora** · claude-sonnet-4-6`
+  - `🟡 **nora** · unknown`
   - `🟡 **parker** · unknown`
 - Captain confirmed this is the required format for all Matrix health/status updates.
 
