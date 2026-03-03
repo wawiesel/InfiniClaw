@@ -13,7 +13,7 @@ export function isIgnoredTrigger(text: string): boolean {
 }
 
 // Status indicator patterns from other bots (working/resuming/idling/worked/resumed/idled)
-const STATUS_INDICATOR_RE = /^[*\s]*[⏳💤🔵🔷🔹]\s*<font\b/;
+const STATUS_INDICATOR_RE = /^[*\s]*[⏳💤🔵🔷🔹]\s*<(?:font|span)\b/;
 
 /** Returns true if the message should be ignored (other bot output). */
 export function shouldIgnoreMessage(msg: NewMessage): boolean {

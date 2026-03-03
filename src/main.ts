@@ -1887,7 +1887,7 @@ async function main(): Promise<void> {
       const hostname = os.hostname();
       const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
       const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname}`;
-      await ch.sendMessage(mainJid, `<font color="#888888"><em>${boot}</em></font>`);
+      await ch.sendMessage(mainJid, `<span style="color:#888888"><em>${boot}</em></span>`);
       // Send startup checklist (skills, MCP tools, todos, health)
       try {
         const checklist = buildStartupChecklist();

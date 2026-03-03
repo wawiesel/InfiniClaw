@@ -118,7 +118,7 @@ function botStatusLine(bot: string, emoji: string): string {
       : isOllamaBaseUrl(env.BRAIN_BASE_URL || '') ? 'Ollama' : 'Claude';
     const model = `${provider}/${rawModel}`;
     const hostname = os.hostname();
-    return `<font color="#888888"><em>${emoji} ${name} · 🔧 ${role} · 💬 ${group} · 🧠 ${model} · 🖥️ ${hostname}</em></font>`;
+    return `<span style="color:#888888"><em>${emoji} ${name} · 🔧 ${role} · 💬 ${group} · 🧠 ${model} · 🖥️ ${hostname}</em></span>`;
   } catch {
     return statusMessage(emoji, `${bot} restarting...`);
   }
@@ -396,7 +396,7 @@ async function handleStopBot(data: CommandData, ctx: InfiniClawIpcContext): Prom
   try {
     serviceStopBot(bot);
     logger.info({ bot }, 'Bot stopped');
-    await safeSend(ctx, chatJid, `<font color="#555555">🛑 ${bot} stopped.</font>`);
+    await safeSend(ctx, chatJid, `<span style="color:#555555">🛑 ${bot} stopped.</span>`);
   } catch (err) {
     logger.error({ bot, err }, 'Failed to stop bot');
     await safeSend(ctx, chatJid, `⛔ failed to stop ${bot}: ${errStr(err)}`);
