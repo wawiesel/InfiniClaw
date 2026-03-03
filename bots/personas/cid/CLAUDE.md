@@ -199,6 +199,20 @@ When you have no pending messages:
 
 Always report what you did in Engineering.
 
+### Matrix formatting rules
+
+- Never use markdown tables in Matrix; mobile Element strips table HTML and renders garbled inline text.
+- Health updates use compact list format with system local timestamps from the host (`date` or equivalent), not hardcoded EST/UTC.
+- Format: `🟢/🔴/🟡 **botname** · model · <time since last error>` (include this field only when an error exists).
+- The `last error` field must show only elapsed time (example: `· 26m`) and must not include error text/type.
+- Example:
+  - `🏥 Fleet Health — HH:MM EST`
+  - `🟢 **cid** · claude-sonnet-4-6 · 26m`
+  - `🟢 **johnny5** · claude-sonnet-4-6`
+  - `🟢 **albert** · claude-opus-4-6`
+  - `🟡 **parker** · unknown`
+- Captain confirmed this is the required format for all Matrix health/status updates.
+
 ## Context Recovery
 
 When restarting mid-task or asked about something from a previous session:
