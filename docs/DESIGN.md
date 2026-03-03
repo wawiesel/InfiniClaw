@@ -195,6 +195,7 @@ The Captain controls the fleet via `!` commands in Matrix, processed by the host
 | `!allow <path> [minutes]` | Grant temporary rw mount access for a bot. Requires restart. |
 | `!deny <path>` | Revoke a mount grant. |
 | `!todo` | Show the bot's current task list. |
+| `!operator <request>` | Summon a human operator via cascade dispatch. Bots see but don't respond. |
 
 ### Chat Activity Tracking
 
@@ -270,6 +271,18 @@ Cross-room communication uses **intercom relay accounts** — dedicated Matrix a
 **Bot usage (CO only):** Only the CO can use the intercom. `send_message` checks `crew-status.json` at runtime — non-CO bots get an error. Messages appear as `<BotName> (<SourceRoom>): <message>`.
 
 Intercom credentials are stored in `operator/intercom.json` in the secrets repo. Accounts must be joined to their respective rooms on the Matrix homeserver.
+
+### Operator Callout (`!operator`)
+
+The Captain can summon a human operator from any Matrix room by typing `!operator <request>`. Bots see the message as context but don't respond to it.
+
+**Cascade dispatch:** Each machine runs `matrix-watch.sh`, which polls Matrix for `!operator` mentions via intercom accounts. When a mention is detected:
+
+1. The first operator in the cascade sends "Hold please, contacting X, Y, Z" to the room.
+2. Each operator waits `position * ESCALATION_TIMEOUT` (default 5 minutes) before handling.
+3. If a higher-priority operator handles it first (claimed in `dispatch-log.json` via git), the others skip it.
+
+Operator ordering is deterministic per-request: each hostname is hashed with the event ID, sorted, producing a random but reproducible sequence.
 
 ## Code Structure
 
