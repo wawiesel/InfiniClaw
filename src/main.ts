@@ -282,6 +282,9 @@ function getMainChatJid(): string | undefined {
 let outgoingSeq = 0;
 
 function storeOutgoing(chatJid: string, text: string, threadId?: string): void {
+  // Ensure the chat exists so the FK constraint on messages is satisfied
+  // (cross-bot IPC can target rooms not yet in this bot's chats table)
+  storeChatMetadata(chatJid, new Date().toISOString());
   const id = `out-${Date.now()}-${++outgoingSeq}`;
   storeMessage({
     id,
