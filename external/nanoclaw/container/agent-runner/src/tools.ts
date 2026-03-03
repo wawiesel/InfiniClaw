@@ -116,6 +116,22 @@ export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
           isError: true,
         };
       }
+      // Only the CO can send cross-room messages via intercom
+      try {
+        const crew = JSON.parse(fs.readFileSync('/workspace/project/data/crew-status.json', 'utf-8'));
+        const me = crew.crew?.find((c: { name: string }) => c.name === crew.thisBot || c.name === process.env.ASSISTANT_NAME);
+        if (!me?.isCommandingOfficer) {
+          return {
+            content: [{ type: 'text' as const, text: `Only the Commanding Officer can send cross-room messages. You are not the current CO.` }],
+            isError: true,
+          };
+        }
+      } catch {
+        return {
+          content: [{ type: 'text' as const, text: `Cannot verify CO status — crew-status.json unavailable. Cross-room send blocked.` }],
+          isError: true,
+        };
+      }
       emitChatMessageTo(resolved, args.text, undefined, args.thread_id);
       return { content: [{ type: 'text' as const, text: `Message sent to ${args.recipient}.` }] };
     },

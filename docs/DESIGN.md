@@ -267,7 +267,7 @@ Cross-room communication uses **intercom relay accounts** — dedicated Matrix a
 
 **Operator usage:** `bash operator/intercom-send.sh <room> "<message>"`. Messages appear as `Operator (<hostname>): <message>`.
 
-**Bot usage (CO only):** Only the CO can use the intercom. Messages appear as `<BotName> (<SourceRoom>): <message>`.
+**Bot usage (CO only):** Only the CO can use the intercom. `send_message` checks `crew-status.json` at runtime — non-CO bots get an error. Messages appear as `<BotName> (<SourceRoom>): <message>`.
 
 Intercom credentials are stored in `operator/intercom.json` in the secrets repo. Accounts must be joined to their respective rooms on the Matrix homeserver.
 
