@@ -405,14 +405,14 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
       if (code !== 0) {
         // Map well-known signal-based exit codes to human-readable descriptions
         const signalExits: Record<number, { signal: string; label: string }> = {
-          137: { signal: 'SIGKILL', label: '⚠️ OOM KILLED — Container ran out of memory' },
+          137: { signal: 'SIGKILL', label: 'Container was killed (SIGKILL)' },
           139: { signal: 'SIGSEGV', label: '⚠️ SEGFAULT — Container crashed (segmentation fault)' },
           134: { signal: 'SIGABRT', label: '⚠️ ABORTED — Container aborted' },
           143: { signal: 'SIGTERM', label: 'Container was terminated' },
         };
 
         const signalInfo = signalExits[code ?? -1];
-        const isOomKill = code === 137;
+        const isOomKill = false; // Can't reliably distinguish OOM from external kill
 
         // If streaming output was already delivered, the crash happened during
         // cleanup or while waiting for more IPC input — treat as success.

@@ -118,12 +118,6 @@ let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
 
-// OOM backoff tracking — per-group consecutive OOM counter and cooldown
-const OOM_MAX_CONSECUTIVE = 3;
-const OOM_COOLDOWN_MS = 60_000; // 60s cooldown after consecutive OOMs
-const oomConsecutive: Record<string, number> = {};
-const oomCooldownUntil: Record<string, number> = {};
-
 // Standing order work cycle — re-trigger bot after completing work
 const STANDING_ORDER_COOLDOWN_MS = parseInt(process.env.STANDING_ORDER_COOLDOWN_MS || '60000', 10);
 const STANDING_ORDER_MAX_CONSECUTIVE = parseInt(process.env.STANDING_ORDER_MAX_CONSECUTIVE || '10', 10);
@@ -504,17 +498,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
-  // OOM backoff: if this group hit consecutive OOMs, enforce cooldown
-  const cooldownEnd = oomCooldownUntil[chatJid] || 0;
-  if (cooldownEnd > Date.now()) {
-    const remainSec = Math.round((cooldownEnd - Date.now()) / 1000);
-    logger.warn(
-      { group: group.name, consecutiveOOMs: oomConsecutive[chatJid], cooldownRemainingSec: remainSec },
-      'OOM cooldown active, deferring container spawn',
-    );
-    return false; // triggers retry with backoff in group-queue
-  }
-
   const channel = findChannel(channels, chatJid);
   if (!channel) {
     console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
@@ -687,26 +670,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const compactError = rawError.replace(/\s+/g, ' ').slice(0, 1000);
     markError(chatJid, compactError);
 
-    const isOomKill = /OOM KILLED/.test(compactError);
-    if (isOomKill) {
-      if (sessions[group.folder]) {
-        deleteSession(group.folder);
-        delete sessions[group.folder];
-        logger.info({ group: group.name }, 'Cleared session after OOM kill');
-      }
-      // Track consecutive OOMs and enforce cooldown
-      oomConsecutive[chatJid] = (oomConsecutive[chatJid] || 0) + 1;
-      if (oomConsecutive[chatJid] >= OOM_MAX_CONSECUTIVE) {
-        oomCooldownUntil[chatJid] = Date.now() + OOM_COOLDOWN_MS;
-        logger.warn(
-          { group: group.name, consecutiveOOMs: oomConsecutive[chatJid], cooldownMs: OOM_COOLDOWN_MS },
-          'OOM cooldown activated after consecutive kills',
-        );
-      }
-    }
-
     if (!outputSentToUser && channel) {
-      // OOM kills and signal-based crashes get a prominent standalone status line
       const isSignalCrash = /^⚠️ /.test(compactError);
       const errorReply = isSignalCrash
         ? compactError
@@ -738,10 +702,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     markRunEnded(chatJid);
     return false;
   }
-
-  // Reset OOM counter on success
-  oomConsecutive[chatJid] = 0;
-  delete oomCooldownUntil[chatJid];
 
   if (lastResponseBody) {
     markCompletion(chatJid, lastResponseBody);
