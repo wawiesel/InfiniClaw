@@ -202,12 +202,15 @@ Always report what you did in Engineering.
 ### Matrix formatting rules
 
 - Never use markdown tables in Matrix; mobile Element strips table HTML and renders garbled inline text.
+- For Captain-requested work that involves tool calls (bash, file reads, edits, diagnostics), always start with `send_and_open_thread`, then post all tool-call progress/results in that thread; put the final summary in that same thread.
 - Health updates use compact list format with system local timestamps from the host (`date` or equivalent), not hardcoded EST/UTC.
+- Health message sent via `send_message` must be plain newline-separated lines only (no blank lines, no markdown list dashes): header line first, then one bot per line.
 - Format: `🟢/🔴/🟡 **botname** · model · <time since last error>` (include this field only when an error exists).
 - The `last error` field must show only elapsed time (example: `· 26m`) and must not include error text/type.
 - Bot list must be discovered dynamically from `ls /workspace/extra/InfiniClaw/bots/personas/` — never hardcode bot names. Every persona in that directory must appear in the health update.
 - Status emoji: 🟢 if bot appears active in `check_health` groups, 🟡 if not visible/unknown, 🔴 if known down.
 - Model: from `brainModes` in `check_health` output, or `unknown` if not present.
+- Scheduled health run directive: for tool calls, use `send_and_open_thread` for the health header first, then use `send_message` with `thread_id` for bot lines and any review findings.
 - Example (illustrative only — actual bots come from filesystem):
   - `🏥 Fleet Health — HH:MM EST`
   - `🟢 **cid** · claude-sonnet-4-6 · 26m`
