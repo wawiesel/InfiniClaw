@@ -994,7 +994,7 @@ export class MatrixChannel implements Channel {
         msgtype: 'm.text',
         body: newText,
       };
-      if (/<[a-z][\s\S]*>/i.test(newText)) {
+      if (/^<[a-z]/i.test(newText.trimStart())) {
         newContent['format'] = 'org.matrix.custom.html';
         newContent['formatted_body'] = newText;
       }
