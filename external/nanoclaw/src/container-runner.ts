@@ -23,6 +23,11 @@ import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import {
+  startMemoryMonitor,
+  evictContainer,
+  analyseExit137,
+} from './container-memory-monitor.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -142,6 +147,11 @@ export interface RunContainerOpts {
   /** Kill container if no stdout data arrives within this many ms after spawn. 0 = disabled. Default: 0 */
   firstOutputDeadlineMs?: number;
 }
+
+// Start the memory monitor once when this module is first loaded.
+// It polls podman stats in the background so exit-137 events can be
+// correlated with memory pressure without any per-container setup.
+startMemoryMonitor();
 
 /**
  * Composable container run loop.
@@ -413,6 +423,23 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
 
         const signalInfo = signalExits[code ?? -1];
         const isOomKill = false; // Can't reliably distinguish OOM from external kill
+
+        // Correlate exit 137 with memory snapshots to distinguish OOM from external kill.
+        if (isOomKill) {
+          const oomAnalysis = analyseExit137(opts.containerName);
+          const logLevel = oomAnalysis.verdict === 'likely_oom' ? 'error' : 'warn';
+          logger[logLevel](
+            {
+              group: opts.groupName,
+              containerName: opts.containerName,
+              verdict: oomAnalysis.verdict,
+              lastUsedPercent: oomAnalysis.lastUsedPercent,
+              peakUsedPercent: oomAnalysis.peakUsedPercent,
+            },
+            `[MemMonitor] ${oomAnalysis.summary}`,
+          );
+          evictContainer(opts.containerName);
+        }
 
         // If streaming output was already delivered, the crash happened during
         // cleanup or while waiting for more IPC input — treat as success.
