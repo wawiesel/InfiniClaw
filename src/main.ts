@@ -544,9 +544,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (filteredMessages.length === 0) return true;
 
   // Separate human messages from bot messages — only humans can trigger a response
-  const humanMessages = filteredMessages.filter(m => !botMatrixUserIds.has(m.sender));
+  // Host commands (!operator) are visible as context but don't trigger responses
+  const humanMessages = filteredMessages.filter(m =>
+    !botMatrixUserIds.has(m.sender) && !/^!operator\b/i.test(m.content.trim()));
   if (humanMessages.length === 0) {
-    // Only bot messages — advance cursor, don't respond
+    // Only bot messages / host commands — advance cursor, don't respond
     lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
     saveState();
     return true;
@@ -966,9 +968,11 @@ async function handleGroupMessagesInLoop(
   }
 
   // Separate human messages from bot messages — only humans can trigger a response
-  const humanMessages = filtered.filter(m => !botMatrixUserIds.has(m.sender));
+  // Host commands (!operator) are visible as context but don't trigger responses
+  const humanMessages = filtered.filter(m =>
+    !botMatrixUserIds.has(m.sender) && !/^!operator\b/i.test(m.content.trim()));
   if (humanMessages.length === 0) {
-    // Only bot messages — advance cursor, don't respond
+    // Only bot messages / host commands — advance cursor, don't respond
     lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
     saveState();
     return;
