@@ -639,9 +639,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     );
     if (triggerMsg) autoThreadId = triggerMsg.id;
   }
-  activeReplyThreadIds[chatJid] = lastMsg?.thread_id || workThreadIds[chatJid] || autoThreadId;
+  // Force every turn into a thread: fall back to the most recent native Matrix event ID from a
+  // human message so tool calls and the final reply all land in a thread on the triggering message.
+  const triggeringEventId = [...contextMessages]
+    .reverse()
+    .find((m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'))?.id;
+  activeReplyThreadIds[chatJid] = lastMsg?.thread_id || workThreadIds[chatJid] || autoThreadId || triggeringEventId;
   logger.info(
-    { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], lastMsgThreadId: lastMsg?.thread_id, workThread: workThreadIds[chatJid], autoThread: autoThreadId, msgCount: contextMessages.length },
+    { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], lastMsgThreadId: lastMsg?.thread_id, workThread: workThreadIds[chatJid], autoThread: autoThreadId, triggeringEventId, msgCount: contextMessages.length },
     'Thread routing resolved',
   );
 
@@ -1076,7 +1081,11 @@ async function handleGroupMessagesInLoop(
     );
     if (triggerMsg) autoThreadId2 = triggerMsg.id;
   }
-  activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid] || autoThreadId2;
+  // Force every turn into a thread (see processGroupMessages for explanation)
+  const triggeringEventId2 = [...messagesToSend]
+    .reverse()
+    .find((m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'))?.id;
+  activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid] || autoThreadId2 || triggeringEventId2;
 
   // Interrupt lobe: if container is busy >30s, spawn parallel Sonnet container
   const groupStatus = queue.getGroupStatus(chatJid);
