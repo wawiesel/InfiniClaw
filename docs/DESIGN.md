@@ -285,6 +285,8 @@ The Captain can summon a human operator from any Matrix room by typing `!operato
 
 Operator ordering is deterministic per-request: each hostname is hashed with the event ID, sorted, producing a random but reproducible sequence.
 
+**Dual watchers:** Operators run both `matrix-watch.sh` and `inbox-watch.sh`. Matrix watch handles live `!operator` callouts from any room. Inbox watch polls git for cross-machine tasks — the fallback channel when Matrix is down. Both are required; neither replaces the other.
+
 ## Code Structure
 
 InfiniClaw wraps NanoClaw entry points via npm workspaces (`import from 'nanoclaw/config.js'`). See `src/README.md` for the full file map.
