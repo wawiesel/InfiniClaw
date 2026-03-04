@@ -76,7 +76,7 @@ Write `~/.config/infiniclaw/machine.json`:
 }
 ```
 
-Replace `YOUR_USERNAME` with the actual macOS username. The `bots` array lists persona names — these must match the directory names in `bots/personas/` and `secrets/`. Remove any that should stay on the other machine.
+Replace `YOUR_USERNAME` with the actual macOS username. The `bots` array lists persona names — these must match the directory names in `bots/{role}/` and `secrets/`. Remove any that should stay on the other machine.
 
 ## 5. Create allow-list.json
 

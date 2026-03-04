@@ -5,7 +5,7 @@ description: Add or modify MCP server configuration. Use when asked to install, 
 
 # Update MCP
 
-**Source of truth:** `/workspace/extra/{bot}-persona/groups/{group}/.mcp.json`
+**Source of truth:** `/workspace/persona/.mcp.json`
 
 This is the ONE file for all MCP server configuration. It is a writable bind mount to the persona directory — edits persist across restarts and take effect on next container spawn.
 

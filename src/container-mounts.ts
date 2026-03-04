@@ -95,19 +95,32 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
   }
 
   if (rootDir && personaName) {
-    const personaBaseDir = path.join(rootDir, 'bots', 'personas', personaName);
+    const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
+    const personaBaseDir = path.join(rootDir, 'bots', role, personaName);
 
     // Mount persona dir writable so bots can edit their own CLAUDE.md
     mounts.push({
       hostPath: personaBaseDir,
-      containerPath: `/workspace/extra/${personaName}-persona`,
+      containerPath: '/workspace/persona',
       readonly: false,
     });
-  }
 
-  // Lock group CLAUDE.md read-only
-  const groupClaudeMd = path.join(groupsDir, group.folder, 'CLAUDE.md');
-  mountIfExists(mounts, groupClaudeMd, '/workspace/group/CLAUDE.md', true);
+    // Mount ROOM.md as read-only CLAUDE.md at workspace root
+    const roomMd = path.join(rootDir, 'bots', role, 'ROOM.md');
+    mountIfExists(mounts, roomMd, '/workspace/CLAUDE.md', true);
+
+    // Mount memory from secrets repo (writable, overlays persona mount)
+    try {
+      const config = loadMachineConfig();
+      const memoryDir = path.join(config.secretsPath, personaName, 'memory');
+      fs.mkdirSync(memoryDir, { recursive: true });
+      mounts.push({
+        hostPath: memoryDir,
+        containerPath: '/workspace/persona/memory',
+        readonly: false,
+      });
+    } catch { /* no secrets config */ }
+  }
 
   // Share host delegate auth directories
   mountIfExists(mounts, path.join(homeDir, '.codex'), '/home/node/.codex', false);
@@ -139,10 +152,11 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 export function getPersonaPortPublish(): string[] {
   const rootDir = process.env.INFINICLAW_ROOT;
   const personaName = process.env.PERSONA_NAME;
+  const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
   if (!rootDir || !personaName) return [];
   try {
     const cfg = JSON.parse(
-      fs.readFileSync(path.join(rootDir, 'bots', 'personas', personaName, 'container-config.json'), 'utf-8'),
+      fs.readFileSync(path.join(rootDir, 'bots', role, personaName, 'container-config.json'), 'utf-8'),
     );
     return (cfg.portPublish as string[] | undefined) || [];
   } catch {
@@ -150,9 +164,9 @@ export function getPersonaPortPublish(): string[] {
   }
 }
 
-/** Read .mcp.json from persona group dir for SDK passthrough. */
-export function readPersonaGroupMcpServers(personaBaseDir: string, groupFolder: string): Record<string, Record<string, unknown>> | undefined {
-  const mcpJsonPath = path.join(personaBaseDir, 'groups', groupFolder, '.mcp.json');
+/** Read .mcp.json from persona dir for SDK passthrough. */
+export function readPersonaGroupMcpServers(personaBaseDir: string): Record<string, Record<string, unknown>> | undefined {
+  const mcpJsonPath = path.join(personaBaseDir, '.mcp.json');
   try {
     if (fs.existsSync(mcpJsonPath)) {
       const raw = fs.readFileSync(mcpJsonPath, 'utf-8');

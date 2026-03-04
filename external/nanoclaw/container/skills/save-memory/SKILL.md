@@ -117,7 +117,7 @@ Tell your lobe:
 1. List session files at the path above
 2. Write the Python script above, run it on the most recent `.jsonl`: `python3 script.py <session.jsonl> /tmp/session-summary.txt`
 3. Read the output, extract: key decisions, completed tasks, standing orders, file paths, errors resolved, unfinished work
-4. Write findings to `/workspace/extra/<persona>-persona/memory/session-recovery-<date>.md`
+4. Write findings to `/workspace/persona/memory/session-recovery-<date>.md`
 
 ### After recovery
 

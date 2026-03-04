@@ -29,7 +29,6 @@ const RSYNC_EXCLUDES = [
   'node_modules',
   'data',
   'store',
-  'groups',
   'logs',
   '.env.local',
 ];
@@ -62,8 +61,18 @@ function logDir(root: string): string {
   return path.join(root, '_runtime', 'logs');
 }
 
+function resolveRole(bot: string): string {
+  const config = loadMachineConfig();
+  try {
+    const roster = JSON.parse(fs.readFileSync(path.join(config.secretsPath, 'roster.json'), 'utf-8'));
+    return (roster[bot]?.role || '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 function personaDir(root: string, bot: string): string {
-  return path.join(root, 'bots', 'personas', bot);
+  return path.join(root, 'bots', resolveRole(bot), bot);
 }
 
 function profileEnvPath(_root: string, bot: string): string {
@@ -71,21 +80,6 @@ function profileEnvPath(_root: string, bot: string): string {
   return path.join(config.secretsPath, bot, 'env');
 }
 
-/** Copy persona group .md files into an instance's groups/ directory. */
-function copyPersonaGroups(personaBase: string, instanceBase: string): void {
-  const personaGroups = path.join(personaBase, 'groups');
-  if (!fs.existsSync(personaGroups)) return;
-  for (const gname of fs.readdirSync(personaGroups)) {
-    const gdir = path.join(personaGroups, gname);
-    if (!fs.statSync(gdir).isDirectory()) continue;
-    const dst = path.join(instanceBase, 'groups', gname);
-    fs.mkdirSync(dst, { recursive: true });
-    for (const file of fs.readdirSync(gdir)) {
-      if (!file.endsWith('.md')) continue;
-      fs.copyFileSync(path.join(gdir, file), path.join(dst, file));
-    }
-  }
-}
 
 /** Seed the registered_groups table with the main room from profile env. */
 function seedMainRoomRegistration(instanceBase: string, mainJid: string, mainGroupName: string, mainGroupFolder: string, requiresTrigger: boolean): void {
@@ -365,9 +359,7 @@ export function restorePersona(root: string, bot: string): void {
     const content = fs.readFileSync(personaClaude, 'utf-8');
     fs.appendFileSync(path.join(instance, 'CLAUDE.md'), '\n' + content);
   }
-
-  // RESTORE: seed group files from personas → instance groups
-  copyPersonaGroups(persona, instance);
+  // ROOM.md is mounted directly at /workspace/CLAUDE.md by container-mounts.ts
 }
 
 // ── Deploy ─────────────────────────────────────────────────────────────
@@ -396,13 +388,13 @@ export function deployBot(root: string, bot: string): void {
   console.log(`${bot}: building...`);
   execSync('npm run build', { cwd: instance, stdio: 'inherit' });
 
-  restorePersona(root, bot);
-
   // Pre-register main room from profile env
   const profileEnv = loadProfileEnv(root, bot);
   const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
   const mainGroupName = profileEnv.MAIN_GROUP_NAME;
   const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+
+  restorePersona(root, bot);
   let mainRequiresTrigger = profileEnv.REQUIRES_TRIGGER === 'true';
   // Commanding officer (lowest rank among active bots on this room) never requires trigger
   if (mainRequiresTrigger && mainGroupName) {
@@ -1000,20 +992,7 @@ export function holodeckCreate(bot: string, branch: string): void {
   console.log(`${hdBot}: building...`);
   execSync('npm run build', { cwd: instance, stdio: 'inherit' });
 
-  // 5. Restore persona (from worktree, using live bot's persona name)
-  const persona = personaDir(worktree, bot);
-  if (fs.existsSync(persona)) {
-    const personaClaude = path.join(persona, 'CLAUDE.md');
-    if (fs.existsSync(personaClaude)) {
-      fs.appendFileSync(
-        path.join(instance, 'CLAUDE.md'),
-        '\n' + fs.readFileSync(personaClaude, 'utf-8'),
-      );
-    }
-    copyPersonaGroups(persona, instance);
-  }
-
-  // 6. Create holodeck profile (clone live bot, force terminal-only)
+  // 5. Create holodeck profile (clone live bot, force terminal-only)
   const config = loadMachineConfig();
   const hdProfileDir = path.join(config.secretsPath, hdBot);
   fs.mkdirSync(hdProfileDir, { recursive: true });
@@ -1028,11 +1007,23 @@ export function holodeckCreate(bot: string, branch: string): void {
     '',
   ].join('\n'));
 
-  // 7. Seed main room registration
+  // 6. Seed main room registration
   const profileEnv = loadProfileEnv(root, hdBot);
   const mainJid = profileEnv.LOCAL_CHAT_JID || profileEnv.LOCAL_MIRROR_MATRIX_JID;
   const mainGroupName = profileEnv.MAIN_GROUP_NAME;
   const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+
+  // 7. Restore persona (from worktree, using live bot's persona name)
+  const persona = personaDir(worktree, bot);
+  if (fs.existsSync(persona)) {
+    const personaClaude = path.join(persona, 'CLAUDE.md');
+    if (fs.existsSync(personaClaude)) {
+      fs.appendFileSync(
+        path.join(instance, 'CLAUDE.md'),
+        '\n' + fs.readFileSync(personaClaude, 'utf-8'),
+      );
+    }
+  }
   const hdRequiresTrigger = profileEnv.REQUIRES_TRIGGER === 'true';
   if (mainJid && mainGroupName) {
     seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, hdRequiresTrigger);

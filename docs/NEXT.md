@@ -54,11 +54,14 @@ Matrix SDK initial sync causes 429s distinct from outbound message rate limits. 
 ### What's Next
 
 - [ ] **MCP self-healing loop** — When a bot's MCP fails preflight, the engineer on that machine should automatically diagnose (check proxy status, network, config) and fix it without human intervention. Currently engineers get the report; they need standing orders to act on it.
-- [ ] **Health metrics collection** — Parker's primary mission. Build a system where engineers on each machine collect: container spawn times, memory usage, OOM rates, restart loop frequency, API call latency, session sizes. Report to Engineering via Matrix on a schedule.
+- [ ] **Health metrics collection** — Parker's primary mission. Three pillars: responsiveness (message-to-reply latency, container spawn time, lobe round-trip), uptime (bot availability, unplanned restarts, OOM kills, MCP proxy health), and capability (Captain-scored via emoji reactions). Scripts over services — health checks run on schedule, store JSON, post summaries to Engineering. Scripts live in the `fleet-inspection` skill.
 - [ ] **Cross-machine health requests** — Engineer on machine A messages engineer on machine B via Matrix requesting health data. Receiving engineer runs diagnostics and replies. No Operator inbox needed.
 - [ ] **Automatic OOM response** — When a bot OOMs (exit 137), the engineer detects it in logs, increases `CONTAINER_MEMORY_MB` in the env file, and restarts. Currently manual.
 - [ ] **Restart loop detection** — If a bot restarts more than 3 times in 10 minutes, the engineer should halt it and report to the Captain instead of letting it burn tokens.
 - [ ] **Reduce Operator to pure escape hatch** — Remove routine operations from Operator CLAUDE.md standing orders. Operator should only activate when: (a) a bot explicitly asks for OS-level help, (b) Matrix is down, (c) Captain manually invokes it.
+- [ ] **Pre-compile TypeScript in container images** — Currently `tsc` runs at container build time. Pre-compiling and shipping only JS would reduce image size and startup time.
+- [ ] **Error handling and observability** — Structured error types, centralized logging, and metrics collection across the host and agent-runner.
+- [ ] **Profile env encryption** — Encrypt bot env files at rest in the secrets repo. Decrypt at load time via keychain or hardware key.
 
 ## Priority 1: Multi-Computer Architecture
 

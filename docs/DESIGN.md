@@ -30,15 +30,15 @@ Each machine writes its own presence file to `operator/presence/<hostname>.json`
 
 ### Roles and Rank
 
-**Roles** are abstract capability sets: navigator, engineer, architect. **Personas** are concrete bot identities assigned to a role. The mapping lives in `roster.json` in the secrets repo.
+**Roles** are abstract capability sets: navigator, engineer, architect. **Personas** are concrete bot identities assigned to a role. The mapping lives in `roster.json` in the secrets repo. Bots are organized by role in `bots/{role}/{bot}/`.
 
 Each role defines what a bot can do:
 
-| Role | Capabilities |
-|------|-------------|
-| Navigator | Explore filesystem, execute tasks, report to Captain. Write access to knowledge vault. Email and calendar access. Cannot modify other bots. |
-| Engineer | Maintain and improve the codebase. Rebuild container images. Modify any bot's persona, skills, MCP. Write access to InfiniClaw. Can restart other bots. |
-| Architect | Create new bots, major redesigns. Write access to InfiniClaw, NanoClaw, WKS, AEGIS. Can deploy and test on the Holodeck. |
+| Role | Rank | Capabilities | Restrictions |
+|------|------|-------------|-------------|
+| Navigator | 1 (highest) | Explore filesystem, execute tasks, report to Captain. Write access to knowledge vault. Email and calendar access. | Cannot modify other bots. |
+| Engineer | 2 | Maintain and improve the codebase. Rebuild container images. Modify any bot's persona, skills, MCP. Write access to InfiniClaw. Can restart other bots. | Upstream nanoclaw owned by Architect. |
+| Architect | 3 (lowest) | Create new bots, major redesigns. Write access to InfiniClaw, NanoClaw, WKS, AEGIS. Can deploy and test on the Holodeck. | Must test on Holodeck before promoting. |
 
 All bots share: read-only home directory access, ability to edit own persona CLAUDE.md/skills/MCP, ability to restart self.
 
@@ -144,17 +144,17 @@ On restart, the agent-runner recovers the most recent session to avoid losing co
 
 Bots receive instructions from three CLAUDE.md files:
 
-| Layer | Source | Bot can edit? | How |
-|-------|--------|---------------|-----|
-| Base | `external/nanoclaw/CLAUDE.md` | No | Read-only in the instance |
-| Persona | `bots/personas/{bot}/CLAUDE.md` | Yes | Writable bind mount at `/workspace/extra/{bot}-persona/CLAUDE.md` |
-| Group | `bots/personas/{bot}/groups/{room}/CLAUDE.md` | No | Read-only copy in `/workspace/group/CLAUDE.md` |
+| Layer | Source | Bot can edit? | Container path |
+|-------|--------|---------------|----------------|
+| Base | `external/nanoclaw/CLAUDE.md` | No | Concatenated into instance CLAUDE.md |
+| Persona | `bots/{role}/{bot}/CLAUDE.md` | Yes | `/workspace/persona/CLAUDE.md` (rw) |
+| Room | `bots/{role}/ROOM.md` | No | `/workspace/CLAUDE.md` (ro) |
 
-Base + persona are concatenated into the instance-level CLAUDE.md. Group is loaded as the project-level CLAUDE.md in the container's working directory.
+Base + persona are concatenated into the instance-level CLAUDE.md. Room context is mounted read-only at `/workspace/CLAUDE.md` — Claude CLI finds it via directory traversal from the working directory.
 
 ### MCP Configuration
 
-**Source of truth:** `bots/personas/{bot}/groups/{group}/.mcp.json`
+**Source of truth:** `bots/{role}/{bot}/.mcp.json`
 
 Last writer wins. Bots edit it via writable bind mount. Changes take effect on next container spawn.
 
@@ -179,7 +179,7 @@ Two-tier design: read-only everywhere, write access where needed.
 
 **Tier 1: Read-only home mirror** — The host home directory is mounted at its real path inside every container, read-only. Bots read files using the same paths as on the host. Added automatically by `container-mounts.ts`.
 
-**Tier 2: Read-write workspace mounts** — Per-bot directories mounted at `/workspace/extra/...` via `container-config.json`. Validated against the host-side allowlist (`~/.config/nanoclaw/mount-allowlist.json`). The Captain grants/revokes temporary mounts via `!allow <path> [minutes]` / `!deny <path>`.
+**Tier 2: Read-write workspace mounts** — Per-bot directories mounted at `/workspace/extra/...` via `container-config.json`. Validated against the host-side allowlist (`~/.config/infiniclaw/allow-list.json`). The Captain grants/revokes temporary mounts via `!allow <path> [minutes]` / `!deny <path>`.
 
 ### Secrets
 

@@ -323,8 +323,9 @@ export async function runContainerAgent(
   // Read .mcp.json from persona for SDK passthrough (single source of truth)
   const rootDir = process.env.INFINICLAW_ROOT;
   const personaName = process.env.PERSONA_NAME;
-  const personaBaseDir = rootDir && personaName ? path.join(rootDir, 'bots', 'personas', personaName) : undefined;
-  const mcpServers = personaBaseDir ? readPersonaGroupMcpServers(personaBaseDir, group.folder) : undefined;
+  const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
+  const personaBaseDir = rootDir && personaName ? path.join(rootDir, 'bots', role, personaName) : undefined;
+  const mcpServers = personaBaseDir ? readPersonaGroupMcpServers(personaBaseDir) : undefined;
   const effectiveInput: ContainerInput & { disallowedTools?: string[] } = {
     ...input,
     disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
