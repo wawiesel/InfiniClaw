@@ -6,6 +6,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { logger } from 'nanoclaw/logger.js';
 
 interface McpServerConfig {
   command?: string;
@@ -77,7 +78,12 @@ export function loadMcpServersToSettings(
     // Copy server code to session
     const srcDir = path.join(personaMcpDir, name);
     const dstDir = path.join(sessionMcpDir, name);
-    fs.cpSync(srcDir, dstDir, { recursive: true });
+    try {
+      fs.cpSync(srcDir, dstDir, { recursive: true });
+    } catch (err) {
+      logger.warn({ err, name }, 'Failed to copy MCP server dir — skipping');
+      continue;
+    }
 
     // Rewrite config to use container-side paths
     const containerDir = `${containerMcpPath}/${name}`;
