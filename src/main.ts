@@ -5,7 +5,6 @@
  * Upstream files (index.ts, container-runner.ts, ipc.ts) are read-only
  * dependencies — never modified by InfiniClaw.
  */
-import { execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -886,119 +885,32 @@ async function runAgent(
   }
 }
 
-// ── Interrupt lobe — parallel container for urgent messages ────────────
+// ── Interrupt IPC — kill running claude and resume with urgent message ──
 
-const INTERRUPT_LOBE_MODEL = 'claude-sonnet-4-6';
-const INTERRUPT_LOBE_TIMEOUT_MS = 5 * 60_000; // 5 min
-const activeInterruptLobes = new Set<string>(); // per-group: max 1 concurrent
+/**
+ * Write an interrupt IPC file for a running container.
+ * The agent-runner polls for interrupt-*.json files every 500ms and
+ * sends SIGTERM to the running claude process, then resumes with the
+ * interrupt message.
+ */
+function sendInterruptMessage(chatJid: string, group: RegisteredGroup, text: string): boolean {
+  const groupStatus = queue.getGroupStatus(chatJid);
+  if (!groupStatus.active) return false;
 
-function spawnInterruptLobe(
-  chatJid: string,
-  group: RegisteredGroup,
-  messages: NewMessage[],
-): void {
-  if (activeInterruptLobes.has(chatJid)) {
-    logger.info({ group: group.name }, 'Interrupt lobe already active, skipping');
-    return;
+  const inputDir = path.join(DATA_DIR, 'ipc', group.folder, 'input');
+  try {
+    fs.mkdirSync(inputDir, { recursive: true });
+    const filename = `interrupt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
+    const filepath = path.join(inputDir, filename);
+    const tempPath = `${filepath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify({ type: 'interrupt', text }));
+    fs.renameSync(tempPath, filepath);
+    logger.info({ chatJid, group: group.name }, 'Sent interrupt message to active container');
+    return true;
+  } catch (err) {
+    logger.error({ chatJid, err }, 'Failed to write interrupt IPC file');
+    return false;
   }
-  activeInterruptLobes.add(chatJid);
-
-  const interruptThreadCtx = buildThreadContextBlock(chatJid, messages);
-  const interruptBase = formatMessages(messages);
-  const prompt = interruptThreadCtx ? `${interruptThreadCtx}\n\n${interruptBase}` : interruptBase;
-  const replyThreadId = messages.find((m) => m.thread_id)?.thread_id
-    || messages.find((m) => m.id?.startsWith('$'))?.id;
-
-  logger.info(
-    { group: group.name, messageCount: messages.length, replyThreadId },
-    'Spawning interrupt lobe (Sonnet) for messages while main container is busy',
-  );
-
-  // Force Sonnet: override env before runContainerAgent collects secrets (synchronous)
-  const savedModel = process.env.ANTHROPIC_MODEL;
-  process.env.ANTHROPIC_MODEL = INTERRUPT_LOBE_MODEL;
-
-  // Interrupt lobe uses streaming mode so output is delivered immediately.
-  // After first output, kill the container — it would otherwise sit in IPC polling
-  // until the timeout, wasting resources and accumulating zombie containers.
-  let interruptOutputSent = false;
-  let interruptContainerName: string | undefined;
-  const interruptOnOutput = async (output: ContainerOutput) => {
-    if (interruptOutputSent || output.isProgress) return;
-    const raw = output.result;
-    if (!raw) return;
-    const text = (typeof raw === 'string' ? raw : JSON.stringify(raw))
-      .replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-    if (!text) return;
-    interruptOutputSent = true;
-    activeInterruptLobes.delete(chatJid);
-    const ch = findChannel(channels, chatJid);
-    if (ch) {
-      await ch.sendMessage(chatJid, text, replyThreadId);
-      storeOutgoing(chatJid, text, replyThreadId);
-      if (ch.setTyping && !isThreadContext(chatJid)) ch.setTyping(chatJid, false).catch(() => {});
-    }
-    clearWorkingIndicator(chatJid);
-    // Kill the container now — its job is done
-    if (interruptContainerName) {
-      try {
-        execSync(`podman stop "${interruptContainerName}"`, { stdio: 'pipe', timeout: 10_000 });
-      } catch { /* container may have already exited */ }
-      logger.info({ containerName: interruptContainerName }, 'Interrupt lobe container stopped after first output');
-    }
-  };
-
-  const resultPromise = runContainerAgent(
-    group,
-    {
-      prompt,
-      groupFolder: group.folder,
-      chatJid,
-      isMain: group.folder === MAIN_GROUP_FOLDER,
-      containerNameTag: 'interrupt',
-      timeoutOverrideMs: INTERRUPT_LOBE_TIMEOUT_MS,
-    },
-    (_proc, containerName) => { interruptContainerName = containerName; },
-    interruptOnOutput,
-  );
-
-  // Restore env immediately — secrets already captured synchronously
-  if (savedModel !== undefined) process.env.ANTHROPIC_MODEL = savedModel;
-  else delete process.env.ANTHROPIC_MODEL;
-
-  // Fire-and-forget: handle completion/errors asynchronously
-  resultPromise.then(async (output) => {
-    // Streaming mode already delivered the first result via interruptOnOutput.
-    // Handle any result that wasn't caught by streaming (e.g. legacy fallback).
-    if (!interruptOutputSent && output.result) {
-      const raw = typeof output.result === 'string' ? output.result : JSON.stringify(output.result);
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      if (text) {
-        const ch = findChannel(channels, chatJid);
-        if (ch) {
-          await ch.sendMessage(chatJid, text, replyThreadId);
-          storeOutgoing(chatJid, text, replyThreadId);
-        }
-      }
-    }
-    clearWorkingIndicator(chatJid);
-    const ch = findChannel(channels, chatJid);
-    if (ch?.setTyping && !isThreadContext(chatJid)) ch.setTyping(chatJid, false).catch(() => {});
-    if (output.status === 'error') {
-      logger.warn({ group: group.name, error: output.error }, 'Interrupt lobe error');
-    }
-    logger.info({ group: group.name }, 'Interrupt lobe completed');
-    activeInterruptLobes.delete(chatJid);
-  }).catch((err) => {
-    clearWorkingIndicator(chatJid);
-    activeInterruptLobes.delete(chatJid);
-    logger.error({ group: group.name, err }, 'Interrupt lobe failed');
-  });
-
-  // Update timestamps so the main container doesn't re-process these messages
-  const lastMsg = messages[messages.length - 1];
-  lastAgentTimestamp[chatJid] = lastMsg.timestamp;
-  saveState();
 }
 
 // ── Per-group message handling ─────────────────────────────────────────
@@ -1089,21 +1001,21 @@ async function handleGroupMessagesInLoop(
     .find((m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'))?.id;
   activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid] || autoThreadId2 || triggeringEventId2;
 
-  // Interrupt lobe: if container is busy >30s, spawn parallel Sonnet container
+  // Interrupt: if container is busy and message is from captain/operator/trigger,
+  // send interrupt IPC to kill running claude and resume with the new message
   const groupStatus = queue.getGroupStatus(chatJid);
   if (groupStatus.active) {
-    {
-      const interruptMessages = messagesToSend.filter((m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) || (CAPTAIN_USER_ID && m.sender === CAPTAIN_USER_ID),
-      );
-      if (interruptMessages.length > 0) {
-        // Show working indicator + typing while interrupt lobe runs
-        startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
-        const ch = findChannel(channels, chatJid);
-        if (ch?.setTyping && !isThreadContext(chatJid)) ch.setTyping(chatJid, true).catch(() => {});
-        spawnInterruptLobe(chatJid, group, interruptMessages);
-        return;
-      }
+    const interruptMessages = messagesToSend.filter((m) =>
+      TRIGGER_PATTERN.test(m.content.trim()) || (CAPTAIN_USER_ID && m.sender === CAPTAIN_USER_ID),
+    );
+    if (interruptMessages.length > 0) {
+      startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
+      const ch = findChannel(channels, chatJid);
+      if (ch?.setTyping && !isThreadContext(chatJid)) ch.setTyping(chatJid, true).catch(() => {});
+      sendInterruptMessage(chatJid, group, formatted);
+      lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
+      saveState();
+      return;
     }
   }
 
