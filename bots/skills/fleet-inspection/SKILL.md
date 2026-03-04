@@ -1,9 +1,50 @@
 ---
 name: fleet-inspection
-description: Diagnose and monitor InfiniClaw — check bot health, uptime, containers, MCP servers, WKSM, errors, and IPC state. One-stop troubleshooting skill.
+description: Monitor and maintain optimal fleet operation. Use for health checks, diagnostics, restarts, rebuilds, bot relocation, and ensuring bots are running correctly.
 ---
 
-# InfiniClaw Diagnostics
+# Fleet Inspection
+
+## Restart a Bot
+
+```
+restart_self(bot: "cid")      # Restart yourself
+restart_self(bot: "parker")   # Restart Parker
+```
+
+What happens on restart:
+1. `tsc --noEmit` validation — if it fails, bot stays up and you get errors to fix
+2. Rsync nanoclaw source, install deps if changed, build TypeScript
+3. Restore persona (appends persona CLAUDE.md to base)
+4. Rebuild container image (picks up Dockerfile changes)
+5. Restart bot process via launchd
+
+Skills, CLAUDE.md changes, and container image updates all take effect after reboot.
+
+## Edit Container Images
+
+Dockerfiles live at `$INFINICLAW_ROOT/bots/container/{bot}/Dockerfile`.
+
+To rebuild without a full bot restart:
+```bash
+echo '{"type":"rebuild_image","bot":"cid"}' > /workspace/ipc/tasks/rebuild-$(date +%s).json
+```
+Takes effect on next container spawn — restart bot afterwards to force it.
+
+## Source Editing & Building
+
+```bash
+cd $INFINICLAW_ROOT
+npm run build          # builds nanoclaw first, then InfiniClaw
+npm test               # runs InfiniClaw tests
+```
+
+## Git Hooks
+
+Pre-commit hooks guard `bots/` and `docs/` structure. Tracked in `.githooks/`.
+```bash
+cd $INFINICLAW_ROOT && git config core.hooksPath .githooks
+```
 
 ## Quick Health Snapshot
 
@@ -12,200 +53,71 @@ check_health()      # Full status snapshot (bots, containers, errors, brain mode
 get_brain_mode()    # Just the LLM backend for each bot
 ```
 
-Key fields to check:
-- **`active: true`** — container is running
-- **`pendingMessages > 0`** — messages queued but unprocessed
-- **`lastError` / `lastErrorAt`** — most recent failure
-- **`brainModes`** — confirms which backend each bot is using
+Key fields: `active`, `pendingMessages`, `lastError`, `brainModes`.
 
 ## Deep Diagnostic Checks
 
-### 1. Podman + images
+### Podman + images
 ```bash
 podman info --format '{{.Host.Arch}}' 2>&1 | head -1
 podman images --format '{{.Repository}}:{{.Tag}}' | grep nanoclaw
 ```
 
-### 2. Bot heartbeats
+### Bot heartbeats
 ```bash
-cat $INFINICLAW_ROOT/_runtime/instances/cid/data/heartbeat 2>/dev/null || echo "no heartbeat"
-cat $INFINICLAW_ROOT/_runtime/instances/johnny5/data/heartbeat 2>/dev/null || echo "no heartbeat"
+cat $INFINICLAW_ROOT/_runtime/instances/<bot>/data/heartbeat 2>/dev/null
 ```
 
-### 3. MCP servers loaded
+### Recent errors
 ```bash
-cat $INFINICLAW_ROOT/_runtime/instances/johnny5/groups/main/mcp-debug.json
-```
-Look for `hasMcpServers: true` and `wksm` in `mcpServerKeys`. If false, validate:
-```bash
-python3 -m json.tool $INFINICLAW_ROOT/bots/personas/johnny5/groups/main/.mcp.json
+tail -20 $INFINICLAW_ROOT/_runtime/logs/<bot>.error.log
 ```
 
-### 4. Recent errors
+### Container logs
 ```bash
-tail -20 $INFINICLAW_ROOT/_runtime/logs/cid.error.log 2>/dev/null
-tail -20 $INFINICLAW_ROOT/_runtime/logs/johnny5.error.log 2>/dev/null
+tail -30 $(ls -t $INFINICLAW_ROOT/_runtime/instances/<bot>/groups/main/logs/container-*.log 2>/dev/null | head -1)
 ```
 
-### 5. Session continuity
+### IPC state
 ```bash
-grep "sessionId" $INFINICLAW_ROOT/_runtime/logs/cid.log 2>/dev/null | tail -5
+ls $INFINICLAW_ROOT/_runtime/instances/<bot>/data/ipc/main/messages/
+ls $INFINICLAW_ROOT/_runtime/instances/<bot>/data/ipc/main/tasks/
 ```
 
-### 6. Container logs
-```bash
-tail -30 $(ls -t $INFINICLAW_ROOT/_runtime/instances/cid/groups/main/logs/container-*.log 2>/dev/null | head -1)
-```
-
-### 7. IPC state
-```bash
-ls $INFINICLAW_ROOT/_runtime/instances/cid/data/ipc/main/messages/ 2>/dev/null
-ls $INFINICLAW_ROOT/_runtime/instances/cid/data/ipc/main/tasks/ 2>/dev/null
-```
-
-### 8. WKSM proxy
+### WKSM proxy
 ```bash
 curl -s --max-time 3 http://host.containers.internal:8765/sse | head -2
 ```
 Should return `event: endpoint`. If not, call `restart_wksm()`.
 
-## WKSM Setup & Diagnosis
-
-WKSM runs as an SSE proxy on the host at `http://host.containers.internal:8765/sse`. Bots connect via their `.mcp.json`.
-
-### MCP config location
-```
-bots/personas/<bot>/groups/main/.mcp.json
-```
-Must contain:
-```json
-{
-  "mcpServers": {
-    "wksm": {
-      "type": "sse",
-      "url": "http://host.containers.internal:8765/sse"
-    }
-  }
-}
-```
-
-**Notes:**
-- `container-config.json` does NOT support `mcpServers` — only `.mcp.json` is read.
-- Runtime copy at `_runtime/instances/<bot>/groups/main/.mcp.json` is read-only; always edit persona source.
-- `.mcp.json` is gitignored. Validate JSON before saving: `python3 -m json.tool <file>`.
-
-### WKSM verification checklist
-1. ✅ `curl -s --max-time 3 http://host.containers.internal:8765/sse` → `event: endpoint`
-2. ✅ Persona `.mcp.json` exists with valid JSON and `mcpServers.wksm`
-3. ✅ `mcp-debug.json` shows `hasMcpServers: true` and `"wksm"` in keys
-4. ✅ Bot can call WKSM tools (test with a simple query)
-
-### Johnny5 special case
-Johnny5 only spawns a container when a Bridge message arrives — restarts alone don't trigger a spawn. After changing his config, send a message to Johnny5 to trigger a container spawn, then check `mcp-debug.json`.
-
-### Trailing comma in .mcp.json
-`readGroupMcpServers()` uses `JSON.parse`, which rejects trailing commas. Symptoms: `hasMcpServers: false` with no errors. Fix: remove trailing commas.
+### Google Workspace MCP
+Host-side launchd service on port 8767. Log at `~/.config/infiniclaw/logs/workspace-mcp.log`. OAuth creds at `~/.config/infiniclaw/secrets/google/`. Auth errors → escalate to Captain.
 
 ## Common Issues
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| `hasMcpServers: false` | Trailing comma in `.mcp.json` | Fix JSON, restart |
-| WKSM not connecting | Proxy down or port 8765 not listening | `restart_wksm()` |
-| Container exits immediately | Auth missing or image outdated | Check `.env`, rebuild image |
-| No session resumption | Sessions dir not mounted | Check container-spawn.ts mounts |
-| IPC files accumulating | IPC watcher not running | Restart bot |
-| `pendingMessages` stuck | Container hung | Check container logs, restart |
+| `hasMcpServers: false` | Bad JSON in mcp.json | Fix JSON, restart |
+| WKSM not connecting | Proxy down | `restart_wksm()` |
+| Container exits immediately | Auth missing or image outdated | Check env, rebuild |
+| `pendingMessages` stuck | Container hung | Check logs, restart |
 
-## Comprehensive Health Check
+## Bot Relocation (S3)
 
-Run a full fleet health check covering memory, OOMs, MCP proxies, sessions, and lobe availability.
+Move a bot between machines. A bot runs on exactly one machine at a time.
 
-### Quick check (no lobe testing)
+### Sending (source machine)
+1. Stop: `npm run cli stop <bot>`
+2. Push state: `cd $INFINICLAW_ROOT && npm run cli sync push`
+3. Remove from `~/.config/infiniclaw/machine.json` `bots` array
+4. Message destination engineer: `@<engineer> transporter: receiving <bot>. State pushed. Pull and start.`
+5. Restart remaining bots
 
-```bash
-bash /workspace/extra/parker-persona/health/check.sh
-```
+### Receiving (destination machine)
+1. Add to `~/.config/infiniclaw/machine.json` `bots` array
+2. Verify: env file, allow-list.json entry, container image
+3. Pull state: `cd $INFINICLAW_ROOT && npm run cli sync pull`
+4. Start: `npm run cli start`
+5. Confirm: `@<engineer> transporter: <bot> received and running.`
 
-Parse the JSON output and format a summary for Engineering.
-
-### Full check (with lobe testing)
-
-1. Run the bash script for system metrics
-2. Test each lobe with a trivial delegation:
-   - `delegate_to_lobe` with lobe=gemini, objective="respond OK", timeout_ms=30000
-   - `delegate_to_lobe` with lobe=claude, objective="respond OK", timeout_ms=30000
-   - `delegate_to_lobe` with lobe=codex, objective="respond OK", timeout_ms=30000
-   - `delegate_to_lobe` with lobe=ollama, objective="respond OK", timeout_ms=30000
-3. Combine system metrics + lobe results into report
-
-### Report format
-
-```
-**Fleet Health — {timestamp}**
-
-**Memory**: {current_mb}MB / {limit_mb}MB ({percent}%) | OOM kills: {oom_kills}
-**Sessions**: {total_mb}MB total | Parker: {parker_mb}MB
-
-**MCP Proxies**:
-- wksm: {status} ({sessions} sessions)
-- google-workspace: {status}
-
-**Lobes**: Codex {ok/down} | Gemini {ok/down} | Claude {ok/down} | Ollama {ok/down}
-
-**Bot Health**:
-| Bot | Restarts | Errors | OOMs |
-|-----|----------|--------|------|
-| architect | ... | ... | ... |
-
-{alerts if any — OOMs > 0, memory > 80%, lobes down}
-```
-
-### Alerts
-- **CRITICAL**: OOM kills > 0, memory > 90%
-- **WARNING**: Memory > 80%, any lobe down, restart count > 5, session size > 100MB
-- **INFO**: Everything green
-
-Save JSON to `/workspace/extra/parker-persona/health/latest.json` for trend tracking.
-
-## Performance Metrics (TUNE)
-
-Run the TUNE dashboard to check against Captain-defined targets:
-
-```bash
-python3 /home/node/.claude/skills/fleet-inspection/scripts/metrics.py
-# For JSON output:
-python3 /home/node/.claude/skills/fleet-inspection/scripts/metrics.py --json
-```
-
-**Targets**:
-| Metric | Target |
-|---|---|
-| responsiveness | <2s from message to first response |
-| idle_time | 0s (always working on standing orders) |
-| restart_rate | <1 per hour |
-
-If any metric is 🔴: investigate, fix, re-run to confirm, save changes to memory.
-
-## Google Workspace MCP Diagnostics
-
-Use when Google Workspace tools (Gmail, Calendar, Drive) fail.
-
-The server runs on the **host machine** as a launchd service (port 8767), not inside your container.
-
-| Component | Location |
-|---|---|
-| MCP server | `workspace-mcp` Python process on host, port 8767 |
-| Log file | `~/.config/infiniclaw/logs/workspace-mcp.log` |
-| OAuth credentials | `~/.config/infiniclaw/secrets/google/` |
-
-1. **Try any tool** — if it works, server is fine
-2. **Connection errors** → server is down. Read the log. Cannot fix host-side; escalate to Captain/Cid
-3. **Auth errors** → OAuth tokens missing/expired. Captain needs to re-run auth flow in browser
-4. **Only some tools fail** → scope issue from original OAuth grant
-
-| Symptom | Escalate to |
-|---|---|
-| Server down / crash loop | Captain or Cid |
-| Missing OAuth tokens | Captain (needs browser) |
-| Python env broken | Cid |
+**Never run the same bot on two machines simultaneously.**
