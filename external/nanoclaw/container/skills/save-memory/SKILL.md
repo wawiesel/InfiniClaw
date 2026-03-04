@@ -9,8 +9,8 @@ description: Save knowledge to memory files. Use after fixing bugs, learning how
 
 | What | Path | Purpose |
 |------|------|---------|
-| MEMORY.md | `/home/node/.claude/projects/-workspace-persona-temp/memory/MEMORY.md` | Auto-loaded each session. 200 line limit. |
-| Topic files | `/home/node/.claude/projects/-workspace-persona-temp/memory/*.md` | Detailed notes by topic. Link from MEMORY.md. |
+| MEMORY.md | `/workspace/persona/memory/MEMORY.md` | Auto-loaded each session. 200 line limit. |
+| Topic files | `/workspace/persona/memory/*.md` | Detailed notes by topic. Link from MEMORY.md. |
 
 ## How to save
 
@@ -21,7 +21,7 @@ delegate_to_lobe:
   reason: "save memory"
   lobe: codex   # or gemini
   objective: |
-    Read /home/node/.claude/projects/-workspace-persona-temp/memory/MEMORY.md
+    Read /workspace/persona/memory/MEMORY.md
     Update it with: <your summary of what to save>
     Rules:
     - Read the file first, preserve existing content
