@@ -2,8 +2,6 @@
 /_runtime/
 /_holodeck/
 .claude/
-# MCP configs contain OAuth secrets — keep local only
-bots/*/*/.mcp.json
 # Build output
 /dist/
 /node_modules/

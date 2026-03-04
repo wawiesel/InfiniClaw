@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "wksm": {
+      "type": "sse",
+      "url": "http://host.containers.internal:8765/sse"
+    },
+    "google-workspace": {
+      "type": "http",
+      "url": "http://host.containers.internal:8767/mcp"
+    }
+  }
+}

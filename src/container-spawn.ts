@@ -324,8 +324,8 @@ export async function runContainerAgent(
   const rootDir = process.env.INFINICLAW_ROOT;
   const personaName = process.env.PERSONA_NAME;
   const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
-  const personaBaseDir = rootDir && personaName ? path.join(rootDir, 'bots', role, personaName) : undefined;
-  const mcpServers = personaBaseDir ? readPersonaGroupMcpServers(personaBaseDir) : undefined;
+  const roleDir = rootDir && role ? path.join(rootDir, 'bots', role) : undefined;
+  const mcpServers = roleDir ? readPersonaGroupMcpServers(roleDir) : undefined;
   const effectiveInput: ContainerInput & { disallowedTools?: string[] } = {
     ...input,
     disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],

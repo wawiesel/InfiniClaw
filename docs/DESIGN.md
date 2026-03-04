@@ -154,24 +154,17 @@ Base + persona are concatenated into the instance-level CLAUDE.md. Room context 
 
 ### MCP Configuration
 
-**Source of truth:** `bots/{role}/{bot}/.mcp.json`
+**Source of truth:** `bots/{role}/mcp.json`
 
-Last writer wins. Bots edit it via writable bind mount. Changes take effect on next container spawn.
+Per-role, shared by all bots of that role. Changes take effect on next container spawn.
 
 ```
-Persona .mcp.json (on disk)
+bots/{role}/mcp.json (on disk)
   ↓ read at spawn time by readPersonaGroupMcpServers()
   ↓ passed as mcpServers in ContainerInput JSON via stdin
   ↓ agent-runner passes to Claude SDK query()
   → Claude connects to MCP servers
 ```
-
-Two mechanisms exist (don't confuse them):
-
-| Mechanism | Source | What it configures | When read |
-|-----------|--------|-------------------|-----------|
-| SDK passthrough | Persona `.mcp.json` | SSE/URL-based servers (host-side) | Container spawn |
-| `mcp-sync.ts` | Persona `mcp-servers/{name}/mcp.json` | Command-based servers (in-container) | Deploy |
 
 ### Mount System
 

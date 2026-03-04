@@ -90,8 +90,8 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
   if (rootDir) {
     const skillsPoolDir = path.join(rootDir, 'bots', 'skills');
-    const rolesFile = path.join(rootDir, 'bots', 'skills', 'roles.json');
-    loadSkillsToSession(skillsDst, skillsPoolDir, rolesFile, role);
+    const skillsFile = path.join(rootDir, 'bots', role, 'skills.json');
+    loadSkillsToSession(skillsDst, skillsPoolDir, skillsFile);
   }
 
   if (rootDir && personaName) {
@@ -164,9 +164,9 @@ export function getPersonaPortPublish(): string[] {
   }
 }
 
-/** Read .mcp.json from persona dir for SDK passthrough. */
-export function readPersonaGroupMcpServers(personaBaseDir: string): Record<string, Record<string, unknown>> | undefined {
-  const mcpJsonPath = path.join(personaBaseDir, '.mcp.json');
+/** Read mcp.json from role dir for SDK passthrough. */
+export function readPersonaGroupMcpServers(roleDir: string): Record<string, Record<string, unknown>> | undefined {
+  const mcpJsonPath = path.join(roleDir, 'mcp.json');
   try {
     if (fs.existsSync(mcpJsonPath)) {
       const raw = fs.readFileSync(mcpJsonPath, 'utf-8');

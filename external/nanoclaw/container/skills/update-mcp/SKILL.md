@@ -5,13 +5,22 @@ description: Add or modify MCP server configuration. Use when asked to install, 
 
 # Update MCP
 
-**Source of truth:** `/workspace/persona/.mcp.json`
+**Source of truth:** `bots/{role}/mcp.json` (in the InfiniClaw repo)
 
-This is the ONE file for all MCP server configuration. It is a writable bind mount to the persona directory — edits persist across restarts and take effect on next container spawn.
+MCP config is per-role, not per-bot. All bots of the same role share the same MCP servers.
 
-## Adding a URL-based server (host-side service)
+## How it works
 
-For services running on the host via supergateway or similar:
+The `mcp.json` is read by the host at container spawn time and passed to the Claude SDK. Changes take effect on next container restart.
+
+## To add or change MCP servers
+
+You cannot edit `mcp.json` directly — it lives outside the container. Instead:
+
+1. Ask the Engineer to update `bots/{role}/mcp.json` in the InfiniClaw repo
+2. Restart to pick up changes
+
+## URL-based server format (host-side service)
 
 ```json
 {
@@ -24,11 +33,7 @@ For services running on the host via supergateway or similar:
 }
 ```
 
-**Do not change the `type` or `url` of existing servers.** The transport type and endpoint path are determined by how the host-side service is configured. If a server isn't working, report the issue to the Operator or Captain.
-
-## Adding a command-based server (in-container)
-
-For servers that run inside the container:
+## Command-based server format (in-container)
 
 ```json
 {
@@ -43,13 +48,3 @@ For servers that run inside the container:
   }
 }
 ```
-
-## How sync works
-
-The persona `.mcp.json` is read by the host at container spawn time and passed to the Claude SDK. Edits to it from inside the container (via the writable mount) persist immediately to the host filesystem. The running container keeps its original config until restart — changes take effect on the next spawn.
-
-Edits inside the container session (e.g. to `/home/node/.claude/`) are **lost on restart**. Always edit the persona dir directly.
-
-## After adding
-
-Restart to activate. Ask Cid via `restart_bot`, or use `restart_self`.
