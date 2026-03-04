@@ -1,49 +1,12 @@
 /**
- * InfiniClaw progress tracking and tool hooks for the agent runner.
- * Tool output formatting, progress dedup, blocked tool enforcement.
+ * InfiniClaw progress tracking and tool output formatting.
+ * Used by the agent runner to format tool calls as HTML details elements
+ * for display in Matrix threads.
  */
-import type { HookCallback, PreToolUseHookInput, PostToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 
-// Secrets to strip from Bash tool subprocess environments.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
-export const SANITIZE_PREFIX = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
-
-export const TOOL_PROGRESS_EMIT_MS = 15_000;
 export const GENERAL_PROGRESS_DEDUPE_MS = 5_000;
 
-const BLOCKED_TOOLS = new Set(['SendMessage', 'TeamCreate', 'TeamDelete']);
-
-export function createToolProgressHook(emitFn: (text: string) => void): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const postInput = input as PostToolUseHookInput;
-    const formatted = formatToolCallWithOutput(
-      postInput.tool_name,
-      postInput.tool_input,
-      postInput.tool_response,
-    );
-    emitFn(formatted);
-    return {};
-  };
-}
-
-export function createBlockBuiltinToolsHook(): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const preInput = input as PreToolUseHookInput;
-    const toolName = preInput.tool_name;
-    if (BLOCKED_TOOLS.has(toolName)) {
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          decision: 'block',
-          reason: `${toolName} is disabled. Use mcp__nanoclaw__send_message with the recipient parameter instead.`,
-        },
-      };
-    }
-    return {};
-  };
-}
-
-function formatToolCallWithOutput(name: string, input: unknown, response: unknown): string {
+export function formatToolCallWithOutput(name: string, input: unknown, response: unknown): string {
   const label = escapeHtml(describeToolCall(name, input));
   const inputText = escapeHtml(formatToolInput(name, input));
   const outputText = escapeHtml(formatToolResponse(response));
@@ -53,10 +16,7 @@ function formatToolCallWithOutput(name: string, input: unknown, response: unknow
 function formatToolInput(name: string, input: unknown): string {
   if (input && typeof input === 'object') {
     const obj = input as Record<string, unknown>;
-    if (name === 'Bash' && typeof obj.command === 'string') {
-      const cmd = obj.command;
-      return cmd.startsWith(SANITIZE_PREFIX) ? cmd.slice(SANITIZE_PREFIX.length) : cmd;
-    }
+    if (name === 'Bash' && typeof obj.command === 'string') return obj.command;
     if (name === 'Read' && typeof obj.file_path === 'string') return obj.file_path;
     if ((name === 'Edit' || name === 'Write') && typeof obj.file_path === 'string') return obj.file_path;
     if ((name === 'Grep' || name === 'Glob') && typeof obj.pattern === 'string') return obj.pattern;
@@ -70,7 +30,16 @@ function formatToolInput(name: string, input: unknown): string {
 
 function formatToolResponse(response: unknown): string {
   if (typeof response === 'string') return response;
-  if (response && typeof response === 'object') return expandMultilineJson(JSON.stringify(response, null, 2));
+  if (response && typeof response === 'object') {
+    // Handle array of content blocks from stream-json
+    if (Array.isArray(response)) {
+      const texts = response
+        .filter((b: unknown) => b && typeof b === 'object' && (b as Record<string, unknown>).type === 'text')
+        .map((b: unknown) => (b as Record<string, string>).text);
+      if (texts.length > 0) return texts.join('\n');
+    }
+    return expandMultilineJson(JSON.stringify(response, null, 2));
+  }
   return String(response || '');
 }
 
@@ -90,12 +59,10 @@ function describeToolCall(name: string, input: unknown): string {
   if (!input || typeof input !== 'object') return name;
   const obj = input as Record<string, unknown>;
 
-  // Tools with an explicit description field
   if (typeof obj.description === 'string' && obj.description.trim()) {
     return `${name} - ${obj.description.trim()}`;
   }
 
-  // Derive from input for other tools
   if (typeof obj.file_path === 'string') {
     const basename = obj.file_path.split('/').pop() || obj.file_path;
     return `${name} - ${basename}`;
@@ -110,9 +77,7 @@ function describeToolCall(name: string, input: unknown): string {
     return `${name} - ${short}`;
   }
   if (typeof obj.command === 'string') {
-    let cmd = obj.command;
-    if (cmd.startsWith(SANITIZE_PREFIX)) cmd = cmd.slice(SANITIZE_PREFIX.length);
-    const short = cmd.replace(/\s+/g, ' ').trim().slice(0, 60);
+    const short = obj.command.replace(/\s+/g, ' ').trim().slice(0, 60);
     return `${name} - ${short}`;
   }
   if (typeof obj.skill === 'string') return `${name} - ${obj.skill}`;
