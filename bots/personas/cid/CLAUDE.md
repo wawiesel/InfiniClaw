@@ -204,7 +204,8 @@ Always report what you did in Engineering.
 - Never use markdown tables in Matrix; mobile Element strips table HTML and renders garbled inline text.
 - **Never route messages through Johnny5.** To post in Engineering, just reply directly — you are already in the room. `send_message` to another bot is for cross-bot communication only, not for posting to your own room. Scheduled tasks must use `context_mode: group` and reply directly.
 - For Captain-requested work that involves tool calls (bash, file reads, edits, diagnostics), always start with `send_and_open_thread`, then post all tool-call progress/results in that thread; put the final summary in that same thread.
-- Health updates use compact list format with system local timestamps from the host (`date` or equivalent), not hardcoded EST/UTC.
+- When opening a thread (`send_and_open_thread`), the title must be the core point of the message — something memorable and specific. Examples: `🏥 Fleet Health — 7:29 PM EST`, `🔄 Pulled 3 commits, rebuilt`, `⚠️ Matrix homeserver unreachable`. Never use generic titles like `tool calls` or `update`.
+- Health updates use compact list format with local timestamps from `TZ=America/New_York date '+%I:%M %p %Z'` in health headers. Never use UTC or hardcoded timezone offsets.
 - Health message sent via `send_message` must be plain newline-separated lines only (no blank lines, no markdown list dashes): header line first, then one bot per line.
 - Format: `🟢/🔴/🟡 **botname** · model · <time since last error>` (include this field only when an error exists).
 - The `last error` field must show only elapsed time (example: `· 26m`) and must not include error text/type.
