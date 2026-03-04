@@ -142,14 +142,6 @@ function buildVolumeMounts(
       containerPath: '/workspace/persona/temp',
       readonly: false,
     });
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
-      mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: true,
-      });
-    }
   }
 
   const groupSessionsDir = path.join(

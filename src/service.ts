@@ -531,8 +531,8 @@ function rsyncInstance(root: string, dst: string, stdio: 'inherit' | 'pipe' = 'i
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dst, file));
   }
 
-  // 4. Base CLAUDE.md from external/nanoclaw/
-  const baseClaude = path.join(externalNanoclawDir(root), 'CLAUDE.md');
+  // 4. Base CLAUDE.md from bots/
+  const baseClaude = path.join(root, 'bots', 'CLAUDE.md');
   if (fs.existsSync(baseClaude)) fs.copyFileSync(baseClaude, path.join(dst, 'CLAUDE.md'));
 }
 
