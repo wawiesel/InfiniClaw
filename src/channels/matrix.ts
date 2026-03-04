@@ -1017,6 +1017,8 @@ export class MatrixChannel implements Channel {
       const content = {
         msgtype: 'm.text',
         body: `* ${newText}`,
+        format: 'org.matrix.custom.html',
+        formatted_body: `* ${editHtml}`,
         'm.new_content': newContent,
         'm.relates_to': {
           rel_type: 'm.replace',
@@ -1032,10 +1034,18 @@ export class MatrixChannel implements Channel {
       if (this.isTooLargeError(err) && newText.length > 2000) {
         const truncated = newText.slice(0, 16_000) + '\n\n…(truncated)';
         try {
+          const truncHtml = truncated.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
           const truncContent: Record<string, any> = { // eslint-disable-line @typescript-eslint/no-explicit-any
             msgtype: 'm.text',
             body: `* ${truncated}`,
-            'm.new_content': { msgtype: 'm.text', body: truncated },
+            format: 'org.matrix.custom.html',
+            formatted_body: `* ${truncHtml}`,
+            'm.new_content': {
+              msgtype: 'm.text',
+              body: truncated,
+              format: 'org.matrix.custom.html',
+              formatted_body: truncHtml,
+            },
             'm.relates_to': { rel_type: 'm.replace', event_id: eventId },
           };
           await this.enqueueSend(() => withTimeout(
