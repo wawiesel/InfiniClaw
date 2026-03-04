@@ -109,14 +109,14 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
     const roomMd = path.join(rootDir, 'bots', role, 'ROOM.md');
     mountIfExists(mounts, roomMd, '/workspace/CLAUDE.md', true);
 
-    // Mount memory from secrets repo (writable, overlays persona mount)
+    // Mount memory from secrets repo
     try {
       const config = loadMachineConfig();
       const memoryDir = path.join(config.secretsPath, personaName, 'memory');
       fs.mkdirSync(memoryDir, { recursive: true });
       mounts.push({
         hostPath: memoryDir,
-        containerPath: '/workspace/persona/memory',
+        containerPath: '/workspace/memory',
         readonly: false,
       });
     } catch { /* no secrets config */ }
