@@ -53,6 +53,7 @@ const STORAGE_REFRESH_TOKEN = 'matrix_refresh_token';
 const STORAGE_DEVICE_ID = 'matrix_device_id';
 const STORAGE_USER_ID = 'matrix_user_id';
 const MATRIX_SEND_TIMEOUT_MS = 10_000;
+const MATRIX_UPLOAD_TIMEOUT_MS = 120_000;
 const MATRIX_TYPING_TIMEOUT_MS = 3_000;
 const MATRIX_META_TIMEOUT_MS = 5_000;
 const MATRIX_HEALTH_TIMEOUT_MS = 10_000;
@@ -399,7 +400,7 @@ export class MatrixChannel implements Channel {
   private botUserId = MATRIX_USER_ID;
   private opts: MatrixChannelOpts;
   private lastMessageEventId = new Map<string, string>();
-  private lastBotEventId = new Map<string, string>();
+  private recentBotEventIds = new Map<string, string[]>();
   private senderNameCache = new Map<string, string>(); // userId → displayname
   private roomNameCache = new Map<string, string>(); // roomId → display name
 
@@ -411,6 +412,14 @@ export class MatrixChannel implements Channel {
   constructor(opts: MatrixChannelOpts) {
     this.opts = opts;
     configureMatrixSdkLogger();
+  }
+
+  /** Track the last N bot-sent event IDs per room for reaction matching. */
+  private trackBotEvent(roomId: string, eventId: string, maxHistory = 10): void {
+    const ids = this.recentBotEventIds.get(roomId) ?? [];
+    ids.push(eventId);
+    if (ids.length > maxHistory) ids.splice(0, ids.length - maxHistory);
+    this.recentBotEventIds.set(roomId, ids);
   }
 
   /**
@@ -731,9 +740,9 @@ export class MatrixChannel implements Channel {
       const groups = this.opts.registeredGroups();
       if (!groups[matrixJid]) return;
 
-      // Only deliver reactions to the bot's own messages to avoid flooding
-      const lastBotEvent = this.lastBotEventId.get(roomId);
-      if (reactedToId !== lastBotEvent) return;
+      // Only deliver reactions to the bot's own recent messages to avoid flooding
+      const recentBotEvents = this.recentBotEventIds.get(roomId) ?? [];
+      if (!recentBotEvents.includes(reactedToId)) return;
 
       const timestamp = new Date(event.origin_server_ts as number).toISOString();
       const senderName = await this.getSenderName(event.sender as string);
@@ -927,7 +936,7 @@ export class MatrixChannel implements Channel {
         MATRIX_SEND_TIMEOUT_MS,
         'sendMessage',
       );
-      if (eventId) this.lastBotEventId.set(roomId, eventId);
+      if (eventId) this.trackBotEvent(roomId, eventId);
       return eventId;
     });
   }
@@ -1109,7 +1118,7 @@ export class MatrixChannel implements Channel {
       logger.info({ filename, mimetype, size: buffer.length }, `Uploading ${kind} to Matrix`);
       const mxcUrl = await this.enqueueSend(() => withTimeout(
         this.client!.uploadContent(buffer, mimetype, filename),
-        MATRIX_SEND_TIMEOUT_MS,
+        MATRIX_UPLOAD_TIMEOUT_MS,
         `uploadContent(${kind})`,
       ));
       logger.info({ mxcUrl, filename }, `${kind} uploaded, sending to room`);
@@ -1145,7 +1154,7 @@ export class MatrixChannel implements Channel {
         MATRIX_SEND_TIMEOUT_MS,
         `sendMessage(${kind})`,
       ));
-      if (eventId) this.lastBotEventId.set(roomId, eventId);
+      if (eventId) this.trackBotEvent(roomId, eventId);
       if (caption && caption.trim()) {
         await this.sendMessage(jid, caption.trim());
       }
@@ -1209,7 +1218,7 @@ export class MatrixChannel implements Channel {
       const hostPath = path.join(mediaDir, timestamped);
       fs.writeFileSync(hostPath, data);
 
-      const containerPath = `/workspace/ipc/media/${timestamped}`;
+      const containerPath = `/workspace/ipc/${groupFolder}/media/${timestamped}`;
       logger.info({ filename, contentType, size: data.length, containerPath }, 'Media downloaded to IPC');
       return containerPath;
     } catch (err) {
