@@ -1625,14 +1625,23 @@ async function main(): Promise<void> {
     queue,
     runContainerAgent,
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
-    sendMessage: async (jid, rawText) => {
+    sendMessage: async (jid, rawText, threadId) => {
       const ch = findChannel(channels, jid);
       if (!ch) return;
       const text = stripInternalTags(rawText);
       if (text) {
-        await ch.sendMessage(jid, text);
-        storeOutgoing(jid, text);
+        await ch.sendMessage(jid, text, threadId);
+        storeOutgoing(jid, text, threadId);
       }
+    },
+    sendMessageReturningId: async (jid, rawText, threadId) => {
+      const ch = findChannel(channels, jid);
+      if (!ch?.sendMessageReturningId) return undefined;
+      const text = stripInternalTags(rawText);
+      if (!text) return undefined;
+      const eventId = await ch.sendMessageReturningId(jid, text, threadId);
+      storeOutgoing(jid, text, threadId);
+      return eventId;
     },
   });
   startIpcWatcher({
@@ -1822,9 +1831,7 @@ async function main(): Promise<void> {
 
     // ── Skills (all bots) ──
     const skillsDir = path.join(sessionDir, '.claude', 'skills');
-    let skillRows = '';
-    let skillHeader = '| Skill |';
-    let skillSep = '|-------|';
+    let skillLines = '';
     try {
       const skillNames = fs.existsSync(skillsDir)
         ? fs.readdirSync(skillsDir).filter((e) => {
@@ -1832,91 +1839,84 @@ async function main(): Promise<void> {
           }).sort()
         : [];
       if (skillNames.length > 0) {
-        skillHeader = '| Skill | Description |';
-        skillSep = '|-------|-------------|';
-        skillRows = skillNames.map((s) => {
+        skillLines = skillNames.map((s) => {
           const skillMd = path.join(skillsDir, s, 'SKILL.md');
           let desc = '';
           try {
             const content = fs.readFileSync(skillMd, 'utf-8');
             const m = content.match(/^description:\s*(.+)$/m);
-            if (m) desc = m[1].trim().replace(/\|/g, '\\|').slice(0, 120);
+            if (m) desc = ' — ' + m[1].trim().slice(0, 120);
           } catch { /* no description */ }
-          return `| \`${s}\` | ${desc} |`;
+          return `- \`${s}\`${desc}`;
         }).join('\n');
       } else {
-        skillRows = '| _(none)_ |';
+        skillLines = '_(none)_';
       }
-    } catch { skillRows = '| _(error reading skills)_ |'; }
-    sections.push(['### 🔧 Skills', skillHeader, skillSep, skillRows].join('\n'));
+    } catch { skillLines = '_(error reading skills)_'; }
+    sections.push(`### 🔧 Skills\n${skillLines}`);
 
     // ── MCP Servers (all bots) ──
     const settingsFile = path.join(sessionDir, '.claude', 'settings.json');
-    let mcpRows = '';
+    let mcpLines = '';
     try {
       if (fs.existsSync(settingsFile)) {
         const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
         const mcpNames = Object.keys(settings.mcpServers || {}).sort();
-        mcpRows = mcpNames.length > 0
-          ? mcpNames.map((m) => `| 🔌 ${m} |`).join('\n')
-          : '| _(none)_ |';
+        mcpLines = mcpNames.length > 0
+          ? mcpNames.map((m) => `- 🔌 ${m}`).join('\n')
+          : '_(none)_';
       } else {
-        mcpRows = '| _(none)_ |';
+        mcpLines = '_(none)_';
       }
-    } catch { mcpRows = '| _(error reading MCP)_ |'; }
-    sections.push(['### 🔌 MCP Servers', '| Server |', '|--------|', mcpRows].join('\n'));
+    } catch { mcpLines = '_(error reading MCP)_'; }
+    sections.push(`### 🔌 MCP Servers\n${mcpLines}`);
 
     // ── Active Todos (all bots) ──
     const todos = readTodoItems(MAIN_GROUP_FOLDER);
     const activeTodos = todos.filter((t) => t.status !== 'completed');
-    let todoRows = '';
+    let todoLines = '';
     if (activeTodos.length > 0) {
       const statusEmoji: Record<string, string> = { in_progress: '🔄', pending: '⏳' };
-      todoRows = activeTodos.map((t) => `| ${statusEmoji[t.status] ?? '❓'} ${t.content} | ${t.status} |`).join('\n');
+      todoLines = activeTodos.map((t) => `- ${statusEmoji[t.status] ?? '❓'} ${t.content}`).join('\n');
     } else {
-      todoRows = '| _(empty)_ | — |';
+      todoLines = '_(empty)_';
     }
-    sections.push(['### ✅ Active Todos', '| Task | Status |', '|------|--------|', todoRows].join('\n'));
+    sections.push(`### ✅ Active Todos\n${todoLines}`);
 
     // ── Machine Health (engineers only) ──
     if (isEngineer) {
       const machineName = os.hostname().toUpperCase();
-      let healthRows = '';
+      let healthLines = '';
       try {
         const status = getSystemStatus(process.cwd());
         const lines: string[] = [];
         for (const bot of status.bots) {
           const svc = bot.service === 'running' ? '🟢' : '🔴';
-          const containers = bot.containers.length > 0
+          const uptime = bot.containers.length > 0
             ? bot.containers.map((c) => c.uptime).join(', ')
             : '—';
           const lastErr = bot.lastErrorAt
-            ? `${Math.round((Date.now() - new Date(bot.lastErrorAt).getTime()) / 60000)}m ago`
-            : '—';
-          lines.push(`| ${bot.name} | ${svc} ${bot.service} | ${bot.model ?? '?'} | ${containers} | ${lastErr} |`);
+            ? ` · ⚠️ ${Math.round((Date.now() - new Date(bot.lastErrorAt).getTime()) / 60000)}m ago`
+            : '';
+          lines.push(`- ${svc} **${bot.name}** · ${bot.model ?? '?'} · ${uptime}${lastErr}`);
         }
-        healthRows = lines.length > 0 ? lines.join('\n') : '| _(no bots)_ | — | — | — | — |';
-      } catch { healthRows = '| _(error reading health)_ | — | — | — | — |'; }
-      sections.push([
-        `### 🏥 Machine Health — ${machineName}`,
-        '| Bot | Service | Model | Containers | Last Error |',
-        '|-----|---------|-------|------------|------------|',
-        healthRows,
-      ].join('\n'));
+        healthLines = lines.length > 0 ? lines.join('\n') : '_(no bots)_';
+      } catch { healthLines = '_(error reading health)_'; }
+      sections.push(`### 🏥 Machine Health — ${machineName}\n${healthLines}`);
     }
 
     // ── Weekly Goals + Knowledge Search (navigators only) ──
     if (isNavigator) {
       // Weekly goals — read from well-known file if present
-      let goalRows = '| _(not configured)_ |';
+      let goalLines = '_(not configured)_';
       const goalsFile = path.join(DATA_DIR, 'weekly-goals.md');
       try {
         if (fs.existsSync(goalsFile)) {
           const lines = fs.readFileSync(goalsFile, 'utf-8').trim().split('\n').filter(Boolean);
-          goalRows = lines.map((l) => `| ${l.replace(/\|/g, '\\|')} |`).join('\n') || '| _(empty)_ |';
+          goalLines = lines.map((l) => `- ${l}`).join('\n') || '_(empty)_';
         }
-      } catch { goalRows = '| _(error reading goals)_ |'; }
-      sections.push(['### 🎯 Weekly Goals', '| Goal |', '|------|', goalRows].join('\n'));
+      } catch { goalLines = '_(error reading goals)_'; }
+      sections.push(`### 🎯 Weekly Goals\n${goalLines}`);
 
       // Knowledge search latest entry
       let knowledgeEntry = '_(not configured)_';

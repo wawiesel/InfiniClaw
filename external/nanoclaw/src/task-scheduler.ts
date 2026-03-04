@@ -27,7 +27,8 @@ export interface SchedulerDependencies {
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
   onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
+  sendMessageReturningId?: (jid: string, text: string, threadId?: string) => Promise<string | undefined>;
   runContainerAgent?: (
     group: RegisteredGroup,
     input: ContainerInput,
@@ -95,6 +96,17 @@ async function runTask(
   const sessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
 
+  // Open a thread for all task output to keep the main timeline clean.
+  // The thread header is a compact label; all progress and final output goes inside it.
+  let taskThreadId: string | undefined;
+  if (deps.sendMessageReturningId) {
+    const now = new Date().toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York',
+    });
+    const header = `<font color="#888888"><em>⏱️ Scheduled task — ${now} EST</em></font>`;
+    taskThreadId = await deps.sendMessageReturningId(task.chat_jid, header).catch(() => undefined);
+  }
+
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
   // query loop to time out. A short delay handles any final MCP calls.
@@ -124,11 +136,11 @@ async function runTask(
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result && streamedOutput.isProgress) {
-          // Forward progress (tool calls) to chat
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Forward progress (tool calls) to chat, in thread if available
+          await deps.sendMessage(task.chat_jid, streamedOutput.result, taskThreadId);
         } else if (streamedOutput.result && !streamedOutput.isProgress) {
           result = streamedOutput.result;
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          await deps.sendMessage(task.chat_jid, streamedOutput.result, taskThreadId);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
