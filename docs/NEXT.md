@@ -20,6 +20,10 @@ Persona directories are now bind-mounted into containers. The `restorePersona()`
 
 With direct bind mounts, bot edits already persist to the repo. The sync-back step on stop is a no-op for mounted paths and a bug source for everything else. Remove it.
 
+### Navigator thread-to-topic mapping
+
+Auto-threading is implemented (1c30fdd) but navigators still need to manage thread-to-topic mapping in their memory so they return to the right thread for ongoing work.
+
 ### Scheduled task mount error
 
 Scheduled tasks fail with `statfs .../container/agent-runner/src: no such file or directory`. The agent-runner source mount path is only valid during development. Scheduled task containers need the same mount resolution as regular containers.
@@ -262,3 +266,6 @@ Container images are small (Node.js + agent-runner). Build time is ~30 seconds. 
 - **Semantic Versioning** — InfiniClaw is at `v1.0.0`, tagged, `safe` branch tracks it.
 - **Branch Strategy** — `safe` and `exp` branches exist locally (pending push to origin).
 - **Claude Lobe Delegation** — `delegate_claude` added alongside Codex/Gemini/Ollama. Uses Claude CLI with `--print --output-format stream-json --dangerously-skip-permissions`. Also added to `delegate_to_lobe` atomic tool.
+- **Private Homeserver Simplifications** — Removed rate limit retry/backoff (c59b11c). Kept `m.replace` filtering (correct regardless of server) and `NODE_EXTRA_CA_CERTS` mapping (still needed for API proxy). No complex sync filter management — `matrix-bot-sdk` handles sync internally.
+- **`cli stop` isolation** — Fixed to only kill the target bot's containers, not all nanoclaw-* containers (26eed38).
+- **`cli send` DB injection** — Removed local DB injection; messages go through Matrix only (61c9412).
