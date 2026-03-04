@@ -16,7 +16,7 @@ restart_self(bot: "albert")   # Restart Albert
 What happens on restart:
 1. `tsc --noEmit` validation — if it fails, bot stays up and you get errors to fix
 2. Rsync nanoclaw source, install deps if changed, build TypeScript
-3. Restore persona (appends persona CLAUDE.md, seeds group files)
+3. Restore persona (appends persona CLAUDE.md to base)
 4. Rebuild container image (picks up Dockerfile changes)
 5. Restart bot process via PM2/launchd
 
@@ -52,55 +52,54 @@ Compiles TypeScript: nanoclaw `src/` → `external/nanoclaw/dist/`, InfiniClaw `
 
 ```
 $INFINICLAW_ROOT/          <- git root
-├── package.json                      <- workspace root (npm workspaces)
-├── tsconfig.json                     <- InfiniClaw build config
-├── vitest.config.ts                  <- InfiniClaw test config
-├── src/                              <- InfiniClaw source
-│   ├── main.ts                       <- orchestrator: startup, message loop
-│   ├── cli.ts                        <- CLI entry: start|stop|chat|send
-│   ├── service.ts                    <- deploy, restart, sync, build logic
-│   ├── container-spawn.ts            <- podman container management
-│   ├── ipc-watcher.ts                <- IPC polling with extended types
-│   ├── ipc-commands.ts               <- extended IPC command handlers
-│   ├── brain-management.ts           <- model selection
-│   ├── chat-activity.ts              <- activity tracking
-│   ├── container-mounts.ts           <- InfiniClaw container volumes
-│   ├── container-secrets.ts          <- provider secret normalization
-│   ├── channels/matrix.ts            <- Matrix channel
-│   ├── channels/local-cli.ts         <- Terminal channel
-│   ├── skill-sync.ts, mcp-sync.ts    <- skill/MCP sync
-│   └── __tests__/                    <- InfiniClaw tests
-├── dist/                             <- InfiniClaw compiled output
+├── .githooks/                       <- shared git hooks (tracked)
+├── package.json                     <- workspace root (npm workspaces)
+├── tsconfig.json                    <- InfiniClaw build config
+├── src/                             <- InfiniClaw source
+│   ├── main.ts                      <- orchestrator: startup, message loop
+│   ├── cli.ts                       <- CLI entry: start|stop|chat|send
+│   ├── service.ts                   <- deploy, restart, sync, build logic
+│   ├── container-spawn.ts           <- podman container management
+│   ├── container-mounts.ts          <- InfiniClaw container volumes
+│   ├── skill-sync.ts, mcp-sync.ts   <- skill/MCP sync
+│   └── channels/matrix.ts           <- Matrix channel
+├── dist/                            <- InfiniClaw compiled output
 ├── external/
-│   └── nanoclaw/                     <- subtree (upstream framework)
-│       ├── src/                      <- upstream source
-│       │   ├── config.ts, db.ts, types.ts, router.ts, logger.ts
-│       │   ├── container-runner.ts, task-scheduler.ts, group-queue.ts
-│       │   ├── mount-security.ts, env-utils.ts, podman-utils.ts
-│       │   └── channels/whatsapp.ts
-│       ├── container/                <- agent-runner/, skills/, build.sh
-│       ├── CLAUDE.md                 <- base instructions (all bots)
-│       ├── package.json              <- with "exports" field
-│       └── dist/                     <- upstream compiled output
-├── bots/                             <- personas, skills, config, container
-│   ├── personas/{bot}/CLAUDE.md      <- persona identity
-│   ├── personas/{bot}/groups/        <- room-level CLAUDE.md
-│   ├── personas/{bot}/skills/        <- persona-specific skills
-│   └── container/{bot}/Dockerfile    <- container images
-└── _runtime/                         <- gitignored (instances, logs, data)
+│   └── nanoclaw/                    <- subtree (upstream framework)
+│       ├── src/                     <- upstream source
+│       ├── container/               <- agent-runner/, Dockerfile
+│       └── dist/                    <- upstream compiled output
+├── bots/
+│   ├── CLAUDE.md                    <- base instructions (all bots)
+│   ├── {role}/ROOM.md               <- shared room context (read-only)
+│   ├── {role}/skills.json           <- skills assigned to this role
+│   ├── {role}/mcp.json              <- MCP servers for this role
+│   ├── {role}/{bot}/CLAUDE.md       <- persona identity (writable)
+│   ├── skills/{name}/SKILL.md       <- shared skill pool
+│   └── container/{bot}/Dockerfile   <- container images
+└── _runtime/                        <- gitignored (instances, logs, data)
 ```
 
 ## What Goes Where
 
 | Change | Location | Notes |
 |--------|----------|-------|
-| Bot capabilities | `bots/personas/{bot}/skills/` | Skills, not code |
-| Bot identity/rules | `bots/personas/{bot}/CLAUDE.md` | Persona layer |
-| Room context | `bots/personas/{bot}/groups/{room}/CLAUDE.md` | Group layer |
-| Shared skills | `external/nanoclaw/container/skills/` | All bots get these |
+| Bot capabilities | `bots/skills/{name}/` | Skills, not code |
+| Bot identity/rules | `bots/{role}/{bot}/CLAUDE.md` | Persona layer |
+| Room context | `bots/{role}/ROOM.md` | Room layer (read-only) |
+| Role skills/MCP | `bots/{role}/skills.json`, `mcp.json` | Per-role config |
 | InfiniClaw source | `src/` | Main orchestrator, channels, deploy |
 | Upstream fixes | `external/nanoclaw/src/` | Captain approval needed |
-| Container image | `external/nanoclaw/container/` + `bots/container/` | Rebuild via image task |
+| Container image | `bots/container/{bot}/Dockerfile` | Rebuild via image task |
+
+## Git Hooks
+
+Pre-commit hooks guard the `bots/` and `docs/` directory structure. They are tracked in `.githooks/`.
+
+After cloning or on first setup, activate them:
+```bash
+cd $INFINICLAW_ROOT && git config core.hooksPath .githooks
+```
 
 ## Git Subtree Operations
 
@@ -114,7 +113,6 @@ git subtree pull --prefix=external/nanoclaw https://github.com/wawiesel/nanoclaw
 git subtree push --prefix=external/nanoclaw https://github.com/wawiesel/nanoclaw main
 ```
 
-- Subtree metadata lives in commit messages (`git-subtree-dir`, `git-subtree-split`), not config files.
 - Always `--squash` on pull to keep InfiniClaw history clean.
 - Commit InfiniClaw-level and nanoclaw-level changes separately when possible — makes subtree push cleaner.
 
