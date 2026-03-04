@@ -1679,6 +1679,22 @@ async function main(): Promise<void> {
       } else {
         delete workThreadIds[chatJid];
       }
+      // Mirror work thread state into last_event_ids.json so containers can
+      // read and restore it around delegate_to_lobe calls.
+      const group = registeredGroups[chatJid];
+      if (group) {
+        const idsFile = path.join(DATA_DIR, 'ipc', group.folder, 'last_event_ids.json');
+        try {
+          let existing: Record<string, string> = {};
+          if (fs.existsSync(idsFile)) existing = JSON.parse(fs.readFileSync(idsFile, 'utf-8'));
+          if (threadId) {
+            existing.workThreadId = threadId;
+          } else {
+            delete existing.workThreadId;
+          }
+          fs.writeFileSync(idsFile, JSON.stringify(existing, null, 2));
+        } catch { /* best effort */ }
+      }
     },
     syncGroupMetadata: async () => { },
     getAvailableGroups,

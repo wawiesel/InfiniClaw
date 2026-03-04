@@ -213,6 +213,20 @@ export function registerDelegateTools(
     });
   }
 
+  /**
+   * Read the current work thread ID from last_event_ids.json.
+   * Returns the workThreadId if set, or null if none.
+   * Used by delegate_to_lobe to save and restore thread context.
+   */
+  function readCurrentWorkThread(): string | null {
+    const idsFile = path.join(ctx.ipcDir, 'last_event_ids.json');
+    try {
+      if (!fs.existsSync(idsFile)) return null;
+      const d = JSON.parse(fs.readFileSync(idsFile, 'utf-8')) as Record<string, string>;
+      return typeof d.workThreadId === 'string' && d.workThreadId ? d.workThreadId : null;
+    } catch { return null; }
+  }
+
   const ollamaHost = process.env.OLLAMA_HOST || (process.env.NANOCLAW_IPC_DIR ? 'http://localhost:11434' : 'http://host.containers.internal:11434');
 
   // ── query_local_llm ───────────────────────────────────────────────────
@@ -277,7 +291,7 @@ The tool handles the entire flow:
 3. Posts the objective in the thread
 4. Runs the lobe subprocess with the objective
 5. Posts the lobe response in the thread
-6. Clears thread back to main timeline
+6. Restores the previous work thread (or clears if none was active)
 7. Returns the lobe output to the calling agent
 
 You never need to call send_message, set_thread, or get_last_event_id manually for delegations.`,
@@ -313,6 +327,11 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         };
       }
 
+      // Save the active work thread before delegation so we can restore it after.
+      // delegate_to_lobe always posts to the main timeline regardless of thread context,
+      // and restores the previous thread when done rather than clearing it.
+      const previousWorkThread = readCurrentWorkThread();
+
       // Resolve lobe and model first (needed for summary)
       const effectiveModel = (() => {
         if (args.model) return args.model;
@@ -335,7 +354,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
       if (!cwdResult.ok) {
         const errText = `<font color="#cc0000">unavailable: ${cwdResult.error}</font>`;
         emitDelegateMessage(errText, threadId ?? undefined);
-        if (threadId) setThread(null);
+        if (threadId) setThread(previousWorkThread);
         return {
           content: [{ type: 'text' as const, text: `${lobe}: unavailable: ${cwdResult.error}` }],
           isError: true,
@@ -402,7 +421,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
           content: [{ type: 'text' as const, text: prefixedMessages.join('\n\n') || `${lobe}: unavailable` }],
         };
         if (unavailableTriggered) ollamaResult.isError = true;
-        if (threadId) setThread(null);
+        if (threadId) setThread(previousWorkThread);
         return ollamaResult;
       }
 
@@ -546,8 +565,10 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         });
       });
 
-      // Step 6: Clear thread back to main timeline
-      if (threadId) setThread(null);
+      // Step 6: Restore previous work thread (or clear if none was active).
+      // This ensures the bot returns to its prior thread context after delegation,
+      // rather than always landing on the main timeline.
+      if (threadId) setThread(previousWorkThread);
 
       return result;
     },
