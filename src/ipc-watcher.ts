@@ -94,7 +94,8 @@ async function handleTextMessage(
       logger.info({ sourceGroup, eventId }, 'Delegate thread created');
     }
   } else {
-    await deps.sendMessage(data.chatJid, body, threadId);
+    const eventId = await deps.sendMessageReturningId(data.chatJid, body, threadId);
+    if (eventId) deps.writeLastEventId(sourceGroup, eventId);
   }
   logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
 }
