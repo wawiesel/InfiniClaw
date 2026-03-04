@@ -123,6 +123,30 @@ let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
 
+/** Resolve which thread a response should go to. Thread on the triggering message. */
+function resolveReplyThread(
+  chatJid: string,
+  messages: NewMessage[],
+  group: { requiresTrigger?: boolean },
+): string | undefined {
+  const lastMsg = messages[messages.length - 1];
+  // If the message is already in a thread, reply there
+  if (lastMsg?.thread_id) return lastMsg.thread_id;
+  // Work thread override (set by setWorkThread MCP tool)
+  if (workThreadIds[chatJid]) return workThreadIds[chatJid];
+  // For requiresTrigger groups: auto-thread on the @trigger message
+  if (group.requiresTrigger === true) {
+    const triggerMsg = [...messages].reverse().find(
+      (m) => !m.thread_id && m.id?.startsWith('$') && TRIGGER_PATTERN.test(m.content.trim()),
+    );
+    if (triggerMsg) return triggerMsg.id;
+  }
+  // Thread on the last human message
+  return [...messages].reverse().find(
+    (m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'),
+  )?.id;
+}
+
 // Exit-137 (SIGKILL) backoff — prevents tight respawn loops when containers are killed externally.
 // We can't know if it's OOM or a host kill, but we should still back off to avoid hammering resources.
 const KILL_137_COOLDOWN_MS = parseInt(process.env.KILL_137_COOLDOWN_MS || '60000', 10);
@@ -630,24 +654,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   setObjectiveFromMessages(chatJid, contextMessages);
 
-  const lastMsg = contextMessages[contextMessages.length - 1];
-  // For requiresTrigger groups: if the trigger is in a main-timeline message (no thread_id),
-  // auto-thread the reply onto that triggering message so the bot doesn't clutter the timeline.
-  let autoThreadId: string | undefined;
-  if (group.requiresTrigger === true) {
-    const triggerMsg = [...contextMessages].reverse().find(
-      (m) => !m.thread_id && m.id?.startsWith('$') && TRIGGER_PATTERN.test(m.content.trim()),
-    );
-    if (triggerMsg) autoThreadId = triggerMsg.id;
-  }
-  // For non-CO bots: fall back to threading on the triggering message.
-  // CO replies on the main timeline unless the conversation is already in a thread.
-  const triggeringEventId = group.requiresTrigger
-    ? [...contextMessages].reverse().find((m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'))?.id
-    : undefined;
-  activeReplyThreadIds[chatJid] = lastMsg?.thread_id || workThreadIds[chatJid] || autoThreadId || triggeringEventId;
+  activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, contextMessages, group);
   logger.info(
-    { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], lastMsgThreadId: lastMsg?.thread_id, workThread: workThreadIds[chatJid], autoThread: autoThreadId, triggeringEventId, msgCount: contextMessages.length },
+    { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], msgCount: contextMessages.length },
     'Thread routing resolved',
   );
 
@@ -986,20 +995,7 @@ async function handleGroupMessagesInLoop(
   const rawFormatted = formatMessages(messagesToSend);
   const formatted = threadCtx ? `${threadCtx}\n\n${rawFormatted}` : rawFormatted;
 
-  const lastPiped = messagesToSend[messagesToSend.length - 1];
-  // Auto-thread for requiresTrigger groups (see processGroupMessages for explanation)
-  let autoThreadId2: string | undefined;
-  if (group.requiresTrigger === true) {
-    const triggerMsg = [...messagesToSend].reverse().find(
-      (m) => !m.thread_id && m.id?.startsWith('$') && TRIGGER_PATTERN.test(m.content.trim()),
-    );
-    if (triggerMsg) autoThreadId2 = triggerMsg.id;
-  }
-  // Non-CO: thread on the triggering message. CO: reply on main timeline.
-  const triggeringEventId2 = group.requiresTrigger
-    ? [...messagesToSend].reverse().find((m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'))?.id
-    : undefined;
-  activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid] || autoThreadId2 || triggeringEventId2;
+  activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend, group);
 
   // Interrupt: if container is busy and message is from captain/operator/trigger,
   // send interrupt IPC to kill running claude and resume with the new message

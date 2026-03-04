@@ -411,6 +411,6 @@ export async function runContainerAgent(
     timeoutErrorMessage: `Task timed out after ${timeoutMinutes} minutes with no response. Try again or simplify the request.`,
     outputChainTimeoutMs: 30_000,
     maxErrorStderrChars: 0,
-    firstOutputDeadlineMs: 120_000,
+    firstOutputDeadlineMs: 300_000,
   });
 }
