@@ -1,4 +1,6 @@
+import { execFileSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { parseEnvFile } from 'nanoclaw/env-utils.js';
 import { ASSISTANT_NAME, CAPTAIN_USER_ID, DATA_DIR } from 'nanoclaw/config.js';
@@ -30,6 +32,12 @@ export function handleOperatorCommand(
                 if (matrix?.isConnected()) await matrix.sendMessage(msg.chat_jid, `⛔ !todo failed: ${err instanceof Error ? err.message : String(err)}`, msg.thread_id);
             }
         })();
+        return true;
+    }
+
+    if (msg.content.startsWith('!operator')) {
+        const text = msg.content.replace(/^!operator\s*/, '').trim();
+        handleOperatorTmux(text, msg.chat_jid, msg.thread_id, matrix);
         return true;
     }
 
@@ -185,4 +193,63 @@ export function buildTodoMessage(chatJid: string): string {
     }
 
     return lines.join('\n');
+}
+
+// ── !operator tmux handler ──────────────────────────────────────────
+
+const OPERATOR_SESSION = 'operator';
+
+function tmuxSessionExists(): boolean {
+    try {
+        execFileSync('tmux', ['has-session', '-t', OPERATOR_SESSION], { stdio: 'pipe' });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function startOperatorSession(): string {
+    const secretsPath = loadMachineConfig().secretsPath;
+    const result = execFileSync('tmux', [
+        'new-session', '-d', '-s', OPERATOR_SESSION, '-c', secretsPath,
+        'claude',
+    ], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    logger.info({ secretsPath }, 'Started operator tmux session');
+    return result;
+}
+
+function sendToOperator(text: string): void {
+    execFileSync('tmux', ['send-keys', '-t', OPERATOR_SESSION, text, 'Enter'], { stdio: 'pipe' });
+}
+
+function handleOperatorTmux(
+    text: string,
+    chatJid: string,
+    threadId: string | undefined,
+    matrix: MatrixChannel | null,
+): void {
+    void (async () => {
+        try {
+            const existed = tmuxSessionExists();
+            if (!existed) {
+                startOperatorSession();
+                // Give Claude Code a moment to initialize
+                await new Promise(r => setTimeout(r, 3000));
+            }
+            if (text) {
+                sendToOperator(text);
+            }
+            const hostname = os.hostname();
+            const status = existed ? 'sent to running operator' : 'started new operator session';
+            const reply = text
+                ? `🔧 ${hostname}: ${status} — "${text.slice(0, 100)}"`
+                : `🔧 ${hostname}: ${status}`;
+            if (matrix?.isConnected()) await matrix.sendMessage(chatJid, reply, threadId);
+        } catch (err) {
+            logger.error({ err }, '!operator failed');
+            if (matrix?.isConnected()) {
+                await matrix.sendMessage(chatJid, `⛔ !operator failed: ${err instanceof Error ? err.message : String(err)}`, threadId);
+            }
+        }
+    })();
 }
