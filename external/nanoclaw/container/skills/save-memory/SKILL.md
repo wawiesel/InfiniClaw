@@ -9,8 +9,8 @@ description: Save knowledge to memory files. Use after fixing bugs, learning how
 
 | What | Path | Purpose |
 |------|------|---------|
-| MEMORY.md | `/home/node/.claude/projects/-workspace-group/memory/MEMORY.md` | Auto-loaded each session. 200 line limit. |
-| Topic files | `/home/node/.claude/projects/-workspace-group/memory/*.md` | Detailed notes by topic. Link from MEMORY.md. |
+| MEMORY.md | `/home/node/.claude/projects/-workspace-persona-temp/memory/MEMORY.md` | Auto-loaded each session. 200 line limit. |
+| Topic files | `/home/node/.claude/projects/-workspace-persona-temp/memory/*.md` | Detailed notes by topic. Link from MEMORY.md. |
 
 ## How to save
 
@@ -21,7 +21,7 @@ delegate_to_lobe:
   reason: "save memory"
   lobe: codex   # or gemini
   objective: |
-    Read /home/node/.claude/projects/-workspace-group/memory/MEMORY.md
+    Read /home/node/.claude/projects/-workspace-persona-temp/memory/MEMORY.md
     Update it with: <your summary of what to save>
     Rules:
     - Read the file first, preserve existing content
@@ -59,7 +59,7 @@ When your session is cleared (OOM kill, restart, etc.), conversation history is 
 ### Session file location
 
 ```
-/Users/ww5/2026-Nanoclaw/InfiniClaw/_runtime/instances/<persona>/data/sessions/main/.claude/projects/-workspace-group/
+/Users/ww5/2026-Nanoclaw/InfiniClaw/_runtime/instances/<persona>/data/sessions/main/.claude/projects/-workspace-persona-temp/
 ```
 
 Replace `<persona>` with your persona name (e.g. `cid`, `johnny5`).
@@ -117,7 +117,7 @@ Tell your lobe:
 1. List session files at the path above
 2. Write the Python script above, run it on the most recent `.jsonl`: `python3 script.py <session.jsonl> /tmp/session-summary.txt`
 3. Read the output, extract: key decisions, completed tasks, standing orders, file paths, errors resolved, unfinished work
-4. Write findings to `/workspace/memory/session-recovery-<date>.md`
+4. Write findings to `/workspace/persona/memory/session-recovery-<date>.md`
 
 ### After recovery
 

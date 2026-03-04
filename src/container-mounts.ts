@@ -116,7 +116,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
       fs.mkdirSync(memoryDir, { recursive: true });
       mounts.push({
         hostPath: memoryDir,
-        containerPath: '/workspace/memory',
+        containerPath: '/workspace/persona/memory',
         readonly: false,
       });
     } catch { /* no secrets config */ }

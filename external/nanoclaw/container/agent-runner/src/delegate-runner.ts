@@ -13,7 +13,7 @@ type DelegateEnv = Record<string, string | undefined>;
 
 const DEFAULT_DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
 const MAX_DELEGATE_TIMEOUT_MS = 60 * 60 * 1000;
-const DELEGATE_CWD_ROOTS = ['/workspace', '/workspace/group', '/workspace/extra'];
+const DELEGATE_CWD_ROOTS = ['/workspace', '/workspace/persona/temp', '/workspace/extra'];
 const DELEGATE_CACHE_ROOT = '/workspace/cache';
 const EXTRA_PATH_PREPEND = process.env.NANOCLAW_PATH_PREPEND || '';
 const HOST_CERT_FALLBACK = '/workspace/host-certs/node_extra_ca_certs-corporate-certs.pem';
@@ -299,7 +299,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
       reason: z.string().min(1).describe('Short reason shown on the main timeline, e.g. "Save memory: threading fix"'),
       objective: z.string().describe('Full detailed prompt/objective for the lobe to execute'),
       lobe: z.enum(['codex', 'gemini', 'claude', 'ollama']).default('codex').describe('Which lobe to use (default: codex)'),
-      cwd: z.string().optional().describe('Working directory. Must be under /workspace/group or /workspace/extra.'),
+      cwd: z.string().optional().describe('Working directory. Must be under /workspace/persona/temp or /workspace/extra.'),
       model: z.string().optional().describe('Optional model override for the lobe.'),
       effort: z.enum(['low', 'medium', 'high']).optional().describe('Thinking effort level (Claude only).'),
       system: z.string().optional().describe('Optional system prompt (Ollama only).'),
@@ -364,7 +364,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
       const timeoutMs = Math.max(1000, Math.min(args.timeout_ms ?? DEFAULT_DELEGATE_TIMEOUT_MS, MAX_DELEGATE_TIMEOUT_MS));
       const delegatedObjective = [
         'Execution constraints:',
-        '- Do NOT create Python virtual environments inside /workspace/group or /workspace/extra.',
+        '- Do NOT create Python virtual environments inside /workspace/persona/temp or /workspace/extra.',
         '- If a Python environment is required, create it under /workspace/cache/venvs.',
         '- Route large model/package caches under /workspace/cache.',
         '',

@@ -108,7 +108,7 @@ Instructions for the bot...
 
 Your persona CLAUDE.md is mounted writable at `/workspace/extra/cid-persona/CLAUDE.md` — edits persist across restarts.
 
-Room-level CLAUDE.md (`/workspace/group/CLAUDE.md`) is **read-only** — managed by the Captain in the repo. Do not attempt to edit it.
+Room-level CLAUDE.md (`/workspace/persona/temp/CLAUDE.md`) is **read-only** — managed by the Captain in the repo. Do not attempt to edit it.
 
 ## Self-management skills
 

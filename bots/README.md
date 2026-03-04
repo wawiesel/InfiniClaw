@@ -28,4 +28,4 @@ Each role has a room, skills, and MCP config shared by all bots of that role. Bo
 
 ## Memory
 
-Bot memory lives in the secrets repo (`~/.config/infiniclaw/secrets/{bot}/memory/`), mounted writable at `/workspace/memory/`.
+Bot memory lives in the secrets repo (`~/.config/infiniclaw/secrets/{bot}/memory/`), mounted writable at `/workspace/persona/memory/`.

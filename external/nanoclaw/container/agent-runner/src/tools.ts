@@ -227,7 +227,7 @@ Use this when you want to post a brief summary line (e.g. "💭 Lobe delegation 
 
   server.tool(
     'send_image',
-    'Send an image file to the user or group. The file must exist in the container filesystem (e.g. /workspace/group/screenshot.png). Supports PNG, JPEG, GIF, WebP.',
+    'Send an image file to the user or group. The file must exist in the container filesystem (e.g. /workspace/persona/temp/screenshot.png). Supports PNG, JPEG, GIF, WebP.',
     {
       file_path: z.string().describe('Absolute path to the image file in the container'),
       caption: z.string().optional().describe('Optional caption to display with the image'),
@@ -237,7 +237,7 @@ Use this when you want to post a brief summary line (e.g. "💭 Lobe delegation 
 
   server.tool(
     'send_file',
-    'Send a file attachment to the user or group. The file must exist in the container filesystem (e.g. /workspace/group/report.pdf).',
+    'Send a file attachment to the user or group. The file must exist in the container filesystem (e.g. /workspace/persona/temp/report.pdf).',
     {
       file_path: z.string().describe('Absolute path to the file in the container'),
       caption: z.string().optional().describe('Optional message to send after the file'),

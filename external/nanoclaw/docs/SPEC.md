@@ -50,9 +50,9 @@ A personal Claude assistant accessible via WhatsApp, with persistent memory per 
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │                    AGENT RUNNER                               │   │
 │  │                                                                │   │
-│  │  Working directory: /workspace/group (mounted from host)       │   │
+│  │  Working directory: /workspace/persona/temp (mounted from host)       │   │
 │  │  Volume mounts:                                                │   │
-│  │    • groups/{name}/ → /workspace/group                         │   │
+│  │    • groups/{name}/ → /workspace/persona/temp                         │   │
 │  │    • groups/global/ → /workspace/global/ (non-main only)        │   │
 │  │    • data/sessions/{group}/.claude/ → /home/node/.claude/      │   │
 │  │    • Additional dirs → /workspace/extra/*                      │   │

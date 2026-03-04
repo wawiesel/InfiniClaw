@@ -74,7 +74,7 @@ Edit your persona CLAUDE.md directly (mounted writable — persists across resta
 /workspace/extra/nora-persona/CLAUDE.md
 ```
 
-Room CLAUDE.md files (`/workspace/group/CLAUDE.md`) are **read-only** — managed by the engineers in the repo.
+Room CLAUDE.md files (`/workspace/persona/temp/CLAUDE.md`) are **read-only** — managed by the engineers in the repo.
 
 ## Threads
 

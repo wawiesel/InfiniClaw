@@ -35,7 +35,7 @@ delegate_to_lobe:
 
 ## DO NOT edit
 
-- `/workspace/group/CLAUDE.md` — read-only, overwritten on deploy.
+- `/workspace/persona/temp/CLAUDE.md` — read-only, overwritten on deploy.
 - `/workspace/project/CLAUDE.md` — read-only instance copy.
 
 ## When to save

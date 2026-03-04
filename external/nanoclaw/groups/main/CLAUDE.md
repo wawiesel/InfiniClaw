@@ -66,7 +66,7 @@ Main has read-only access to the project and read-write access to its group fold
 | Container Path | Host Path | Access |
 |----------------|-----------|--------|
 | `/workspace/project` | Project root | read-only |
-| `/workspace/group` | `groups/main/` | read-write |
+| `/workspace/persona/temp` | `groups/main/` | read-write |
 
 Key paths inside the container:
 - `/workspace/project/store/messages.db` - SQLite database

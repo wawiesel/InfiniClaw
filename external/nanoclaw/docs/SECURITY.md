@@ -87,7 +87,7 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 | Capability | Main Group | Non-Main Group |
 |------------|------------|----------------|
 | Project root access | `/workspace/project` (ro) | None |
-| Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
+| Group folder | `/workspace/persona/temp` (rw) | `/workspace/persona/temp` (rw) |
 | Global memory | Implicit via project | `/workspace/global` (ro) |
 | Additional mounts | Configurable | Read-only unless allowed |
 | Network access | Unrestricted | Unrestricted |

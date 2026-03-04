@@ -133,13 +133,13 @@ function buildVolumeMounts(
     });
     mounts.push({
       hostPath: path.join(GROUPS_DIR, group.folder),
-      containerPath: '/workspace/group',
+      containerPath: '/workspace/persona/temp',
       readonly: false,
     });
   } else {
     mounts.push({
       hostPath: path.join(GROUPS_DIR, group.folder),
-      containerPath: '/workspace/group',
+      containerPath: '/workspace/persona/temp',
       readonly: false,
     });
     const globalDir = path.join(GROUPS_DIR, 'global');

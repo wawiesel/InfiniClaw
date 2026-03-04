@@ -36,7 +36,7 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 ## Your Workspace
 
-Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
+Files you create are saved in `/workspace/persona/temp/`. Use this for notes, research, or anything that should persist.
 
 ## Memory
 

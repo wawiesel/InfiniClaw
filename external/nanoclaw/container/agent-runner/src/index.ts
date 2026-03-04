@@ -302,7 +302,7 @@ function createPreCompactHook(): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = '/workspace/persona/temp/conversations';
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -542,7 +542,7 @@ async function runQuery(
   }
 
   // Extra directories under /workspace/extra/ are mounted for file access only.
-  // CLAUDE.md is loaded exclusively from /workspace/group/ — no additional directories.
+  // CLAUDE.md is loaded exclusively from /workspace/persona/temp/ — no additional directories.
 
   const anthropicBaseUrl = sdkEnv.ANTHROPIC_BASE_URL;
   const configuredMainModel = getRequestedMainModel(sdkEnv);
@@ -676,7 +676,7 @@ async function runQuery(
         ? Object.keys(containerInput.mcpServers).filter(k => !(k in validatedMcpServers))
         : [],
     };
-    fs.writeFileSync('/workspace/group/mcp-debug.json', JSON.stringify(debugInfo, null, 2));
+    fs.writeFileSync('/workspace/persona/temp/mcp-debug.json', JSON.stringify(debugInfo, null, 2));
     log(`MCP validated: ${JSON.stringify(debugInfo.mcpServerKeys)}${debugInfo.droppedServers.length ? `, dropped: ${JSON.stringify(debugInfo.droppedServers)}` : ''}`);
   } catch (e) {
     log(`Failed to write MCP debug: ${e}`);
@@ -687,7 +687,7 @@ async function runQuery(
     for await (const message of query({
       prompt: stream,
       options: {
-        cwd: '/workspace/group',
+        cwd: '/workspace/persona/temp',
         additionalDirectories: undefined,
         resume: sessionId,
         resumeSessionAt: resumeAt,

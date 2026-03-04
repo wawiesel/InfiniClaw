@@ -67,7 +67,7 @@ COPY agent-runner/ ./
 RUN npm run build
 
 # Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+RUN mkdir -p /workspace/persona/temp /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
 # Create entrypoint script
 # TypeScript is pre-compiled during image build (npm run build → /app/dist).
@@ -80,6 +80,6 @@ RUN chown -R node:node /workspace
 # Switch to non-root user
 USER node
 
-WORKDIR /workspace/group
+WORKDIR /workspace/persona/temp
 
 ENTRYPOINT ["/app/entrypoint.sh"]
