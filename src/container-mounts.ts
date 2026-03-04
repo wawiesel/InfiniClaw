@@ -90,7 +90,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
   if (rootDir) {
     const skillsPoolDir = path.join(rootDir, 'bots', 'skills');
-    const rolesFile = path.join(rootDir, 'bots', 'roles.json');
+    const rolesFile = path.join(rootDir, 'bots', 'skills', 'roles.json');
     loadSkillsToSession(skillsDst, skillsPoolDir, rolesFile, role);
   }
 
