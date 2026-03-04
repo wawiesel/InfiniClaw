@@ -13,6 +13,7 @@ InfiniClaw is a multi-bot orchestration layer built on a maintained NanoClaw for
 - **No silent failures.** Every failed message send must be retried or surfaced as a visible error. If a bot can't deliver, it logs the failure with full context and retries. Silent `.catch(() => {})` is a bug.
 - **System actions get an emoji prefix.** Any message that isn't a direct conversation response (restarts, working indicator, brain reload, startup) must start with an emoji.
 - **Work with Claude Code, not against it.** Bots run on the Claude Agent SDK. When the SDK has a preferred way to do something, use it. If the SDK introduces a tool that overlaps with ours, prefer one-way sync from the SDK over blocking it.
+- **Fix code and process, not behavior.** When a bot behaves incorrectly, fix the underlying system — the code, the IPC flow, the routing logic — not the bot's in-context behavior. Workarounds that patch behavior without addressing root cause accumulate debt and mask real problems.
 - **SSL passthrough.** Containers and host processes must forward corporate SSL variables (`SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`) and mount host certificates for TLS inspection proxies.
 
 ## Architecture
