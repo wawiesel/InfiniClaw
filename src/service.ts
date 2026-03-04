@@ -843,8 +843,9 @@ function buildRoomMap(root: string): Record<string, { bot: string; roomId: strin
     roster = JSON.parse(fs.readFileSync(path.join(config.secretsPath, 'roster.json'), 'utf-8'));
   } catch { /* no roster — all bots equal */ }
 
-  // Consider all bots in the roster, not just local ones
-  const allBots = Object.keys(roster).length > 0 ? Object.keys(roster) : getActiveBots();
+  // Only consider bots running on this machine for CO election
+  const localBots = config.bots;
+  const allBots = localBots.length > 0 ? localBots : getActiveBots();
 
   const map: Record<string, { bot: string; roomId: string; jid: string; rank: number }> = {};
   for (const bot of allBots) {

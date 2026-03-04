@@ -640,11 +640,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     );
     if (triggerMsg) autoThreadId = triggerMsg.id;
   }
-  // Force every turn into a thread: fall back to the most recent native Matrix event ID from a
-  // human message so tool calls and the final reply all land in a thread on the triggering message.
-  const triggeringEventId = [...contextMessages]
-    .reverse()
-    .find((m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'))?.id;
+  // For non-CO bots: fall back to threading on the triggering message.
+  // CO replies on the main timeline unless the conversation is already in a thread.
+  const triggeringEventId = group.requiresTrigger
+    ? [...contextMessages].reverse().find((m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'))?.id
+    : undefined;
   activeReplyThreadIds[chatJid] = lastMsg?.thread_id || workThreadIds[chatJid] || autoThreadId || triggeringEventId;
   logger.info(
     { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], lastMsgThreadId: lastMsg?.thread_id, workThread: workThreadIds[chatJid], autoThread: autoThreadId, triggeringEventId, msgCount: contextMessages.length },
@@ -995,10 +995,10 @@ async function handleGroupMessagesInLoop(
     );
     if (triggerMsg) autoThreadId2 = triggerMsg.id;
   }
-  // Force every turn into a thread (see processGroupMessages for explanation)
-  const triggeringEventId2 = [...messagesToSend]
-    .reverse()
-    .find((m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'))?.id;
+  // Non-CO: thread on the triggering message. CO: reply on main timeline.
+  const triggeringEventId2 = group.requiresTrigger
+    ? [...messagesToSend].reverse().find((m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'))?.id
+    : undefined;
   activeReplyThreadIds[chatJid] = lastPiped?.thread_id || workThreadIds[chatJid] || autoThreadId2 || triggeringEventId2;
 
   // Interrupt: if container is busy and message is from captain/operator/trigger,
