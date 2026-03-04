@@ -37,29 +37,6 @@ COPY agent-runner/package*.json ./
 # Install dependencies
 RUN npm install
 
-# Patch SDK for runtime backend detection:
-# 1. countTokensWithFallback returns null when NANOCLAW_SKIP_TOKEN_COUNTING=1
-# 2. Context window reads from NANOCLAW_CONTEXT_WINDOW env (default 200K for Claude)
-RUN node -e " \
-  const fs = require('fs'); \
-  const p = '/app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js'; \
-  let c = fs.readFileSync(p, 'utf8'); \
-  let patches = 0; \
-  /* Patch 1: conditional countTokensWithFallback bypass */ \
-  const marker = 'countTokensWithFallback: API returned null'; \
-  const idx = c.indexOf(marker); \
-  if (idx === -1) { console.error('marker not found'); process.exit(1); } \
-  const fnStart = c.lastIndexOf('async function', idx); \
-  const braceIdx = c.indexOf('{', fnStart); \
-  c = c.slice(0, braceIdx + 1) + 'if(process.env.NANOCLAW_SKIP_TOKEN_COUNTING===\"1\")return null;' + c.slice(braceIdx + 1); \
-  patches++; \
-  /* Patch 2: runtime-configurable context window */ \
-  c = c.replace(/vhq=200000/g, 'vhq=parseInt(process.env.NANOCLAW_CONTEXT_WINDOW||\"200000\")'); \
-  patches++; \
-  fs.writeFileSync(p, c); \
-  console.log('SDK patched (' + patches + ' patches applied)'); \
-"
-
 # Copy source code
 COPY agent-runner/ ./
 
