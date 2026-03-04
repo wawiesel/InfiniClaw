@@ -1407,7 +1407,7 @@ async function main(): Promise<void> {
     const rssMB = Math.round(usage.rss / 1024 / 1024);
     logger.info({ heapMB, rssMB, limitMB: HEAP_LIMIT_MB }, 'Memory');
     try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { }
-    if (usage.heapUsed > heapLimitBytes) {
+    if (heapLimitBytes > 0 && usage.heapUsed > heapLimitBytes) {
       logger.warn({ heapMB, limitMB: HEAP_LIMIT_MB }, 'Heap limit exceeded, recycling');
       shutdown('HEAP_LIMIT');
     }

@@ -471,6 +471,26 @@ async function main(): Promise<void> {
     env[key] = value;
   }
 
+  // Ensure ~/.claude.json exists — Claude Code refuses to start without it
+  const claudeJsonPath = path.join(process.env.HOME || '/home/node', '.claude.json');
+  if (!fs.existsSync(claudeJsonPath)) {
+    // Restore from backup if available, otherwise create minimal config
+    const backupDir = path.join(process.env.HOME || '/home/node', '.claude', 'backups');
+    let restored = false;
+    try {
+      const backups = fs.readdirSync(backupDir).filter(f => f.startsWith('.claude.json.backup.')).sort();
+      if (backups.length > 0) {
+        fs.copyFileSync(path.join(backupDir, backups[backups.length - 1]), claudeJsonPath);
+        log(`Restored .claude.json from backup: ${backups[backups.length - 1]}`);
+        restored = true;
+      }
+    } catch { /* no backups */ }
+    if (!restored) {
+      fs.writeFileSync(claudeJsonPath, JSON.stringify({ firstStartTime: new Date().toISOString() }));
+      log('Created minimal .claude.json');
+    }
+  }
+
   // Write MCP config before first claude spawn
   writeMcpConfig(containerInput, env);
 
@@ -521,10 +541,20 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting claude (session: ${sessionId || 'new'})...`);
 
-      const runResult = await runClaude(
+      let runResult = await runClaude(
         prompt, sessionId, model,
         containerInput.disallowedTools, env, emitProgress,
       );
+
+      // If claude failed with a session ID (stale session), retry without resume
+      if (runResult.exitCode !== 0 && !runResult.result && !runResult.interrupted && sessionId) {
+        log('Claude failed with session ID, retrying without --resume');
+        sessionId = undefined;
+        runResult = await runClaude(
+          prompt, sessionId, model,
+          containerInput.disallowedTools, env, emitProgress,
+        );
+      }
 
       // Update session ID from the run
       if (runResult.sessionId) {
