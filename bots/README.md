@@ -1,40 +1,31 @@
-# bots/ — Bot Definitions
-
-Everything that defines a bot's identity, capabilities, and container image.
-
-## Structure
+# bots/
 
 ```
 bots/
-├── roles/              Abstract capability sets (navigator, engineer, architect)
-│   └── {role}/
-│       ├── role.md     Role description and capabilities
-│       ├── skills/     Shared skills for all bots with this role
-│       └── mcp-servers/Shared MCP configs for all bots with this role
-├── personas/           Concrete bot identities
-│   └── {bot}/
-│       ├── CLAUDE.md           Bot personality and rules (writable by bot)
-│       ├── container-config.json   Extra mounts and container settings
-│       ├── groups/{room}/
-│       │   ├── CLAUDE.md       Room-specific context (read-only to bot)
-│       │   └── .mcp.json       MCP server config for this room (writable by bot)
-│       ├── skills/             Bot-specific skills (writable by bot)
-│       ├── memory/             Bot knowledge base
-│       └── health/             Health check scripts and data
-└── container/          Docker/Podman build files
-    ├── build.sh        Master build script
-    └── {bot}/Dockerfile Per-bot container image
+├── {role}/                 One directory per role (navigator, engineer, architect)
+│   ├── ROOM.md             Shared room context (mounted ro at /workspace/CLAUDE.md)
+│   ├── skills.json         Skills assigned to this role
+│   ├── mcp.json            MCP servers for this role
+│   └── {bot}/              Bot persona
+│       ├── CLAUDE.md       Identity and rules (mounted rw at /workspace/persona/CLAUDE.md)
+│       └── container-config.json  Extra mounts and container settings
+├── skills/                 Shared skill pool
+│   └── {name}/SKILL.md
+└── container/              Container images
+    ├── build.sh
+    └── {bot}/Dockerfile
 ```
 
-## Roles vs Personas
+## Role directories
 
-**Roles** define what a bot *can* do (navigator explores, engineer codes). **Personas** define *who* a bot is (Nora the navigator, Cid the engineer). A persona is assigned to exactly one role via `roster.json` in the secrets repo.
+Each role has a room, skills, and MCP config shared by all bots of that role. Bots are assigned to roles via `roster.json` in the secrets repo.
 
 ## CLAUDE.md layers
 
-Bots see three instruction layers assembled at deploy time:
-1. **Base** (nanoclaw CLAUDE.md) — framework behavior
-2. **Persona** (this directory's CLAUDE.md) — identity and rules
-3. **Group** (per-room CLAUDE.md) — room context
+1. **Base** (`external/nanoclaw/CLAUDE.md`) — framework behavior
+2. **Persona** (`bots/{role}/{bot}/CLAUDE.md`) — identity and rules, writable by bot
+3. **Room** (`bots/{role}/ROOM.md`) — room context, read-only
 
-The persona CLAUDE.md is bind-mounted writable into the container. The bot can edit its own instructions.
+## Memory
+
+Bot memory lives in the secrets repo (`~/.config/infiniclaw/secrets/{bot}/memory/`), mounted writable at `/workspace/persona/memory/`.
