@@ -66,7 +66,7 @@ beforeEach(() => {
       delete groups[jid];
     },
     setWorkThread: () => {},
-    syncGroupMetadata: async () => {},
+    syncGroups: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
     writeLastEventId: () => {},

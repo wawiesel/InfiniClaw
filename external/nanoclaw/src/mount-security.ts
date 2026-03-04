@@ -19,23 +19,31 @@ const logger = pino({
   transport: { target: 'pino-pretty', options: { colorize: true } },
 });
 
-// Cache the allowlist in memory - invalidated on grant/revoke
+// Cache the allowlist in memory - only reloads on process restart
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
 
-function invalidateCache(): void {
-  cachedAllowlist = null;
-  allowlistLoadError = null;
-}
-
 /**
- * Default blocked patterns - always merged with allowlist patterns.
- * ".*" blocks all dotfiles/dotdirs. Specific entries catch non-dot sensitive paths.
+ * Default blocked patterns - paths that should never be mounted
  */
 const DEFAULT_BLOCKED_PATTERNS = [
-  '.*',
+  '.ssh',
+  '.gnupg',
+  '.gpg',
+  '.aws',
+  '.azure',
+  '.gcloud',
+  '.kube',
+  '.docker',
   'credentials',
+  '.env',
+  '.netrc',
+  '.npmrc',
+  '.pypirc',
+  'id_rsa',
+  'id_ed25519',
   'private_key',
+  '.secret',
 ];
 
 /**
@@ -70,20 +78,6 @@ export function loadMountAllowlist(): MountAllowlist | null {
     // Validate structure
     if (!Array.isArray(allowlist.allowedRoots)) {
       throw new Error('allowedRoots must be an array');
-    }
-
-    // Prune expired temporary grants
-    const now = Date.now();
-    const before = allowlist.allowedRoots.length;
-    allowlist.allowedRoots = allowlist.allowedRoots.filter((r) => {
-      if (r.expiresAt && new Date(r.expiresAt).getTime() <= now) {
-        logger.info({ path: r.path, expiresAt: r.expiresAt }, 'Pruned expired mount grant');
-        return false;
-      }
-      return true;
-    });
-    if (allowlist.allowedRoots.length < before) {
-      fs.writeFileSync(MOUNT_ALLOWLIST_PATH, JSON.stringify(allowlist, null, 2));
     }
 
     if (!Array.isArray(allowlist.blockedPatterns)) {
@@ -151,8 +145,7 @@ function getRealPath(p: string): string | null {
 }
 
 /**
- * Check if a path matches any blocked pattern.
- * The special pattern ".*" blocks any path component starting with a dot (dotfiles/dotdirs).
+ * Check if a path matches any blocked pattern
  */
 function matchesBlockedPattern(
   realPath: string,
@@ -161,16 +154,6 @@ function matchesBlockedPattern(
   const pathParts = realPath.split(path.sep);
 
   for (const pattern of blockedPatterns) {
-    if (pattern === '.*') {
-      // Block any path component that starts with a dot
-      for (const part of pathParts) {
-        if (part.startsWith('.')) {
-          return `.*  (matched "${part}")`;
-        }
-      }
-      continue;
-    }
-
     // Check if any path component matches the pattern
     for (const part of pathParts) {
       if (part === pattern || part.includes(pattern)) {
@@ -188,22 +171,13 @@ function matchesBlockedPattern(
 }
 
 /**
- * Check if a real path is under an allowed root.
- * Returns the MOST SPECIFIC (longest) matching root so that
- * ~/foo/bar (rw) takes precedence over ~ (ro).
+ * Check if a real path is under an allowed root
  */
 function findAllowedRoot(
   realPath: string,
   allowedRoots: AllowedRoot[],
-  botName?: string,
 ): AllowedRoot | null {
-  let bestRoot: AllowedRoot | null = null;
-  let bestRealRoot = '';
-
   for (const root of allowedRoots) {
-    // Skip entries restricted to specific bots if this bot isn't listed
-    if (root.bots && botName && !root.bots.includes(botName)) continue;
-
     const expandedRoot = expandPath(root.path);
     const realRoot = getRealPath(expandedRoot);
 
@@ -215,15 +189,11 @@ function findAllowedRoot(
     // Check if realPath is under realRoot
     const relative = path.relative(realRoot, realPath);
     if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
-      // Pick the longest (most specific) matching root
-      if (realRoot.length > bestRealRoot.length) {
-        bestRoot = root;
-        bestRealRoot = realRoot;
-      }
+      return root;
     }
   }
 
-  return bestRoot;
+  return null;
 }
 
 /**
@@ -263,7 +233,6 @@ export interface MountValidationResult {
 export function validateMount(
   mount: AdditionalMount,
   isMain: boolean,
-  botName?: string,
 ): MountValidationResult {
   const allowlist = loadMountAllowlist();
 
@@ -310,7 +279,7 @@ export function validateMount(
   }
 
   // Check if under an allowed root
-  const allowedRoot = findAllowedRoot(realPath, allowlist.allowedRoots, botName);
+  const allowedRoot = findAllowedRoot(realPath, allowlist.allowedRoots);
   if (allowedRoot === null) {
     return {
       allowed: false,
@@ -360,92 +329,19 @@ export function validateMount(
 }
 
 /**
- * Find allowlist entries that are children of a mounted path with different
- * permissions. These become overlapping mounts so subdirectory permissions
- * are enforced by the container runtime.
- *
- * Example: mounting ~/InfiniClaw (rw) with allowlist entry
- * ~/InfiniClaw/_runtime (ro) produces an extra mount for _runtime:ro.
- */
-function findChildOverrides(
-  parentRealPath: string,
-  parentContainerPath: string,
-  parentReadonly: boolean,
-  allowedRoots: AllowedRoot[],
-  isMain: boolean,
-  nonMainReadOnly: boolean,
-  botName?: string,
-): Array<{ hostPath: string; containerPath: string; readonly: boolean }> {
-  const overrides: Array<{
-    hostPath: string;
-    containerPath: string;
-    readonly: boolean;
-  }> = [];
-
-  for (const root of allowedRoots) {
-    // Skip entries restricted to specific bots if this bot isn't listed
-    if (root.bots && botName && !root.bots.includes(botName)) continue;
-
-    const expandedRoot = expandPath(root.path);
-    const realRoot = getRealPath(expandedRoot);
-    if (realRoot === null) continue;
-
-    // Must be a strict child of the parent (not the parent itself)
-    const relative = path.relative(parentRealPath, realRoot);
-    if (
-      !relative ||
-      relative.startsWith('..') ||
-      path.isAbsolute(relative)
-    ) {
-      continue;
-    }
-
-    // Determine effective readonly for this child
-    let childReadonly = !root.allowReadWrite;
-    if (!isMain && nonMainReadOnly) childReadonly = true;
-
-    // Only add override if permissions differ from parent
-    if (childReadonly === parentReadonly) continue;
-
-    // Check the child path actually exists
-    if (!fs.existsSync(realRoot)) continue;
-
-    overrides.push({
-      hostPath: realRoot,
-      containerPath: path.join(parentContainerPath, relative),
-      readonly: childReadonly,
-    });
-
-    logger.debug(
-      {
-        parent: parentRealPath,
-        child: realRoot,
-        readonly: childReadonly,
-      },
-      'Adding subdirectory permission override mount',
-    );
-  }
-
-  return overrides;
-}
-
-/**
  * Validate all additional mounts for a group.
  * Returns array of validated mounts (only those that passed validation).
- * Also adds overlapping mounts for subdirectories with different permissions.
  * Logs warnings for rejected mounts.
  */
 export function validateAdditionalMounts(
   mounts: AdditionalMount[],
   groupName: string,
   isMain: boolean,
-  botName?: string,
 ): Array<{
   hostPath: string;
   containerPath: string;
   readonly: boolean;
 }> {
-  const allowlist = loadMountAllowlist();
   const validatedMounts: Array<{
     hostPath: string;
     containerPath: string;
@@ -453,13 +349,12 @@ export function validateAdditionalMounts(
   }> = [];
 
   for (const mount of mounts) {
-    const result = validateMount(mount, isMain, botName);
+    const result = validateMount(mount, isMain);
 
     if (result.allowed) {
-      const containerPath = `/workspace/extra/${result.resolvedContainerPath}`;
       validatedMounts.push({
         hostPath: result.realHostPath!,
-        containerPath,
+        containerPath: `/workspace/extra/${result.resolvedContainerPath}`,
         readonly: result.effectiveReadonly!,
       });
 
@@ -473,20 +368,6 @@ export function validateAdditionalMounts(
         },
         'Mount validated successfully',
       );
-
-      // Add overlapping mounts for child entries with different permissions
-      if (allowlist) {
-        const overrides = findChildOverrides(
-          result.realHostPath!,
-          containerPath,
-          result.effectiveReadonly!,
-          allowlist.allowedRoots,
-          isMain,
-          allowlist.nonMainReadOnly,
-          botName,
-        );
-        validatedMounts.push(...overrides);
-      }
     } else {
       logger.warn(
         {
@@ -499,12 +380,6 @@ export function validateAdditionalMounts(
       );
     }
   }
-
-  // Sort by path depth (shallowest first) so container runtime applies
-  // the most specific mount last, ensuring subdirectory overrides win.
-  validatedMounts.sort(
-    (a, b) => a.hostPath.split(path.sep).length - b.hostPath.split(path.sep).length,
-  );
 
   return validatedMounts;
 }
@@ -541,56 +416,4 @@ export function generateAllowlistTemplate(): string {
   };
 
   return JSON.stringify(template, null, 2);
-}
-
-/**
- * Temporarily add a path to the mount allowlist.
- * The entry expires after durationMinutes and is pruned on next load.
- */
-export function grantTemporaryMount(
-  hostPath: string,
-  allowReadWrite: boolean,
-  durationMinutes: number,
-  description?: string,
-  bot?: string,
-): void {
-  const raw = fs.existsSync(MOUNT_ALLOWLIST_PATH)
-    ? (JSON.parse(fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8')) as MountAllowlist)
-    : { allowedRoots: [], blockedPatterns: [], nonMainReadOnly: false };
-
-  const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000).toISOString();
-
-  // Remove any existing temporary entry for this path+bot combo
-  raw.allowedRoots = raw.allowedRoots.filter((r) => {
-    if (r.path !== hostPath) return true;
-    if (!r.expiresAt) return true; // keep permanent entries
-    // Remove temporary entry if same bot scope
-    const sameScope = bot ? r.bots?.includes(bot) : !r.bots;
-    return !sameScope;
-  });
-  const entry: AllowedRoot = { path: hostPath, allowReadWrite, description, expiresAt };
-  if (bot) entry.bots = [bot];
-  raw.allowedRoots.push(entry);
-
-  fs.writeFileSync(MOUNT_ALLOWLIST_PATH, JSON.stringify(raw, null, 2));
-  invalidateCache();
-  logger.info({ hostPath, allowReadWrite, durationMinutes, expiresAt }, 'Temporary mount grant added');
-}
-
-/**
- * Remove a path from the mount allowlist (revoke access).
- */
-export function revokeMount(hostPath: string): boolean {
-  if (!fs.existsSync(MOUNT_ALLOWLIST_PATH)) return false;
-
-  const raw = JSON.parse(fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8')) as MountAllowlist;
-  const before = raw.allowedRoots.length;
-  raw.allowedRoots = raw.allowedRoots.filter((r) => r.path !== hostPath);
-
-  if (raw.allowedRoots.length === before) return false;
-
-  fs.writeFileSync(MOUNT_ALLOWLIST_PATH, JSON.stringify(raw, null, 2));
-  invalidateCache();
-  logger.info({ hostPath }, 'Mount grant revoked');
-  return true;
 }

@@ -7,11 +7,8 @@ import path from 'path';
 
 import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from 'nanoclaw/env-utils.js';
 import { loadMachineConfig } from './machine-config.js';
-import {
-  ASSISTANT_NAME,
-  DATA_DIR,
-  MAIN_GROUP_FOLDER,
-} from 'nanoclaw/config.js';
+import { ASSISTANT_NAME, DATA_DIR } from 'nanoclaw/config.js';
+import { MAIN_GROUP_FOLDER } from './infini-config.js';
 import { logger } from 'nanoclaw/logger.js';
 
 const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');

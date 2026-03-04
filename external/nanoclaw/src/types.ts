@@ -25,10 +25,6 @@ export interface AllowedRoot {
   allowReadWrite: boolean;
   // Optional description for documentation
   description?: string;
-  // If set, this entry expires at this ISO timestamp (for temporary grants)
-  expiresAt?: string;
-  // If set, only these bots (by PERSONA_NAME) can use this entry
-  bots?: string[];
 }
 
 export interface ContainerConfig {
@@ -43,6 +39,7 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
+  isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
 
 export interface NewMessage {
@@ -52,8 +49,9 @@ export interface NewMessage {
   sender_name: string;
   content: string;
   timestamp: string;
+  thread_id?: string; // [InfiniClaw] Matrix thread support
   is_from_me?: boolean;
-  thread_id?: string; // Matrix thread root event ID (MSC3440)
+  is_bot_message?: boolean;
 }
 
 export interface ScheduledTask {
@@ -91,26 +89,16 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  // Optional: send an image file. Buffer is the raw file data.
-  sendImage?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
-  // Optional: send a generic file attachment. Buffer is the raw file data.
-  sendFile?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
-  // Whether to prefix outbound messages with the assistant name.
-  // Telegram bots already display their name, so they return false.
-  // WhatsApp returns true. Default true if not implemented.
-  prefixAssistantName?: boolean;
-  // Optional: reaction to a message to acknowledge receipt
-  sendReaction?(jid:string, eventId: string, emoji: string): Promise<void>;
-  // Optional: set presence/status visible next to bot display name
-  setPresenceStatus?(state: string, statusMessage?: string): Promise<void>;
-  // Optional: react to the bot's own last message with a status pip emoji
-  setStatusPip?(jid: string, emoji: string): Promise<void>;
-  // Optional: send a message and return its ID (for later edit/redact)
+  // Optional: sync group/chat names from the platform.
+  syncGroups?(force: boolean): Promise<void>;
+  // [InfiniClaw] Matrix extensions
   sendMessageReturningId?(jid: string, text: string, threadId?: string): Promise<string | undefined>;
-  // Optional: edit a previously sent message in-place
   editMessage?(jid: string, eventId: string, newText: string): Promise<void>;
-  // Optional: delete/redact a previously sent message
-  redactMessage?(jid: string, eventId: string): Promise<void>;
+  setPresenceStatus?(status: string, statusMsg?: string): Promise<void>;
+  setStatusPip?(jid: string, emoji: string): Promise<void>;
+  sendReaction?(jid: string, eventId: string, emoji: string): Promise<void>;
+  sendImage?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
+  sendFile?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
@@ -118,7 +106,7 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;
-// channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
+// channels that sync names separately (via syncGroups) omit it.
 export type OnChatMetadata = (
   chatJid: string,
   timestamp: string,

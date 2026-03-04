@@ -11,11 +11,8 @@ import path from 'path';
 import Database from 'better-sqlite3';
 import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from 'nanoclaw/env-utils.js';
 
-import {
-  ASSISTANT_NAME,
-  ASSISTANT_ROLE,
-  MAIN_GROUP_FOLDER,
-} from 'nanoclaw/config.js';
+import { ASSISTANT_NAME } from 'nanoclaw/config.js';
+import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
 import { logger } from 'nanoclaw/logger.js';
 import { loadMachineConfig } from './machine-config.js';
 import {

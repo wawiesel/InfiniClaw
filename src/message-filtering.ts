@@ -2,7 +2,7 @@
  * InfiniClaw message filtering.
  * Determines which messages should be ignored (other bot output, wrong triggers).
  */
-import { IGNORE_PATTERNS, IGNORE_SENDERS } from 'nanoclaw/config.js';
+import { IGNORE_PATTERNS, IGNORE_SENDERS } from './infini-config.js';
 import type { NewMessage } from 'nanoclaw/types.js';
 
 /** Returns true if the message is addressed to another bot and should be ignored. */

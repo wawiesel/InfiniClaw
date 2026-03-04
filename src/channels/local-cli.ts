@@ -4,7 +4,7 @@ import {
   LOCAL_CHAT_JID,
   LOCAL_CHAT_NAME,
   LOCAL_CHAT_SENDER_NAME,
-} from 'nanoclaw/config.js';
+} from '../infini-config.js';
 import { logger } from 'nanoclaw/logger.js';
 import { Channel, NewMessage, OnChatMetadata, OnInboundMessage } from 'nanoclaw/types.js';
 

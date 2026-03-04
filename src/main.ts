@@ -12,10 +12,15 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  ASSISTANT_ROLE,
   DATA_DIR,
-  HEAP_LIMIT_MB,
   IDLE_TIMEOUT,
+  POLL_INTERVAL,
+  TRIGGER_PATTERN,
+} from 'nanoclaw/config.js';
+import {
+  ASSISTANT_ROLE,
+  CAPTAIN_USER_ID,
+  HEAP_LIMIT_MB,
   LOCAL_CHANNEL_ENABLED,
   LOCAL_MIRROR_MATRIX_JID,
   MAIN_GROUP_FOLDER,
@@ -24,12 +29,9 @@ import {
   MATRIX_PASSWORD,
   MATRIX_RECONNECT_INTERVAL,
   MATRIX_USERNAME,
-  POLL_INTERVAL,
   MEMORY_CHECK_INTERVAL,
   RESUME_DELAY_SECONDS,
-  TRIGGER_PATTERN,
-  CAPTAIN_USER_ID,
-} from 'nanoclaw/config.js';
+} from './infini-config.js';
 import {
   getAllChats,
   botParticipatesInThread,
@@ -1089,9 +1091,8 @@ async function handleGroupMessagesInLoop(
 
   // Interrupt lobe: if container is busy >30s, spawn parallel Sonnet container
   const groupStatus = queue.getGroupStatus(chatJid);
-  if (groupStatus.active && groupStatus.runStartMs > 0) {
-    const elapsed = Date.now() - groupStatus.runStartMs;
-    if (elapsed > 30_000) {
+  if (groupStatus.active) {
+    {
       const interruptMessages = messagesToSend.filter((m) =>
         TRIGGER_PATTERN.test(m.content.trim()) || (CAPTAIN_USER_ID && m.sender === CAPTAIN_USER_ID),
       );
@@ -1625,23 +1626,14 @@ async function main(): Promise<void> {
     queue,
     runContainerAgent,
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
-    sendMessage: async (jid, rawText, threadId) => {
+    sendMessage: async (jid: string, rawText: string) => {
       const ch = findChannel(channels, jid);
       if (!ch) return;
       const text = stripInternalTags(rawText);
       if (text) {
-        await ch.sendMessage(jid, text, threadId);
-        storeOutgoing(jid, text, threadId);
+        await ch.sendMessage(jid, text);
+        storeOutgoing(jid, text);
       }
-    },
-    sendMessageReturningId: async (jid, rawText, threadId) => {
-      const ch = findChannel(channels, jid);
-      if (!ch?.sendMessageReturningId) return undefined;
-      const text = stripInternalTags(rawText);
-      if (!text) return undefined;
-      const eventId = await ch.sendMessageReturningId(jid, text, threadId);
-      storeOutgoing(jid, text, threadId);
-      return eventId;
     },
   });
   startIpcWatcher({
@@ -1705,7 +1697,7 @@ async function main(): Promise<void> {
         } catch { /* best effort */ }
       }
     },
-    syncGroupMetadata: async () => { },
+    syncGroups: async () => { },
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
     writeLastEventId: (sourceGroup, eventId) => updateEventIdFile(sourceGroup, 'lastSent', eventId),

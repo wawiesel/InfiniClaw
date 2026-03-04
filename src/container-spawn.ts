@@ -26,10 +26,6 @@ import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js'
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
-  CONTAINER_CPUS,
-  CONTAINER_MEMORY_MB,
-  CONTAINER_MEMORY_RESERVATION_MB,
-  CONTAINER_HEAP_LIMIT_MB,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
@@ -39,12 +35,18 @@ import {
 } from 'nanoclaw/config.js';
 import { logger } from 'nanoclaw/logger.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
-import { runContainer } from 'nanoclaw/container-runner.js';
-import type { ContainerInput, ContainerOutput, VolumeMount } from 'nanoclaw/container-runner.js';
+import type { ContainerInput, ContainerOutput } from 'nanoclaw/container-runner.js';
+import { runContainer, type VolumeMount } from './run-container.js';
 
 // Re-export upstream utilities that main.ts needs
 export { writeTasksSnapshot, writeGroupsSnapshot } from 'nanoclaw/container-runner.js';
 export type { ContainerOutput, ContainerInput } from 'nanoclaw/container-runner.js';
+
+// Container resource limits — upstream removed these from config in v1.2.2
+const CONTAINER_CPUS = parseFloat(process.env.CONTAINER_CPUS || '0');
+const CONTAINER_MEMORY_MB = parseInt(process.env.CONTAINER_MEMORY_MB || '0', 10);
+const CONTAINER_MEMORY_RESERVATION_MB = parseInt(process.env.CONTAINER_MEMORY_RESERVATION_MB || '0', 10);
+const CONTAINER_HEAP_LIMIT_MB = parseInt(process.env.CONTAINER_HEAP_LIMIT_MB || '0', 10);
 
 const ALLOWED_ENV_VARS = [
   'ASSISTANT_NAME',

@@ -2,8 +2,15 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, STORE_DIR } from './config.js';
-import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
+import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { isValidGroupFolder } from './group-folder.js';
+import { logger } from './logger.js';
+import {
+  NewMessage,
+  RegisteredGroup,
+  ScheduledTask,
+  TaskRunLog,
+} from './types.js';
 
 let db: Database.Database;
 
@@ -24,6 +31,7 @@ function createSchema(database: Database.Database): void {
       content TEXT,
       timestamp TEXT,
       is_from_me INTEGER,
+      is_bot_message INTEGER DEFAULT 0,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -85,31 +93,49 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
-  // Drop route_to_main column if it exists (migration for existing DBs)
-  // SQLite doesn't support DROP COLUMN before 3.35; just ignore the old column in queries.
-
-  // Add thread_id column for Matrix thread support (MSC3440)
+  // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(`ALTER TABLE messages ADD COLUMN thread_id TEXT`);
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN is_bot_message INTEGER DEFAULT 0`,
+    );
+    // Backfill: mark existing bot messages that used the content prefix pattern
+    database
+      .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
+      .run(`${ASSISTANT_NAME}:%`);
   } catch {
     /* column already exists */
   }
-  // Create thread index (must come after thread_id migration for existing DBs)
-  database.exec(`CREATE INDEX IF NOT EXISTS idx_thread_id ON messages(chat_jid, thread_id)`);
+
+  // Add is_main column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`,
+    );
+    // Backfill: existing rows with folder = 'main' are the main group
+    database.exec(
+      `UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE chats ADD COLUMN channel TEXT`,
-    );
-    database.exec(
-      `ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`,
-    );
+    database.exec(`ALTER TABLE chats ADD COLUMN channel TEXT`);
+    database.exec(`ALTER TABLE chats ADD COLUMN is_group INTEGER DEFAULT 0`);
     // Backfill from JID patterns
-    database.exec(`UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us'`);
-    database.exec(`UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`);
-    database.exec(`UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`);
-    database.exec(`UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`);
+    database.exec(
+      `UPDATE chats SET channel = 'whatsapp', is_group = 1 WHERE jid LIKE '%@g.us'`,
+    );
+    database.exec(
+      `UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`,
+    );
+    database.exec(
+      `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
+    );
+    database.exec(
+      `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
+    );
   } catch {
     /* columns already exist */
   }
@@ -236,7 +262,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -245,12 +271,12 @@ export function storeMessage(msg: NewMessage): void {
     msg.content,
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
-    msg.thread_id ?? null,
+    msg.is_bot_message ? 1 : 0,
   );
 }
 
 /**
- * Store a message directly (for non-WhatsApp channels that don't use Baileys proto).
+ * Store a message directly.
  */
 export function storeMessageDirect(msg: {
   id: string;
@@ -260,9 +286,10 @@ export function storeMessageDirect(msg: {
   content: string;
   timestamp: string;
   is_from_me: boolean;
+  is_bot_message?: boolean;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -271,6 +298,7 @@ export function storeMessageDirect(msg: {
     msg.content,
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
+    msg.is_bot_message ? 1 : 0,
   );
 }
 
@@ -282,11 +310,14 @@ export function getNewMessages(
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
-  // Filter out bot's own messages by content prefix AND is_from_me flag
+  // Filter bot messages using both the is_bot_message flag AND the content
+  // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
     FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ? AND is_from_me = 0
+    WHERE timestamp > ? AND chat_jid IN (${placeholders})
+      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
     ORDER BY timestamp
   `;
 
@@ -302,58 +333,24 @@ export function getNewMessages(
   return { messages: rows, newTimestamp };
 }
 
-export function getMessageById(id: string): NewMessage | undefined {
-  return db.prepare('SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id FROM messages WHERE id = ?').get(id) as NewMessage | undefined;
-}
-
 export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
 ): NewMessage[] {
-  // Filter out bot's own messages by is_from_me flag and content prefix
+  // Filter bot messages using both the is_bot_message flag AND the content
+  // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
     FROM messages
-    WHERE chat_jid = ? AND timestamp > ? AND is_from_me = 0 AND content NOT LIKE ?
+    WHERE chat_jid = ? AND timestamp > ?
+      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
     ORDER BY timestamp
   `;
   return db
     .prepare(sql)
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
-}
-
-export function getRecentMessages(
-  chatJid: string,
-  botPrefix: string,
-  limit = 25,
-): NewMessage[] {
-  const safeLimit = Math.max(1, Math.min(limit, 200));
-  const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
-    FROM messages
-    WHERE chat_jid = ? AND content NOT LIKE ?
-    ORDER BY timestamp DESC
-    LIMIT ?
-  `;
-  return db
-    .prepare(sql)
-    .all(chatJid, `${botPrefix}:%`, safeLimit) as NewMessage[];
-}
-
-export function botParticipatesInThread(chatJid: string, threadId: string): boolean {
-  const row = db.prepare(
-    `SELECT 1 FROM messages WHERE chat_jid = ? AND thread_id = ? AND is_from_me = 1 LIMIT 1`,
-  ).get(chatJid, threadId);
-  return !!row;
-}
-
-export function getThreadMessages(chatJid: string, threadId: string, limit = 20): NewMessage[] {
-  return db.prepare(`
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
-    FROM messages WHERE chat_jid = ? AND (thread_id = ? OR id = ?)
-    ORDER BY timestamp ASC LIMIT ?
-  `).all(chatJid, threadId, threadId, Math.min(limit, 50)) as NewMessage[];
 }
 
 export function createTask(
@@ -519,10 +516,6 @@ export function setSession(groupFolder: string, sessionId: string): void {
   ).run(groupFolder, sessionId);
 }
 
-export function deleteSession(groupFolder: string): void {
-  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
-}
-
 export function getAllSessions(): Record<string, string> {
   const rows = db
     .prepare('SELECT group_folder, session_id FROM sessions')
@@ -550,9 +543,17 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
+        is_main: number | null;
       }
     | undefined;
   if (!row) return undefined;
+  if (!isValidGroupFolder(row.folder)) {
+    logger.warn(
+      { jid: row.jid, folder: row.folder },
+      'Skipping registered group with invalid folder',
+    );
+    return undefined;
+  }
   return {
     jid: row.jid,
     name: row.name,
@@ -562,17 +563,19 @@ export function getRegisteredGroup(
     containerConfig: row.container_config
       ? JSON.parse(row.container_config)
       : undefined,
-    requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    requiresTrigger:
+      row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    isMain: row.is_main === 1 ? true : undefined,
   };
 }
 
-export function setRegisteredGroup(
-  jid: string,
-  group: RegisteredGroup,
-): void {
+export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
+  if (!isValidGroupFolder(group.folder)) {
+    throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
+  }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -581,17 +584,12 @@ export function setRegisteredGroup(
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
+    group.isMain ? 1 : 0,
   );
 }
 
-export function deleteRegisteredGroup(jid: string): void {
-  db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
-}
-
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-  const rows = db
-    .prepare('SELECT * FROM registered_groups')
-    .all() as Array<{
+  const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
     jid: string;
     name: string;
     folder: string;
@@ -599,9 +597,17 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
+    is_main: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
+    if (!isValidGroupFolder(row.folder)) {
+      logger.warn(
+        { jid: row.jid, folder: row.folder },
+        'Skipping registered group with invalid folder',
+      );
+      continue;
+    }
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
@@ -610,10 +616,54 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       containerConfig: row.container_config
         ? JSON.parse(row.container_config)
         : undefined,
-      requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      requiresTrigger:
+        row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      isMain: row.is_main === 1 ? true : undefined,
     };
   }
   return result;
+}
+
+// --- [InfiniClaw] Functions removed upstream in v1.2.2 but still needed ---
+
+export function getRecentMessages(
+  chatJid: string,
+  botPrefix: string,
+  limit = 25,
+): NewMessage[] {
+  const safeLimit = Math.max(1, Math.min(limit, 200));
+  return db
+    .prepare(`
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
+      FROM messages
+      WHERE chat_jid = ? AND content NOT LIKE ?
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `)
+    .all(chatJid, `${botPrefix}:%`, safeLimit) as NewMessage[];
+}
+
+export function botParticipatesInThread(chatJid: string, threadId: string): boolean {
+  const row = db.prepare(
+    `SELECT 1 FROM messages WHERE chat_jid = ? AND thread_id = ? AND is_from_me = 1 LIMIT 1`,
+  ).get(chatJid, threadId);
+  return !!row;
+}
+
+export function getThreadMessages(chatJid: string, threadId: string, limit = 20): NewMessage[] {
+  return db.prepare(`
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
+    FROM messages WHERE chat_jid = ? AND (thread_id = ? OR id = ?)
+    ORDER BY timestamp ASC LIMIT ?
+  `).all(chatJid, threadId, threadId, Math.min(limit, 50)) as NewMessage[];
+}
+
+export function deleteSession(groupFolder: string): void {
+  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+}
+
+export function deleteRegisteredGroup(jid: string): void {
+  db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
 }
 
 // --- JSON migration ---
@@ -666,7 +716,14 @@ function migrateJsonState(): void {
   > | null;
   if (groups) {
     for (const [jid, group] of Object.entries(groups)) {
-      setRegisteredGroup(jid, group);
+      try {
+        setRegisteredGroup(jid, group);
+      } catch (err) {
+        logger.warn(
+          { jid, folder: group.folder, err },
+          'Skipping migrated registered group with invalid folder',
+        );
+      }
     }
   }
 }

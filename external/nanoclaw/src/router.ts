@@ -1,7 +1,7 @@
-import { ASSISTANT_NAME } from './config.js';
 import { Channel, NewMessage } from './types.js';
 
 export function escapeXml(s: string): string {
+  if (!s) return '';
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -10,34 +10,21 @@ export function escapeXml(s: string): string {
 }
 
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) => {
-    const idAttr = m.id ? ` id="${escapeXml(m.id)}"` : '';
-    const threadAttr = m.thread_id ? ` thread_id="${escapeXml(m.thread_id)}"` : '';
-    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${idAttr}${threadAttr}>${escapeXml(m.content)}</message>`;
-  });
+  const lines = messages.map(
+    (m) =>
+      `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
+  );
   return `<messages>\n${lines.join('\n')}\n</messages>`;
-}
-
-export function formatThreadContext(threadMessages: NewMessage[], newMessageIds: Set<string>): string {
-  const contextOnly = threadMessages.filter(m => m.id && !newMessageIds.has(m.id));
-  if (contextOnly.length === 0) return '';
-  const lines = contextOnly.map(m => {
-    const content = m.content.length > 500 ? m.content.slice(0, 500) + '...' : m.content;
-    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(content)}</message>`;
-  });
-  return `<thread_context>\n${lines.join('\n')}\n</thread_context>`;
 }
 
 export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
-export function formatOutbound(channel: Channel, rawText: string): string {
+export function formatOutbound(rawText: string): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  const prefix =
-    channel.prefixAssistantName !== false ? `${ASSISTANT_NAME}: ` : '';
-  return `${prefix}${text}`;
+  return text;
 }
 
 export function routeOutbound(
@@ -55,4 +42,15 @@ export function findChannel(
   jid: string,
 ): Channel | undefined {
   return channels.find((c) => c.ownsJid(jid));
+}
+
+// [InfiniClaw] formatThreadContext removed upstream in v1.2.2
+export function formatThreadContext(threadMessages: NewMessage[], newMessageIds: Set<string>): string {
+  const contextOnly = threadMessages.filter(m => m.id && !newMessageIds.has(m.id));
+  if (contextOnly.length === 0) return '';
+  const lines = contextOnly.map(m => {
+    const content = m.content.length > 500 ? m.content.slice(0, 500) + '...' : m.content;
+    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(content)}</message>`;
+  });
+  return `<thread_context>\n${lines.join('\n')}\n</thread_context>`;
 }

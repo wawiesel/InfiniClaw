@@ -1,14 +1,15 @@
 /**
  * InfiniClaw IPC watcher.
- * Uses upstream's composable createIpcPoller and processBaseTaskIpc,
- * adding InfiniClaw message types (image, file), delegate threading,
- * and commands (set_brain_mode, restart_bot, etc.) via handlers.
+ * Polls per-group IPC directories for message and task files.
+ * Uses upstream's processTaskIpc for base task types, adds InfiniClaw
+ * message types (image, file), delegate threading, and extended commands.
  */
-import {
-  createIpcPoller,
-  processBaseTaskIpc,
-} from 'nanoclaw/ipc.js';
+import fs from 'fs';
+import path from 'path';
+
+import { processTaskIpc } from 'nanoclaw/ipc.js';
 import type { AvailableGroup } from 'nanoclaw/container-runner.js';
+import { DATA_DIR, IPC_POLL_INTERVAL } from 'nanoclaw/config.js';
 import {
   handleInfiniClawCommand,
   handleInfiniClawMessage,
@@ -26,7 +27,7 @@ export interface IpcDeps {
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   unregisterGroup: (jid: string) => void;
   setWorkThread: (chatJid: string, threadId: string | null) => void;
-  syncGroupMetadata: (force: boolean) => Promise<void>;
+  syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
     groupFolder: string,
@@ -64,8 +65,6 @@ async function handleTextMessage(
 ): Promise<void> {
   const registeredGroups = deps.registeredGroups();
   const targetGroup = registeredGroups[data.chatJid];
-  // Allow if: main group, own registered group, or cross-bot message (any Matrix JID)
-  // Cross-bot messages are validated by the MCP server before reaching here
   const isCrossBotTarget = data.chatJid.startsWith('matrix:');
   const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup) || isCrossBotTarget;
 
@@ -81,12 +80,9 @@ async function handleTextMessage(
   const body = String(data.text);
   const isDelegateHeader = body.startsWith('💭');
 
-  // Auto-thread delegate output: create a new thread on the first delegate
-  // message (the lobe header), then route all subsequent messages into it.
   const threadId = explicitThreadId ?? delegateThreadIds[sourceGroup];
 
   if (isDelegateHeader && !explicitThreadId) {
-    // Start a new delegate thread rooted at this header message
     const eventId = await deps.sendMessageReturningId(data.chatJid, body, undefined);
     if (eventId) {
       delegateThreadIds[sourceGroup] = eventId;
@@ -107,68 +103,149 @@ export function startIpcWatcher(deps: IpcDeps): void {
   }
   ipcWatcherRunning = true;
 
-  createIpcPoller({
-    onMessage: async (_filePath, data, sourceGroup, isMain) => {
-      if (data.type === 'message' && data.chatJid && data.text) {
-        await handleTextMessage(
-          {
-            chatJid: data.chatJid as string,
-            text: data.text as string,
-            sender: data.sender as string | undefined,
-            threadId: data.threadId as string | undefined,
-          },
-          sourceGroup,
-          isMain,
-          deps,
-        );
-      } else {
-        // Handle extended message types (image, file)
-        const registeredGroups = deps.registeredGroups();
-        const targetGroup = registeredGroups[data.chatJid as string];
-        const authorized = isMain || !!(targetGroup && targetGroup.folder === sourceGroup);
-        await handleInfiniClawMessage(data as Parameters<typeof handleInfiniClawMessage>[0], {
-          authorized,
-          sourceGroup,
-          sendImage: deps.sendImage,
-          sendFile: deps.sendFile,
-        });
-      }
-    },
+  const ipcBaseDir = path.join(DATA_DIR, 'ipc');
+  fs.mkdirSync(ipcBaseDir, { recursive: true });
 
-    onTask: async (_filePath, data, sourceGroup, isMain) => {
-      // Try base task types first (schedule, pause, resume, cancel, refresh, register)
-      const handled = await processBaseTaskIpc(data, sourceGroup, isMain, {
-        registeredGroups: deps.registeredGroups,
-        registerGroup: (jid, group) => {
-          // InfiniClaw extension: replace existing group with same folder
-          const registeredGroups = deps.registeredGroups();
-          const existing = Object.entries(registeredGroups)
-            .find(([existingJid, g]) => g.folder === data.folder && existingJid !== data.jid);
-          if (existing) {
-            deps.unregisterGroup(existing[0]);
-            logger.info({ oldJid: existing[0], newJid: data.jid, folder: data.folder }, 'Replaced existing group with same folder');
+  const processIpcFiles = async () => {
+    let groupFolders: string[];
+    try {
+      groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
+        const stat = fs.statSync(path.join(ipcBaseDir, f));
+        return stat.isDirectory() && f !== 'errors';
+      });
+    } catch (err) {
+      logger.error({ err }, 'Error reading IPC base directory');
+      setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+      return;
+    }
+
+    const registeredGroups = deps.registeredGroups();
+
+    // Build folder→isMain lookup from registered groups
+    const folderIsMain = new Map<string, boolean>();
+    for (const group of Object.values(registeredGroups)) {
+      if (group.isMain) folderIsMain.set(group.folder, true);
+    }
+
+    for (const sourceGroup of groupFolders) {
+      const isMain = folderIsMain.get(sourceGroup) === true;
+      const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
+      const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
+
+      // Process messages
+      try {
+        if (fs.existsSync(messagesDir)) {
+          const messageFiles = fs
+            .readdirSync(messagesDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of messageFiles) {
+            const filePath = path.join(messagesDir, file);
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              fs.unlinkSync(filePath);
+
+              if (data.type === 'message' && data.chatJid && data.text) {
+                handleTextMessage(
+                  {
+                    chatJid: data.chatJid as string,
+                    text: data.text as string,
+                    sender: data.sender as string | undefined,
+                    threadId: data.threadId as string | undefined,
+                  },
+                  sourceGroup,
+                  isMain,
+                  deps,
+                ).catch((err) => {
+                  logger.error({ file, sourceGroup, err }, 'Error delivering IPC message');
+                });
+              } else {
+                // Extended message types (image, file)
+                const targetGroup = registeredGroups[data.chatJid as string];
+                const authorized = isMain || !!(targetGroup && targetGroup.folder === sourceGroup);
+                handleInfiniClawMessage(data as Parameters<typeof handleInfiniClawMessage>[0], {
+                  authorized,
+                  sourceGroup,
+                  sendImage: deps.sendImage,
+                  sendFile: deps.sendFile,
+                }).catch((err) => {
+                  logger.error({ file, sourceGroup, err }, 'Error delivering InfiniClaw IPC message');
+                });
+              }
+            } catch (err) {
+              logger.error({ file, sourceGroup, err }, 'Error processing IPC message');
+              try { fs.unlinkSync(filePath); } catch { /* already gone */ }
+            }
           }
-          deps.registerGroup(jid, group);
-        },
-        syncGroupMetadata: deps.syncGroupMetadata,
-        getAvailableGroups: deps.getAvailableGroups,
-        writeGroupsSnapshot: deps.writeGroupsSnapshot,
-      });
-
-      if (handled) return;
-
-      // Delegate to InfiniClaw extended command handlers
-      const extHandled = await handleInfiniClawCommand(data as Parameters<typeof handleInfiniClawCommand>[0], {
-        isMain,
-        sourceGroup,
-        sendMessage: deps.sendMessage,
-        registeredGroups: deps.registeredGroups,
-        setWorkThread: deps.setWorkThread,
-        clearDelegateThread,
-      });
-      if (!extHandled) {
-        logger.warn({ type: data.type }, 'Unknown IPC task type');
+        }
+      } catch (err) {
+        logger.error({ err, sourceGroup }, 'Error reading IPC messages directory');
       }
-    },
-  });
+
+      // Process tasks
+      try {
+        if (fs.existsSync(tasksDir)) {
+          const taskFiles = fs
+            .readdirSync(tasksDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of taskFiles) {
+            const filePath = path.join(tasksDir, file);
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              fs.unlinkSync(filePath);
+
+              // Try base task types first (schedule, pause, resume, cancel, refresh, register)
+              const baseTypes = ['schedule_task', 'pause_task', 'resume_task', 'cancel_task', 'refresh_groups', 'register_group'];
+              if (baseTypes.includes(data.type)) {
+                await processTaskIpc(data, sourceGroup, isMain, {
+                  sendMessage: (jid: string, text: string) => deps.sendMessage(jid, text),
+                  registeredGroups: deps.registeredGroups,
+                  registerGroup: (jid: string, group: RegisteredGroup) => {
+                    // InfiniClaw extension: replace existing group with same folder
+                    const groups = deps.registeredGroups();
+                    const existing = Object.entries(groups)
+                      .find(([existingJid, g]) => g.folder === data.folder && existingJid !== data.jid);
+                    if (existing) {
+                      deps.unregisterGroup(existing[0]);
+                      logger.info({ oldJid: existing[0], newJid: data.jid, folder: data.folder }, 'Replaced existing group with same folder');
+                    }
+                    deps.registerGroup(jid, group);
+                  },
+                  syncGroups: deps.syncGroups,
+                  getAvailableGroups: deps.getAvailableGroups,
+                  writeGroupsSnapshot: deps.writeGroupsSnapshot,
+                });
+              } else {
+                // Delegate to InfiniClaw extended command handlers
+                const extHandled = await handleInfiniClawCommand(data as Parameters<typeof handleInfiniClawCommand>[0], {
+                  isMain,
+                  sourceGroup,
+                  sendMessage: deps.sendMessage,
+                  registeredGroups: deps.registeredGroups,
+                  setWorkThread: deps.setWorkThread,
+                  clearDelegateThread,
+                });
+                if (!extHandled) {
+                  logger.warn({ type: data.type }, 'Unknown IPC task type');
+                }
+              }
+            } catch (err) {
+              logger.error({ file, sourceGroup, err }, 'Error processing IPC task');
+              const errorDir = path.join(ipcBaseDir, 'errors');
+              fs.mkdirSync(errorDir, { recursive: true });
+              try {
+                fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+              } catch { /* file may already be gone */ }
+            }
+          }
+        }
+      } catch (err) {
+        logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+    }
+
+    setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+  };
+
+  processIpcFiles();
+  logger.info('IPC watcher started (per-group namespaces)');
 }

@@ -10,16 +10,15 @@ import {
 } from 'matrix-bot-sdk';
 import { marked } from 'marked';
 
+import { DATA_DIR, STORE_DIR } from 'nanoclaw/config.js';
 import {
-  DATA_DIR,
   MATRIX_ACCESS_TOKEN,
   MATRIX_DEVICE_NAME,
   MATRIX_HOMESERVER,
   MATRIX_PASSWORD,
   MATRIX_USER_ID,
   MATRIX_USERNAME,
-  STORE_DIR,
-} from 'nanoclaw/config.js';
+} from '../infini-config.js';
 import { logger } from 'nanoclaw/logger.js';
 import {
   Channel,
