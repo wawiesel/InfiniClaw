@@ -422,6 +422,23 @@ function appendHealthHistory(report: string): void {
   }
 }
 
+/** Run session cleanup to prune old JSONL files and telemetry. */
+function runSessionCleanup(): void {
+  const root = resolveRoot();
+  const script = path.join(root, 'scripts', 'session-cleanup.sh');
+  if (!fs.existsSync(script)) return;
+  try {
+    const output = execSync(`bash "${script}" --keep 5`, {
+      cwd: root, encoding: 'utf-8', timeout: 30_000, stdio: 'pipe',
+    }).trim();
+    if (output.includes('Freed') && !output.includes('Freed ~0KB')) {
+      log(`session cleanup: ${output.split('\n').pop()}`);
+    }
+  } catch (err) {
+    log(`session cleanup error: ${errStr(err)}`);
+  }
+}
+
 /** Periodic health loop — runs health check and uploads to S3. */
 async function healthLoop(): Promise<void> {
   // Wait before first run to let everything stabilize
@@ -437,6 +454,7 @@ async function healthLoop(): Promise<void> {
     } catch (err) {
       log(`health loop error: ${errStr(err)}`);
     }
+    try { runSessionCleanup(); } catch { /* non-critical */ }
     await sleep(HEALTH_INTERVAL);
   }
 }

@@ -47,7 +47,10 @@ for bot_dir in "$INSTANCES_DIR"/*/; do
       if [[ $total -gt $KEEP ]]; then
         to_remove=$((total - KEEP))
         # Sort by mtime (oldest first) using stat, remove oldest
-        find "$subdir" -maxdepth 1 -name "*.jsonl" -not -name "*.tmp" -exec stat -f '%m %N' {} \; 2>/dev/null | \
+        # stat format differs: macOS uses -f '%m %N', Linux uses -c '%Y %n'
+        stat_fmt='-c' stat_arg='%Y %n'
+        [[ "$(uname)" == "Darwin" ]] && stat_fmt='-f' stat_arg='%m %N'
+        find "$subdir" -maxdepth 1 -name "*.jsonl" -not -name "*.tmp" -exec stat "$stat_fmt" "$stat_arg" {} \; 2>/dev/null | \
           sort -n | head -n "$to_remove" | while IFS= read -r line; do
             old="${line#* }"
             size=$(du -sk "$old" 2>/dev/null | cut -f1)
