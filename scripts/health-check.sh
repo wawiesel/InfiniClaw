@@ -143,10 +143,13 @@ for bot in sorted(bots):
     age_min = (now - log_dt).total_seconds() / 60
 
     # A bot with a running container is ACTIVE regardless of log age
+    # If podman is unavailable, fall back to log freshness (< 5min = ACTIVE)
     if bot in running_containers:
         status = "ACTIVE"
+    elif not running_containers and age_min < 5:
+        status = "ACTIVE"
     else:
-        status = "IDLE" if age_min < 5 else ("RECENT" if age_min < 60 else "STALE")
+        status = "RECENT" if age_min < 60 else "STALE"
 
     report["bots"][bot] = {
         "status": status,
