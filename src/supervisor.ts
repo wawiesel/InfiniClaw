@@ -7,10 +7,17 @@
  *
  * Run: node dist/supervisor.js
  */
-import { execFileSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  ListObjectsV2Command,
+} from '@aws-sdk/client-s3';
 
 import { loadMachineConfig } from './machine-config.js';
 import {
@@ -213,6 +220,136 @@ function resolveBots(target: string | undefined, roomName: string): string[] {
   return local.filter((bot) => botRooms[bot] === roomName);
 }
 
+// ── Health check + S3 ─────────────────────────────────────────
+
+const HEALTH_INTERVAL = 30 * 60_000; // 30 minutes
+const HEALTH_S3_PREFIX = 'health';
+
+function getS3Client(): { client: S3Client; bucket: string } | null {
+  try {
+    const config = loadMachineConfig();
+    if (!config.s3) return null;
+    const { endpoint, bucket, accessKey, secretKey } = config.s3;
+    return {
+      client: new S3Client({
+        endpoint,
+        region: 'us-east-1',
+        credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
+        forcePathStyle: true,
+      }),
+      bucket,
+    };
+  } catch { return null; }
+}
+
+function runHealthCheck(): string | null {
+  const root = resolveRoot();
+  const script = path.join(root, 'scripts', 'health-check.sh');
+  if (!fs.existsSync(script)) return null;
+  try {
+    return execSync(`MACHINE_NAME="${HOSTNAME}" bash "${script}" --json`, {
+      encoding: 'utf-8',
+      timeout: 30_000,
+      env: { ...process.env, MACHINE_NAME: HOSTNAME },
+    }).trim();
+  } catch (err) {
+    log(`health-check.sh failed: ${errStr(err)}`);
+    return null;
+  }
+}
+
+async function uploadHealthToS3(report: string): Promise<boolean> {
+  const s3 = getS3Client();
+  if (!s3) return false;
+  const key = `${HEALTH_S3_PREFIX}/${HOSTNAME}.json`;
+  try {
+    await s3.client.send(new PutObjectCommand({
+      Bucket: s3.bucket,
+      Key: key,
+      Body: Buffer.from(report),
+      ContentType: 'application/json',
+    }));
+    return true;
+  } catch (err) {
+    log(`S3 health upload failed: ${errStr(err)}`);
+    return false;
+  }
+}
+
+async function fetchAllHealthReports(): Promise<Array<{ machine: string; data: Record<string, unknown> }>> {
+  const s3 = getS3Client();
+  if (!s3) return [];
+  const results: Array<{ machine: string; data: Record<string, unknown> }> = [];
+  try {
+    const listed = await s3.client.send(new ListObjectsV2Command({
+      Bucket: s3.bucket,
+      Prefix: `${HEALTH_S3_PREFIX}/`,
+    }));
+    for (const obj of listed.Contents || []) {
+      if (!obj.Key?.endsWith('.json')) continue;
+      try {
+        const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: obj.Key }));
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+        const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+        const machine = obj.Key.replace(`${HEALTH_S3_PREFIX}/`, '').replace('.json', '');
+        results.push({ machine, data });
+      } catch { /* skip corrupt reports */ }
+    }
+  } catch (err) {
+    log(`S3 health fetch failed: ${errStr(err)}`);
+  }
+  return results;
+}
+
+function formatHealthSummary(reports: Array<{ machine: string; data: Record<string, unknown> }>): string {
+  if (reports.length === 0) return '⚠️ No health reports available.';
+  const lines: string[] = [`🏥 Fleet Health — ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n`];
+  let totalOom = 0;
+  let totalSessions = 0;
+
+  for (const { machine, data } of reports) {
+    const bots = (data.bots || {}) as Record<string, Record<string, unknown>>;
+    const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => n);
+    const ts = String(data.ts || '?').slice(0, 19);
+    lines.push(`**${machine}** (${ts})`);
+    lines.push(`  Active: ${active.length > 0 ? active.join(', ') : 'none'}`);
+
+    for (const [name, b] of Object.entries(bots)) {
+      const oom = Number(b.oom_kills || 0);
+      totalOom += oom;
+      if (b.status === 'ACTIVE' || oom > 0) {
+        const mem = b.rss_mb != null ? `RSS=${b.rss_mb}/${b.limit_mb}MB` : '';
+        lines.push(`  ${name}: ${b.status} ${mem} OOM=${oom}`);
+      }
+    }
+    const sess = Number(data.session_total_mb || 0);
+    totalSessions += sess;
+    lines.push(`  Sessions: ${sess}MB\n`);
+  }
+
+  lines.push(`**Totals:** ${reports.length} machines, ${totalOom} OOM kills, ${totalSessions}MB sessions`);
+  return lines.join('\n');
+}
+
+/** Periodic health loop — runs health check and uploads to S3. */
+async function healthLoop(): Promise<void> {
+  // Wait before first run to let everything stabilize
+  await sleep(60_000);
+  while (true) {
+    try {
+      const report = runHealthCheck();
+      if (report) {
+        const uploaded = await uploadHealthToS3(report);
+        log(`health check: ${uploaded ? 'uploaded to S3' : 'S3 unavailable, local only'}`);
+      }
+    } catch (err) {
+      log(`health loop error: ${errStr(err)}`);
+    }
+    await sleep(HEALTH_INTERVAL);
+  }
+}
+
 // ── Command handling ───────────────────────────────────────────────
 
 async function handleLifecycleCommand(
@@ -299,6 +436,20 @@ async function handleCommand(cmd: string, conn: RoomConn): Promise<void> {
       log(`!operator failed: ${errStr(err)}`);
       await reply(conn, `${HOSTNAME}: !operator failed — ${errStr(err)}`);
     }
+    return;
+  }
+
+  // !health — run health check, upload to S3, show fleet summary
+  if (cmd === '!health') {
+    // Run local health check and upload
+    const report = runHealthCheck();
+    if (report) {
+      await uploadHealthToS3(report);
+    }
+    // Fetch all reports from S3 and show summary
+    const reports = await fetchAllHealthReports();
+    const summary = formatHealthSummary(reports);
+    await reply(conn, summary);
     return;
   }
 
@@ -460,6 +611,9 @@ async function main(): Promise<void> {
   const loops = conns.map((conn, i) =>
     sleep(i * STARTUP_SYNC_DELAY).then(() => dialtone(conn, captainUserId)),
   );
+
+  // Start health loop in background (non-blocking alongside room sync loops)
+  healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));
 
   await Promise.all(loops);
 }
