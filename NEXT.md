@@ -17,7 +17,7 @@ Updated 2026-03-05T18:28Z.
 - **Tool call breadcrumbs** (Captain idea). Tool calls should have single-line hash in Matrix, full content to S3.
 - **Lobe delegation CWD too restrictive**. `delegate-runner.ts` only allows `/workspace/*` roots. Health scripts needing `/_runtime/` fail.
 - **Concurrency ceiling starvation**. When MAX_CONCURRENT_CONTAINERS reached, lower-priority bots starve.
-- **Matrix sluggish on Poseidon** (Captain report). Likely Element client or network issue.
+- **Matrix sluggish on Poseidon** (Captain report). Server responds <1ms locally but conduwuit logs show 500 errors on federated rooms ("non-create event for room of unknown version") and UIAA auth errors. These may cause client retries and perceived sluggishness. Consider leaving problematic federated rooms or upgrading conduwuit.
 
 ## LOW — Infrastructure
 
