@@ -3,7 +3,7 @@
  * Extended commands delegated from the base ipc.ts processTaskIpc switch.
  */
 import crypto from 'crypto';
-import { execSync, spawn } from 'child_process';
+import { execFileSync, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -56,6 +56,7 @@ import { statusMessage } from './formatting.js';
 const RESTART_COOLDOWN_MS = 60_000; // 60 seconds
 const REBUILD_COOLDOWN_MS = 5 * 60_000; // 5 minutes — image builds are expensive
 const GIT_PUSH_COOLDOWN_MS = 60_000; // 60 seconds
+const MAX_IPC_BINARY_BYTES = 10 * 1024 * 1024; // 10MB
 const cooldowns: Record<string, number> = {};
 
 // ── Interfaces ──────────────────────────────────────────────────────────
@@ -256,6 +257,18 @@ function truncateOutput(text: string, max = 3000): string {
   return text.length > max ? text.slice(-max) : text;
 }
 
+/** Simple branch/remote token validation for argv-safe git operations. */
+function isSafeGitToken(value: string): boolean {
+  return /^[a-zA-Z0-9._\-/]+$/.test(value) && !value.startsWith('-');
+}
+
+function decodeIpcBase64(data: string): Buffer {
+  if (data.length > Math.ceil(MAX_IPC_BINARY_BYTES / 3) * 4) {
+    throw new Error(`IPC attachment exceeds ${MAX_IPC_BINARY_BYTES} bytes`);
+  }
+  return Buffer.from(data, 'base64');
+}
+
 // ── Extended message types (image, file) ────────────────────────────────
 
 /**
@@ -275,7 +288,13 @@ export async function handleInfiniClawMessage(
     return true;
   }
 
-  const buffer = Buffer.from((isImage ? data.imageData : data.fileData)!, 'base64');
+  let buffer: Buffer;
+  try {
+    buffer = decodeIpcBase64((isImage ? data.imageData : data.fileData)!);
+  } catch (err) {
+    logger.warn({ sourceGroup: ctx.sourceGroup, err }, `Rejected IPC ${data.type} payload`);
+    return true;
+  }
   const sendFn = isImage ? ctx.sendImage : ctx.sendFile;
   const defaultName = isImage ? 'image.png' : 'attachment.bin';
   const defaultMime = isImage ? 'image/png' : 'application/octet-stream';
@@ -464,7 +483,12 @@ async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Pr
 
     let serviceInfo = '';
     try {
-      serviceInfo = execSync(`npx pm2 show infiniclaw-${bot} 2>&1`, { timeout: 5_000, cwd: resolveRoot() }).toString().trim();
+      serviceInfo = execFileSync('npx', ['pm2', 'show', `infiniclaw-${bot}`], {
+        timeout: 5_000,
+        cwd: resolveRoot(),
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
     } catch (e) {
       serviceInfo = e instanceof Error ? e.message : 'not running';
     }
@@ -551,8 +575,7 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
   const chatJid = parseChatJid(data);
   const remote = typeof data.remote === 'string' ? data.remote.trim() : 'origin';
   const branches = Array.isArray(data.branches) ? data.branches.map(String) : ['main'];
-  const safeBranch = /^[a-zA-Z0-9._\-/]+$/;
-  if (!safeBranch.test(remote) || branches.some((b) => !safeBranch.test(b))) {
+  if (!isSafeGitToken(remote) || branches.some((b) => !isSafeGitToken(b))) {
     await safeSend(ctx, chatJid, '⛔ git_push: invalid remote or branch name');
     return;
   }
@@ -564,8 +587,7 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
     return;
   }
   try {
-    const branchArgs = branches.join(' ');
-    execSync(`git push ${remote} ${branchArgs}`, {
+    execFileSync('git', ['push', remote, ...branches], {
       cwd: resolveRoot(),
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -588,6 +610,10 @@ async function handleHolodeckCreate(data: CommandData, ctx: InfiniClawIpcContext
   const chatJid = parseChatJid(data);
   if (!branch) {
     await safeSend(ctx, chatJid, '⛔ holodeck_create: missing branch name');
+    return;
+  }
+  if (!isSafeGitToken(branch)) {
+    await safeSend(ctx, chatJid, '⛔ holodeck_create: invalid branch name');
     return;
   }
   logger.info({ bot, branch }, 'Holodeck create requested via IPC');
@@ -717,7 +743,12 @@ async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext
   try {
     let serviceInfo = '';
     try {
-      serviceInfo = execSync(`npx pm2 show infiniclaw-${hdBot} 2>&1`, { timeout: 5_000, cwd: resolveRoot() }).toString().trim();
+      serviceInfo = execFileSync('npx', ['pm2', 'show', `infiniclaw-${hdBot}`], {
+        timeout: 5_000,
+        cwd: resolveRoot(),
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
     } catch (e) {
       serviceInfo = e instanceof Error ? e.message : 'not running';
     }
@@ -750,6 +781,7 @@ type CommandHandler = (data: CommandData, ctx: InfiniClawIpcContext) => void | P
 // ── send_to_room ────────────────────────────────────────────────────────
 
 async function handleSendToRoom(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'send_to_room')) return;
   const room = typeof data.room === 'string' ? data.room.trim() : '';
   const message = typeof data.message === 'string' ? data.message : '';
   if (!room || !message) {
@@ -823,13 +855,23 @@ function syncVerificationsToInstance(root: string, bot: string): void {
 
 async function handleRequestVerification(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'request_verification')) return;
+  if (
+    typeof data.id !== 'string' || !data.id.trim()
+    || typeof data.task_description !== 'string' || !data.task_description.trim()
+    || typeof data.criteria !== 'string' || !data.criteria.trim()
+    || typeof data.requested_by !== 'string' || !data.requested_by.trim()
+    || typeof data.assigned_to !== 'string' || !data.assigned_to.trim()
+  ) {
+    await safeSend(ctx, parseChatJid(data), '⛔ request_verification: missing required fields');
+    return;
+  }
   const root = resolveRoot();
   const record: VerificationRecord = {
-    id: data.id as string,
-    task_description: data.task_description as string,
-    criteria: data.criteria as string,
-    requested_by: data.requested_by as string,
-    assigned_to: data.assigned_to as string,
+    id: data.id.trim(),
+    task_description: data.task_description.trim(),
+    criteria: data.criteria.trim(),
+    requested_by: data.requested_by.trim(),
+    assigned_to: data.assigned_to.trim(),
     status: 'pending',
     requested_at: (data.timestamp as string) || new Date().toISOString(),
     source_group: data.groupFolder as string,
@@ -849,22 +891,27 @@ async function handleRequestVerification(data: CommandData, ctx: InfiniClawIpcCo
 
 async function handleSubmitVerification(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'submit_verification')) return;
+  if (typeof data.id !== 'string' || !data.id.trim() || typeof data.passed !== 'boolean') {
+    await safeSend(ctx, parseChatJid(data), '⛔ submit_verification: invalid id or passed flag');
+    return;
+  }
+  const id = data.id.trim();
   const root = resolveRoot();
   const records = readVerifications(root);
-  const record = records.find((r) => r.id === (data.id as string));
+  const record = records.find((r) => r.id === id);
 
   if (!record) {
-    await safeSend(ctx, parseChatJid(data), `❌ Verification ${data.id as string} not found.`);
+    await safeSend(ctx, parseChatJid(data), `❌ Verification ${id} not found.`);
     return;
   }
 
   if (record.status !== 'pending') {
-    await safeSend(ctx, parseChatJid(data), `Verification ${data.id as string} is already ${record.status}.`);
+    await safeSend(ctx, parseChatJid(data), `Verification ${id} is already ${record.status}.`);
     return;
   }
 
-  record.status = (data.passed as boolean) ? 'verified' : 'failed';
-  record.evidence = data.evidence as string;
+  record.status = data.passed ? 'verified' : 'failed';
+  if (typeof data.evidence === 'string') record.evidence = data.evidence;
   record.resolved_at = new Date().toISOString();
 
   writeVerifications(root, records);
