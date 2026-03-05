@@ -108,6 +108,33 @@ for bot in sorted(bots):
         report["bots"][bot] = {"error": str(e)}
         continue
 
+    # Fallback: read memory from metrics-history.jsonl if error logs lack it
+    if last_rss is None:
+        metrics_file = os.path.join(instances_dir, bot, "data", "metrics-history.jsonl")
+        if os.path.exists(metrics_file):
+            try:
+                with open(metrics_file, 'rb') as mf:
+                    mf.seek(0, 2)
+                    pos = mf.tell()
+                    buf = b''
+                    while pos > 0 and buf.count(b'\n') < 3:
+                        pos = max(0, pos - 4096)
+                        mf.seek(pos)
+                        buf = mf.read() + buf
+                    for raw in reversed(buf.split(b'\n')):
+                        raw = raw.strip()
+                        if not raw:
+                            continue
+                        try:
+                            m_data = json.loads(raw)
+                            last_rss = m_data.get("rssMB")
+                            last_heap = m_data.get("heapMB")
+                            break
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+            except Exception:
+                pass
+
     # Use most recent mtime of either log for age (main log is always written to)
     log_mtime = os.path.getmtime(error_log)
     if os.path.exists(main_log):
