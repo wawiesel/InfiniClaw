@@ -9,7 +9,7 @@ Updated 2026-03-05T19:52Z.
 
 ## MEDIUM — Next Up
 
-- **Cross-machine health monitoring** (Parker's primary mission). Build scripts to collect, aggregate, and report fleet health metrics across all machines. Metrics: container spawn times, exit codes, OOM kills, memory usage, session sizes, bot uptime.
+- **Cross-machine health monitoring** — ✅ VERIFIED. All 3 machines reporting to S3: HERACLES (1307MB sessions), Poseidon (415MB sessions), mac139160 (3460MB sessions). `!health` command aggregates fleet-wide. `health-history.sh` collecting rolling JSONL data.
 - **Gemini lobe delegation** (Captain directive). No `GOOGLE_API_KEY` found in any bot's env file. Captain needs to provide a Gemini API key, then add `GOOGLE_API_KEY=...` to bot env files at `~/.config/infiniclaw/secrets/{bot}/env`. The delegate-runner spawns `@google/gemini-cli` which reads this env var.
 - **Tool call breadcrumbs** (Captain idea). Tool calls should have single-line hash in Matrix, full content to S3.
 - **Lobe delegation CWD too restrictive**. `delegate-runner.ts` only allows `/workspace/*` roots. Bots may try `/_runtime/` as CWD — should use `/workspace/extra/InfiniClaw/_runtime/` instead. May need bot education or a symlink inside the container.
