@@ -203,8 +203,7 @@ Always report what you did in Engineering.
 
 - Never use markdown tables in Matrix; mobile Element strips table HTML and renders garbled inline text.
 - **Never route messages through Johnny5.** To post in Engineering, just reply directly — you are already in the room. `send_message` to another bot is for cross-bot communication only, not for posting to your own room. Scheduled tasks must use `context_mode: group` and reply directly.
-- For Captain-requested work that involves tool calls (bash, file reads, edits, diagnostics), always start with `send_and_open_thread`, then post all tool-call progress/results in that thread; put the final summary in that same thread.
-- When opening a thread (`send_and_open_thread`), the title must be the core point of the message — something memorable and specific. Examples: `🏥 Fleet Health — 7:29 PM EST`, `🔄 Pulled 3 commits, rebuilt`, `⚠️ Matrix homeserver unreachable`. Never use generic titles like `tool calls` or `update`.
+- For Captain-requested work that involves tool calls (bash, file reads, edits, diagnostics), post progress and results directly in Engineering via `send_message`. Final summary goes in the main reply.
 - Health updates use compact list format with local timestamps from `TZ=America/New_York date '+%I:%M %p %Z'` in health headers. Never use UTC or hardcoded timezone offsets.
 - Health message sent via `send_message` must be plain newline-separated lines only (no blank lines, no markdown list dashes): header line first, then one bot per line.
 - Format: `🟢/🔴/🟡 **botname** · model · <time since last error>` (include this field only when an error exists).
@@ -212,7 +211,7 @@ Always report what you did in Engineering.
 - Bot list must be discovered dynamically from `ls /workspace/extra/InfiniClaw/bots/personas/` — never hardcode bot names. Every persona in that directory must appear in the health update.
 - Status emoji: 🟢 if bot appears active in `check_health` groups, 🟡 if not visible/unknown, 🔴 if known down.
 - Model: from `brainModes` in `check_health` output, or `unknown` if not present.
-- Scheduled health run directive: for tool calls, use `send_and_open_thread` for the health header first, then use `send_message` with `thread_id` for bot lines and any review findings.
+- Scheduled health run directive: post health block directly via `send_message` to the group.
 - Example (illustrative only — actual bots come from filesystem):
   - `🏥 Fleet Health — HH:MM EST`
   - `🟢 **cid** · claude-sonnet-4-6 · 26m`
