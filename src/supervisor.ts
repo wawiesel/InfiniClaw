@@ -396,6 +396,16 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` },
           });
           log('git sync: rebuild succeeded');
+          // Copy supervisor.js to all active bot instances so the running
+          // supervisor picks up new code on next pm2 restart
+          const builtSupervisor = path.join(root, 'dist', 'supervisor.js');
+          if (fs.existsSync(builtSupervisor)) {
+            for (const bot of getActiveBots()) {
+              const dst = path.join(root, '_runtime', 'instances', bot, 'dist', 'supervisor.js');
+              try { fs.copyFileSync(builtSupervisor, dst); } catch { /* instance may not exist yet */ }
+            }
+            log('git sync: deployed supervisor.js to instances');
+          }
         } catch (err) {
           log(`git sync: rebuild FAILED: ${errStr(err)}`);
           const msg = `⚠️ ${HOSTNAME}: git pull succeeded (${result.newCommits} commits) but build failed — engineer please fix.\n\`\`\`\n${errStr(err).slice(0, 500)}\n\`\`\``;

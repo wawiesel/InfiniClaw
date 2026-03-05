@@ -18,7 +18,6 @@ Updated 2026-03-05 03:55 PM EST.
 ## LOW — Infrastructure
 
 - **Podman SSH connection drops on macOS** — Podman machine shows "Currently running" but SSH socket dies silently. Containers fail with "unable to connect to Podman socket". Fix: `podman machine stop && podman machine start` (may need a retry due to race condition). Root cause unknown — possibly long-running VM + sleep/wake cycles.
-- **Supervisor deployment gotcha** — supervisor runs from `_runtime/instances/<first-bot>/dist/supervisor.js`, NOT from the project root `dist/`. After `npm run build`, must copy `dist/supervisor.js` to instance dir or do a full `!restart`.
 - Rename supervisor to "relay" — name conflicts with pm2. It's a message relay, not a process manager.
 - **Matrix sluggish on Poseidon** (Captain report). conduwuit logs show 500 errors on federated rooms and UIAA auth errors. Status indicator spam now throttled (5min cap). Consider leaving problematic federated rooms or upgrading conduwuit.
 
@@ -28,6 +27,7 @@ Updated 2026-03-05 03:55 PM EST.
 
 ## Recently Completed
 
+- Supervisor auto-deploy — `gitSyncLoop` now copies `dist/supervisor.js` to all active bot instances after a successful build, so the supervisor picks up new code without needing a full `!restart`.
 - Cross-machine health monitoring — verified. All 3 machines reporting to S3. `!health` aggregates fleet-wide.
 - Health check liveness fix — `health-check.sh` now uses `podman ps` to detect running containers. Bots with containers show ACTIVE; stopped bots show IDLE/RECENT/STALE based on log freshness. Previously healthy bots with no recent errors appeared STALE.
 - Supervisor self-command fix — supervisor now processes `!restart`/`!join` sent via its own intercom account.
