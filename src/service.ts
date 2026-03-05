@@ -764,10 +764,11 @@ export async function stop(onlyBot?: string): Promise<void> {
   }
   killStaleContainers(onlyBot);
 
-  // Push state to S3 after stopping (warn on failure)
-  try { await pushAll(root); } catch (err) {
-    console.warn(`S3 push failed: ${err instanceof Error ? err.message : err}`);
-  }
+  // Push state to S3 in background (non-blocking)
+  pushAll(root).then(
+    () => console.log('S3 backup complete.'),
+    (err) => console.warn(`S3 push failed: ${err instanceof Error ? err.message : err}`),
+  );
 
   console.log('InfiniClaw stopped.');
 }
