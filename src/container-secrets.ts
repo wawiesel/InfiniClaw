@@ -93,14 +93,24 @@ function mapCertPath(
     return value;
   }
 
-  const safeName = path.basename(value).replace(/[^a-zA-Z0-9._-]/g, '_');
+  let resolvedPath: string;
+  try {
+    resolvedPath = fs.realpathSync(value);
+    if (!fs.statSync(resolvedPath).isFile()) {
+      return value;
+    }
+  } catch {
+    return value;
+  }
+
+  const safeName = path.basename(resolvedPath).replace(/[^a-zA-Z0-9._-]/g, '_');
   const containerPath = `${certMountRoot}/${key.toLowerCase()}-${safeName}`;
 
   const alreadyMounted = mounts.some(
-    (m) => m.hostPath === value && m.containerPath === containerPath,
+    (m) => m.hostPath === resolvedPath && m.containerPath === containerPath,
   );
   if (!alreadyMounted) {
-    mounts.push({ hostPath: value, containerPath, readonly: true });
+    mounts.push({ hostPath: resolvedPath, containerPath, readonly: true });
   }
 
   return containerPath;
