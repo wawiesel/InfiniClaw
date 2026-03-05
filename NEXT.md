@@ -1,11 +1,11 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05 04:10 PM EST.
+Updated 2026-03-05 05:20 PM EST.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
-- **Check Poseidon for stale launchd agents** — HERACLES had zombie `com.infiniclaw.{bot}.plist` launch agents from before the PM2 migration. Poseidon may too. Run `launchctl list | grep infiniclaw` and remove any bot agents (`launchctl unload` + `rm`).
+- **Bot display name format** — display names should follow `Name (location) 🔹` format, e.g. `Cid (HERACLES) ⭐`, `Parker (Poseidon) 🟢`. Needs update in container-config or bot profile.
 
 ## MEDIUM — Next Up
 
@@ -23,11 +23,13 @@ Updated 2026-03-05 04:10 PM EST.
 
 ## LOW — Reliability
 
-- **Bots can commit dist/ files** — Cid committed the entire `dist/` directory despite `.gitignore`. Bots running inside containers may use `git add -A` which bypasses gitignore when files are already tracked. Need a pre-commit hook to reject `dist/` additions, or educate bots to use `git add src/` only.
+- **Bots can commit dist/ files** — pre-commit hook added on HERACLES (`.git/hooks/pre-commit`). Blocks any commit with `dist/` staged. Note: `.git/hooks/` is not tracked by git — Poseidon needs the same hook installed manually.
 - **Session OOM still possible** — V8 heap OOM (exit 137) from large JSONL sessions. Full cleanup chain: DB sessions table, JSONL file, .claude/backups/.
 
 ## Recently Completed
 
+- Security hardening sweep (Cid) — systematic review across 23 source files (allow-list.ts through skill-sync.ts). Path traversal fixes, input validation, symlink escape prevention, HTML sanitization, command injection prevention, schema validation. 23 commits pushed, all 59 tests passing.
+- Poseidon launchd check — Poseidon is Linux, no launchd agents. Clean.
 - launchd zombie agents removed — old `com.infiniclaw.{bot}.plist` files with `KeepAlive: true` were fighting PM2, causing persistent duplicate processes. All launch agents deleted from HERACLES. MinIO also moved to Poseidon. See LESSONS_LEARNED.md.
 - Supervisor auto-deploy — `gitSyncLoop` now copies `dist/supervisor.js` to all active bot instances after a successful build, so the supervisor picks up new code without needing a full `!restart`.
 - Cross-machine health monitoring — verified. All 3 machines reporting to S3. `!health` aggregates fleet-wide.
