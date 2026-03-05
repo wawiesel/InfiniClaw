@@ -671,7 +671,7 @@ async function handleLifecycleCommand(
         stopBot(bot);
         killStaleContainers(bot);
         bootstrapBot(root, bot);
-        await reply(conn, `${HOSTNAME}: ${name} restarted`);
+        await reply(conn, `${HOSTNAME}: ${name} restarted (rank ${rank})`);
       }
     } catch (err) {
       log(`!${action} ${name} failed: ${errStr(err)}`);
