@@ -21,7 +21,7 @@ Updated 2026-03-05T18:25Z.
 ## LOW — Infrastructure
 
 - Rename supervisor to "relay" — name conflicts with pm2. It's a message relay, not a process manager.
-- Supervisor can't process `!restart`/`!join` sent via its own intercom account (ignores own messages). Workaround: `pm2 restart` directly.
+- Supervisor can't process `!restart`/`!join` sent via its own intercom account (ignores own messages at line 614). Workaround: `pm2 restart` directly.
 
 ## LOW — Reliability
 

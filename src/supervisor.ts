@@ -338,20 +338,29 @@ const GIT_SYNC_INTERVAL = 10 * 60_000; // 10 minutes
 
 function gitSync(): { ok: boolean; output: string; newCommits: number } {
   const root = resolveRoot();
+  const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
   try {
     // Fetch first
-    execSync('git fetch origin', { cwd: root, encoding: 'utf-8', timeout: 30_000, stdio: 'pipe' });
+    execSync('git fetch origin', execOpts);
     // Check how many new commits
     const countStr = execSync('git rev-list HEAD..origin/main --count', {
-      cwd: root, encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
+      ...execOpts, timeout: 5_000,
     }).trim();
     const newCommits = parseInt(countStr, 10) || 0;
     if (newCommits === 0) return { ok: true, output: 'up to date', newCommits: 0 };
-    // Rebase
-    const output = execSync('git rebase origin/main', {
-      cwd: root, encoding: 'utf-8', timeout: 30_000, stdio: 'pipe',
-    }).trim();
-    return { ok: true, output, newCommits };
+    // Stash any uncommitted changes (bots may have WIP edits)
+    const stashOutput = execSync('git stash', execOpts).trim();
+    const didStash = !stashOutput.includes('No local changes');
+    try {
+      // Rebase
+      const output = execSync('git rebase origin/main', execOpts).trim();
+      return { ok: true, output, newCommits };
+    } finally {
+      // Restore stashed changes
+      if (didStash) {
+        try { execSync('git stash pop', execOpts); } catch { /* conflict — leave in stash */ }
+      }
+    }
   } catch (err) {
     return { ok: false, output: errStr(err), newCommits: -1 };
   }
