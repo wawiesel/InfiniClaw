@@ -263,8 +263,18 @@ export function syncPersona(root: string, bot: string): void {
   } catch { return; }
 }
 
+/** Update the local presence file to reflect currently running bots. */
+export function updatePresence(root: string): void {
+  const config = loadMachineConfig();
+  const hostname = os.hostname();
+  const presenceDir = path.join(config.secretsPath, 'operator', 'presence');
+  fs.mkdirSync(presenceDir, { recursive: true });
+  const localPresence = { hostname, bots: getActiveBots(), updatedAt: new Date().toISOString() };
+  fs.writeFileSync(path.join(presenceDir, `${hostname}.json`), JSON.stringify(localPresence, null, 2));
+}
+
 /** Write local presence file and generate crew-status.json from all machines' presence. */
-function writeCrewStatus(root: string, thisBot: string, dataDir: string): void {
+export function writeCrewStatus(root: string, thisBot: string, dataDir: string): void {
   const config = loadMachineConfig();
   const hostname = os.hostname();
 

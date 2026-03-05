@@ -129,6 +129,31 @@ const roomRoster: Record<string, Map<string, number>> = {};
 const roomCO: Record<string, string | undefined> = {};
 let matrixRef: MatrixChannel | null = null;
 
+/** Parse supervisor lifecycle messages to update CO roster at runtime. */
+function handleLifecycleMessage(msg: { content: string; chat_jid: string; sender: string }): boolean {
+  // Supervisor messages: "HOSTNAME: Name stopped" / "HOSTNAME: Name started (rank N)" / "HOSTNAME: Name restarted"
+  const match = msg.content.match(/^\S+: (\S+) (stopped|started|restarted)(?:\s+\(rank (\d+)\))?$/);
+  if (!match) return false;
+  // Only process messages from intercom accounts (supervisor sends via intercom)
+  if (!msg.sender.includes('-intercom')) return false;
+
+  const [, botName, action, rankStr] = match;
+  const chatJid = msg.chat_jid;
+
+  if (!roomRoster[chatJid]) roomRoster[chatJid] = new Map();
+
+  if (action === 'stopped') {
+    roomRoster[chatJid].delete(botName);
+  } else if (action === 'started') {
+    const rank = rankStr ? parseInt(rankStr, 10) : 99;
+    roomRoster[chatJid].set(botName, rank);
+  }
+  // 'restarted' = no roster change (bot stays present)
+
+  void rerankCO(chatJid);
+  return false; // don't consume — still store the message for context
+}
+
 /** Recalculate CO for a room and update display name badge. */
 async function rerankCO(chatJid: string): Promise<void> {
   const roster = roomRoster[chatJid];
@@ -1325,6 +1350,7 @@ async function main(): Promise<void> {
       displayName: `${ASSISTANT_NAME} ${initialBadge}`,
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
+        handleLifecycleMessage(msg);
         storeMessage(msg);
         if (msg.id && msg.id.startsWith('$')) {
           const group = registeredGroups[msg.chat_jid];

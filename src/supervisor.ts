@@ -21,6 +21,7 @@ import {
   ensurePodmanReady,
   killStaleContainers,
   loadProfileEnv,
+  updatePresence,
 } from './service.js';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -233,9 +234,16 @@ async function handleLifecycleCommand(
     }
   }
 
+  // Load roster for rank info
+  let roster: Record<string, { rank?: number }> = {};
+  try {
+    roster = JSON.parse(fs.readFileSync(path.join(loadMachineConfig().secretsPath, 'roster.json'), 'utf-8'));
+  } catch { /* no roster */ }
+
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
     const name = env?.ASSISTANT_NAME || bot;
+    const rank = roster[bot]?.rank ?? 99;
     log(`!${action} ${name}`);
     try {
       if (action === 'dismiss') {
@@ -244,7 +252,7 @@ async function handleLifecycleCommand(
         await reply(conn, `${HOSTNAME}: ${name} stopped`);
       } else if (action === 'join') {
         bootstrapBot(root, bot);
-        await reply(conn, `${HOSTNAME}: ${name} started`);
+        await reply(conn, `${HOSTNAME}: ${name} started (rank ${rank})`);
       } else {
         stopBot(bot);
         killStaleContainers(bot);
@@ -256,6 +264,9 @@ async function handleLifecycleCommand(
       await reply(conn, `${HOSTNAME}: failed to ${action} ${name} — ${errStr(err)}`);
     }
   }
+
+  // Update presence so crew-status.json reflects current state for future startups
+  try { updatePresence(root); } catch { /* best effort */ }
 }
 
 async function handleCommand(cmd: string, conn: RoomConn): Promise<void> {
