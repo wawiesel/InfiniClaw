@@ -45,3 +45,7 @@ Updated 2026-03-05T19:52Z.
 - Idle container wakeup — `e1b369e`.
 - Image hash cache fix — `5887d63`. Checks image existence.
 - Container exit 125 — mitigated with `mountIfExists`.
+
+## LOW — Health Script
+
+- **Bots appear STALE when healthy** — `health-check.sh` uses error log mtime to determine bot status. Bots with no recent errors (healthy!) appear STALE. Should use `podman ps` or process check instead of log age for liveness.
