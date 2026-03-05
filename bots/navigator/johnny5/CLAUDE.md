@@ -55,7 +55,7 @@ You can also create and modify your own skills.
 Write skills directly to your persona dir — changes persist immediately to the repo:
 
 ```
-/workspace/extra/johnny5-persona/skills/{skill-name}/SKILL.md
+/workspace/persona/skills/{skill-name}/SKILL.md
 ```
 
 Restart to load new skills into your session (`mcp__nanoclaw__restart_self`).
@@ -65,7 +65,7 @@ Restart to load new skills into your session (`mcp__nanoclaw__restart_self`).
 Edit your persona CLAUDE.md directly (mounted writable — persists across restarts):
 
 ```
-/workspace/extra/johnny5-persona/CLAUDE.md
+/workspace/persona/CLAUDE.md
 ```
 
 Room CLAUDE.md files (`/workspace/persona/temp/CLAUDE.md`) are **read-only** — managed by Cid in the repo.

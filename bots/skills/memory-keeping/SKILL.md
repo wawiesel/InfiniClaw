@@ -78,7 +78,7 @@ Replace `<persona>` with your bot name (e.g. `cid`, `johnny5`).
    - Important file paths, architecture notes
    - Errors and how resolved
    - Unfinished work for follow-up
-5. Write findings to /workspace/extra/<persona>-persona/memory/session-recovery-<date>.md
+5. Write findings to /workspace/persona/memory/session-recovery-<date>.md
 ```
 
 ### After recovery

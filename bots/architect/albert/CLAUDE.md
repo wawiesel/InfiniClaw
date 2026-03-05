@@ -91,7 +91,7 @@ Delegate to a lobe so you don't burn main brain context. Save proactively — af
 
 ## Editing your instructions
 
-Your persona CLAUDE.md is mounted writable at `/workspace/extra/albert-persona/CLAUDE.md` — edits persist across restarts.
+Your persona CLAUDE.md is mounted writable at `/workspace/persona/CLAUDE.md` — edits persist across restarts.
 
 Room-level CLAUDE.md (`/workspace/persona/temp/CLAUDE.md`) is **read-only** — managed by the Captain in the repo. Do not attempt to edit it.
 

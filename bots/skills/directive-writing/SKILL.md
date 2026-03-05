@@ -7,7 +7,7 @@ description: Update your persona CLAUDE.md. Use when the Captain gives standing 
 
 ## Your persona CLAUDE.md
 
-Path: `/workspace/extra/*-persona/CLAUDE.md` (use `ls` to find the exact path).
+Path: `/workspace/persona/CLAUDE.md`
 
 This is YOUR file — it controls who you are and how you behave. Edits persist across restarts.
 

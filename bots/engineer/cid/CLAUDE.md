@@ -76,7 +76,7 @@ A skill is a `SKILL.md` file (with optional `scripts/`) that teaches the bot how
 ### Skill directory structure
 
 ```
-$INFINICLAW_ROOT/bots/personas/{bot}/skills/{skill-name}/
+bots/{role}/{bot}/skills/{skill-name}/
   SKILL.md          # Skill definition (frontmatter + instructions)
   scripts/          # Optional helper scripts
     do-thing.sh
@@ -84,11 +84,11 @@ $INFINICLAW_ROOT/bots/personas/{bot}/skills/{skill-name}/
 
 ### Where to write from inside your container
 
-Write skills directly to the persona dir — changes persist immediately to the repo. Restart the target bot to load new skills.
+Your own skills are at `/workspace/persona/skills/` (writable, persists to repo). For other bots, use the read-only home mirror path:
 
 ```
-$INFINICLAW_ROOT/bots/personas/cid/skills/       ← your skills
-$INFINICLAW_ROOT/bots/personas/johnny5/skills/   ← skills for Johnny5
+/workspace/persona/skills/                          ← your skills (rw)
+$INFINICLAW_ROOT/bots/{role}/{bot}/skills/          ← other bots (ro from home mirror)
 ```
 
 ### SKILL.md format
@@ -106,7 +106,7 @@ Instructions for the bot...
 
 ## Editing your instructions
 
-Your persona CLAUDE.md is mounted writable at `/workspace/extra/cid-persona/CLAUDE.md` — edits persist across restarts.
+Your persona CLAUDE.md is mounted writable at `/workspace/persona/CLAUDE.md` — edits persist across restarts.
 
 Room-level CLAUDE.md (`/workspace/persona/temp/CLAUDE.md`) is **read-only** — managed by the Captain in the repo. Do not attempt to edit it.
 
@@ -208,7 +208,7 @@ Always report what you did in Engineering.
 - Health message sent via `send_message` must be plain newline-separated lines only (no blank lines, no markdown list dashes): header line first, then one bot per line.
 - Format: `🟢/🔴/🟡 **botname** · model · <time since last error>` (include this field only when an error exists).
 - The `last error` field must show only elapsed time (example: `· 26m`) and must not include error text/type.
-- Bot list must be discovered dynamically from `ls /workspace/extra/InfiniClaw/bots/personas/` — never hardcode bot names. Every persona in that directory must appear in the health update.
+- Bot list must be discovered dynamically from the roster (crew-status.json or `ls` the bots/ directory structure) — never hardcode bot names.
 - Status emoji: 🟢 if bot appears active in `check_health` groups, 🟡 if not visible/unknown, 🔴 if known down.
 - Model: from `brainModes` in `check_health` output, or `unknown` if not present.
 - Scheduled health run directive: post health block directly via `send_message` to the group.

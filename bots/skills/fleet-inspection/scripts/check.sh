@@ -1,11 +1,11 @@
 #!/bin/bash
 # Fleet health check script — run from inside a bot container
 # Outputs JSON with all health metrics for this machine
-# Usage: bash /workspace/extra/parker-persona/health/check.sh
+# Usage: bash /workspace/persona/skills/fleet-inspection/scripts/check.sh
 
 RUNTIME="/workspace/extra/InfiniClaw/_runtime"
 LOGS_DIR="$RUNTIME/logs"
-HEALTH_DIR="/workspace/extra/parker-persona/health"
+HEALTH_DIR="/workspace/persona/health"
 
 mkdir -p "$HEALTH_DIR"
 
@@ -133,7 +133,7 @@ fi
 
 # ── Rolling uptime (bots + machines) ─────────────────────────────────
 # Pings heartbeats and records to uptime.db, then queries rolling uptime
-uptime_json=$(python3 /workspace/extra/parker-persona/health/rolling_uptime.py --ping 2>/dev/null || echo "{}")
+uptime_json=$(python3 /workspace/persona/health/rolling_uptime.py --ping 2>/dev/null || echo "{}")
 
 # ── Output JSON ──────────────────────────────────────────────────────
 timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)

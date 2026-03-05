@@ -23,7 +23,7 @@ from pathlib import Path
 
 RUNTIME = Path(os.environ.get("INFINICLAW_RUNTIME", "/workspace/extra/InfiniClaw/_runtime"))
 INSTANCES_DIR = RUNTIME / "instances"
-HEALTH_DIR = Path("/workspace/extra/parker-persona/health")
+HEALTH_DIR = Path("/workspace/persona/health")
 UPTIME_DB = HEALTH_DIR / "uptime.db"
 
 BOTS = ["cid", "johnny5", "albert", "parker"]

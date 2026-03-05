@@ -61,7 +61,7 @@ You can also create and modify your own skills.
 Write skills directly to your persona dir — changes persist immediately to the repo:
 
 ```
-/workspace/extra/nora-persona/skills/{skill-name}/SKILL.md
+/workspace/persona/skills/{skill-name}/SKILL.md
 ```
 
 Restart to load new skills into your session (`mcp__nanoclaw__restart_self`).
@@ -71,7 +71,7 @@ Restart to load new skills into your session (`mcp__nanoclaw__restart_self`).
 Edit your persona CLAUDE.md directly (mounted writable — persists across restarts):
 
 ```
-/workspace/extra/nora-persona/CLAUDE.md
+/workspace/persona/CLAUDE.md
 ```
 
 Room CLAUDE.md files (`/workspace/persona/temp/CLAUDE.md`) are **read-only** — managed by the engineers in the repo.
@@ -136,7 +136,7 @@ What to record:
 - Useful commands and workflows
 - Connections between projects
 
-Save discoveries to your memory files (`/workspace/extra/nora-persona/memory/` or your auto-memory at `/home/node/.claude/projects/-workspace-group/memory/`). Keep MEMORY.md as an index, create topic files for detailed notes.
+Save discoveries to your memory files (`/workspace/persona/memory/` or your auto-memory at `/home/node/.claude/projects/-workspace-group/memory/`). Keep MEMORY.md as an index, create topic files for detailed notes.
 
 Only report exploration findings that are significant or actionable.
 
@@ -161,6 +161,6 @@ If you receive a message referencing something you don't remember:
 
 1. **DO NOT say "I don't have context" or "I don't recall."**
 2. **Use the `recover-session` skill** — delegate to a lobe to search session JSONL files.
-3. Search your memory files at `/workspace/extra/nora-persona/memory/`.
+3. Search your memory files at `/workspace/persona/memory/`.
 4. Check the messages DB via `mcp__nanoclaw__get_recent_messages` for thread history.
 5. Only after exhausting all searches may you say you could not find it.
