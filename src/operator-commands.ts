@@ -183,7 +183,10 @@ function handleOperatorTmux(text: string, chatJid: string, threadId: string | un
                 execFileSync('tmux', ['new-session', '-d', '-s', OPERATOR_SESSION, '-c', loadMachineConfig().secretsPath, 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
                 await new Promise(r => setTimeout(r, 3000));
             }
-            if (text) execFileSync('tmux', ['send-keys', '-t', OPERATOR_SESSION, text, 'Enter'], { stdio: 'pipe' });
+            if (text) {
+                execFileSync('tmux', ['send-keys', '-t', OPERATOR_SESSION, '-l', text.trim()], { stdio: 'pipe' });
+                execFileSync('tmux', ['send-keys', '-t', OPERATOR_SESSION, 'Enter'], { stdio: 'pipe' });
+            }
             const status = existed ? 'sent to running operator' : 'started new operator session';
             const msg = text ? `🔧 ${os.hostname()}: ${status} — "${text.slice(0, 100)}"` : `🔧 ${os.hostname()}: ${status}`;
             const room = (process.env.MAIN_GROUP_NAME || '').toLowerCase();
