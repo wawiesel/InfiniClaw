@@ -1,16 +1,23 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05 05:50 PM EST.
+Updated 2026-03-05 06:10 PM EST.
 
-## HIGH PRIORITY — Captain Directives (blocking progress)
+## HIGH PRIORITY — Captain Directives (from Engineering conversation review)
 
-- **Bots not maintaining todo lists** — Captain complaint. All bots need to track what they're working on, what's blocked, and what's done. Use NEXT.md as the central tracking file and keep it current.
+- **Bots must maintain personal todo lists at ALL times** — Captain: "You should have on your personal task list 2 things at all times: the thing you are working on and what you're doing next." Bots are wasting time on maintenance instead of assigned tasks. Stop working on maintenance unless explicitly told to.
+- **2-second response time to Captain** — Captain explicitly called this out as an activity. Bots must respond to Captain messages within 2 seconds. CO must ALWAYS respond to Captain — never ignore.
+- **Tool call breadcrumbs** — Captain directive. Tool calls should show single-line hash in Matrix, full content to S3. This is an active work item, not a backlog wish.
+- **Bot display names still not showing** — Captain: "I still don't see the updated names with (machine) in parens." Code is committed (`37fee0e`) but bots need restart to pick it up. Verify names show correctly after restart.
+- **Bot-to-bot cross-machine communication must be seamless** — Captain: "It should be seamless and just like human-to-human conversation." Cid and Parker must communicate fluidly in Engineering.
+- **Health metrics: look at trends** — Captain: "you need to look at health metrics in the 1-day / 7-day rolling and look at trend." Not just collect snapshots — analyze and report trends.
+- **Bots not reading Captain's directives** — Captain updated main and engineer CLAUDE.md directives (commit `8b75*`). Asked bots to pull and review. Bots didn't read them, leading to Captain frustration. Bots must `git pull` and review directive changes when told to.
+- **Duplicate bot instances** — Two Parkers were running (one on mac139160, one on Poseidon). Fixed on Poseidon (machine.json trimmed). mac139160 Parker needs `!dismiss parker`. HERACLES machine.json also trimmed to `["cid"]` only.
 
 ## MEDIUM — Next Up
 
-- **Tool call breadcrumbs** (Captain idea). Tool calls should have single-line hash in Matrix, full content to S3.
-- **Concurrency ceiling starvation**. When MAX_CONCURRENT_CONTAINERS reached, lower-priority bots starve.
+- **Concurrency ceiling starvation**. FIFO `waitingGroups` drain in `group-queue.ts` (upstream nanoclaw). Active groups hog slots across rapid messages; waiting groups queue fairly but can lag. Fix = priority-aware `drainWaiting()`. Needs Captain approval before touching upstream.
+- **Cid SIGKILL death spirals** — Extended periods of SIGKILL loops (duplicate processes, podman EOF, session OOM). Need better resilience: faster detection of unrecoverable state, cooldown backoff, session clearing on repeated OOM.
 
 ## MEDIUM — Blocked on Captain
 
