@@ -402,6 +402,17 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
   }
 }
 
+function appendHealthHistory(report: string): void {
+  const root = resolveRoot();
+  const historyFile = path.join(root, '_runtime', 'data', 'health-history.jsonl');
+  try {
+    fs.mkdirSync(path.dirname(historyFile), { recursive: true });
+    fs.appendFileSync(historyFile, report.trim() + '\n');
+  } catch (err) {
+    log(`health history append failed: ${errStr(err)}`);
+  }
+}
+
 /** Periodic health loop — runs health check and uploads to S3. */
 async function healthLoop(): Promise<void> {
   // Wait before first run to let everything stabilize
@@ -410,6 +421,7 @@ async function healthLoop(): Promise<void> {
     try {
       const report = runHealthCheck();
       if (report) {
+        appendHealthHistory(report);
         const uploaded = await uploadHealthToS3(report);
         log(`health check: ${uploaded ? 'uploaded to S3' : 'S3 unavailable, local only'}`);
       }
