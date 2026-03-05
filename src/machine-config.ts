@@ -59,6 +59,9 @@ export function loadMachineConfig(): MachineConfig {
   };
 
   if (typeof raw.containerNetwork === 'string') {
+    if (!/^[a-z][a-z0-9_-]*$/i.test(raw.containerNetwork)) {
+      throw new Error(`machine.json: "containerNetwork" must be a valid network name (got "${raw.containerNetwork}")`);
+    }
     config.containerNetwork = raw.containerNetwork;
   }
 
