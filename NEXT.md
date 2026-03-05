@@ -1,7 +1,7 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05T20:50Z.
+Updated 2026-03-05 03:55 PM EST.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
