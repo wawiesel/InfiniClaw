@@ -273,13 +273,13 @@ function createIndicatorSet(emoji: string, activeVerb: string, doneVerb: string,
       sendWithRetry().then((eventId) => {
         if (!eventId) return;
         if (indicators[chatJid]) {
-          ch.editMessage!(chatJid, eventId, statusMessage(emoji, `${doneVerb} (${formatElapsed(startedAt)})`)).catch(() => { });
+          ch.editMessage!(chatJid, eventId, statusMessage(emoji, `${doneVerb} (${formatElapsed(startedAt)})`)).catch((err) => { logger.debug({ chatJid, err }, 'Indicator edit failed (already done)'); });
           return;
         }
-        const doEdit = () => ch.editMessage!(chatJid, eventId, statusMessage(emoji, `${activeVerb} (${formatElapsed(startedAt)})`)).catch(() => { });
+        const doEdit = () => ch.editMessage!(chatJid, eventId, statusMessage(emoji, `${activeVerb} (${formatElapsed(startedAt)})`)).catch((err) => { logger.debug({ chatJid, err }, 'Indicator edit failed'); });
         const timer = createAdaptiveTimer(startedAt, doEdit, indicators, chatJid);
         indicators[chatJid] = { eventId, startedAt, timer, chatJid };
-      }).catch(() => { });
+      }).catch((err) => { logger.warn({ chatJid, err }, 'Indicator send failed'); });
     };
     if (delayMs) {
       delays[chatJid] = setTimeout(() => { delete delays[chatJid]; send(); }, delayMs);
@@ -297,7 +297,7 @@ function createIndicatorSet(emoji: string, activeVerb: string, doneVerb: string,
     if (!indicator.eventId) return;
     const ch = findChannel(channels, chatJid);
     if (ch?.editMessage) {
-      ch.editMessage(chatJid, indicator.eventId, statusMessage(emoji, `${doneVerb} (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
+      ch.editMessage(chatJid, indicator.eventId, statusMessage(emoji, `${doneVerb} (${formatElapsed(indicator.startedAt)})`)).catch((err) => { logger.debug({ chatJid, err }, 'Indicator clear edit failed'); });
     }
   }
 
@@ -307,7 +307,7 @@ function createIndicatorSet(emoji: string, activeVerb: string, doneVerb: string,
     if (!indicator) { start(chatJid, threadId); return; }
     const ch = findChannel(channels, chatJid);
     if (ch?.editMessage) {
-      ch.editMessage(chatJid, indicator.eventId, statusMessage(emoji, `${activeVerb} (${formatElapsed(indicator.startedAt)})`)).catch(() => { });
+      ch.editMessage(chatJid, indicator.eventId, statusMessage(emoji, `${activeVerb} (${formatElapsed(indicator.startedAt)})`)).catch((err) => { logger.debug({ chatJid, err }, 'Indicator bump edit failed'); });
     }
   }
 
@@ -549,14 +549,14 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
                 sendToToolThread(anchorId);
               } else {
                 // Fallback: send inline if we couldn't get an anchor ID
-                void ch.sendMessage(ctx.chatJid, text).catch(() => {});
+                void ch.sendMessage(ctx.chatJid, text).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Fallback tool call send failed'); });
               }
             }).catch((err) => {
               logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to open tool call thread anchor');
             });
           } else {
             // Channel doesn't support returning IDs — send inline as fallback
-            void ch.sendMessage(ctx.chatJid, text).catch(() => {});
+            void ch.sendMessage(ctx.chatJid, text).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Inline tool call send failed'); });
           }
         }
       } else {
@@ -715,7 +715,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   markRunStarted(chatJid);
 
   if (channel?.setStatusPip) {
-    void channel.setStatusPip(chatJid, PIP_PULSE[0]).catch(() => { });
+    void channel.setStatusPip(chatJid, PIP_PULSE[0]).catch((err) => { logger.debug({ chatJid, err }, 'Status pip pulse failed'); });
   }
 
   if (isMainGroup) {
@@ -746,7 +746,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         for (const msgId of inboundMessageIds) {
           // Skip synthetic IDs (resume-, out-, system-, op-) — only channel-native IDs can be reacted to
           if (/^(resume|out|system|op)-/.test(msgId)) continue;
-          void ch.sendReaction(chatJid, msgId, '🔹').catch(() => { });
+          void ch.sendReaction(chatJid, msgId, '🔹').catch((err) => { logger.debug({ chatJid, msgId, err }, 'Reaction send failed'); });
         }
       }
     },
@@ -781,7 +781,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   if (channel?.setStatusPip) {
-    void channel.setStatusPip(chatJid, '🟢').catch(() => { });
+    void channel.setStatusPip(chatJid, '🟢').catch((err) => { logger.debug({ chatJid, err }, 'Status pip green failed'); });
   }
   if (idleTimer) clearTimeout(idleTimer);
   if (runProgressNudgeTimer) clearInterval(runProgressNudgeTimer);
@@ -1008,7 +1008,7 @@ async function handleGroupMessagesInLoop(
     if (interruptMessages.length > 0) {
       startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
       const ch = findChannel(channels, chatJid);
-      if (ch?.setTyping) ch.setTyping(chatJid, true).catch(() => {});
+      if (ch?.setTyping) ch.setTyping(chatJid, true).catch((err) => { logger.debug({ chatJid, err }, 'Set typing failed'); });
       sendInterruptMessage(chatJid, group, formatted);
       lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
       saveState();
@@ -1403,9 +1403,9 @@ async function main(): Promise<void> {
                   ? statusMessage('🔌', `reconnected (${reconnectCount}x).`)
                   : statusMessage('🔌', 'reconnected.');
                 if (reconnectEventId) {
-                  matrix.editMessage(mainJid, reconnectEventId, label).catch(() => { });
+                  matrix.editMessage(mainJid, reconnectEventId, label).catch((err) => { logger.warn({ mainJid, err }, 'Reconnect edit failed'); });
                 } else {
-                  const id = await matrix.sendMessageReturningId(mainJid, label).catch(() => undefined);
+                  const id = await matrix.sendMessageReturningId(mainJid, label).catch((err) => { logger.warn({ mainJid, err }, 'Reconnect send failed'); return undefined; });
                   if (id) reconnectEventId = id;
                 }
               }

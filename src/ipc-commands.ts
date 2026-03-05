@@ -214,7 +214,7 @@ function checkCooldown(key: string, cooldownMs: number): string | null {
 /** Send a message, swallowing errors (best-effort notification). */
 async function safeSend(ctx: InfiniClawIpcContext, chatJid: string | null, text: string): Promise<void> {
   if (!chatJid) return;
-  try { await ctx.sendMessage(chatJid, text); } catch { /* best-effort */ }
+  try { await ctx.sendMessage(chatJid, text); } catch (err) { logger.warn({ chatJid, err }, 'safeSend failed'); }
 }
 
 /** Parse chatJid from data, returning null if empty. */
@@ -226,9 +226,11 @@ function parseChatJid(data: CommandData): string | null {
 
 /** Parse bot name from IPC data, defaulting to calling bot's own name. */
 function parseBot(data: CommandData): string {
-  return typeof data.bot === 'string' && getActiveBots().includes(data.bot)
-    ? data.bot
-    : ASSISTANT_NAME.toLowerCase();
+  if (typeof data.bot === 'string' && data.bot.trim()) {
+    if (getActiveBots().includes(data.bot)) return data.bot;
+    logger.warn({ requested: data.bot, active: getActiveBots() }, 'parseBot: requested bot not in active list, falling back to self');
+  }
+  return ASSISTANT_NAME.toLowerCase();
 }
 
 /** Truncate long output for chat display. */
@@ -332,7 +334,12 @@ async function handleSelfRestart(bot: string, chatJid: string | null, ctx: Infin
   } catch (err) {
     logger.warn({ bot, err }, 'Start script refresh failed — restarting anyway');
   }
-  setTimeout(() => process.exit(0), 500);
+  // Allow time for pending sends to flush before exiting
+  logger.info({ bot }, 'Self-restart: waiting for pending operations before exit');
+  setTimeout(() => {
+    logger.info({ bot }, 'Self-restart: exiting now');
+    process.exit(0);
+  }, 2000);
 }
 
 async function handleCrossBotRestart(bot: string, chatJid: string | null, ctx: InfiniClawIpcContext): Promise<void> {
@@ -793,7 +800,7 @@ function syncVerificationsToInstance(root: string, bot: string): void {
   try {
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.copyFileSync(src, dst);
-  } catch { /* best effort */ }
+  } catch (err) { logger.warn({ bot, err }, 'Failed to sync verifications to instance'); }
 }
 
 async function handleRequestVerification(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {

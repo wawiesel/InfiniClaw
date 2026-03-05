@@ -67,7 +67,8 @@ interface RoomConn {
 
 const HOSTNAME = os.hostname();
 const SYNC_TIMEOUT = 30_000;
-const RETRY_DELAY = 10_000;
+const RETRY_DELAY_BASE = 10_000;
+const RETRY_DELAY_MAX = 5 * 60_000; // cap at 5 minutes
 const STARTUP_SYNC_DELAY = 3_000;
 
 function loadIntercomConfig(): IntercomConfig {
@@ -327,16 +328,23 @@ async function connectRoom(conn: RoomConn): Promise<void> {
   log(`connected to ${conn.name} as ${userId}`);
 }
 
-async function syncLoop(conn: RoomConn, captainUserId: string): Promise<void> {
+async function dialtone(conn: RoomConn, captainUserId: string): Promise<void> {
+  let retryDelay = RETRY_DELAY_BASE;
+
   // Initial sync to get the since token (discard old events)
-  try {
-    await connectRoom(conn);
-    const initial = await matrixSync(conn.homeserver, conn.accessToken!, conn.syncToken, conn.filterId, 0);
-    conn.syncToken = initial.next_batch;
-    log(`${conn.name}: initial sync done, watching for commands`);
-  } catch (err) {
-    log(`${conn.name}: initial sync failed: ${errStr(err)}`);
-    await sleep(RETRY_DELAY);
+  while (!conn.syncToken) {
+    try {
+      await connectRoom(conn);
+      const initial = await matrixSync(conn.homeserver, conn.accessToken!, conn.syncToken, conn.filterId, 0);
+      conn.syncToken = initial.next_batch;
+      retryDelay = RETRY_DELAY_BASE;
+      log(`${conn.name}: initial sync done, watching for commands`);
+    } catch (err) {
+      log(`${conn.name}: initial sync failed (retry in ${Math.round(retryDelay / 1000)}s): ${errStr(err)}`);
+      conn.accessToken = null;
+      await sleep(retryDelay);
+      retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
+    }
   }
 
   while (true) {
@@ -350,6 +358,7 @@ async function syncLoop(conn: RoomConn, captainUserId: string): Promise<void> {
 
       const data = await matrixSync(conn.homeserver, conn.accessToken!, conn.syncToken, conn.filterId, SYNC_TIMEOUT);
       conn.syncToken = data.next_batch;
+      retryDelay = RETRY_DELAY_BASE; // reset on success
 
       // Process timeline events
       const joinedRooms = data.rooms?.join;
@@ -378,9 +387,10 @@ async function syncLoop(conn: RoomConn, captainUserId: string): Promise<void> {
         }
       }
     } catch (err) {
-      log(`${conn.name}: sync error: ${errStr(err)}`);
+      log(`${conn.name}: sync error (retry in ${Math.round(retryDelay / 1000)}s): ${errStr(err)}`);
       conn.accessToken = null;
-      await sleep(RETRY_DELAY);
+      await sleep(retryDelay);
+      retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
     }
   }
 }
@@ -437,7 +447,7 @@ async function main(): Promise<void> {
 
   // Stagger startup to avoid thundering herd
   const loops = conns.map((conn, i) =>
-    sleep(i * STARTUP_SYNC_DELAY).then(() => syncLoop(conn, captainUserId)),
+    sleep(i * STARTUP_SYNC_DELAY).then(() => dialtone(conn, captainUserId)),
   );
 
   await Promise.all(loops);
