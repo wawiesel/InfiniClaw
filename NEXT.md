@@ -40,3 +40,4 @@ Updated 2026-03-05T18:25Z.
 - Message-filtering regex fix — `a7ee61f`. lastIndex reset, type guard, expanded pattern.
 - Idle container wakeup — `e1b369e`. Containers now wake for pending messages/tasks.
 - Image hash cache fix — `5887d63`. Checks `podman image exists` before trusting cache.
+- Rolling health metrics — `health-check.sh` now reports 24h and 7d rolling deltas from JSONL history. Supervisor appends snapshots every 30 min.

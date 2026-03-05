@@ -4,20 +4,22 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOGS_DIR="$ROOT_DIR/_runtime/logs"
 INSTANCES_DIR="$ROOT_DIR/_runtime/instances"
+HISTORY_FILE="$ROOT_DIR/_runtime/data/health-history.jsonl"
 OUTPUT_MODE="${1:-text}"  # text or --json
 MACHINE_NAME="${MACHINE_NAME:-$(hostname)}"
 export MACHINE_NAME
 
-python3 - "$LOGS_DIR" "$INSTANCES_DIR" "$OUTPUT_MODE" <<'PY'
+python3 - "$LOGS_DIR" "$INSTANCES_DIR" "$OUTPUT_MODE" "$HISTORY_FILE" <<'PY'
 import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 logs_dir = sys.argv[1]
 instances_dir = sys.argv[2]
 json_mode = sys.argv[3] == "--json"
+history_file = sys.argv[4]
 
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 def strip_ansi(s):
@@ -30,6 +32,7 @@ report = {
     "bots": {},
     "sessions": {},
     "session_total_mb": 0,
+    "rolling": {},
 }
 
 # Discover bots from error logs
@@ -131,6 +134,66 @@ if os.path.isdir(instances_dir):
         report["sessions"][bot_dir] = size_mb
 report["session_total_mb"] = round(total_session / 1024 / 1024, 1)
 
+# ── Rolling metrics from history ──────────────────────────────────
+def compute_rolling(snapshots, hours_label):
+    """Compute rolling deltas from a list of snapshots."""
+    if len(snapshots) < 2:
+        return None
+    first = snapshots[0]
+    last = snapshots[-1]
+    result = {"snapshots": len(snapshots), "bots": {}}
+
+    for bot in set(list(first.get("bots", {})) + list(last.get("bots", {}))):
+        fb = first.get("bots", {}).get(bot, {})
+        lb = last.get("bots", {}).get(bot, {})
+        if "error" in fb or "error" in lb:
+            continue
+        result["bots"][bot] = {
+            "oom_kills": lb.get("oom_kills", 0) - fb.get("oom_kills", 0),
+            "sigkills": lb.get("sigkills", 0) - fb.get("sigkills", 0),
+            "errors": lb.get("errors", 0) - fb.get("errors", 0),
+            "spawns": lb.get("spawns", 0) - fb.get("spawns", 0),
+            "rss_max": max(
+                (s.get("bots", {}).get(bot, {}).get("rss_mb", 0) or 0)
+                for s in snapshots
+            ),
+        }
+
+    first_sess = first.get("session_total_mb", 0)
+    last_sess = last.get("session_total_mb", 0)
+    result["session_delta_mb"] = round(last_sess - first_sess, 1)
+    return result
+
+if os.path.exists(history_file):
+    cutoff_24h = now - timedelta(hours=24)
+    cutoff_7d = now - timedelta(days=7)
+    snaps_24h = []
+    snaps_7d = []
+    try:
+        with open(history_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    snap = json.loads(line)
+                    ts = datetime.fromisoformat(snap["ts"])
+                    if ts >= cutoff_7d:
+                        snaps_7d.append(snap)
+                    if ts >= cutoff_24h:
+                        snaps_24h.append(snap)
+                except (json.JSONDecodeError, KeyError, ValueError):
+                    continue
+    except Exception:
+        pass
+
+    r24 = compute_rolling(snaps_24h, "24h")
+    r7d = compute_rolling(snaps_7d, "7d")
+    if r24:
+        report["rolling"]["24h"] = r24
+    if r7d:
+        report["rolling"]["7d"] = r7d
+
 # Output
 if json_mode:
     print(json.dumps(report))
@@ -147,9 +210,21 @@ else:
         print(f"  Log age: {d['log_age_min']}min | Error: {d['error_log_kb']}KB | Main: {d['main_log_kb']}KB")
         if d["rss_mb"] is not None:
             print(f"  Memory: RSS={d['rss_mb']}MB heap={d['heap_mb']}MB limit={d['limit_mb']}MB ({d['mem_pct']}%)")
-        print(f"  Events: spawns={d['spawns']} SIGKILLs={d['sigkills']} SIGTERMs={d['sigterms']} OOM={d['oom_kills']} errors={d['errors']}")
+        print(f"  Cumulative: spawns={d['spawns']} SIGKILLs={d['sigkills']} SIGTERMs={d['sigterms']} OOM={d['oom_kills']} errors={d['errors']}")
         if d["last_ts"]:
             print(f"  Last entry: {d['last_ts']}")
+
+    # Rolling metrics
+    for window, label in [("24h", "24-HOUR"), ("7d", "7-DAY")]:
+        rolling = report.get("rolling", {}).get(window)
+        if rolling:
+            print(f"\n{'=' * 60}")
+            print(f"ROLLING {label} ({rolling['snapshots']} snapshots)")
+            print("=" * 60)
+            for bot, rd in rolling["bots"].items():
+                print(f"  {bot}: OOM={rd['oom_kills']} kills={rd['sigkills']} errors={rd['errors']} spawns={rd['spawns']} peak_RSS={rd['rss_max']}MB")
+            print(f"  Session delta: {rolling['session_delta_mb']:+.1f}MB")
+
     print(f"\n{'=' * 60}")
     print("SESSION FILES")
     for bot, mb in report["sessions"].items():
