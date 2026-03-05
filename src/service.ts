@@ -34,6 +34,14 @@ const RSYNC_EXCLUDES = [
   '.env.local',
 ];
 
+const BOT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function assertValidBotName(bot: string): void {
+  if (!BOT_NAME_PATTERN.test(bot) || bot.includes('..')) {
+    throw new Error(`Invalid bot name: ${bot}`);
+  }
+}
+
 // ── Path helpers ───────────────────────────────────────────────────────
 
 export function resolveRoot(): string {
@@ -55,6 +63,7 @@ function externalNanoclawDir(root: string): string {
 }
 
 export function instanceDir(root: string, bot: string): string {
+  assertValidBotName(bot);
   return path.join(root, '_runtime', 'instances', bot);
 }
 
@@ -73,10 +82,12 @@ function resolveRole(bot: string): string {
 }
 
 function personaDir(root: string, bot: string): string {
+  assertValidBotName(bot);
   return path.join(root, 'bots', resolveRole(bot), bot);
 }
 
 function profileEnvPath(_root: string, bot: string): string {
+  assertValidBotName(bot);
   const config = loadMachineConfig();
   return path.join(config.secretsPath, bot, 'env');
 }
@@ -316,6 +327,7 @@ export function writeCrewStatus(root: string, thisBot: string, dataDir: string):
     present: boolean;
     isCommandingOfficer: boolean;
   }[] = [];
+  const crewIndexByBotId = new Map<string, number>();
 
   for (const [botId, info] of Object.entries(roster)) {
     const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
@@ -338,6 +350,7 @@ export function writeCrewStatus(root: string, thisBot: string, dataDir: string):
       present,
       isCommandingOfficer: false, // set below
     });
+    crewIndexByBotId.set(botId, crew.length - 1);
   }
 
   // Mark CO for each room (lowest rank among present bots)
@@ -345,10 +358,8 @@ export function writeCrewStatus(root: string, thisBot: string, dataDir: string):
     members.sort((a, b) => a.rank - b.rank);
     const coBotId = members[0]?.bot;
     if (coBotId) {
-      const env = (() => { try { return loadProfileEnv(root, coBotId); } catch { return null; } })();
-      const coName = env?.ASSISTANT_NAME || coBotId;
-      const entry = crew.find((c) => c.name === coName);
-      if (entry) entry.isCommandingOfficer = true;
+      const idx = crewIndexByBotId.get(coBotId);
+      if (idx !== undefined) crew[idx].isCommandingOfficer = true;
     }
   }
 
@@ -496,7 +507,7 @@ function rebuildImageIfChanged(root: string, bot: string): void {
   // Also rebuild if the image was removed (e.g. podman rmi)
   let imageExists = true;
   try {
-    execSync(`podman image exists nanoclaw-${bot}:latest`, { stdio: 'pipe' });
+    execFileSync('podman', ['image', 'exists', `nanoclaw-${bot}:latest`], { stdio: 'pipe' });
   } catch { imageExists = false; }
   if (currentHash === storedHash && imageExists) {
     console.log(`${bot}: container image up to date`);
@@ -514,7 +525,7 @@ function pm2Name(bot: string): string {
 }
 
 function pm2Stop(name: string): void {
-  try { execSync(`"${PM2_BIN}" delete "${name}"`, { stdio: 'pipe' }); } catch { /* ok — not running */ }
+  try { execFileSync(PM2_BIN, ['delete', name], { stdio: 'pipe' }); } catch { /* ok — not running */ }
 }
 
 /** Stamp git version info into instance so running code knows its deploy commit. */
@@ -626,7 +637,7 @@ function removeStaleProcesses(): void {
   const validNames = new Set(getActiveBots().map(pm2Name));
   validNames.add('infiniclaw-supervisor');
   try {
-    const out = execSync(`"${PM2_BIN}" jlist`, { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' });
+    const out = execFileSync(PM2_BIN, ['jlist'], { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' });
     const list = JSON.parse(out) as Array<{ name: string }>;
     for (const proc of list) {
       if (proc.name.startsWith('infiniclaw-') && !validNames.has(proc.name) && !proc.name.includes('-holodeck')) {
@@ -762,7 +773,7 @@ export async function start(onlyBot?: string): Promise<void> {
   startSupervisor(root);
 
   // Save pm2 process list so `pm2 resurrect` can restore after reboot
-  try { execSync(`"${PM2_BIN}" save`, { stdio: 'pipe' }); } catch { /* ok */ }
+  try { execFileSync(PM2_BIN, ['save'], { stdio: 'pipe' }); } catch { /* ok */ }
 
   console.log('\nInfiniClaw running. Check status:\n  npx pm2 list');
 }
@@ -828,7 +839,7 @@ export function chat(bot: string): void {
   let needsBuild = !fs.existsSync(distMain);
   if (!needsBuild) {
     try {
-      const srcFiles = execSync(`find "${instance}/src" -name '*.ts' -newer "${distMain}"`, {
+      const srcFiles = execFileSync('find', [path.join(instance, 'src'), '-name', '*.ts', '-newer', distMain], {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
@@ -949,6 +960,7 @@ function holodeckBotName(bot: string): string {
 }
 
 export function holodeckCreate(bot: string, branch: string): void {
+  assertValidBotName(bot);
   const activeBots = getActiveBots();
   if (!activeBots.includes(bot)) {
     throw new Error(`Unknown bot: ${bot}. Valid: ${activeBots.join(', ')}`);
@@ -968,7 +980,10 @@ export function holodeckCreate(bot: string, branch: string): void {
   // 1. Create git worktree from branch
   console.log(`Creating worktree for branch '${branch}'...`);
   fs.mkdirSync(path.dirname(worktree), { recursive: true });
-  execSync(`git worktree add "${worktree}" "${branch}"`, { cwd: root, stdio: 'inherit' });
+  const normalizedBranch = branch.trim();
+  if (!normalizedBranch) throw new Error('Branch name is required.');
+  execFileSync('git', ['check-ref-format', '--branch', normalizedBranch], { cwd: root, stdio: 'pipe' });
+  execFileSync('git', ['worktree', 'add', worktree, normalizedBranch], { cwd: root, stdio: 'inherit' });
 
   // 2. Deploy worktree code to holodeck instance
   fs.mkdirSync(instance, { recursive: true });
@@ -1037,7 +1052,7 @@ export function holodeckCreate(bot: string, branch: string): void {
   pm2StartBot(hdBot, process.execPath, instance, logs, root);
 
   console.log(`\nHolodeck started: ${hdBot}`);
-  console.log(`  Branch: ${branch}`);
+  console.log(`  Branch: ${normalizedBranch}`);
   console.log(`  Instance: ${instance}`);
   console.log(`  Chat: npm run cli holodeck chat ${bot}`);
   console.log(`  Logs: tail -f ${logs}/${hdBot}.log`);
@@ -1049,6 +1064,7 @@ export function holodeckChat(bot: string): void {
 }
 
 export function holodeckTeardown(bot: string): void {
+  assertValidBotName(bot);
   const root = resolveRoot();
   const hdBot = holodeckBotName(bot);
   const worktree = path.join(root, '_holodeck', bot);
@@ -1076,7 +1092,7 @@ export function holodeckTeardown(bot: string): void {
 
   // Remove worktree
   if (fs.existsSync(worktree)) {
-    execSync(`git worktree remove "${worktree}" --force`, { cwd: root, stdio: 'inherit' });
+    execFileSync('git', ['worktree', 'remove', worktree, '--force'], { cwd: root, stdio: 'inherit' });
     console.log(`Removed worktree: ${worktree}`);
   }
 
@@ -1084,6 +1100,7 @@ export function holodeckTeardown(bot: string): void {
 }
 
 export function holodeckPromote(bot: string): void {
+  assertValidBotName(bot);
   const root = resolveRoot();
   const worktree = path.join(root, '_holodeck', bot);
   if (!fs.existsSync(worktree)) {
@@ -1096,7 +1113,7 @@ export function holodeckPromote(bot: string): void {
 
   // Merge into current branch
   console.log(`Merging '${branch}' into current branch...`);
-  execSync(`git merge "${branch}"`, { cwd: root, stdio: 'inherit' });
+  execFileSync('git', ['merge', branch], { cwd: root, stdio: 'inherit' });
 
   // Teardown holodeck
   holodeckTeardown(bot);
