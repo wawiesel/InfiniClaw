@@ -123,32 +123,10 @@ let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
 
-// ── Dynamic CO roster ──────────────────────────────────────────────────
-// Active bots in each room: botName → rank
+// ── CO roster (initialized from crew-status.json at startup) ────────────
 const roomRoster: Record<string, Map<string, number>> = {};
-// Current CO per room
 const roomCO: Record<string, string | undefined> = {};
-// Reference to matrix channel for display name updates
 let matrixRef: MatrixChannel | null = null;
-
-/** Intercept !roster intercom signals for roster state updates. Returns true if consumed. */
-function handleRosterSignal(msg: { content: string; chat_jid: string }): boolean {
-  const match = msg.content.match(/^!roster\s+(join|leave)\s+(\S+)(?:\s+(\d+))?/);
-  if (!match) return false;
-  const [, action, botName, rankStr] = match;
-  const chatJid = msg.chat_jid;
-
-  if (!roomRoster[chatJid]) roomRoster[chatJid] = new Map();
-
-  if (action === 'join') {
-    roomRoster[chatJid].set(botName, parseInt(rankStr || '99', 10));
-  } else {
-    roomRoster[chatJid].delete(botName);
-  }
-
-  void rerankCO(chatJid);
-  return true; // consumed, don't pass to bot
-}
 
 /** Recalculate CO for a room and update display name badge. */
 async function rerankCO(chatJid: string): Promise<void> {
@@ -1310,7 +1288,6 @@ async function main(): Promise<void> {
       displayName: `${ASSISTANT_NAME} 🟢`,
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
-        if (handleRosterSignal(msg)) return;
         storeMessage(msg);
         if (msg.id && msg.id.startsWith('$')) {
           const group = registeredGroups[msg.chat_jid];

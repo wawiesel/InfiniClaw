@@ -48,7 +48,7 @@ Each room has a **commanding officer (CO)** — the lowest-rank active bot on th
 - Gets a star badge in their Matrix display name (e.g. "BotName ⭐")
 - All bots require @callout — CO designation is for rank/authority and display badge only
 
-CO election is dynamic via `!roster join/leave` intercom signals sent at CLI start/stop. Display name badges: ⭐ = CO, 🟢 = active, 🔴 = dismissed/offline. Bots query the live roster via the `crew_roster` MCP tool, which reads `crew-status.json` generated at deploy from fleet-wide presence data.
+CO is determined from `crew-status.json`, generated at deploy from fleet-wide presence data. Each bot reads it after connecting to Matrix and sets its badge accordingly. Display name badges: ⭐ = CO, 🟢 = active, 🔴 = dismissed/offline. Bots query the live roster via the `crew_roster` MCP tool, which also reads `crew-status.json`.
 
 ### Containers
 

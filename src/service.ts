@@ -707,7 +707,6 @@ export async function start(onlyBot?: string): Promise<void> {
       deployBot(root, bot);
       pm2StartBot(bot, process.execPath, instance, logs, root);
       console.log(`${bot}: started (${pm2Name(bot)})`);
-      try { sendRosterSignal(root, bot, 'join'); } catch { /* best effort */ }
     } catch (err) {
       console.error(`${bot}: failed to start -`, err);
     }
@@ -728,7 +727,6 @@ export async function stop(onlyBot?: string): Promise<void> {
   const bots = onlyBot ? allBots.filter(b => b === onlyBot) : allBots;
 
   for (const bot of bots) {
-    try { sendRosterSignal(root, bot, 'leave'); } catch { /* best effort */ }
     try { syncPersona(root, bot); } catch { /* best effort */ }
     pm2Stop(pm2Name(bot));
     console.log(`${bot}: stopped`);
@@ -813,48 +811,6 @@ export function chat(bot: string): void {
     stdio: 'inherit',
   });
   process.exit(result.status ?? 1);
-}
-
-// ── Roster signals ──────────────────────────────────────────────────
-
-/** Send a !roster join/leave signal via intercom to a bot's room. */
-export function sendRosterSignal(root: string, bot: string, action: 'join' | 'leave'): void {
-  const config = loadMachineConfig();
-  const profileEnv = loadProfileEnv(root, bot);
-  const roomName = profileEnv.MAIN_GROUP_NAME;
-  if (!roomName) return;
-
-  // Map MAIN_GROUP_NAME to intercom room key
-  const roomKey = roomName.toLowerCase();
-
-  let rank = 99;
-  if (action === 'join') {
-    try {
-      const roster = JSON.parse(fs.readFileSync(path.join(config.secretsPath, 'roster.json'), 'utf-8'));
-      rank = roster[bot]?.rank ?? 99;
-    } catch { /* default rank */ }
-  }
-
-  const botDisplayName = profileEnv.ASSISTANT_NAME || bot;
-  const message = action === 'join'
-    ? `!roster join ${botDisplayName} ${rank}`
-    : `!roster leave ${botDisplayName}`;
-
-  const intercomScript = path.join(config.secretsPath, 'operator', 'intercom-send.sh');
-  if (!fs.existsSync(intercomScript)) {
-    console.warn(`${bot}: intercom-send.sh not found, skipping roster signal`);
-    return;
-  }
-
-  try {
-    execSync(`bash "${intercomScript}" "${roomKey}" "${message}"`, {
-      stdio: 'pipe',
-      timeout: 15000,
-    });
-    console.log(`${bot}: roster ${action} sent to ${roomKey}`);
-  } catch (err) {
-    console.warn(`${bot}: roster signal failed:`, err instanceof Error ? err.message : err);
-  }
 }
 
 // ── Send (operator message to bot room) ─────────────────────────────
