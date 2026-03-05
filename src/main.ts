@@ -142,6 +142,7 @@ const activeReplyThreadIds: Record<string, string | undefined> = {};
 // Per-turn thread for tool call <details> blocks when on main timeline
 const progressToolCallThreadIds: Record<string, string | undefined> = {};
 const threadMapLastSeen: Record<string, number> = {};
+const triggerAckByMessageKey: Record<string, number> = {};
 let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
@@ -269,6 +270,25 @@ let botMatrixUserIds: Set<string> = new Set();
 function isThreadContext(chatJid: string): boolean {
   threadMapLastSeen[`r:${chatJid}`] = Date.now();
   return Boolean(activeReplyThreadIds[chatJid]);
+}
+
+function sendTriggerAck(chatJid: string, messages: NewMessage[]): void {
+  const ch = findChannel(channels, chatJid);
+  if (!ch) return;
+
+  if (ch.setTyping) {
+    void ch.setTyping(chatJid, true).catch((err) => { logger.debug({ chatJid, err }, 'Set typing failed'); });
+  }
+
+  if (!ch.sendReaction) return;
+  for (const m of messages) {
+    if (!m.id) continue;
+    if (/^(resume|out|system|op)-/.test(m.id)) continue;
+    const key = `${chatJid}:${m.id}`;
+    if (triggerAckByMessageKey[key]) continue;
+    triggerAckByMessageKey[key] = Date.now();
+    void ch.sendReaction(chatJid, m.id, '👀').catch((err) => { logger.debug({ chatJid, msgId: m.id, err }, 'Trigger ack reaction failed'); });
+  }
 }
 
 const esc = (s: string): string =>
@@ -753,6 +773,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
+  // Fast acknowledgment as soon as we decide to respond.
+  sendTriggerAck(chatJid, actionableMessages);
+
   // Filter context by thread participation — exclude threads bot isn't part of
   const contextMessages = filteredMessages.filter(m => {
     if (!m.thread_id) return true;
@@ -838,16 +861,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     chatJid,
     group,
     inboundMessageIds,
-    onAcknowledge: () => {
-      const ch = findChannel(channels, chatJid);
-      if (ch?.sendReaction) {
-        for (const msgId of inboundMessageIds) {
-          // Skip synthetic IDs (resume-, out-, system-, op-) — only channel-native IDs can be reacted to
-          if (/^(resume|out|system|op)-/.test(msgId)) continue;
-          void ch.sendReaction(chatJid, msgId, '🔹').catch((err) => { logger.debug({ chatJid, msgId, err }, 'Reaction send failed'); });
-        }
-      }
-    },
+    onAcknowledge: () => { },
     onOutputSent: (text) => {
       outputSentToUser = true;
       lastResponseBody = text;
@@ -1077,6 +1091,9 @@ async function handleGroupMessagesInLoop(
     saveState();
     return;
   }
+
+  // Fast acknowledgment as soon as we decide to respond.
+  sendTriggerAck(chatJid, actionableMessages);
 
   // Collect all pending messages since last agent response, filtered by thread participation
   const allPending = getMessagesSince(
@@ -1584,6 +1601,12 @@ async function main(): Promise<void> {
       if (now - threadMapLastSeen[`p:${jid}`] > STALE_THREAD_TTL) {
         delete progressToolCallThreadIds[jid];
         delete threadMapLastSeen[`p:${jid}`];
+        pruned++;
+      }
+    }
+    for (const key of Object.keys(triggerAckByMessageKey)) {
+      if (now - triggerAckByMessageKey[key] > STALE_THREAD_TTL) {
+        delete triggerAckByMessageKey[key];
         pruned++;
       }
     }

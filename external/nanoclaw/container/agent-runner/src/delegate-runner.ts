@@ -286,11 +286,11 @@ Available lobes and models:
 - ollama: qwen3:30b-thinking (default, 30.5B reasoning), qwen3:14b (14.8B fast), devstral-small-2:24b (24B coding), devstral-2:latest (125B heavy), gpt-oss:20b (20.9B), nemotron-3-nano:30b (31.6B) — free local LLM, last resort fallback only
 
 The tool handles the entire flow:
-1. Posts summary to the main timeline
-2. Captures that message's event ID for threading
-3. Posts the objective in the thread
+1. Posts summary in the active thread when one exists, otherwise on main timeline
+2. Captures the summary event ID for threading when no active thread exists
+3. Posts the objective in the delegate thread
 4. Runs the lobe subprocess with the objective
-5. Posts the lobe response in the thread
+5. Posts the lobe response in the same thread
 6. Restores the previous work thread (or clears if none was active)
 7. Returns the lobe output to the calling agent
 
@@ -328,8 +328,6 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
       }
 
       // Save the active work thread before delegation so we can restore it after.
-      // delegate_to_lobe always posts to the main timeline regardless of thread context,
-      // and restores the previous thread when done rather than clearing it.
       const previousWorkThread = readCurrentWorkThread();
 
       // Resolve lobe and model first (needed for summary)
@@ -342,9 +340,15 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
       })();
       const providerName = lobe.charAt(0).toUpperCase() + lobe.slice(1);
 
-      // Step 1+2: Post summary to main timeline and capture event ID
+      // Step 1+2: Keep delegations in the active thread when present. Otherwise post
+      // summary on the main timeline and use it as the new delegate thread anchor.
       const summaryText = `\u{1F4AD} ${providerName}/${effectiveModel} - ${args.reason}`;
-      const threadId = await sendAndGetEventId(summaryText, 10000);
+      let threadId: string | null = previousWorkThread;
+      if (threadId) {
+        emitDelegateMessage(summaryText, threadId);
+      } else {
+        threadId = await sendAndGetEventId(summaryText, 10000);
+      }
 
       // Step 3: Post the objective in the thread with markdown formatting
       emitDelegateMessage(args.objective, threadId ?? undefined);
