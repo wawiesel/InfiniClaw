@@ -25,6 +25,29 @@ const SYNC_PATHS = [
   'store/matrix-bot.json',
   'data/sessions',       // recursive
 ];
+const RECURSIVE_SYNC_PATHS = new Set(['data/sessions']);
+const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function isValidBotName(bot: string): boolean {
+  return SAFE_BOT_NAME.test(bot) && bot !== '.' && bot !== '..';
+}
+
+function assertNoSymlinkOnPath(baseDir: string, targetPath: string): void {
+  const rel = path.relative(baseDir, targetPath);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`unsafe local path: ${targetPath}`);
+  }
+
+  let current = baseDir;
+  for (const part of rel.split(path.sep)) {
+    current = path.join(current, part);
+    if (!fs.existsSync(current)) continue;
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      throw new Error(`symlink path component blocked: ${current}`);
+    }
+  }
+}
 
 function getClient(): { client: S3Client; bucket: string } | null {
   const config = loadMachineConfig();
@@ -78,6 +101,9 @@ function walkDir(dir: string, base: string = dir): string[] {
 export async function pushBot(root: string, bot: string): Promise<void> {
   const s3 = getClient();
   if (!s3) return;
+  if (!isValidBotName(bot)) {
+    throw new Error(`Invalid bot name for S3 sync: ${bot}`);
+  }
 
   const instance = instanceDir(root, bot);
   if (!fs.existsSync(instance)) {
@@ -92,7 +118,11 @@ export async function pushBot(root: string, bot: string): Promise<void> {
     const fullPath = path.join(instance, syncPath);
     if (!fs.existsSync(fullPath)) continue;
 
-    const stat = fs.statSync(fullPath);
+    const stat = fs.lstatSync(fullPath);
+    if (stat.isSymbolicLink()) {
+      logger.warn({ path: fullPath }, 'S3 push: skipping top-level symlink path');
+      continue;
+    }
     if (stat.isDirectory()) {
       // Recursive upload
       const files = walkDir(fullPath);
@@ -122,6 +152,9 @@ export async function pushBot(root: string, bot: string): Promise<void> {
 export async function pullBot(root: string, bot: string): Promise<void> {
   const s3 = getClient();
   if (!s3) return;
+  if (!isValidBotName(bot)) {
+    throw new Error(`Invalid bot name for S3 sync: ${bot}`);
+  }
 
   const instance = instanceDir(root, bot);
   const dbPath = path.join(instance, 'store', 'messages.db');
@@ -132,8 +165,9 @@ export async function pullBot(root: string, bot: string): Promise<void> {
   let count = 0;
 
   for (const syncPath of SYNC_PATHS) {
-    const prefix = `${bot}/${syncPath}`;
-    const fullPath = path.join(instance, syncPath);
+    const isRecursive = RECURSIVE_SYNC_PATHS.has(syncPath);
+    const prefix = isRecursive ? `${bot}/${syncPath}/` : `${bot}/${syncPath}`;
+    const exactKey = `${bot}/${syncPath}`;
 
     // List all objects under this prefix (handles pagination for >1000 keys)
     let continuationToken: string | undefined;
@@ -147,6 +181,12 @@ export async function pullBot(root: string, bot: string): Promise<void> {
       if (listed.Contents) {
         for (const obj of listed.Contents) {
           if (!obj.Key) continue;
+          if (isRecursive) {
+            if (!obj.Key.startsWith(prefix)) continue;
+          } else if (obj.Key !== exactKey) {
+            continue;
+          }
+          if (!obj.Key.startsWith(`${bot}/`)) continue;
           // Compute local path from key
           const relativeToBot = obj.Key.slice(`${bot}/`.length);
           const localPath = path.join(instance, relativeToBot);
@@ -156,6 +196,7 @@ export async function pullBot(root: string, bot: string): Promise<void> {
             continue;
           }
           try {
+            assertNoSymlinkOnPath(instance, localPath);
             await downloadFile(s3.client, s3.bucket, obj.Key, localPath);
             count++;
           } catch (err) {
