@@ -1,15 +1,16 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05T18:10Z.
+Updated 2026-03-05T18:15Z.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
-- **2-second ack** — implemented in `f28eb09` (👀 reaction + typing indicator). Verify it works in practice after Cid restart.
-- **Thread discipline** — bots spam main room too much. More work in threads, only post summaries/results to main timeline. Cid editing main.ts and delegate-runner.ts for this — monitor result.
-- **Parker ineffective as autonomous monitor**. Fixed: idle containers now wake for pending messages/tasks (group-queue.ts). Still needed: periodic heartbeat so Parker can do proactive health work without external trigger.
-- **Matrix sluggish on Poseidon** (Captain report). Server responds <1ms locally — likely Element client or network issue. Investigate client-side or consider lighter Matrix client.
-- **Standing orders drift** — Cid spent an entire session on low-priority security reviews instead of Captain directives. Fixed in `08eb197` but pattern may recur. Operators must check commit messages against priorities, not just activity.
+- **Idle bots don't process queued messages**. Root cause: when a container goes idle (waitForIpcMessage), incoming messages just set a flag but never wake the container. Fix in `e1b369e` (idle-wake in group-queue.ts) deployed on Poseidon but NOT on HERACLES (git sync was broken). Cid is stuck idle since 18:09. **HERACLES needs to pull and rebuild.**
+- **2-second ack** — implemented in `f28eb09` (👀 reaction + typing indicator). Cannot verify until Cid is responsive again.
+- **Thread discipline** — implemented in `f28eb09`. Cannot verify until Cid is responsive.
+- **CLAUDE.md should be overarching directives only** (Captain directive 18:00). Specific priorities go in NEXT.md. Bots should consult NEXT.md for what to work on. Implemented in `aec6912`.
+- **Standing orders drift** — bots default to low-priority background work instead of Captain directives. Root: specific task lists in CLAUDE.md. Fixed by moving priorities to NEXT.md.
+- **Matrix sluggish on Poseidon** (Captain report). Server responds <1ms locally — likely Element client or network.
 
 ## MEDIUM — Next Up
 
@@ -23,7 +24,7 @@ Updated 2026-03-05T18:10Z.
 
 - Rename supervisor to "relay" — name conflicts with pm2. It's a message relay, not a process manager.
 - Supervisor can't process `!restart`/`!join` sent via its own intercom account (ignores own messages). Workaround: `pm2 restart` directly.
-- `npm run cli stop` hangs on S3 push — needs timeout or skip option.
+- ~~`npm run cli stop` hangs on S3 push~~ — fixed in `83ba947`, 30s timeout.
 - Pre-push hook runs full type-check + tests twice when push is rejected by remote. Consider caching or skipping on immediate retry.
 
 ## LOW — Reliability
