@@ -784,8 +784,13 @@ export async function stop(onlyBot?: string): Promise<void> {
   killStaleContainers(onlyBot);
 
   // Push state to S3 before returning so data is not lost on exit.
+  // Timeout after 30s to avoid hanging on network issues.
   try {
-    await pushAll(root);
+    const pushPromise = pushAll(root);
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('S3 push timed out after 30s')), 30_000),
+    );
+    await Promise.race([pushPromise, timeout]);
     console.log('S3 backup complete.');
   } catch (err) {
     console.warn(`S3 push failed: ${err instanceof Error ? err.message : err}`);
