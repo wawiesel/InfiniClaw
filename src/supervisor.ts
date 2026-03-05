@@ -29,6 +29,7 @@ import {
   killStaleContainers,
   loadProfileEnv,
   updatePresence,
+  removeStaleProcesses,
 } from './service.js';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -483,6 +484,7 @@ async function healthLoop(): Promise<void> {
       log(`health loop error: ${errStr(err)}`);
     }
     try { runSessionCleanup(); } catch { /* non-critical */ }
+    try { removeStaleProcesses(); } catch { /* non-critical */ }
     await sleep(HEALTH_INTERVAL);
   }
 }

@@ -633,7 +633,7 @@ function pm2StartBot(bot: string, nodeBin: string, instance: string, logs: strin
   );
 }
 
-function removeStaleProcesses(): void {
+export function removeStaleProcesses(): void {
   const validNames = new Set(getActiveBots().map(pm2Name));
   validNames.add('infiniclaw-supervisor');
   try {
@@ -663,6 +663,11 @@ export function refreshStartScript(root: string, bot: string): void {
  * Safe to call on an already-running bot (stops first).
  */
 export function bootstrapBot(root: string, bot: string): void {
+  const allowed = getActiveBots();
+  if (!allowed.includes(bot)) {
+    throw new Error(`${bot} is not in this machine's machine.json — refusing to start`);
+  }
+
   const instance = instanceDir(root, bot);
   const logs = logDir(root);
   fs.mkdirSync(logs, { recursive: true });
