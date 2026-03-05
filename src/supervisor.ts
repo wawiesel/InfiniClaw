@@ -332,6 +332,72 @@ function formatHealthSummary(reports: Array<{ machine: string; data: Record<stri
   return lines.join('\n');
 }
 
+// ── Git sync ──────────────────────────────────────────────────
+
+const GIT_SYNC_INTERVAL = 10 * 60_000; // 10 minutes
+
+function gitSync(): { ok: boolean; output: string; newCommits: number } {
+  const root = resolveRoot();
+  try {
+    // Fetch first
+    execSync('git fetch origin', { cwd: root, encoding: 'utf-8', timeout: 30_000, stdio: 'pipe' });
+    // Check how many new commits
+    const countStr = execSync('git rev-list HEAD..origin/main --count', {
+      cwd: root, encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
+    }).trim();
+    const newCommits = parseInt(countStr, 10) || 0;
+    if (newCommits === 0) return { ok: true, output: 'up to date', newCommits: 0 };
+    // Rebase
+    const output = execSync('git rebase origin/main', {
+      cwd: root, encoding: 'utf-8', timeout: 30_000, stdio: 'pipe',
+    }).trim();
+    return { ok: true, output, newCommits };
+  } catch (err) {
+    return { ok: false, output: errStr(err), newCommits: -1 };
+  }
+}
+
+/** Periodic git sync loop — pull --rebase, notify engineer on failure. */
+async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
+  await sleep(30_000); // initial delay
+  while (true) {
+    try {
+      const result = gitSync();
+      if (!result.ok) {
+        log(`git sync FAILED: ${result.output}`);
+        // Notify all rooms so the engineer on this machine sees it
+        const msg = `⚠️ ${HOSTNAME}: git sync failed — engineer please fix immediately.\n\`\`\`\n${result.output.slice(0, 500)}\n\`\`\``;
+        for (const conn of conns) {
+          if (conn.accessToken) {
+            await reply(conn, msg).catch(() => {});
+          }
+        }
+      } else if (result.newCommits > 0) {
+        log(`git sync: pulled ${result.newCommits} new commit(s)`);
+        // Rebuild after pulling new code
+        const root = resolveRoot();
+        try {
+          execSync('npm run build', { cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe' });
+          log('git sync: rebuild succeeded');
+        } catch (err) {
+          log(`git sync: rebuild FAILED: ${errStr(err)}`);
+          const msg = `⚠️ ${HOSTNAME}: git pull succeeded (${result.newCommits} commits) but build failed — engineer please fix.\n\`\`\`\n${errStr(err).slice(0, 500)}\n\`\`\``;
+          for (const conn of conns) {
+            if (conn.accessToken) {
+              await reply(conn, msg).catch(() => {});
+            }
+          }
+        }
+      } else {
+        log('git sync: up to date');
+      }
+    } catch (err) {
+      log(`git sync loop error: ${errStr(err)}`);
+    }
+    await sleep(GIT_SYNC_INTERVAL);
+  }
+}
+
 /** Periodic health loop — runs health check and uploads to S3. */
 async function healthLoop(): Promise<void> {
   // Wait before first run to let everything stabilize
@@ -612,8 +678,9 @@ async function main(): Promise<void> {
     sleep(i * STARTUP_SYNC_DELAY).then(() => dialtone(conn, captainUserId)),
   );
 
-  // Start health loop in background (non-blocking alongside room sync loops)
+  // Start background loops (non-blocking alongside room sync loops)
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));
+  gitSyncLoop(conns).catch((err) => log(`git sync loop fatal: ${errStr(err)}`));
 
   await Promise.all(loops);
 }
