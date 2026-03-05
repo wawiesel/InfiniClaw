@@ -1278,6 +1278,38 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
+  // Determine initial CO status from crew-status.json before connecting
+  let initialBadge = '🟢';
+  try {
+    const crewFile = path.join(DATA_DIR, 'crew-status.json');
+    if (fs.existsSync(crewFile)) {
+      const crewData = JSON.parse(fs.readFileSync(crewFile, 'utf-8'));
+      const roomNameToJid: Record<string, string> = {};
+      for (const [jid, group] of Object.entries(registeredGroups)) {
+        roomNameToJid[group.name.toLowerCase()] = jid;
+      }
+      for (const member of crewData.crew || []) {
+        if (!member.present) continue;
+        const jid = roomNameToJid[member.room?.toLowerCase()];
+        if (!jid) continue;
+        if (!roomRoster[jid]) roomRoster[jid] = new Map();
+        roomRoster[jid].set(member.name, member.rank);
+      }
+      // Determine CO for each room
+      for (const [jid, roster] of Object.entries(roomRoster)) {
+        let coBotName: string | undefined;
+        let coRank = Infinity;
+        for (const [name, rank] of roster) {
+          if (rank < coRank) { coBotName = name; coRank = rank; }
+        }
+        roomCO[jid] = coBotName;
+        if (coBotName === ASSISTANT_NAME) initialBadge = '⭐';
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to read crew-status.json for initial CO badge');
+  }
+
   // Create Matrix channel
   let matrix: MatrixChannel | null = null;
   if (
@@ -1285,7 +1317,7 @@ async function main(): Promise<void> {
     (MATRIX_ACCESS_TOKEN || (MATRIX_USERNAME && MATRIX_PASSWORD))
   ) {
     matrix = new MatrixChannel({
-      displayName: `${ASSISTANT_NAME} 🟢`,
+      displayName: `${ASSISTANT_NAME} ${initialBadge}`,
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
         storeMessage(msg);
@@ -1342,30 +1374,6 @@ async function main(): Promise<void> {
       logger.error({ err }, 'Initial Matrix connection failed; continuing in degraded mode');
     }
     refreshConnectedChannels();
-
-    // Initialize CO roster from crew-status.json and set display name badge
-    try {
-      const crewFile = path.join(DATA_DIR, 'crew-status.json');
-      if (fs.existsSync(crewFile)) {
-        const crewData = JSON.parse(fs.readFileSync(crewFile, 'utf-8'));
-        const roomNameToJid: Record<string, string> = {};
-        for (const [jid, group] of Object.entries(registeredGroups)) {
-          roomNameToJid[group.name.toLowerCase()] = jid;
-        }
-        for (const member of crewData.crew || []) {
-          if (!member.present) continue;
-          const jid = roomNameToJid[member.room?.toLowerCase()];
-          if (!jid) continue;
-          if (!roomRoster[jid]) roomRoster[jid] = new Map();
-          roomRoster[jid].set(member.name, member.rank);
-        }
-        for (const jid of Object.keys(roomRoster)) {
-          await rerankCO(jid);
-        }
-      }
-    } catch (err) {
-      logger.warn({ err }, 'Failed to initialize CO roster from crew-status.json');
-    }
 
     let matrixReconnectInProgress = false;
     let matrixReconnectDelay = MATRIX_RECONNECT_INTERVAL;

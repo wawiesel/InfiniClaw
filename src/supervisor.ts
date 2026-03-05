@@ -233,24 +233,26 @@ async function handleLifecycleCommand(
   }
 
   for (const bot of bots) {
-    log(`!${action} ${bot}`);
+    const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+    const name = env?.ASSISTANT_NAME || bot;
+    log(`!${action} ${name}`);
     try {
       if (action === 'dismiss') {
         stopBot(bot);
         killStaleContainers(bot);
-        await reply(conn, `${HOSTNAME}: ${bot} stopped`);
+        await reply(conn, `${HOSTNAME}: ${name} stopped`);
       } else if (action === 'join') {
         bootstrapBot(root, bot);
-        await reply(conn, `${HOSTNAME}: ${bot} started`);
+        await reply(conn, `${HOSTNAME}: ${name} started`);
       } else {
         stopBot(bot);
         killStaleContainers(bot);
         bootstrapBot(root, bot);
-        await reply(conn, `${HOSTNAME}: ${bot} restarted`);
+        await reply(conn, `${HOSTNAME}: ${name} restarted`);
       }
     } catch (err) {
-      log(`!${action} ${bot} failed: ${errStr(err)}`);
-      await reply(conn, `${HOSTNAME}: failed to ${action} ${bot} — ${errStr(err)}`);
+      log(`!${action} ${name} failed: ${errStr(err)}`);
+      await reply(conn, `${HOSTNAME}: failed to ${action} ${name} — ${errStr(err)}`);
     }
   }
 }
