@@ -6,6 +6,38 @@ import {
 } from './service.js';
 
 const [cmd, ...args] = process.argv.slice(2);
+
+function fail(message: string): never {
+  console.error(message);
+  process.exit(1);
+}
+
+function parseBot(value: string | undefined, usage: string): string {
+  if (!value) fail(usage);
+  // Bot names are used in process names and filesystem paths.
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(value)) {
+    fail(`Invalid bot name: ${value}`);
+  }
+  return value;
+}
+
+function parseBranch(value: string | undefined, usage: string): string {
+  if (!value) fail(usage);
+  // Keep branch syntax conservative because it is forwarded into git shell commands.
+  if (!/^[A-Za-z0-9._/-]{1,128}$/.test(value) || value.startsWith('-') || value.includes('..') || value.includes('//') || value.includes('@{')) {
+    fail(`Invalid branch name: ${value}`);
+  }
+  return value;
+}
+
+function runSync(fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    fail(err instanceof Error ? err.message : String(err));
+  }
+}
+
 switch (cmd) {
   case 'start':
     start(args[0]).catch((err) => { console.error(err.message); process.exit(1); });
@@ -14,8 +46,7 @@ switch (cmd) {
     stop(args[0]).catch((err) => { console.error(err.message); process.exit(1); });
     break;
   case 'chat':
-    if (!args[0]) { console.error('Usage: cli chat <bot>'); process.exit(1); }
-    chat(args[0]);
+    runSync(() => chat(parseBot(args[0], 'Usage: cli chat <bot>')));
     break;
   case 'send':
     if (args.length < 2) { console.error('Usage: cli send <room> <message>'); process.exit(1); }
@@ -40,20 +71,19 @@ switch (cmd) {
     const [sub, ...hArgs] = args;
     switch (sub) {
       case 'create':
-        if (hArgs.length < 2) { console.error('Usage: cli holodeck create <bot> <branch>'); process.exit(1); }
-        holodeckCreate(hArgs[0], hArgs[1]);
+        runSync(() => holodeckCreate(
+          parseBot(hArgs[0], 'Usage: cli holodeck create <bot> <branch>'),
+          parseBranch(hArgs[1], 'Usage: cli holodeck create <bot> <branch>'),
+        ));
         break;
       case 'chat':
-        if (!hArgs[0]) { console.error('Usage: cli holodeck chat <bot>'); process.exit(1); }
-        holodeckChat(hArgs[0]);
+        runSync(() => holodeckChat(parseBot(hArgs[0], 'Usage: cli holodeck chat <bot>')));
         break;
       case 'teardown':
-        if (!hArgs[0]) { console.error('Usage: cli holodeck teardown <bot>'); process.exit(1); }
-        holodeckTeardown(hArgs[0]);
+        runSync(() => holodeckTeardown(parseBot(hArgs[0], 'Usage: cli holodeck teardown <bot>')));
         break;
       case 'promote':
-        if (!hArgs[0]) { console.error('Usage: cli holodeck promote <bot>'); process.exit(1); }
-        holodeckPromote(hArgs[0]);
+        runSync(() => holodeckPromote(parseBot(hArgs[0], 'Usage: cli holodeck promote <bot>')));
         break;
       default:
         console.error('Usage: cli holodeck create|chat|teardown|promote');
@@ -64,9 +94,9 @@ switch (cmd) {
   case 'supervisor': {
     const sub = args[0];
     if (sub === 'start') {
-      startSupervisor(resolveRoot());
+      runSync(() => startSupervisor(resolveRoot()));
     } else if (sub === 'stop') {
-      stopSupervisor();
+      runSync(() => stopSupervisor());
     } else {
       console.error('Usage: cli supervisor start|stop');
       process.exit(1);
