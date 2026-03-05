@@ -141,6 +141,7 @@ const workThreadIds: Record<string, string> = {};
 const activeReplyThreadIds: Record<string, string | undefined> = {};
 // Per-turn thread for tool call <details> blocks when on main timeline
 const progressToolCallThreadIds: Record<string, string | undefined> = {};
+const threadMapLastSeen: Record<string, number> = {};
 let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
@@ -231,7 +232,10 @@ function resolveReplyThread(
   // If the message is in a thread, reply in that thread
   if (lastMsg?.thread_id) return lastMsg.thread_id;
   // Work thread override (set by setWorkThread MCP tool)
-  if (workThreadIds[chatJid]) return workThreadIds[chatJid];
+  if (workThreadIds[chatJid]) {
+    threadMapLastSeen[`w:${chatJid}`] = Date.now();
+    return workThreadIds[chatJid];
+  }
   // Main timeline message → reply on main timeline (no auto-threading)
   return undefined;
 }
@@ -257,8 +261,12 @@ const METRICS_HISTORY_MAX_LINES = 10_000;
 let botMatrixUserIds: Set<string> = new Set();
 
 function isThreadContext(chatJid: string): boolean {
+  threadMapLastSeen[`r:${chatJid}`] = Date.now();
   return Boolean(activeReplyThreadIds[chatJid]);
 }
+
+const esc = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function updateEventIdFile(groupFolder: string, key: 'lastSent' | 'lastReceived', eventId: string): void {
   const idsFile = path.join(DATA_DIR, 'ipc', groupFolder, 'last_event_ids.json');
@@ -590,6 +598,7 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
     const ch = findChannel(channels, ctx.chatJid);
     if (ch) {
       if (isToolCall) {
+        threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
         const activeThread = activeReplyThreadIds[ctx.chatJid];
         if (activeThread) {
           // Already in a thread — send <details> collapsible in-thread (desktop renders it; mobile shows inline but off main timeline)
@@ -607,6 +616,7 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
               logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call to dedicated thread');
             });
           };
+          threadMapLastSeen[`p:${ctx.chatJid}`] = Date.now();
           if (progressToolCallThreadIds[ctx.chatJid]) {
             sendToToolThread(progressToolCallThreadIds[ctx.chatJid]!);
           } else if (ch.sendMessageReturningId) {
@@ -614,6 +624,7 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
             void ch.sendMessageReturningId(ctx.chatJid, '<font color="#888888"><em>🔧 Tool calls</em></font>').then((anchorId) => {
               if (anchorId) {
                 progressToolCallThreadIds[ctx.chatJid] = anchorId;
+                threadMapLastSeen[`p:${ctx.chatJid}`] = Date.now();
                 sendToToolThread(anchorId);
               } else {
                 // Fallback: send inline if we couldn't get an anchor ID
@@ -628,8 +639,10 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
           }
         }
       } else {
-        const formatted = `<small><em>${text}</em></small>`;
+        const formatted = `<small><em>${esc(text)}</em></small>`;
+        threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
         void ch.sendMessage(ctx.chatJid, formatted, activeReplyThreadIds[ctx.chatJid]).then(() => {
+          threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
           bumpWorkingIndicator(ctx.chatJid, activeReplyThreadIds[ctx.chatJid]);
         }).catch((err) => {
           logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send progress to chat');
@@ -648,17 +661,22 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   const ch = findChannel(channels, ctx.chatJid);
   if (ch) {
     if (ch.setTyping) await ch.setTyping(ctx.chatJid, true);
-    let sentEventId: string | undefined;
-    if (ch.sendMessageReturningId) {
-      sentEventId = await ch.sendMessageReturningId(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
-    } else {
-      await ch.sendMessage(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
-    }
-    if (ch.setTyping) await ch.setTyping(ctx.chatJid, false);
-    storeOutgoing(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
-    if (sentEventId) {
-      const group = registeredGroups[ctx.chatJid];
-      if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
+    try {
+      let sentEventId: string | undefined;
+      threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
+      if (ch.sendMessageReturningId) {
+        sentEventId = await ch.sendMessageReturningId(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
+      } else {
+        await ch.sendMessage(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
+      }
+      threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
+      storeOutgoing(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
+      if (sentEventId) {
+        const group = registeredGroups[ctx.chatJid];
+        if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
+      }
+    } finally {
+      if (ch.setTyping) await ch.setTyping(ctx.chatJid, false);
     }
   }
 }
@@ -739,6 +757,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   setObjectiveFromMessages(chatJid, contextMessages);
 
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, contextMessages);
+  threadMapLastSeen[`r:${chatJid}`] = Date.now();
   logger.info(
     { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], msgCount: contextMessages.length },
     'Thread routing resolved',
@@ -1075,6 +1094,7 @@ async function handleGroupMessagesInLoop(
   const formatted = threadCtx ? `${threadCtx}\n\n${rawFormatted}` : rawFormatted;
 
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
+  threadMapLastSeen[`r:${chatJid}`] = Date.now();
 
   // Interrupt: if container is busy and message is from captain/operator/trigger,
   // send interrupt IPC to kill running claude and resume with the new message
@@ -1534,7 +1554,6 @@ async function main(): Promise<void> {
   // Prune stale in-memory thread maps every 30 minutes (entries older than 6 hours)
   const STALE_THREAD_TTL = 6 * 60 * 60 * 1000;
   const STALE_THREAD_CHECK = 30 * 60 * 1000;
-  const threadMapLastSeen: Record<string, number> = {};
   persistentTimers.push(setInterval(() => {
     const now = Date.now();
     let pruned = 0;
@@ -1734,8 +1753,10 @@ async function main(): Promise<void> {
     setWorkThread: (chatJid: string, threadId: string | null) => {
       if (threadId) {
         workThreadIds[chatJid] = threadId;
+        threadMapLastSeen[`w:${chatJid}`] = Date.now();
       } else {
         delete workThreadIds[chatJid];
+        delete threadMapLastSeen[`w:${chatJid}`];
       }
       // Mirror work thread state into last_event_ids.json so containers can
       // read and restore it around delegate_to_lobe calls.
@@ -1949,8 +1970,8 @@ async function main(): Promise<void> {
       const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
       const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname} · 📦 ${GIT_VERSION}`;
       const bootEventId = ch.sendMessageReturningId
-        ? await ch.sendMessageReturningId(mainJid, `<font color="#888888"><em>${boot}</em></font>`)
-        : (await ch.sendMessage(mainJid, `<font color="#888888"><em>${boot}</em></font>`), undefined);
+        ? await ch.sendMessageReturningId(mainJid, `<font color="#888888"><em>${esc(boot)}</em></font>`)
+        : (await ch.sendMessage(mainJid, `<font color="#888888"><em>${esc(boot)}</em></font>`), undefined);
       // Send startup checklist in a thread off the boot message (keeps mobile timeline clean)
       try {
         const checklist = buildStartupChecklist();
