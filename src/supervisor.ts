@@ -339,6 +339,10 @@ const GIT_SYNC_INTERVAL = 10 * 60_000; // 10 minutes
 function gitSync(): { ok: boolean; output: string; newCommits: number } {
   const root = resolveRoot();
   const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
+  // Abort any stuck rebase from a previous failed sync
+  if (fs.existsSync(path.join(root, '.git', 'REBASE_HEAD'))) {
+    try { execSync('git rebase --abort', execOpts); } catch { /* ignore */ }
+  }
   try {
     // Fetch first
     execSync('git fetch origin', execOpts);

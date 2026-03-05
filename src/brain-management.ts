@@ -200,6 +200,7 @@ export async function maybeAutoSwitchBrainsOnQuotaError(
   const switched: string[] = [];
   for (const bot of config.bots) {
     const envPath = path.join(config.secretsPath, bot, 'env');
+    if (!envPath.startsWith(config.secretsPath + path.sep)) continue; // path traversal guard
     if (!fs.existsSync(envPath)) continue;
     try {
       applyOllamaFallbackToProfile(envPath);
