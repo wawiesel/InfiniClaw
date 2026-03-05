@@ -14,7 +14,7 @@ import { parseEnvLine } from 'nanoclaw/env-utils.js';
 import {
   buildBotDirectory,
   buildInfiniClawMounts,
-  getPersonaPortPublish,
+  getPersonaContainerConfig,
   readPersonaGroupMcpServers,
 } from './container-mounts.js';
 import {
@@ -210,7 +210,12 @@ function buildVolumeMounts(
   return mounts;
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string, portPublish: string[] = []): string[] {
+function buildContainerArgs(
+  mounts: VolumeMount[],
+  containerName: string,
+  portPublish: string[] = [],
+  memoryMb?: number,
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   args.push('--pull=never');
@@ -226,10 +231,11 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string, portPu
     args.push('--userns=keep-id', '-e', 'HOME=/home/node');
   }
 
-  if (CONTAINER_MEMORY_MB > 0) {
-    args.push('--memory', `${CONTAINER_MEMORY_MB}m`);
+  const effectiveMemoryMb = memoryMb && memoryMb > 0 ? memoryMb : CONTAINER_MEMORY_MB;
+  if (effectiveMemoryMb > 0) {
+    args.push('--memory', `${effectiveMemoryMb}m`);
     // Soft limit: kernel reclaims memory more aggressively past this threshold
-    if (CONTAINER_MEMORY_RESERVATION_MB > 0 && CONTAINER_MEMORY_RESERVATION_MB < CONTAINER_MEMORY_MB) {
+    if (CONTAINER_MEMORY_RESERVATION_MB > 0 && CONTAINER_MEMORY_RESERVATION_MB < effectiveMemoryMb) {
       args.push('--memory-reservation', `${CONTAINER_MEMORY_RESERVATION_MB}m`);
     }
   }
@@ -353,8 +359,9 @@ export async function runContainerAgent(
     killExistingContainersForGroup(botTag, safeName);
   }
 
-  const portPublish = input.containerNameTag ? [] : getPersonaPortPublish();
-  const containerArgs = buildContainerArgs(mounts, containerName, portPublish);
+  const personaContainerConfig = getPersonaContainerConfig();
+  const portPublish = input.containerNameTag ? [] : personaContainerConfig.portPublish;
+  const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaContainerConfig.memoryMb);
   const configTimeout = input.timeoutOverrideMs || group.containerConfig?.timeout || CONTAINER_TIMEOUT;
   const timeoutMinutes = Math.round(configTimeout / 60_000);
 

@@ -149,17 +149,26 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
 /** Read portPublish from persona container-config.json. */
 export function getPersonaPortPublish(): string[] {
+  return getPersonaContainerConfig().portPublish;
+}
+
+/** Read supported settings from persona container-config.json. */
+export function getPersonaContainerConfig(): { portPublish: string[]; memoryMb?: number } {
   const rootDir = process.env.INFINICLAW_ROOT;
   const personaName = process.env.PERSONA_NAME;
   const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
-  if (!rootDir || !personaName) return [];
+  if (!rootDir || !personaName) return { portPublish: [] };
   try {
     const cfg = JSON.parse(
       fs.readFileSync(path.join(rootDir, 'bots', role, personaName, 'container-config.json'), 'utf-8'),
     );
-    return (cfg.portPublish as string[] | undefined) || [];
+    const portPublish = Array.isArray(cfg.portPublish)
+      ? cfg.portPublish.filter((v: unknown): v is string => typeof v === 'string')
+      : [];
+    const memoryMb = typeof cfg.memoryMb === 'number' ? cfg.memoryMb : undefined;
+    return { portPublish, memoryMb };
   } catch {
-    return [];
+    return { portPublish: [] };
   }
 }
 

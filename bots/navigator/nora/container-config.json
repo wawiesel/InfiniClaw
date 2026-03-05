@@ -1,1 +1,1 @@
-{ "portPublish": ["9000:8000"] }
+{ "portPublish": ["9000:8000"], "memoryMb": 3072 }
