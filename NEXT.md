@@ -5,6 +5,7 @@ Updated 2026-03-05T18:28Z.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
+- **Dream period** (Captain directive). Before recycling, bots get a 30-minute "dream" period to review room history, collapse memories, optimize instructions/standing orders, and prepare for a fresh start. **Scheduling rules** (all configurable via env vars): (1) **Never more than one bot dreaming at a time** — supervisor coordinates fleet-wide. (2) **Activity-based trigger** — supervisor schedules a dream when a bot has been running >MIN_SESSION_AGE_MS (default 6h) AND has no pending tasks for the next 30 minutes. The hard max MAX_SESSION_AGE_MS (default 8h) forces a dream regardless. (3) **Supervisor-driven** — the supervisor owns dream scheduling, not the bot. It tracks each bot's session age and idle state, picks the best candidate, sends a "dream" prompt via IPC, waits for completion, then allows the next bot to dream. Implementation: add dream state machine to supervisor (IDLE→DREAMING→RECYCLING). Config env vars: `MIN_DREAM_AGE_MS`, `MAX_SESSION_AGE_MS`, `DREAM_DURATION_MS`.
 - **Bots have no autonomous work mechanism** — they only respond to incoming messages. Need a heartbeat or scheduled task for proactive work without external trigger.
 - **Thread discipline** — implemented in `f28eb09` — needs verification in practice.
 - **Parker autonomous monitoring** — idle-wake deployed. Parker's scheduled health cron fires hourly but SSL errors prevented execution — should work now with `containerNetwork: "host"`. Verify.
