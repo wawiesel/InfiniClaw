@@ -86,7 +86,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
   // Sync role-assigned skills from the pool
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  const role = process.env.ASSISTANT_ROLE || '';
+  const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
 
   if (rootDir) {
     const skillsPoolDir = path.join(rootDir, 'bots', 'skills');
@@ -95,7 +95,6 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
   }
 
   if (rootDir && personaName) {
-    const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
     const personaBaseDir = path.join(rootDir, 'bots', role, personaName);
 
     // Mount persona dir writable so bots can edit their own CLAUDE.md
