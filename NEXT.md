@@ -25,7 +25,6 @@ Updated 2026-03-05T18:15Z.
 ## LOW — Reliability
 
 - Session OOM still possible — V8 heap OOM (exit 137) from large JSONL sessions. Agent-runner backup files (.claude/backups/) can restore old session IDs even after manual cleanup. Full cleanup chain: DB sessions table -> JSONL file -> .claude/backups/.
-- ~~Image hash cache prevents rebuild~~ — fixed: `rebuildImageIfChanged` now checks `podman image exists` before trusting the cache.
 - Container exit 125 from missing agent-runner mount — partially fixed with `mountIfExists` but root cause (build context) should be revisited.
 - Parker's scheduled task `ERR_SSL_PACKET_LENGTH_TOO_LONG` — should be fixed with `containerNetwork: "host"`, verify on next cron fire.
 
@@ -39,3 +38,4 @@ Updated 2026-03-05T18:15Z.
 - CLAUDE.md directive separation — `aec6912`. Specific priorities moved to NEXT.md.
 - Message-filtering regex fix — `a7ee61f`. lastIndex reset, type guard, expanded pattern.
 - Idle container wakeup — `e1b369e`. Containers now wake for pending messages/tasks.
+- Image hash cache fix — `5887d63`. Checks `podman image exists` before trusting cache.
