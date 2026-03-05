@@ -53,7 +53,7 @@ export function buildBotDirectory(): Record<string, string> {
       }
       if (name && roomJid) directory[name] = roomJid;
     }
-  } catch { /* best effort */ }
+  } catch (err) { logger.warn({ err }, 'Failed to read bot profiles for directory'); }
   return directory;
 }
 
@@ -119,7 +119,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
         containerPath: '/workspace/persona/memory',
         readonly: false,
       });
-    } catch { /* no secrets config */ }
+    } catch (err) { logger.debug({ err }, 'Memory mount skipped — no secrets config'); }
   }
 
   // Share host delegate auth directories

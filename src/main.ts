@@ -203,7 +203,7 @@ function updateEventIdFile(groupFolder: string, key: 'lastSent' | 'lastReceived'
     existing[key] = eventId;
     existing[`${key}At`] = new Date().toISOString();
     fs.writeFileSync(idsFile, JSON.stringify(existing, null, 2));
-  } catch { /* best effort */ }
+  } catch (err) { logger.debug({ groupFolder, key, err }, 'Failed to update event ID file'); }
 }
 
 interface StatusIndicator {
@@ -1673,7 +1673,7 @@ async function main(): Promise<void> {
             delete existing.workThreadId;
           }
           fs.writeFileSync(idsFile, JSON.stringify(existing, null, 2));
-        } catch { /* best effort */ }
+        } catch (err) { logger.debug({ chatJid, err }, 'Failed to write workThread to IPC file'); }
       }
     },
     syncGroups: async () => { },
