@@ -638,9 +638,12 @@ async function dialtone(conn: RoomConn, captainUserId: string): Promise<void> {
           for (const event of events.timeline?.events || []) {
             if (event.type !== 'm.room.message') continue;
             if (event.content?.msgtype !== 'm.text') continue;
-            if (event.sender === conn.userId) continue;
+            // Skip non-command messages from self (intercom-send shares the same account).
+            // ! commands from self ARE processed — echo loops are impossible since the
+            // supervisor never sends !-prefixed messages.
             const body = event.content.body?.trim();
             if (!body || !body.startsWith('!')) continue;
+            // At this point body starts with !, so even own messages are processed.
 
             if (!isAuthorized(event.sender, captainUserId)) {
               log(`${conn.name}: unauthorized command from ${event.sender}: ${body.slice(0, 50)}`);

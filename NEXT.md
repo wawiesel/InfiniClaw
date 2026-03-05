@@ -23,7 +23,6 @@ Updated 2026-03-05T19:05Z.
 ## LOW — Infrastructure
 
 - Rename supervisor to "relay" — name conflicts with pm2. It's a message relay, not a process manager.
-- Supervisor can't process `!restart`/`!join` sent via its own intercom account (ignores own messages at line 614). Root cause: supervisor and intercom-send share same Matrix account. Workaround: `pm2 restart` directly.
 
 ## LOW — Reliability
 
@@ -32,6 +31,7 @@ Updated 2026-03-05T19:05Z.
 
 ## Recently Completed
 
+- Supervisor self-command fix — supervisor now processes `!restart`/`!join` sent via its own intercom account. Root cause was self-skip at line 641.
 - Status indicator throttle — indicators stop editing after 5 minutes. Previously they edited the room message every 15s indefinitely, flooding rooms with hundreds of status edits per hour per bot.
 - Rolling health metrics — `health-check.sh` reports 24h/7d rolling deltas from JSONL history.
 - S3 push timeout — 30s timeout in `stop()`.
