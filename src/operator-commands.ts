@@ -233,7 +233,8 @@ function handleOperatorTmux(text: string, chatJid: string, threadId: string | un
             if (text) execFileSync('tmux', ['send-keys', '-t', OPERATOR_SESSION, text, 'Enter'], { stdio: 'pipe' });
             const status = existed ? 'sent to running operator' : 'started new operator session';
             const msg = text ? `🔧 ${os.hostname()}: ${status} — "${text.slice(0, 100)}"` : `🔧 ${os.hostname()}: ${status}`;
-            reply(matrix, chatJid, msg, threadId);
+            const room = (process.env.MAIN_GROUP_NAME || '').toLowerCase();
+            try { sendIntercom(room, msg); } catch { reply(matrix, chatJid, msg, threadId); }
         } catch (err) {
             logger.error({ err }, '!operator failed');
             reply(matrix, chatJid, `⛔ !operator failed: ${err instanceof Error ? err.message : String(err)}`, threadId);
