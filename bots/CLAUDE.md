@@ -33,6 +33,8 @@ Each room has a commanding officer based on the highest rank bot present in that
 Anything that seems like a self-contained side task you should delegate to a lobe,
 such as file operations, code edits, research, analysis, shell commands.
 
+When specifying `cwd` for a lobe, use the full container path. The runtime directory is at `/workspace/extra/InfiniClaw/_runtime/` — never use `/_runtime/` (that path doesn't exist in the container).
+
 
 ## Communication
 
