@@ -13,7 +13,26 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from 'nanoclaw/env-utils
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
+import { execSync as gitExecSync } from 'child_process';
 import { logger } from 'nanoclaw/logger.js';
+
+const GIT_VERSION = (() => {
+  const root = process.env.INFINICLAW_ROOT || process.cwd();
+  // Prefer stamped file written by deployBot() — always reflects deployed commit
+  try {
+    const stamped = fs.readFileSync(path.join(root, 'GIT_VERSION'), 'utf-8').trim();
+    if (stamped) return stamped;
+  } catch { /* fall through to live git */ }
+  // Fallback: live git query
+  try {
+    const hash = gitExecSync('git rev-parse --short HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    const date = gitExecSync('git log -1 --format=%ci HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().slice(0, 10);
+    const subject = gitExecSync('git log -1 --format=%s HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return `${hash} (${date}) ${subject}`;
+  } catch {
+    return 'unknown';
+  }
+})();
 import { loadMachineConfig } from './machine-config.js';
 import {
   getActiveBots,
@@ -115,7 +134,7 @@ function botStatusLine(bot: string, emoji: string): string {
       : isOllamaBaseUrl(env.BRAIN_BASE_URL || '') ? 'Ollama' : 'Claude';
     const model = `${provider}/${rawModel}`;
     const hostname = os.hostname();
-    return `<font color="#888888"><em>${emoji} ${name} · 🔧 ${role} · 💬 ${group} · 🧠 ${model} · 🖥️ ${hostname}</em></font>`;
+    return `<font color="#888888"><em>${emoji} ${name} · 🔧 ${role} · 💬 ${group} · 🧠 ${model} · 🖥️ ${hostname} · 📦 ${GIT_VERSION}</em></font>`;
   } catch {
     return statusMessage(emoji, `${bot} restarting...`);
   }

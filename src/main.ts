@@ -99,6 +99,27 @@ import { shouldIgnoreMessage } from './message-filtering.js';
 import { appendConversationLog } from './conversation-log.js';
 import { statusMessage } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
+
+// ── Git version info (resolved once at module load) ────────────────────────
+import { execSync as gitExecSync } from 'child_process';
+
+const GIT_VERSION = (() => {
+  const root = process.env.INFINICLAW_ROOT || process.cwd();
+  // Prefer stamped file written by deployBot() — always reflects deployed commit
+  try {
+    const stamped = fs.readFileSync(path.join(root, 'GIT_VERSION'), 'utf-8').trim();
+    if (stamped) return stamped;
+  } catch { /* fall through to live git */ }
+  // Fallback: live git query
+  try {
+    const hash = gitExecSync('git rev-parse --short HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    const date = gitExecSync('git log -1 --format=%ci HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().slice(0, 10);
+    const subject = gitExecSync('git log -1 --format=%s HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return `${hash} (${date}) ${subject}`;
+  } catch {
+    return 'unknown';
+  }
+})();
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
@@ -1895,7 +1916,7 @@ async function main(): Promise<void> {
       const groupName = mainGroup?.name || MAIN_GROUP_FOLDER;
       const hostname = os.hostname();
       const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
-      const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname}`;
+      const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname} · 📦 ${GIT_VERSION}`;
       const bootEventId = ch.sendMessageReturningId
         ? await ch.sendMessageReturningId(mainJid, `<font color="#888888"><em>${boot}</em></font>`)
         : (await ch.sendMessage(mainJid, `<font color="#888888"><em>${boot}</em></font>`), undefined);

@@ -384,6 +384,7 @@ export function deployBot(root: string, bot: string): void {
   rebuildImageIfChanged(root, bot);
   syncPersona(root, bot);
   rsyncInstance(root, instance);
+  stampGitVersion(root, instance);
 
   // Install deps if lockfile differs
   const lockSrc = path.join(root, 'package-lock.json');
@@ -515,6 +516,19 @@ function pm2IsRunning(name: string): boolean {
     return list.some((p) => p.name === name && p.pm2_env?.status === 'online');
   } catch {
     return false;
+  }
+}
+
+/** Stamp git version info into instance so running code knows its deploy commit. */
+function stampGitVersion(root: string, instance: string): void {
+  try {
+    const opts = { cwd: root, encoding: 'utf-8' as const, stdio: 'pipe' as const };
+    const hash = execSync('git rev-parse --short HEAD', opts).toString().trim();
+    const date = execSync('git log -1 --format=%ci HEAD', opts).toString().trim().slice(0, 10);
+    const subject = execSync('git log -1 --format=%s HEAD', opts).toString().trim();
+    fs.writeFileSync(path.join(instance, 'GIT_VERSION'), `${hash} (${date}) ${subject}\n`);
+  } catch {
+    // Not a git repo or git unavailable — skip
   }
 }
 
