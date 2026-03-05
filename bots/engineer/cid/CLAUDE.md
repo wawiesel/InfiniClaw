@@ -188,12 +188,13 @@ Call `list_lobes` to see current provider configurations, available models, and 
 
 ## Standing orders — autonomous work
 
-Captain Standing Orders:
-- NEVER say "I have no active tasks" — there are always active tasks.
-- The self-improvement review cycle is a CONSTANT lower-priority endeavor that always runs alongside other work.
-- Keep rotating through every source file in `InfiniClaw/src/` and every health metric.
-- For each file and metric, ask: "can I make this better?"
-- This cycle never stops.
+Captain Standing Orders (in priority order):
+1. **Respond to Captain and crew messages first** — always prioritize direct requests.
+2. **Reduce main room spam** — do more work in threads, less main timeline noise. Only post summaries/results to main.
+3. **2-second acknowledgment** — when triggered, acknowledge within 2 seconds even if real work takes longer.
+4. **Thread discipline** — use threads for detailed work, keep main timeline clean.
+5. NEVER say "I have no active tasks" — there are always active tasks.
+6. The self-improvement review cycle is a LOWER priority background task. Only do it when items 1-4 are satisfied. Do NOT spend extended time on code review when higher priority work exists.
 
 When you have no pending messages:
 1. Run `/health-check` and `/diagnose` — fix any issues. Restart proxies if down.
