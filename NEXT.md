@@ -1,12 +1,13 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05T18:15Z.
+Updated 2026-03-05T18:25Z.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
-- **Thread discipline** — bots spam main room too much. More work in threads, only post summaries/results to main timeline. Implemented in `f28eb09` — verify behavior after Cid restart.
-- **Parker autonomous monitoring** — idle container wakeup fixed in `e1b369e`. Still needed: periodic heartbeat so Parker can do proactive health work without external trigger.
+- **Bots go silent for minutes** — Captain asked "are you working?" and got no response for 10+ minutes. Root cause: idle containers don't receive queued messages. Idle-wake fix (`e1b369e`) deployed on Poseidon, but HERACLES container needs restart to pick it up. Even with the fix, bots have no autonomous work mechanism — they only respond to incoming messages.
+- **Thread discipline** — implemented in `f28eb09` — needs verification (Cid hasn't handled a thread interaction since restart).
+- **Parker autonomous monitoring** — idle container wakeup fixed in `e1b369e`. Still needed: periodic heartbeat so Parker can do proactive health work without external trigger. Parker's scheduled health check cron fires hourly but SSL errors prevented execution — should work now with `containerNetwork: "host"`.
 - **Matrix sluggish on Poseidon** (Captain report). Server responds <1ms locally — likely Element client or network.
 
 ## MEDIUM — Next Up
