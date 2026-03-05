@@ -1224,7 +1224,11 @@ export class MatrixChannel implements Channel {
     jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string,
   ): Promise<void> {
     if (!this.client || !this._connected) return;
-    const roomId = toRoomId(jid);
+    const roomId = parseRoomIdFromJid(jid);
+    if (!roomId) {
+      logger.warn({ jid }, `Invalid Matrix room jid; ${kind} send skipped`);
+      return;
+    }
     const isImage = kind === 'image';
     const defaultName = isImage ? 'image' : 'attachment';
     const msgtype = isImage ? 'm.image' : 'm.file';
