@@ -87,6 +87,12 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
     let hadStreamingOutput = false;
     let firstOutputReceived = false;
     const timeoutMs = Math.max(opts.configTimeout, opts.idleTimeout + 30_000);
+    if (opts.firstOutputDeadlineMs && opts.firstOutputDeadlineMs > timeoutMs) {
+      logger.warn(
+        { firstOutputDeadlineMs: opts.firstOutputDeadlineMs, timeoutMs, group: opts.groupName },
+        'firstOutputDeadlineMs exceeds container timeout — deadline will never fire',
+      );
+    }
 
     const killOnTimeout = () => {
       timedOut = true;
