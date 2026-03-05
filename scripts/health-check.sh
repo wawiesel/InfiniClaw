@@ -21,11 +21,28 @@ instances_dir = sys.argv[2]
 json_mode = sys.argv[3] == "--json"
 history_file = sys.argv[4]
 
+import subprocess
+
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 def strip_ansi(s):
     return ANSI_RE.sub('', s)
 
 now = datetime.now(tz=timezone.utc)
+
+# Get running containers to determine liveness
+running_containers = set()
+try:
+    result = subprocess.run(
+        ["podman", "ps", "--format", "{{.Names}}"],
+        capture_output=True, text=True, timeout=10
+    )
+    for line in result.stdout.strip().splitlines():
+        # container names like nanoclaw-cid-main-... → extract bot name
+        parts = line.split("-")
+        if len(parts) >= 2 and parts[0] == "nanoclaw":
+            running_containers.add(parts[1])
+except Exception:
+    pass
 report = {
     "ts": now.isoformat(),
     "machine": os.environ.get("MACHINE_NAME", os.environ.get("HOSTNAME", "unknown")),
@@ -91,15 +108,18 @@ for bot in sorted(bots):
         report["bots"][bot] = {"error": str(e)}
         continue
 
-    error_mtime = datetime.fromtimestamp(os.path.getmtime(error_log), tz=timezone.utc)
-    # Use the most recent mtime of either log — healthy bots may not write errors
-    latest_mtime = error_mtime
+    # Use most recent mtime of either log for age (main log is always written to)
+    log_mtime = os.path.getmtime(error_log)
     if os.path.exists(main_log):
-        main_mtime = datetime.fromtimestamp(os.path.getmtime(main_log), tz=timezone.utc)
-        if main_mtime > latest_mtime:
-            latest_mtime = main_mtime
-    age_min = (now - latest_mtime).total_seconds() / 60
-    status = "ACTIVE" if age_min < 5 else ("RECENT" if age_min < 60 else "STALE")
+        log_mtime = max(log_mtime, os.path.getmtime(main_log))
+    log_dt = datetime.fromtimestamp(log_mtime, tz=timezone.utc)
+    age_min = (now - log_dt).total_seconds() / 60
+
+    # A bot with a running container is ACTIVE regardless of log age
+    if bot in running_containers:
+        status = "ACTIVE"
+    else:
+        status = "IDLE" if age_min < 5 else ("RECENT" if age_min < 60 else "STALE")
 
     report["bots"][bot] = {
         "status": status,
