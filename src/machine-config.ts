@@ -22,8 +22,21 @@ export interface MachineConfig {
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.config', 'infiniclaw', 'machine.json');
+const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 let cached: MachineConfig | null = null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isValidBotName(name: string): boolean {
+  return SAFE_BOT_NAME.test(name) && name !== '.' && name !== '..';
+}
 
 export function loadMachineConfig(): MachineConfig {
   if (cached) return cached;
@@ -36,26 +49,52 @@ export function loadMachineConfig(): MachineConfig {
     );
   }
 
-  let raw: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
   } catch (err) {
     throw new Error(`machine.json: invalid JSON in ${CONFIG_PATH}: ${err instanceof Error ? err.message : String(err)}`);
   }
+  if (!isRecord(parsed)) {
+    throw new Error('machine.json: top-level JSON must be an object');
+  }
+  const raw = parsed;
 
   if (!Array.isArray(raw.bots) || raw.bots.length === 0) {
     throw new Error(`machine.json: "bots" must be a non-empty array`);
   }
-  if (typeof raw.secretsPath !== 'string' || !raw.secretsPath) {
+  const bots = raw.bots.map((value, i) => {
+    if (!isNonEmptyString(value)) {
+      throw new Error(`machine.json: bots[${i}] must be a non-empty string`);
+    }
+    const bot = value.trim();
+    if (!isValidBotName(bot)) {
+      throw new Error(`machine.json: invalid bot name "${bot}"`);
+    }
+    return bot;
+  });
+  if (new Set(bots).size !== bots.length) {
+    throw new Error('machine.json: "bots" must not contain duplicates');
+  }
+
+  if (!isNonEmptyString(raw.secretsPath)) {
     throw new Error(`machine.json: "secretsPath" must be a non-empty string`);
   }
-  if (!fs.existsSync(raw.secretsPath)) {
-    throw new Error(`machine.json: secretsPath does not exist: ${raw.secretsPath}`);
+  const secretsPath = path.resolve(raw.secretsPath.trim());
+  if (!path.isAbsolute(secretsPath)) {
+    throw new Error('machine.json: "secretsPath" must be an absolute path');
+  }
+  if (!fs.existsSync(secretsPath)) {
+    throw new Error(`machine.json: secretsPath does not exist: ${secretsPath}`);
+  }
+  const secretsStat = fs.statSync(secretsPath);
+  if (!secretsStat.isDirectory()) {
+    throw new Error(`machine.json: secretsPath must be a directory: ${secretsPath}`);
   }
 
   const config: MachineConfig = {
-    bots: raw.bots as string[],
-    secretsPath: raw.secretsPath as string,
+    bots,
+    secretsPath,
   };
 
   if (typeof raw.containerNetwork === 'string') {
@@ -66,12 +105,20 @@ export function loadMachineConfig(): MachineConfig {
   }
 
   if (raw.s3) {
-    const s3 = raw.s3 as Record<string, unknown>;
-    if (typeof s3.endpoint !== 'string' || typeof s3.bucket !== 'string' ||
-        typeof s3.accessKey !== 'string' || typeof s3.secretKey !== 'string') {
+    if (!isRecord(raw.s3)) {
+      throw new Error('machine.json: "s3" must be an object');
+    }
+    const s3 = raw.s3;
+    if (!isNonEmptyString(s3.endpoint) || !isNonEmptyString(s3.bucket) ||
+        !isNonEmptyString(s3.accessKey) || !isNonEmptyString(s3.secretKey)) {
       throw new Error('machine.json: "s3" requires endpoint, bucket, accessKey, secretKey');
     }
-    config.s3 = s3 as unknown as S3Config;
+    config.s3 = {
+      endpoint: s3.endpoint.trim(),
+      bucket: s3.bucket.trim(),
+      accessKey: s3.accessKey.trim(),
+      secretKey: s3.secretKey.trim(),
+    };
   }
 
   cached = config;
