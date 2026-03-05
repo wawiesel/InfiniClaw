@@ -13,7 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from 'nanoclaw/env-utils
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
-import { execSync as gitExecSync } from 'child_process';
+import { loadMachineConfig } from './machine-config.js';
 import { logger } from 'nanoclaw/logger.js';
 
 const GIT_VERSION = (() => {
@@ -25,15 +25,14 @@ const GIT_VERSION = (() => {
   } catch { /* fall through to live git */ }
   // Fallback: live git query
   try {
-    const hash = gitExecSync('git rev-parse --short HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    const date = gitExecSync('git log -1 --format=%ci HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().slice(0, 10);
-    const subject = gitExecSync('git log -1 --format=%s HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    const hash = execSync('git rev-parse --short HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    const date = execSync('git log -1 --format=%ci HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().slice(0, 10);
+    const subject = execSync('git log -1 --format=%s HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
     return `${hash} (${date}) ${subject}`;
   } catch {
     return 'unknown';
   }
 })();
-import { loadMachineConfig } from './machine-config.js';
 import {
   getActiveBots,
   bootstrapBot as serviceBootstrapBot,
@@ -148,17 +147,17 @@ function validateDeploy(bot: string): { ok: boolean; errors: string } {
 }
 
 function deployInstance(bot: string): { ok: boolean; output: string } {
-  return trySync(() => {
+  return trySync((): { ok: boolean; output: string } => {
     const root = resolveRoot();
     serviceDeployBot(root, bot);
     serviceRebuildImage(root, bot);
-    return { ok: true as boolean, output: '' };
+    return { ok: true, output: '' };
   }, (err) => ({ ok: false, output: errStr(err) }));
 }
 
 function rebuildImage(bot: string): { ok: boolean; output: string } {
   return trySync(
-    () => { serviceRebuildImage(resolveRoot(), bot); return { ok: true as boolean, output: '' }; },
+    (): { ok: boolean; output: string } => { serviceRebuildImage(resolveRoot(), bot); return { ok: true, output: '' }; },
     (err) => ({ ok: false, output: errStr(err) }),
   );
 }
@@ -508,7 +507,7 @@ async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): 
   const chatJid = parseChatJid(data);
   logger.info('restart_wksm requested via IPC');
   try {
-    const home = process.env.HOME || '/Users/ww5';
+    const home = process.env.HOME || os.homedir();
     const wksc = `${home}/2025-WKS/main/venv/bin/wksc`;
 
     if (chatJid) await ctx.sendMessage(chatJid, '🔄 Restarting wksm...');
@@ -823,6 +822,7 @@ function syncVerificationsToInstance(root: string, bot: string): void {
 }
 
 async function handleRequestVerification(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'request_verification')) return;
   const root = resolveRoot();
   const record: VerificationRecord = {
     id: data.id as string,
@@ -848,6 +848,7 @@ async function handleRequestVerification(data: CommandData, ctx: InfiniClawIpcCo
 }
 
 async function handleSubmitVerification(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'submit_verification')) return;
   const root = resolveRoot();
   const records = readVerifications(root);
   const record = records.find((r) => r.id === (data.id as string));
