@@ -1,11 +1,11 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05 03:55 PM EST.
+Updated 2026-03-05 04:10 PM EST.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
-(none currently — all high items resolved or waiting passively)
+- **Check Poseidon for stale launchd agents** — HERACLES had zombie `com.infiniclaw.{bot}.plist` launch agents from before the PM2 migration. Poseidon may too. Run `launchctl list | grep infiniclaw` and remove any bot agents (`launchctl unload` + `rm`).
 
 ## MEDIUM — Next Up
 
@@ -27,6 +27,7 @@ Updated 2026-03-05 03:55 PM EST.
 
 ## Recently Completed
 
+- launchd zombie agents removed — old `com.infiniclaw.{bot}.plist` files with `KeepAlive: true` were fighting PM2, causing persistent duplicate processes. All launch agents deleted from HERACLES. MinIO also moved to Poseidon. See LESSONS_LEARNED.md.
 - Supervisor auto-deploy — `gitSyncLoop` now copies `dist/supervisor.js` to all active bot instances after a successful build, so the supervisor picks up new code without needing a full `!restart`.
 - Cross-machine health monitoring — verified. All 3 machines reporting to S3. `!health` aggregates fleet-wide.
 - Health check liveness fix — `health-check.sh` now uses `podman ps` to detect running containers. Bots with containers show ACTIVE; stopped bots show IDLE/RECENT/STALE based on log freshness. Previously healthy bots with no recent errors appeared STALE.

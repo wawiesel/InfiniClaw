@@ -72,3 +72,17 @@ Additionally, deploying a new bot on a fresh machine requires: (1) pm2 installed
 - Use `podman build --network host` on machines with inbound port 443 forwarding.
 - `service.ts` expects pm2 in `node_modules/.bin/`, not on `PATH`. Always install locally.
 - When adding a new bot persona, update `build.sh` case statement, `machine.json`, `roster.json`, and secrets env.
+
+## 2026-03-05 — launchd → PM2 migration left zombie launch agents
+
+**Participants:** Operator (HERACLES), Captain
+
+When the fleet moved from macOS launchd (`com.infiniclaw.{bot}.plist`) to PM2 for process management, the old launch agent plist files were not removed from `~/Library/LaunchAgents/`. With `KeepAlive: true`, launchd continued respawning bot processes in parallel with PM2-managed ones — causing persistent duplicate processes, doubled message processing, SIGKILL loops from stale container kills, and exit-137 cooldown cycles.
+
+Every `kill` of the launchd-managed process caused an immediate respawn. The operator spent significant time chasing "orphan" processes before discovering the root cause.
+
+**Takeaways:**
+- When migrating process managers, **always remove the old one's config**. A `KeepAlive: true` launchd agent will fight any replacement forever.
+- `launchctl list | grep infiniclaw` immediately reveals launchd-managed processes. Check this when debugging mystery respawns.
+- Two process managers for the same binary = guaranteed duplicate processing, doubled Matrix messages, and container thrashing.
+- The `npm run cli start` command starts ALL bots in `machine.json`, not just the one you name. Use `npm run cli start <bot>` only when you want exactly that bot plus the supervisor. To start only Cid without Johnny5/Albert, you'd need to edit `machine.json` first or stop the extras after.
