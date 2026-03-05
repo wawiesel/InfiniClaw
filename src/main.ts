@@ -260,6 +260,7 @@ const STANDING_ORDER_MAX_CONSECUTIVE = parseInt(process.env.STANDING_ORDER_MAX_C
 const STANDING_ORDER_REST_MS = parseInt(process.env.STANDING_ORDER_REST_MS || '1800000', 10);
 const standingOrderCycles: Record<string, number> = {};
 const standingOrderRestUntil: Record<string, number> = {};
+const standingOrderTimers: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
 const METRICS_HISTORY_FILE = path.join(DATA_DIR, 'metrics-history.jsonl');
 const METRICS_HISTORY_MAX_LINES = 10_000;
 
@@ -289,6 +290,52 @@ function sendTriggerAck(chatJid: string, messages: NewMessage[]): void {
     triggerAckByMessageKey[key] = Date.now();
     void ch.sendReaction(chatJid, m.id, '👀').catch((err) => { logger.debug({ chatJid, msgId: m.id, err }, 'Trigger ack reaction failed'); });
   }
+}
+
+const MAX_INBOUND_CONTENT_CHARS = 100_000;
+const MAX_INBOUND_ID_CHARS = 255;
+const MAX_INBOUND_SENDER_CHARS = 255;
+const MAX_INBOUND_THREAD_CHARS = 255;
+const MAX_INBOUND_CHAT_JID_CHARS = 255;
+
+function isValidInboundChatJid(chatJid: string): boolean {
+  if (!chatJid || chatJid.length > MAX_INBOUND_CHAT_JID_CHARS) return false;
+  if (chatJid.startsWith('matrix:')) {
+    const roomId = chatJid.slice('matrix:'.length);
+    return /^[!#][^:\s]+:[^\s]+$/.test(roomId);
+  }
+  return true;
+}
+
+function isValidInboundSender(sender: string): boolean {
+  if (!sender || sender.length > MAX_INBOUND_SENDER_CHARS) return false;
+  if (sender.startsWith('@')) return /^@[^:\s]+:[^\s]+$/.test(sender);
+  return true;
+}
+
+function normalizeInboundMessage(msg: NewMessage): NewMessage | null {
+  if (!isValidInboundChatJid(msg.chat_jid)) return null;
+  if (!isValidInboundSender(msg.sender)) return null;
+  if (!msg.id || msg.id.length > MAX_INBOUND_ID_CHARS) return null;
+  if (!msg.sender_name || msg.sender_name.length > MAX_INBOUND_SENDER_CHARS) return null;
+  if (!msg.timestamp || Number.isNaN(new Date(msg.timestamp).getTime())) return null;
+
+  const content = typeof msg.content === 'string'
+    ? msg.content.slice(0, MAX_INBOUND_CONTENT_CHARS)
+    : '';
+  const threadId = typeof msg.thread_id === 'string' && msg.thread_id.length > 0
+    ? msg.thread_id.slice(0, MAX_INBOUND_THREAD_CHARS)
+    : undefined;
+
+  return {
+    ...msg,
+    content,
+    thread_id: threadId,
+  };
+}
+
+function safeToolCallHtml(raw: string): string {
+  return `<details><summary>🔧 Tool calls</summary><pre><code>${esc(raw)}</code></pre></details>`;
 }
 
 const esc = (s: string): string =>
@@ -633,6 +680,7 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
   clearIdleIndicator(ctx.chatJid);
   markProgress(ctx.chatJid, text);
   const isToolCall = text.includes('<details>');
+  const toolCallHtml = isToolCall ? safeToolCallHtml(text) : '';
   const now = Date.now();
   if (isToolCall || !lastProgressChatAt[ctx.chatJid] || now - lastProgressChatAt[ctx.chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
     if (!isToolCall) lastProgressChatAt[ctx.chatJid] = now;
@@ -643,7 +691,7 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
         const activeThread = activeReplyThreadIds[ctx.chatJid];
         if (activeThread) {
           // Already in a thread — send <details> collapsible in-thread (desktop renders it; mobile shows inline but off main timeline)
-          void ch.sendMessage(ctx.chatJid, text, activeThread).then(() => {
+          void ch.sendMessage(ctx.chatJid, toolCallHtml, activeThread).then(() => {
             bumpWorkingIndicator(ctx.chatJid, activeThread);
           }).catch((err) => {
             logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call progress to thread');
@@ -651,7 +699,7 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
         } else {
           // Main timeline — route tool calls to a dedicated per-turn thread
           const sendToToolThread = (threadId: string) => {
-            void ch.sendMessage(ctx.chatJid, text, threadId).then(() => {
+            void ch.sendMessage(ctx.chatJid, toolCallHtml, threadId).then(() => {
               bumpWorkingIndicator(ctx.chatJid, threadId);
             }).catch((err) => {
               logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call to dedicated thread');
@@ -669,14 +717,14 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
                 sendToToolThread(anchorId);
               } else {
                 // Fallback: send inline if we couldn't get an anchor ID
-                void ch.sendMessage(ctx.chatJid, text).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Fallback tool call send failed'); });
+                void ch.sendMessage(ctx.chatJid, toolCallHtml).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Fallback tool call send failed'); });
               }
             }).catch((err) => {
               logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to open tool call thread anchor');
             });
           } else {
             // Channel doesn't support returning IDs — send inline as fallback
-            void ch.sendMessage(ctx.chatJid, text).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Inline tool call send failed'); });
+            void ch.sendMessage(ctx.chatJid, toolCallHtml).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Inline tool call send failed'); });
           }
         }
       } else {
@@ -1241,7 +1289,9 @@ function scheduleStandingOrderCycle(chatJid: string): void {
     return;
   }
 
-  setTimeout(() => {
+  if (standingOrderTimers[chatJid]) clearTimeout(standingOrderTimers[chatJid]);
+  standingOrderTimers[chatJid] = setTimeout(() => {
+    standingOrderTimers[chatJid] = undefined;
     const state = queue.getGroupStatus(chatJid);
     if (state.active || state.pendingMessages || state.pendingTasks > 0) return;
     standingOrderCycles[chatJid] = cycles + 1;
@@ -1459,12 +1509,17 @@ async function main(): Promise<void> {
     matrix = new MatrixChannel({
       displayName: `${ASSISTANT_NAME} ${initialBadge}`,
       onMessage: (_chatJid, msg) => {
-        if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
-        handleLifecycleMessage(msg);
-        storeMessage(msg);
-        if (msg.id && msg.id.startsWith('$')) {
-          const group = registeredGroups[msg.chat_jid];
-          if (group) updateEventIdFile(group.folder, 'lastReceived', msg.id);
+        const safeMsg = normalizeInboundMessage(msg);
+        if (!safeMsg) {
+          logger.warn({ chatJid: msg.chat_jid, sender: msg.sender, id: msg.id }, 'Dropped invalid inbound Matrix message');
+          return;
+        }
+        if (handleOperatorCommand(safeMsg, matrix, injectSystemNotice)) return;
+        handleLifecycleMessage(safeMsg);
+        storeMessage(safeMsg);
+        if (safeMsg.id && safeMsg.id.startsWith('$')) {
+          const group = registeredGroups[safeMsg.chat_jid];
+          if (group) updateEventIdFile(group.folder, 'lastReceived', safeMsg.id);
         }
       },
       onChatMetadata: (chatJid, timestamp, name) => {
@@ -1479,8 +1534,13 @@ async function main(): Promise<void> {
   if (LOCAL_CHANNEL_ENABLED) {
     localCli = new LocalCliChannel({
       onMessage: (_chatJid, msg) => {
-        if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
-        storeMessage(msg);
+        const safeMsg = normalizeInboundMessage(msg);
+        if (!safeMsg) {
+          logger.warn({ chatJid: msg.chat_jid, sender: msg.sender, id: msg.id }, 'Dropped invalid inbound local message');
+          return;
+        }
+        if (handleOperatorCommand(safeMsg, matrix, injectSystemNotice)) return;
+        storeMessage(safeMsg);
       },
       onChatMetadata: (chatJid, timestamp, name) =>
         storeChatMetadata(chatJid, timestamp, name),
