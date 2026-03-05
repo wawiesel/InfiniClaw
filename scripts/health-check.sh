@@ -92,7 +92,13 @@ for bot in sorted(bots):
         continue
 
     error_mtime = datetime.fromtimestamp(os.path.getmtime(error_log), tz=timezone.utc)
-    age_min = (now - error_mtime).total_seconds() / 60
+    # Use the most recent mtime of either log — healthy bots may not write errors
+    latest_mtime = error_mtime
+    if os.path.exists(main_log):
+        main_mtime = datetime.fromtimestamp(os.path.getmtime(main_log), tz=timezone.utc)
+        if main_mtime > latest_mtime:
+            latest_mtime = main_mtime
+    age_min = (now - latest_mtime).total_seconds() / 60
     status = "ACTIVE" if age_min < 5 else ("RECENT" if age_min < 60 else "STALE")
 
     report["bots"][bot] = {
