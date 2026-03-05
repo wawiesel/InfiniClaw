@@ -89,7 +89,13 @@ export function handleOperatorCommand(
         if (!isAuthorized(msg.sender)) return true;
         const [, botName, hostPath, mins] = grant;
         if (botName.toLowerCase() !== MY_NAME) return true;
-        const duration = parseInt(mins ?? '30', 10);
+        const defaultDuration = 30;
+        const parsedDuration = parseInt(mins ?? String(defaultDuration), 10);
+        let duration = parsedDuration <= 0 ? defaultDuration : parsedDuration;
+        if (duration > 1440) {
+            logger.warn({ requestedMinutes: parsedDuration, cappedMinutes: 1440, sender: msg.sender, hostPath }, '!allow duration capped to 24 hours');
+            duration = 1440;
+        }
         void (async () => {
             try {
                 grantMount(PERSONA, hostPath, duration);
@@ -166,4 +172,3 @@ export function buildTodoMessage(chatJid: string): string {
     } catch { lines.push('Currently: idle'); }
     return lines.join('\n');
 }
-
