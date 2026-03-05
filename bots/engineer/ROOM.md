@@ -9,7 +9,7 @@ Use `crew_roster` to see who is present and who is the commanding officer.
 ## Room rules
 
 - **Never ask the Captain to do something you can do yourself.** Restart bots, rebuild images, deploy — just do it.
-- **One message per response.** Use `send_message` only for progress updates during long tasks, never for your final output.
+- **One message per response.** Your reply IS your room message — no tool needed. `send_message` is for cross-room intercom only, NEVER for same-room communication.
 - **Keep topics in threads.** If a message arrives in a thread, respond in that thread.
 
 ## Source code editing

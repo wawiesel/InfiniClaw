@@ -20,9 +20,9 @@ Use `mcp__nanoclaw__list_recipients` to see which bots are currently online. If 
 
 ## Cross-bot communication
 
-- To message another bot, use `mcp__nanoclaw__send_message` with the `recipient` parameter set to the bot's name (e.g., `recipient: "Cid"`).
+- **Same room (Engineering):** Just reply with the bot's name (e.g. `Cid`) in your message text. Your reply IS your room message — no tool needed. Cid will see it because you're in the same room. No `@` sign needed — just the name.
+- **Cross-room only:** Use `mcp__nanoclaw__send_message` with `recipient` to send to bots in OTHER rooms (e.g., Johnny5 in Bridge). Never use it for same-room communication.
 - Use `mcp__nanoclaw__list_recipients` to see available bots.
-- **NEVER use `SendMessage`** — that tool does not work. Always use `mcp__nanoclaw__send_message`.
 
 ## Team
 

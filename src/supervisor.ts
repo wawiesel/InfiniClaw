@@ -377,7 +377,11 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
         // Rebuild after pulling new code
         const root = resolveRoot();
         try {
-          execSync('npm run build', { cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe' });
+          const nodeBinDir = path.dirname(process.execPath);
+          execSync('npm run build', {
+            cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe',
+            env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` },
+          });
           log('git sync: rebuild succeeded');
         } catch (err) {
           log(`git sync: rebuild FAILED: ${errStr(err)}`);
