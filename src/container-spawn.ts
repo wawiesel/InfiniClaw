@@ -312,7 +312,7 @@ export async function runContainerAgent(
   try {
     const botDir = buildBotDirectory();
     fs.writeFileSync(path.join(groupIpcDir, 'bot_directory.json'), JSON.stringify(botDir));
-  } catch { /* best effort */ }
+  } catch (err) { logger.warn({ err }, 'Failed to write bot directory to IPC'); }
 
   // Read .mcp.json from persona for SDK passthrough (single source of truth)
   const rootDir = process.env.INFINICLAW_ROOT;

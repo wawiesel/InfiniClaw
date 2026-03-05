@@ -962,7 +962,7 @@ export class MatrixChannel implements Channel {
         try {
           await this.sendTextReturningId(jid, truncated, threadId);
           return;
-        } catch { /* fall through to original error handling */ }
+        } catch (retryErr) { logger.warn({ jid, retryErr }, 'Truncated message retry also failed'); }
       }
       if (this.isAuthFailure(err)) {
         this.markDisconnected('Matrix auth failed while sending message', err);
@@ -1064,7 +1064,7 @@ export class MatrixChannel implements Channel {
             'editMessage(truncated)',
           ));
           return;
-        } catch { /* fall through */ }
+        } catch (retryErr) { logger.warn({ jid, eventId, retryErr }, 'Truncated edit retry also failed'); }
       }
       logger.warn({ jid, eventId, err }, 'Failed to edit Matrix message');
     }
