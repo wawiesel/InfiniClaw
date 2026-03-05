@@ -46,3 +46,14 @@ const ignoreSendersStr = (process.env.IGNORE_SENDERS || '').trim();
 export const IGNORE_SENDERS: Set<string> = new Set(
   ignoreSendersStr ? ignoreSendersStr.split(',').map((s) => s.trim()).filter(Boolean) : [],
 );
+
+/** Validate critical config at startup. Logs warnings for empty required values. */
+export function validateConfig(): string[] {
+  const warnings: string[] = [];
+  if (!CAPTAIN_USER_ID) warnings.push('CAPTAIN_USER_ID is empty — operator commands will be unrestricted');
+  if (!MATRIX_HOMESERVER && !LOCAL_CHANNEL_ENABLED) warnings.push('No channel configured: MATRIX_HOMESERVER empty and LOCAL_CHANNEL_ENABLED off');
+  if (MATRIX_HOMESERVER && !MATRIX_USERNAME && !MATRIX_ACCESS_TOKEN) warnings.push('MATRIX_HOMESERVER set but no MATRIX_USERNAME or MATRIX_ACCESS_TOKEN');
+  if (HEAP_LIMIT_MB < 0) warnings.push(`HEAP_LIMIT_MB is negative (${HEAP_LIMIT_MB})`);
+  if (MEMORY_CHECK_INTERVAL < 10_000) warnings.push(`MEMORY_CHECK_INTERVAL too low (${MEMORY_CHECK_INTERVAL}ms) — may cause excessive logging`);
+  return warnings;
+}

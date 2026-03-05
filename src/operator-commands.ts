@@ -37,7 +37,11 @@ function parseTarget(cmd: string, prefix: string): { matched: boolean; target?: 
 
 function reply(matrix: MatrixChannel | null, chatJid: string, text: string, threadId?: string): void {
     void (async () => {
-        if (matrix?.isConnected()) await matrix.sendMessage(chatJid, text, threadId);
+        try {
+            if (matrix?.isConnected()) await matrix.sendMessage(chatJid, text, threadId);
+        } catch (err) {
+            logger.warn({ chatJid, err }, 'operator-commands reply failed');
+        }
     })();
 }
 

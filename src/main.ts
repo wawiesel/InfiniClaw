@@ -30,6 +30,7 @@ import {
   MATRIX_USERNAME,
   MEMORY_CHECK_INTERVAL,
   RESUME_DELAY_SECONDS,
+  validateConfig,
 } from './infini-config.js';
 import {
   getAllChats,
@@ -1241,6 +1242,10 @@ async function main(): Promise<void> {
   await ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
+
+  // Validate config and warn about missing values
+  const configWarnings = validateConfig();
+  for (const w of configWarnings) logger.warn(w);
   loadState();
 
   // Populate bot Matrix user IDs for human-vs-bot message filtering

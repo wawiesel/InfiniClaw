@@ -92,13 +92,21 @@ export async function pushBot(root: string, bot: string): Promise<void> {
       const files = walkDir(fullPath);
       for (const relFile of files) {
         const key = `${bot}/${syncPath}/${relFile}`;
-        await uploadFile(s3.client, s3.bucket, key, path.join(fullPath, relFile));
-        count++;
+        try {
+          await uploadFile(s3.client, s3.bucket, key, path.join(fullPath, relFile));
+          count++;
+        } catch (err) {
+          console.warn(`${bot}: failed to upload ${key} — ${err instanceof Error ? err.message : err}`);
+        }
       }
     } else {
       const key = `${bot}/${syncPath}`;
-      await uploadFile(s3.client, s3.bucket, key, fullPath);
-      count++;
+      try {
+        await uploadFile(s3.client, s3.bucket, key, fullPath);
+        count++;
+      } catch (err) {
+        console.warn(`${bot}: failed to upload ${key} — ${err instanceof Error ? err.message : err}`);
+      }
     }
   }
 
@@ -132,8 +140,12 @@ export async function pullBot(root: string, bot: string): Promise<void> {
           // Compute local path from key
           const relativeToBot = obj.Key.slice(`${bot}/`.length);
           const localPath = path.join(instance, relativeToBot);
-          await downloadFile(s3.client, s3.bucket, obj.Key, localPath);
-          count++;
+          try {
+            await downloadFile(s3.client, s3.bucket, obj.Key, localPath);
+            count++;
+          } catch (err) {
+            console.warn(`${bot}: failed to download ${obj.Key} — ${err instanceof Error ? err.message : err}`);
+          }
         }
       }
 
