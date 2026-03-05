@@ -1203,12 +1203,12 @@ async function handleGroupMessagesInLoop(
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
   threadMapLastSeen[`r:${chatJid}`] = Date.now();
 
-  // Interrupt: if container is busy and message is from captain/operator/trigger,
-  // send interrupt IPC to kill running claude and resume with the new message
+  // Interrupt: if container is busy and message is from captain/operator, interrupt.
+  // Bot-to-bot callouts do NOT interrupt — they queue normally to avoid interrupt loops.
   const groupStatus = queue.getGroupStatus(chatJid);
   if (groupStatus.active) {
     const interruptMessages = messagesToSend.filter((m) =>
-      TRIGGER_PATTERN.test(m.content.trim()) || (CAPTAIN_USER_ID && m.sender === CAPTAIN_USER_ID),
+      !botMatrixUserIds.has(m.sender) && (TRIGGER_PATTERN.test(m.content.trim()) || (CAPTAIN_USER_ID && m.sender === CAPTAIN_USER_ID)),
     );
     if (interruptMessages.length > 0) {
       startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
