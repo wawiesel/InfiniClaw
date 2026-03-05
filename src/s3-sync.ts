@@ -27,9 +27,14 @@ const SYNC_PATHS = [
 ];
 const RECURSIVE_SYNC_PATHS = new Set(['data/sessions']);
 const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const SAFE_BUCKET_NAME = /^(?!\d+\.\d+\.\d+\.\d+$)[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$/;
 
 function isValidBotName(bot: string): boolean {
   return SAFE_BOT_NAME.test(bot) && bot !== '.' && bot !== '..';
+}
+
+function isValidBucketName(bucket: string): boolean {
+  return SAFE_BUCKET_NAME.test(bucket) && !bucket.includes('..');
 }
 
 function assertNoSymlinkOnPath(baseDir: string, targetPath: string): void {
@@ -53,6 +58,10 @@ function getClient(): { client: S3Client; bucket: string } | null {
   const config = loadMachineConfig();
   if (!config.s3) return null;
   const { endpoint, bucket, accessKey, secretKey } = config.s3;
+  if (!isValidBucketName(bucket)) {
+    logger.warn({ bucket }, 'S3 sync disabled: invalid bucket name');
+    return null;
+  }
   const client = new S3Client({
     endpoint,
     region: 'us-east-1',
