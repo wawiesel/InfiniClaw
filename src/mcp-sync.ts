@@ -31,9 +31,21 @@ function readPersonaMcpServers(
       const manifest = JSON.parse(
         fs.readFileSync(manifestPath, 'utf-8'),
       ) as McpServerConfig;
+
+      if (manifest.args !== undefined && !Array.isArray(manifest.args)) {
+        logger.warn(
+          { manifestPath, server: entry.name },
+          'Invalid mcp.json: "args" must be an array; skipping MCP server',
+        );
+        continue;
+      }
+
       servers[entry.name] = manifest;
-    } catch {
-      // Skip malformed manifests
+    } catch (err) {
+      logger.warn(
+        { err, manifestPath, server: entry.name },
+        'Malformed mcp.json; skipping MCP server',
+      );
     }
   }
   return servers;
@@ -51,7 +63,15 @@ export function loadMcpServersToSettings(
   containerMcpPath: string,
 ): void {
   const personaServers = readPersonaMcpServers(personaMcpDir);
-  if (Object.keys(personaServers).length === 0) return;
+  const personaServerNames = new Set(Object.keys(personaServers));
+
+  // Track persona-owned keys from the previous sync run before cleaning session dir.
+  const previousPersonaOwned = new Set<string>();
+  if (fs.existsSync(sessionMcpDir)) {
+    for (const entry of fs.readdirSync(sessionMcpDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) previousPersonaOwned.add(entry.name);
+    }
+  }
 
   // Read existing settings
   let settings: Record<string, unknown> = {};
@@ -67,6 +87,13 @@ export function loadMcpServersToSettings(
   const existing =
     (settings.mcpServers as Record<string, unknown> | undefined) || {};
   const merged: Record<string, unknown> = { ...existing };
+
+  // Remove stale persona-managed entries that no longer exist in persona manifests.
+  for (const name of previousPersonaOwned) {
+    if (!personaServerNames.has(name)) {
+      delete merged[name];
+    }
+  }
 
   // Clean session MCP dir and copy server code
   if (fs.existsSync(sessionMcpDir)) {
@@ -92,11 +119,18 @@ export function loadMcpServersToSettings(
       cwd: containerDir,
     };
     // Rewrite args paths that reference the server dir
-    if (rewritten.args) {
-      rewritten.args = rewritten.args.map((arg) =>
-        arg.startsWith('./') ? `${containerDir}/${arg.slice(2)}` : arg,
+    if (rewritten.args === undefined) {
+      rewritten.args = [];
+    } else if (!Array.isArray(rewritten.args)) {
+      logger.warn(
+        { name },
+        'Invalid MCP config: "args" must be an array; skipping MCP server',
       );
+      continue;
     }
+    rewritten.args = rewritten.args.map((arg) =>
+      arg.startsWith('./') ? `${containerDir}/${arg.slice(2)}` : arg,
+    );
     merged[name] = rewritten;
   }
 
