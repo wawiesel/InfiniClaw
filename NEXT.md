@@ -23,6 +23,7 @@ Updated 2026-03-05 04:10 PM EST.
 
 ## LOW — Reliability
 
+- **Bots can commit dist/ files** — Cid committed the entire `dist/` directory despite `.gitignore`. Bots running inside containers may use `git add -A` which bypasses gitignore when files are already tracked. Need a pre-commit hook to reject `dist/` additions, or educate bots to use `git add src/` only.
 - **Session OOM still possible** — V8 heap OOM (exit 137) from large JSONL sessions. Full cleanup chain: DB sessions table, JSONL file, .claude/backups/.
 
 ## Recently Completed
