@@ -352,9 +352,12 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
     }).trim();
     const newCommits = parseInt(countStr, 10) || 0;
     if (newCommits === 0) return { ok: true, output: 'up to date', newCommits: 0 };
-    // Stash any uncommitted changes (bots may have WIP edits)
-    const stashOutput = execSync('git stash', execOpts).trim();
-    const didStash = !stashOutput.includes('No local changes');
+    // Stash any uncommitted changes (bots may have WIP edits) — non-fatal if stash fails
+    let didStash = false;
+    try {
+      const stashOutput = execSync('git stash', execOpts).trim();
+      didStash = !stashOutput.includes('No local changes');
+    } catch { /* stash failed (e.g. index.lock, no user config) — proceed without stashing */ }
     try {
       // Rebase
       const output = execSync('git rebase origin/main', execOpts).trim();
