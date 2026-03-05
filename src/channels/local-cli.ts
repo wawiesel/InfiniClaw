@@ -27,6 +27,14 @@ export class LocalCliChannel implements Channel {
 
   constructor(private readonly opts: LocalCliChannelOpts) {}
 
+  private sanitizeTerminalText(text: string): string {
+    return text
+      .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, '')
+      .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
+      .replace(/\u001B[@-_]/g, '')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '');
+  }
+
   private formatMirrorInbound(text: string): string {
     return `\`\`\`\n${this.senderName}: ${text}\n\`\`\``;
   }
@@ -92,7 +100,7 @@ export class LocalCliChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.ownsJid(jid)) return;
-    process.stdout.write(`\n${text}\n\n`);
+    process.stdout.write(`\n${this.sanitizeTerminalText(text)}\n\n`);
     if (this.opts.mirrorToMatrix) {
       this.opts
         .mirrorToMatrix(this.formatMirrorOutbound(text))
@@ -104,7 +112,7 @@ export class LocalCliChannel implements Channel {
   }
 
   async setPresenceStatus(_state: string, statusMessage?: string): Promise<void> {
-    if (statusMessage) process.stdout.write(`\n[${statusMessage}]\n`);
+    if (statusMessage) process.stdout.write(`\n[${this.sanitizeTerminalText(statusMessage)}]\n`);
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
@@ -133,7 +141,8 @@ export class LocalCliChannel implements Channel {
 
   private prompt(): void {
     if (!this.rl || !this.connected) return;
-    this.rl.setPrompt(`${this.senderName.toLowerCase()}> `);
+    const promptName = this.sanitizeTerminalText(this.senderName.toLowerCase()).trim() || 'local';
+    this.rl.setPrompt(`${promptName}> `);
     this.rl.prompt();
   }
 }
