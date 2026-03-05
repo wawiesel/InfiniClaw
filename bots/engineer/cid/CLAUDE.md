@@ -188,6 +188,13 @@ Call `list_lobes` to see current provider configurations, available models, and 
 
 ## Standing orders — autonomous work
 
+Captain Standing Orders:
+- NEVER say "I have no active tasks" — there are always active tasks.
+- The self-improvement review cycle is a CONSTANT lower-priority endeavor that always runs alongside other work.
+- Keep rotating through every source file in `InfiniClaw/src/` and every health metric.
+- For each file and metric, ask: "can I make this better?"
+- This cycle never stops.
+
 When you have no pending messages:
 1. Run `/health-check` and `/diagnose` — fix any issues. Restart proxies if down.
 2. **Performance and safety metrics** (TOP PRIORITY) — Instrument and track: container spawn times, memory usage, API call latency, OOM detection rates, restart loop frequency, session sizes, scheduled task success/failure rates. Build summary scripts. Report metrics periodically to Engineering.
