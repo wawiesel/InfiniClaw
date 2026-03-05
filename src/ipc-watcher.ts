@@ -43,6 +43,8 @@ let ipcWatcherRunning = false;
 
 // Per-group delegate thread IDs — created on first delegate message, cleared when set_thread(null) fires
 const delegateThreadIds: Record<string, string> = {};
+const MAX_IPC_MESSAGE_JSON_BYTES = 14 * 1024 * 1024; // Allows up to 10MB base64 payloads plus metadata.
+const MAX_IPC_TASK_JSON_BYTES = 64 * 1024;
 
 function clearDelegateThread(sourceGroup: string): void {
   if (sourceGroup in delegateThreadIds) {
@@ -58,6 +60,25 @@ interface TextMessageData {
   threadId?: string;
   crossRoom?: boolean;
   senderName?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readValidatedIpcJson(filePath: string, maxBytes: number): Record<string, unknown> {
+  const stat = fs.lstatSync(filePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error('IPC payload must be a regular file');
+  }
+  if (stat.size > maxBytes) {
+    throw new Error(`IPC payload exceeds ${maxBytes} bytes`);
+  }
+  const parsed: unknown = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  if (!isRecord(parsed)) {
+    throw new Error('IPC payload must be a JSON object');
+  }
+  return parsed;
 }
 
 async function handleTextMessage(
@@ -80,8 +101,7 @@ async function handleTextMessage(
 
   const registeredGroups = deps.registeredGroups();
   const targetGroup = registeredGroups[data.chatJid];
-  const isCrossBotTarget = data.chatJid.startsWith('matrix:');
-  const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup) || isCrossBotTarget;
+  const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup);
 
   if (!authorized) {
     logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Unauthorized IPC message attempt blocked');
@@ -138,6 +158,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
     }
 
     const registeredGroups = deps.registeredGroups();
+    const registeredFolders = new Set(Object.values(registeredGroups).map((g) => g.folder));
 
     // Build folder→isMain lookup from registered groups
     const folderIsMain = new Map<string, boolean>();
@@ -146,6 +167,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
     }
 
     for (const sourceGroup of groupFolders) {
+      // Ignore unknown source folders once registration is initialized.
+      if (registeredFolders.size > 0 && !registeredFolders.has(sourceGroup)) {
+        logger.warn({ sourceGroup }, 'Skipping IPC for unregistered source group');
+        continue;
+      }
       const isMain = folderIsMain.get(sourceGroup) === true;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
@@ -154,21 +180,23 @@ export function startIpcWatcher(deps: IpcDeps): void {
       try {
         if (fs.existsSync(messagesDir)) {
           const messageFiles = fs
-            .readdirSync(messagesDir)
-            .filter((f) => f.endsWith('.json'));
+            .readdirSync(messagesDir, { withFileTypes: true })
+            .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+            .map((entry) => entry.name);
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             const processingPath = `${filePath}.processing`;
             const errorPath = `${filePath}.error`;
             try {
               fs.renameSync(filePath, processingPath);
-              const data = JSON.parse(fs.readFileSync(processingPath, 'utf-8'));
+              const data = readValidatedIpcJson(processingPath, MAX_IPC_MESSAGE_JSON_BYTES);
+              const type = typeof data.type === 'string' ? data.type : '';
 
-              if (data.type === 'message' && data.chatJid && data.text) {
+              if (type === 'message' && typeof data.chatJid === 'string' && typeof data.text === 'string') {
                 await handleTextMessage(
                   {
-                    chatJid: data.chatJid as string,
-                    text: data.text as string,
+                    chatJid: data.chatJid,
+                    text: data.text,
                     sender: data.sender as string | undefined,
                     threadId: data.threadId as string | undefined,
                     crossRoom: data.crossRoom as boolean | undefined,
@@ -204,30 +232,35 @@ export function startIpcWatcher(deps: IpcDeps): void {
       try {
         if (fs.existsSync(tasksDir)) {
           const taskFiles = fs
-            .readdirSync(tasksDir)
-            .filter((f) => f.endsWith('.json'));
+            .readdirSync(tasksDir, { withFileTypes: true })
+            .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+            .map((entry) => entry.name);
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
             const processingPath = `${filePath}.processing`;
             const errorPath = `${filePath}.error`;
             try {
               fs.renameSync(filePath, processingPath);
-              const data = JSON.parse(fs.readFileSync(processingPath, 'utf-8'));
+              const data = readValidatedIpcJson(processingPath, MAX_IPC_TASK_JSON_BYTES);
+              if (typeof data.type !== 'string') {
+                throw new Error('IPC task missing string type');
+              }
+              const taskData = data as Parameters<typeof processTaskIpc>[0];
 
               // Try base task types first (schedule, pause, resume, cancel, refresh, register)
               const baseTypes = ['schedule_task', 'pause_task', 'resume_task', 'cancel_task', 'refresh_groups', 'register_group'];
-              if (baseTypes.includes(data.type)) {
-                await processTaskIpc(data, sourceGroup, isMain, {
+              if (baseTypes.includes(taskData.type)) {
+                await processTaskIpc(taskData, sourceGroup, isMain, {
                   sendMessage: (jid: string, text: string) => deps.sendMessage(jid, text),
                   registeredGroups: deps.registeredGroups,
                   registerGroup: (jid: string, group: RegisteredGroup) => {
                     // InfiniClaw extension: replace existing group with same folder
                     const groups = deps.registeredGroups();
                     const existing = Object.entries(groups)
-                      .find(([existingJid, g]) => g.folder === data.folder && existingJid !== data.jid);
+                      .find(([existingJid, g]) => g.folder === taskData.folder && existingJid !== taskData.jid);
                     if (existing) {
                       deps.unregisterGroup(existing[0]);
-                      logger.info({ oldJid: existing[0], newJid: data.jid, folder: data.folder }, 'Replaced existing group with same folder');
+                      logger.info({ oldJid: existing[0], newJid: taskData.jid, folder: taskData.folder }, 'Replaced existing group with same folder');
                     }
                     deps.registerGroup(jid, group);
                   },
@@ -246,7 +279,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   clearDelegateThread,
                 });
                 if (!extHandled) {
-                  logger.warn({ type: data.type }, 'Unknown IPC task type');
+                  logger.warn({ type: taskData.type }, 'Unknown IPC task type');
                 }
               }
               fs.unlinkSync(processingPath);
