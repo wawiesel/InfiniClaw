@@ -7,7 +7,7 @@ Updated 2026-03-05 06:10 PM EST.
 
 - **Bots must maintain personal todo lists at ALL times** — Captain: "You should have on your personal task list 2 things at all times: the thing you are working on and what you're doing next." Bots are wasting time on maintenance instead of assigned tasks. Stop working on maintenance unless explicitly told to.
 - **2-second response time to Captain** — Captain explicitly called this out as an activity. Bots must respond to Captain messages within 2 seconds. CO must ALWAYS respond to Captain — never ignore.
-- **Tool call breadcrumbs** — Captain directive. Tool calls should show single-line hash in Matrix, full content to S3. This is an active work item, not a backlog wish.
+- **Tool call breadcrumbs** ✅ — Implemented `4c7a968`: single-line `🔧 Name · hash` in Matrix, full HTML to S3 under `tool-calls/{bot}/{ts}-{hash}.html`. Needs restart to activate.
 - **Bot display names still not showing** — Captain: "I still don't see the updated names with (machine) in parens." Code is committed (`37fee0e`) but bots need restart to pick it up. Verify names show correctly after restart.
 - **Bot-to-bot cross-machine communication must be seamless** — Captain: "It should be seamless and just like human-to-human conversation." Cid and Parker must communicate fluidly in Engineering.
 - **Health metrics: look at trends** — Captain: "you need to look at health metrics in the 1-day / 7-day rolling and look at trend." Not just collect snapshots — analyze and report trends.
