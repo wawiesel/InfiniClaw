@@ -601,14 +601,14 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   ctx.stopNudgeTimer();
   const ch = findChannel(channels, ctx.chatJid);
   if (ch) {
-    if (ch.setTyping && !isThreadContext(ctx.chatJid)) await ch.setTyping(ctx.chatJid, true);
+    if (ch.setTyping) await ch.setTyping(ctx.chatJid, true);
     let sentEventId: string | undefined;
     if (ch.sendMessageReturningId) {
       sentEventId = await ch.sendMessageReturningId(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
     } else {
       await ch.sendMessage(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
     }
-    if (ch.setTyping && !isThreadContext(ctx.chatJid)) await ch.setTyping(ctx.chatJid, false);
+    if (ch.setTyping) await ch.setTyping(ctx.chatJid, false);
     storeOutgoing(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
     if (sentEventId) {
       const group = registeredGroups[ctx.chatJid];
@@ -800,7 +800,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   delete workThreadIds[chatJid];
   // Clear per-turn tool call thread so next turn opens a fresh anchor
   delete progressToolCallThreadIds[chatJid];
-  if (channel?.setTyping && !isThreadContext(chatJid)) await channel.setTyping(chatJid, false);
+  if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   if (channel?.setStatusPip) {
     void channel.setStatusPip(chatJid, '🟢').catch(() => { });
@@ -1030,7 +1030,7 @@ async function handleGroupMessagesInLoop(
     if (interruptMessages.length > 0) {
       startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
       const ch = findChannel(channels, chatJid);
-      if (ch?.setTyping && !isThreadContext(chatJid)) ch.setTyping(chatJid, true).catch(() => {});
+      if (ch?.setTyping) ch.setTyping(chatJid, true).catch(() => {});
       sendInterruptMessage(chatJid, group, formatted);
       lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
       saveState();
@@ -1060,7 +1060,7 @@ async function handlePipedToActiveContainer(
   saveState();
 
   const ch = findChannel(channels, chatJid);
-  if (ch?.setTyping && !isThreadContext(chatJid)) await ch.setTyping(chatJid, true);
+  if (ch?.setTyping) await ch.setTyping(chatJid, true);
   if (ch?.setPresenceStatus) await ch.setPresenceStatus('online', 'processing...');
 }
 

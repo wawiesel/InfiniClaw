@@ -113,7 +113,7 @@ Every lobe runs in a Matrix thread. The main brain stays sequential — lobes ha
 ### Threading
 
 - Every lobe operation runs in a thread, not on the main timeline.
-- Typing indicators are suppressed when the bot is working in a thread.
+- Typing indicators are always sent, including when the bot is working in a thread.
 - Bots with `requiresTrigger` use auto-threading: the triggering message becomes the thread root.
 
 ### Status Indicators
