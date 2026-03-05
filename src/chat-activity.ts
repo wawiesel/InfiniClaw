@@ -20,7 +20,7 @@ export interface ChatActivity {
   lastErrorAt?: number;
 }
 
-const chatActivity: Record<string, ChatActivity> = {};
+const chatActivity = new Map<string, ChatActivity>();
 const CHAT_ACTIVITY_STATE_PREFIX = 'chat_activity:';
 
 function chatActivityStateKey(chatJid: string): string {
@@ -31,15 +31,15 @@ function sanitizeActivity(raw: unknown): ChatActivity {
   if (!raw || typeof raw !== 'object') return {};
   const record = raw as Record<string, unknown>;
   const out: ChatActivity = {};
-  if (typeof record.runStartedAt === 'number') out.runStartedAt = record.runStartedAt;
+  if (typeof record.runStartedAt === 'number' && Number.isFinite(record.runStartedAt)) out.runStartedAt = record.runStartedAt;
   if (typeof record.currentObjective === 'string') out.currentObjective = record.currentObjective;
-  if (typeof record.currentObjectiveAt === 'number') out.currentObjectiveAt = record.currentObjectiveAt;
+  if (typeof record.currentObjectiveAt === 'number' && Number.isFinite(record.currentObjectiveAt)) out.currentObjectiveAt = record.currentObjectiveAt;
   if (typeof record.lastProgress === 'string') out.lastProgress = record.lastProgress;
-  if (typeof record.lastProgressAt === 'number') out.lastProgressAt = record.lastProgressAt;
+  if (typeof record.lastProgressAt === 'number' && Number.isFinite(record.lastProgressAt)) out.lastProgressAt = record.lastProgressAt;
   if (typeof record.lastCompletion === 'string') out.lastCompletion = record.lastCompletion;
-  if (typeof record.lastCompletionAt === 'number') out.lastCompletionAt = record.lastCompletionAt;
+  if (typeof record.lastCompletionAt === 'number' && Number.isFinite(record.lastCompletionAt)) out.lastCompletionAt = record.lastCompletionAt;
   if (typeof record.lastError === 'string') out.lastError = record.lastError;
-  if (typeof record.lastErrorAt === 'number') out.lastErrorAt = record.lastErrorAt;
+  if (typeof record.lastErrorAt === 'number' && Number.isFinite(record.lastErrorAt)) out.lastErrorAt = record.lastErrorAt;
   if (Array.isArray(record.recentUserContext)) {
     out.recentUserContext = record.recentUserContext
       .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
@@ -50,7 +50,7 @@ function sanitizeActivity(raw: unknown): ChatActivity {
 }
 
 function persistChatActivity(chatJid: string): void {
-  const activity = chatActivity[chatJid];
+  const activity = chatActivity.get(chatJid);
   if (!activity) return;
   try {
     setRouterState(chatActivityStateKey(chatJid), JSON.stringify(activity));
@@ -60,31 +60,30 @@ function persistChatActivity(chatJid: string): void {
 }
 
 export function ensureChatActivity(chatJid: string): ChatActivity {
-  if (!chatActivity[chatJid]) {
+  const existing = chatActivity.get(chatJid);
+  if (!existing) {
     const persisted = getRouterState(chatActivityStateKey(chatJid));
     if (persisted) {
       try {
-        chatActivity[chatJid] = sanitizeActivity(JSON.parse(persisted));
+        chatActivity.set(chatJid, sanitizeActivity(JSON.parse(persisted)));
       } catch {
-        chatActivity[chatJid] = {};
+        chatActivity.set(chatJid, {});
       }
     } else {
-      chatActivity[chatJid] = {};
+      chatActivity.set(chatJid, {});
     }
   }
-  return chatActivity[chatJid];
+  return chatActivity.get(chatJid) as ChatActivity;
 }
 
 export function getChatActivity(chatJid: string): ChatActivity | undefined {
-  return chatActivity[chatJid];
+  return chatActivity.get(chatJid);
 }
 
 function compactMessage(text: string, maxLen = 220): string | undefined {
   let compact = text.trim();
   if (!compact) return undefined;
-  if (TRIGGER_PATTERN.test(compact)) {
-    compact = compact.replace(TRIGGER_PATTERN, '').trim();
-  }
+  compact = compact.replace(TRIGGER_PATTERN, '').trim();
   compact = compact.replace(/\s+/g, ' ').trim();
   if (!compact) return undefined;
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact;
@@ -99,7 +98,9 @@ function recordUserContext(activity: ChatActivity, text: string): void {
 
 export function setObjectiveFromMessages(chatJid: string, messages: NewMessage[]): void {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const content = messages[i].content.trim();
+    const rawContent = messages[i]?.content;
+    if (typeof rawContent !== 'string') continue;
+    const content = rawContent.trim();
     if (!content) continue;
     const compactObj = compactMessage(content, 180);
     if (!compactObj) continue;
