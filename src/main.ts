@@ -201,6 +201,27 @@ async function rerankCO(chatJid: string): Promise<void> {
   }
 }
 
+/** Check if this bot is CO and there's an unaddressed human message on the main timeline. */
+function isCOMainTimelineTrigger(chatJid: string, messages: NewMessage[]): boolean {
+  if (roomCO[chatJid] !== ASSISTANT_NAME) return false;
+  // Build patterns for all known bot names in this room
+  const roster = roomRoster[chatJid];
+  const botNamePatterns: RegExp[] = [];
+  if (roster) {
+    for (const name of roster.keys()) {
+      botNamePatterns.push(new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'));
+    }
+  }
+  return messages.some(m => {
+    if (botMatrixUserIds.has(m.sender)) return false; // bot message
+    if (m.thread_id) return false; // thread message, not main timeline
+    const content = m.content.trim();
+    // Check if any bot is addressed
+    const addressesBot = botNamePatterns.some(p => p.test(content));
+    return !addressesBot;
+  });
+}
+
 /** Resolve which thread a response should go to. Reply where the message was. */
 function resolveReplyThread(
   chatJid: string,
@@ -699,9 +720,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const hasParticipatingThread = actionableMessages.some(
     m => m.thread_id && botParticipatesInThread(chatJid, m.thread_id),
   );
+  const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
-  // Need explicit callout or participating thread
-  if (!hasTrigger && !hasParticipatingThread) {
+  // Need explicit callout, participating thread, or CO main timeline duty
+  if (!hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
     saveState();
     return true;
@@ -1022,9 +1044,10 @@ async function handleGroupMessagesInLoop(
   const hasParticipatingThread = actionableMessages.some(
     m => m.thread_id && botParticipatesInThread(chatJid, m.thread_id),
   );
+  const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
-  // Need explicit callout or participating thread
-  if (!hasTrigger && !hasParticipatingThread) {
+  // Need explicit callout, participating thread, or CO main timeline duty
+  if (!hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
     saveState();
     return;
