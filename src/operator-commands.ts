@@ -13,6 +13,57 @@ import type { MatrixChannel } from './channels/matrix.js';
 
 const MY_NAME = ASSISTANT_NAME.toLowerCase();
 const PERSONA = process.env.PERSONA_NAME || ASSISTANT_NAME.toLowerCase();
+let cachedIntercomSenders: Set<string> | null = null;
+
+interface IntercomConfig {
+    homeserver?: unknown;
+    rooms?: Record<string, { username?: unknown }>;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function resolveIntercomSender(username: string, homeserver: string): string | null {
+    const trimmed = username.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith('@')) {
+        return /^@[^:\s]+:[^\s]+$/.test(trimmed) ? trimmed : null;
+    }
+    if (!/^[^:\s@]+$/.test(trimmed)) return null;
+    try {
+        const domain = new URL(homeserver).host;
+        return domain ? `@${trimmed}:${domain}` : null;
+    } catch {
+        return null;
+    }
+}
+
+function getAuthorizedIntercomSenders(): Set<string> {
+    if (cachedIntercomSenders) return cachedIntercomSenders;
+    const senders = new Set<string>();
+    try {
+        const configPath = path.join(loadMachineConfig().secretsPath, 'operator', 'intercom.json');
+        if (!fs.existsSync(configPath)) {
+            cachedIntercomSenders = senders;
+            return senders;
+        }
+        const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as IntercomConfig;
+        if (!isObject(parsed) || typeof parsed.homeserver !== 'string' || !isObject(parsed.rooms)) {
+            cachedIntercomSenders = senders;
+            return senders;
+        }
+        for (const room of Object.values(parsed.rooms)) {
+            if (!isObject(room) || typeof room.username !== 'string') continue;
+            const sender = resolveIntercomSender(room.username, parsed.homeserver);
+            if (sender) senders.add(sender);
+        }
+    } catch (err) {
+        logger.warn({ err }, 'Failed to load intercom authorization config');
+    }
+    cachedIntercomSenders = senders;
+    return senders;
+}
 
 
 export function getCaptainUserId(): string {
@@ -20,7 +71,7 @@ export function getCaptainUserId(): string {
 }
 
 function isAuthorized(sender: string): boolean {
-    return (CAPTAIN_USER_ID && sender === CAPTAIN_USER_ID) || /-intercom:/.test(sender);
+    return (CAPTAIN_USER_ID && sender === CAPTAIN_USER_ID) || getAuthorizedIntercomSenders().has(sender);
 }
 
 /** Parse "!cmd [target]" — returns target (lowercased) or undefined. */
@@ -84,7 +135,7 @@ export function handleOperatorCommand(
     }
 
     // !allow <bot> <path> [minutes] — authorized only
-    const grant = cmd.match(/^!allow\s+(\S+)\s+(\S+)(?:\s+(\d+))?/);
+    const grant = cmd.match(/^!allow\s+(\S+)\s+(\S+)(?:\s+(\d+))?$/);
     if (grant) {
         if (!isAuthorized(msg.sender)) return true;
         const [, botName, hostPath, mins] = grant;
@@ -111,7 +162,7 @@ export function handleOperatorCommand(
     }
 
     // !deny <bot> <path> — authorized only
-    const revoke = cmd.match(/^!deny\s+(\S+)\s+(\S+)/);
+    const revoke = cmd.match(/^!deny\s+(\S+)\s+(\S+)$/);
     if (revoke) {
         if (!isAuthorized(msg.sender)) return true;
         const [, botName, hostPath] = revoke;
