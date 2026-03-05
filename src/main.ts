@@ -5,6 +5,7 @@
  * Upstream files (index.ts, container-runner.ts, ipc.ts) are read-only
  * dependencies — never modified by InfiniClaw.
  */
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -99,6 +100,7 @@ import { shouldIgnoreMessage } from './message-filtering.js';
 import { appendConversationLog } from './conversation-log.js';
 import { statusMessage } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
+import { uploadContent } from './s3-sync.js';
 
 // ── Git version info (resolved once at module load) ────────────────────────
 import { execSync as gitExecSync } from 'child_process';
@@ -340,8 +342,14 @@ function normalizeInboundMessage(msg: NewMessage): NewMessage | null {
   };
 }
 
-function safeToolCallHtml(raw: string): string {
-  return `<details><summary>🔧 Tool calls</summary><pre><code>${esc(raw)}</code></pre></details>`;
+/** Compact single-line breadcrumb for a tool call. Full content uploaded to S3 async. */
+function toolCallBreadcrumb(text: string): { html: string; s3Key: string } {
+  const hash = crypto.createHash('sha1').update(text).digest('hex').slice(0, 7);
+  const titleMatch = text.match(/🔧\s*([^<]{1,60})/);
+  const title = titleMatch ? titleMatch[1].trim() : 'Tool call';
+  const s3Key = `tool-calls/${ASSISTANT_NAME}/${Date.now()}-${hash}.html`;
+  const html = `<font color="#888888">🔧 <em>${esc(title)}</em> · <code>${hash}</code></font>`;
+  return { html, s3Key };
 }
 
 const esc = (s: string): string =>
@@ -686,7 +694,14 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
   clearIdleIndicator(ctx.chatJid);
   markProgress(ctx.chatJid, text);
   const isToolCall = text.includes('<details>');
-  const toolCallHtml = isToolCall ? safeToolCallHtml(text) : '';
+  let toolCallHtml = '';
+  if (isToolCall) {
+    const bc = toolCallBreadcrumb(text);
+    toolCallHtml = bc.html;
+    void uploadContent(bc.s3Key, text).catch((err) => {
+      logger.warn({ err }, 'Failed to upload tool call to S3');
+    });
+  }
   const now = Date.now();
   if (isToolCall || !lastProgressChatAt[ctx.chatJid] || now - lastProgressChatAt[ctx.chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
     if (!isToolCall) lastProgressChatAt[ctx.chatJid] = now;

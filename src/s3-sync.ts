@@ -76,6 +76,13 @@ async function uploadFile(client: S3Client, bucket: string, key: string, filePat
   await client.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body }));
 }
 
+/** Upload arbitrary text content to S3 under the given key. No-op if S3 not configured. */
+export async function uploadContent(key: string, content: string): Promise<void> {
+  const s3 = getClient();
+  if (!s3) return;
+  await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: content }));
+}
+
 async function downloadFile(client: S3Client, bucket: string, key: string, filePath: string): Promise<void> {
   const resp = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   if (!resp.Body) return;
