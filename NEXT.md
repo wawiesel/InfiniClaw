@@ -24,7 +24,7 @@ Updated 2026-03-05T19:52Z.
 ## LOW — Reliability
 
 - Session OOM still possible — V8 heap OOM (exit 137) from large JSONL sessions. Full cleanup chain: DB sessions table, JSONL file, .claude/backups/.
-- Parker's scheduled task `ERR_SSL_PACKET_LENGTH_TOO_LONG` — should be fixed with `containerNetwork: "host"`, verify on next cron fire.
+- ~~Parker's scheduled task `ERR_SSL_PACKET_LENGTH_TOO_LONG`~~ — ✅ FIXED with `containerNetwork: "host"`. Zero SSL errors in supervisor logs. Verified 2026-03-05.
 
 ## Recently Completed
 
