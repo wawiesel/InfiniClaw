@@ -14,6 +14,8 @@ import { logger } from 'nanoclaw/logger.js';
 const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');
 const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
 const AUTO_BRAIN_SWITCH_COOLDOWN_MS = 10 * 60 * 1000;
+const BOT_NAME_PATTERN = /^[a-zA-Z0-9._-]+$/;
+const MAX_MODEL_NAME_LENGTH = 200;
 
 let lastAutoBrainSwitchAt = 0;
 
@@ -54,8 +56,38 @@ function isMainConfiguredForOllama(): boolean {
   return isOllamaBaseUrl(getConfiguredEnv('ANTHROPIC_BASE_URL'));
 }
 
+function normalizeBotName(bot: string): string | undefined {
+  const trimmed = bot.trim();
+  if (!trimmed) return undefined;
+  if (!BOT_NAME_PATTERN.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+function isPathWithinRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function sanitizeModelName(model: string | undefined): string | undefined {
+  const trimmed = model?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > MAX_MODEL_NAME_LENGTH) return undefined;
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) return undefined;
+  if (/[<>]/.test(trimmed)) return undefined;
+  return trimmed;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function resolveConfiguredMainModel(): string | undefined {
-  return getConfiguredEnv(MAIN_MODEL_ENV_KEY)?.trim() || undefined;
+  return sanitizeModelName(getConfiguredEnv(MAIN_MODEL_ENV_KEY));
 }
 
 function parseNumber(value: unknown): number {
@@ -143,7 +175,7 @@ function isGenericClaudeModel(model: string): boolean {
 }
 
 export function normalizeMainLlm(model: string | undefined): string | undefined {
-  const trimmed = model?.trim();
+  const trimmed = sanitizeModelName(model);
   if (!trimmed) return undefined;
 
   if (resolveMainProvider() !== 'claude') {
@@ -197,13 +229,41 @@ export async function maybeAutoSwitchBrainsOnQuotaError(
   let config;
   try { config = loadMachineConfig(); } catch { return; }
 
+  let secretsRoot: string;
+  try {
+    secretsRoot = fs.realpathSync(config.secretsPath);
+  } catch {
+    return;
+  }
+
   const switched: string[] = [];
-  for (const bot of config.bots) {
-    const envPath = path.join(config.secretsPath, bot, 'env');
-    if (!envPath.startsWith(config.secretsPath + path.sep)) continue; // path traversal guard
+  for (const rawBot of config.bots) {
+    const bot = normalizeBotName(rawBot);
+    if (!bot) {
+      logger.warn({ bot: rawBot }, 'Skipping invalid bot name in machine config');
+      continue;
+    }
+
+    const envPath = path.resolve(secretsRoot, bot, 'env');
+    if (!isPathWithinRoot(secretsRoot, envPath)) {
+      logger.warn({ bot, envPath }, 'Skipping bot with env path outside secrets root');
+      continue;
+    }
     if (!fs.existsSync(envPath)) continue;
+
+    let safeEnvPath: string;
     try {
-      applyOllamaFallbackToProfile(envPath);
+      safeEnvPath = fs.realpathSync(envPath);
+    } catch {
+      continue;
+    }
+    if (!isPathWithinRoot(secretsRoot, safeEnvPath)) {
+      logger.warn({ bot, safeEnvPath }, 'Skipping bot with symlinked env path outside secrets root');
+      continue;
+    }
+
+    try {
+      applyOllamaFallbackToProfile(safeEnvPath);
       switched.push(bot);
     } catch (err) {
       logger.error({ err, bot }, 'Failed ollama fallback switch for bot');
@@ -247,7 +307,8 @@ export function setMainLlm(model: string): void {
 
 export function mainSender(): string {
   const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
-  return `<font color="#888888">🧠 <em>${providerName}/${mainLlm}</em></font>`;
+  const modelName = sanitizeModelName(mainLlm) || 'unknown-model';
+  return `<font color="#888888">🧠 <em>${providerName}/${escapeHtml(modelName)}</em></font>`;
 }
 
 export function defaultSenderForGroup(
