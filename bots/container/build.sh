@@ -24,7 +24,7 @@ build_image() {
 
   echo "Building ${image_name}..."
   # Build context is nanoclaw/container/ so COPY agent-runner/ works
-  podman build -t "${image_name}" -f "${dockerfile}" "${NANOCLAW_CONTAINER}"
+  podman build --network host -t "${image_name}" -f "${dockerfile}" "${NANOCLAW_CONTAINER}"
   echo "${image_name}: done"
 }
 
@@ -35,6 +35,7 @@ case "${target}" in
   cid)      build_image cid ;;
   parker)   build_image parker ;;
   albert)   build_image albert ;;
-  all)      build_image nora && build_image johnny5 && build_image cid && build_image parker && build_image albert ;;
-  *)        echo "Usage: $0 [nora|johnny5|cid|parker|albert|all]" >&2; exit 1 ;;
+  max)      build_image max ;;
+  all)      build_image nora && build_image johnny5 && build_image cid && build_image parker && build_image albert && build_image max ;;
+  *)        echo "Usage: $0 [nora|johnny5|cid|parker|albert|max|all]" >&2; exit 1 ;;
 esac

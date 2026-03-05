@@ -59,3 +59,16 @@ npm run cli start
 - `service.ts` / `cli.ts` are clean — no refactoring needed.
 - Config reads from `process.env` scattered across `main.ts` should eventually consolidate into a config module, but not urgent.
 - Upstream NanoClaw changes infrequently. Manual porting of upstream fixes is acceptable.
+
+## 2026-03-05 — Podman bridge network breaks HTTPS on machines with port 443 forwarding
+
+**Participants:** Operator (Poseidon), Captain
+
+When a machine has port 443 forwarded to it (e.g. NAS → host:6167 for Matrix), outbound HTTPS from Podman containers on the default bridge network fails with `ERR_SSL_PACKET_LENGTH_TOO_LONG`. The port forwarding rule intercepts the container's outbound port 443 traffic. Host networking works fine.
+
+Additionally, deploying a new bot on a fresh machine requires: (1) pm2 installed as a local dependency (`npm install pm2 --save-dev`), not just globally, since `service.ts` resolves `PM2_BIN` from `node_modules/.bin/pm2`. (2) The bot added to `bots/container/build.sh`'s case statement if it's a new persona.
+
+**Takeaways:**
+- Use `podman build --network host` on machines with inbound port 443 forwarding.
+- `service.ts` expects pm2 in `node_modules/.bin/`, not on `PATH`. Always install locally.
+- When adding a new bot persona, update `build.sh` case statement, `machine.json`, `roster.json`, and secrets env.
