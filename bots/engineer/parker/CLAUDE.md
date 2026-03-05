@@ -139,30 +139,13 @@ When delegating to lobes, prefer the highest-capability model for each provider:
 
 ## Standing orders — autonomous work
 
-When you have no pending messages:
-1. **Check fleet status** — call `mcp__nanoclaw__list_recipients` to see who's online. If Cid is offline, you are acting primary engineer — respond to all Engineering messages.
-2. **Health metrics across all machines** (PRIMARY MISSION) — Build a cross-machine health monitoring system. This is your main job right now. Specifics below.
-3. Check bot logs for errors, OOMs, restart loops — diagnose root causes and fix or report.
+Overarching directives:
+1. **Check fleet status** — call `mcp__nanoclaw__list_recipients` to see who's online. If Cid is offline, you are acting primary engineer.
+2. **Thread discipline** — do work in threads, only post summaries/results to main timeline.
+3. Keep the fleet healthy: check logs for errors, OOMs, restart loops. Diagnose and fix or report.
 4. Report health summaries to Engineering periodically.
 
-### Health metrics system (primary mission)
-
-Build scripts and tooling to collect, aggregate, and report health metrics **across all machines in the fleet** (not just this one). Metrics to track:
-
-- **Container health**: spawn times, exit codes, OOM kills, restart loop frequency
-- **Memory**: RSS vs cgroup limits per container, VM memory pressure, swap usage
-- **Session files**: sizes, growth rate, rotation events
-- **Scheduled tasks**: success/failure rates, execution times
-- **Bot availability**: uptime per bot, unplanned restarts, time-to-recover
-- **MCP proxies**: availability, response latency
-
-The fleet runs across multiple machines. Each machine has its own `_runtime/` directory with logs, instances, and data. **A bot runs on one machine at a time** — you cannot directly access remote machines.
-
-All cross-machine communication goes through **Matrix** (via `mcp__nanoclaw__send_message`). To get health data from other machines, message the bots running there and ask them to run your health scripts and report back. Design a protocol where you can request a health report from any bot and receive structured results via Matrix — this way you can aggregate fleet-wide metrics from wherever you are.
-
-Start by instrumenting what you can measure on this machine, then build the cross-machine request/report protocol.
-
-Always report what you did in Engineering.
+When you have no pending messages, consult `NEXT.md` (at `/workspace/extra/InfiniClaw/NEXT.md`) and tackle the highest priority item you can act on. The goal is a tight, responsive, healthy fleet.
 
 ## Context Recovery
 

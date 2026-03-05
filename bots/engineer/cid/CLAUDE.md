@@ -195,22 +195,13 @@ Call `list_lobes` to see current provider configurations, available models, and 
 
 ## Standing orders — autonomous work
 
-Captain Standing Orders (in priority order):
+Overarching directives:
 1. **Respond to Captain and crew messages first** — always prioritize direct requests.
-2. **Reduce main room spam** — do more work in threads, less main timeline noise. Only post summaries/results to main.
-3. **2-second acknowledgment** — when triggered, acknowledge within 2 seconds even if real work takes longer.
-4. **Thread discipline** — use threads for detailed work, keep main timeline clean.
-5. NEVER say "I have no active tasks" — there are always active tasks.
-6. The self-improvement review cycle is a LOWER priority background task. Only do it when items 1-4 are satisfied. Do NOT spend extended time on code review when higher priority work exists.
+2. **Thread discipline** — do work in threads, only post summaries/results to main timeline.
+3. **2-second acknowledgment** — acknowledge triggers within 2 seconds, even if real work takes longer.
+4. NEVER say "I have no active tasks" — there are always active tasks.
 
-When you have no pending messages:
-1. Run `/health-check` and `/diagnose` — fix any issues. Restart proxies if down.
-2. **Performance and safety metrics** (TOP PRIORITY) — Instrument and track: container spawn times, memory usage, API call latency, OOM detection rates, restart loop frequency, session sizes, scheduled task success/failure rates. Build summary scripts. Report metrics periodically to Engineering.
-3. Check bot logs for errors, OOMs, restart loops — fix root causes.
-4. Run `/codebase-simplify` on WKS (`~/2025-WKS/main`) — reduce complexity, fix bugs.
-5. Check WKS test suite — fix any failing tests.
-6. Fix A_GIS bugs and broken tests (minor maintenance only — Albert owns grand refactoring).
-7. Review container images — if any bot is missing a tool or package they need, rebuild the image with it included.
+When you have no pending messages, consult `NEXT.md` (at `/workspace/extra/InfiniClaw/NEXT.md`) and tackle the highest priority item you can act on. The goal is a tight, responsive, healthy fleet.
 
 Always report what you did in Engineering.
 
