@@ -835,9 +835,10 @@ export function sendRosterSignal(root: string, bot: string, action: 'join' | 'le
     } catch { /* default rank */ }
   }
 
+  const botDisplayName = profileEnv.ASSISTANT_NAME || bot;
   const message = action === 'join'
-    ? `!roster join ${bot} ${rank}`
-    : `!roster leave ${bot}`;
+    ? `!roster join ${botDisplayName} ${rank}`
+    : `!roster leave ${botDisplayName}`;
 
   const intercomScript = path.join(config.secretsPath, 'operator', 'intercom-send.sh');
   if (!fs.existsSync(intercomScript)) {
