@@ -5,7 +5,6 @@ Updated 2026-03-05 05:20 PM EST.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
-- **Bot display name format** — display names should follow `Name (location) 🔹` format, e.g. `Cid (HERACLES) ⭐`, `Parker (Poseidon) 🟢`. Needs update in container-config or bot profile.
 
 ## MEDIUM — Next Up
 
@@ -28,6 +27,7 @@ Updated 2026-03-05 05:20 PM EST.
 
 ## Recently Completed
 
+- Bot display names — now `Name (HOSTNAME) ⭐/🟢/🔴` via `botDisplayName()` in main.ts (`37fee0e`). Restart needed to take effect.
 - Security hardening sweep (Cid) — systematic review across 23 source files (allow-list.ts through skill-sync.ts). Path traversal fixes, input validation, symlink escape prevention, HTML sanitization, command injection prevention, schema validation. 23 commits pushed, all 59 tests passing.
 - Poseidon launchd check — Poseidon is Linux, no launchd agents. Clean.
 - launchd zombie agents removed — old `com.infiniclaw.{bot}.plist` files with `KeepAlive: true` were fighting PM2, causing persistent duplicate processes. All launch agents deleted from HERACLES. MinIO also moved to Poseidon. See LESSONS_LEARNED.md.
