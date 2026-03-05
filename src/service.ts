@@ -261,6 +261,9 @@ export function syncPersona(root: string, bot: string): void {
       return;
     }
   } catch { return; }
+
+  // TODO: Implement any required pre-deploy persona sync work here.
+  // Current architecture is one-way (repo/persona -> instance), so this is intentionally a no-op.
 }
 
 /** Update the local presence file to reflect currently running bots. */
@@ -509,16 +512,6 @@ function pm2Stop(name: string): void {
   try { execSync(`"${PM2_BIN}" delete "${name}"`, { stdio: 'pipe' }); } catch { /* ok — not running */ }
 }
 
-function pm2IsRunning(name: string): boolean {
-  try {
-    const out = execSync(`"${PM2_BIN}" jlist`, { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' });
-    const list = JSON.parse(out) as Array<{ name: string; pm2_env?: { status?: string } }>;
-    return list.some((p) => p.name === name && p.pm2_env?.status === 'online');
-  } catch {
-    return false;
-  }
-}
-
 /** Stamp git version info into instance so running code knows its deploy commit. */
 function stampGitVersion(root: string, instance: string): void {
   try {
@@ -606,10 +599,20 @@ function pm2StartBot(bot: string, nodeBin: string, instance: string, logs: strin
   const outLog = path.join(logs, `${bot}.log`);
   const errLog = path.join(logs, `${bot}.error.log`);
 
-  execSync(
-    `"${PM2_BIN}" start "/bin/bash" --name "${name}" --cwd "${instance}" ` +
-    `--output "${outLog}" --error "${errLog}" ` +
-    `--restart-delay 2000 --max-restarts 100 -- "${startScript}"`,
+  execFileSync(
+    PM2_BIN,
+    [
+      'start',
+      '/bin/bash',
+      '--name', name,
+      '--cwd', instance,
+      '--output', outLog,
+      '--error', errLog,
+      '--restart-delay', '2000',
+      '--max-restarts', '100',
+      '--',
+      startScript,
+    ],
     { stdio: 'inherit' },
   );
 }
@@ -683,13 +686,29 @@ export function startSupervisor(root: string): void {
   const outLog = path.join(logs, 'supervisor.log');
   const errLog = path.join(logs, 'supervisor.error.log');
 
-  execSync(
-    `INFINICLAW_ROOT="${root}" HOME="${os.homedir()}" ` +
-    `PATH="${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin" ` +
-    `"${PM2_BIN}" start "${process.execPath}" --name "${SUPERVISOR_PM2_NAME}" --cwd "${root}" ` +
-    `--output "${outLog}" --error "${errLog}" ` +
-    `--restart-delay 5000 --max-restarts 50 -- "${distFile}"`,
-    { stdio: 'inherit' },
+  execFileSync(
+    PM2_BIN,
+    [
+      'start',
+      process.execPath,
+      '--name', SUPERVISOR_PM2_NAME,
+      '--cwd', root,
+      '--output', outLog,
+      '--error', errLog,
+      '--restart-delay', '5000',
+      '--max-restarts', '50',
+      '--',
+      distFile,
+    ],
+    {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        INFINICLAW_ROOT: root,
+        HOME: os.homedir(),
+        PATH: `${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`,
+      },
+    },
   );
   console.log('supervisor: started');
 }
@@ -721,7 +740,7 @@ export async function start(onlyBot?: string): Promise<void> {
   removeStaleProcesses();
   killRogueProcesses();
   spawnSync('sleep', ['1']);
-  killStaleContainers();
+  killStaleContainers(onlyBot);
 
   for (const bot of bots) {
     try {
@@ -764,11 +783,13 @@ export async function stop(onlyBot?: string): Promise<void> {
   }
   killStaleContainers(onlyBot);
 
-  // Push state to S3 in background (non-blocking)
-  pushAll(root).then(
-    () => console.log('S3 backup complete.'),
-    (err) => console.warn(`S3 push failed: ${err instanceof Error ? err.message : err}`),
-  );
+  // Push state to S3 before returning so data is not lost on exit.
+  try {
+    await pushAll(root);
+    console.log('S3 backup complete.');
+  } catch (err) {
+    console.warn(`S3 push failed: ${err instanceof Error ? err.message : err}`);
+  }
 
   console.log('InfiniClaw stopped.');
 }
@@ -837,47 +858,6 @@ export function chat(bot: string): void {
 }
 
 // ── Send (operator message to bot room) ─────────────────────────────
-
-/** Build room map dynamically from ALL bots' env files (fleet-wide).
- *  When multiple bots share a room, the highest-ranking (lowest rank number)
- *  bot is chosen — the commanding officer for that room.
- *  Uses the roster (not just local machine.json bots) so the CO election
- *  is consistent across machines. */
-function buildRoomMap(root: string): Record<string, { bot: string; roomId: string; jid: string }> {
-  const config = loadMachineConfig();
-  let roster: Record<string, { rank?: number }> = {};
-  try {
-    roster = JSON.parse(fs.readFileSync(path.join(config.secretsPath, 'roster.json'), 'utf-8'));
-  } catch { /* no roster — all bots equal */ }
-
-  // Only consider bots running on this machine for CO election
-  const localBots = config.bots;
-  const allBots = localBots.length > 0 ? localBots : getActiveBots();
-
-  const map: Record<string, { bot: string; roomId: string; jid: string; rank: number }> = {};
-  for (const bot of allBots) {
-    try {
-      const env = loadProfileEnv(root, bot);
-      const groupName = env.MAIN_GROUP_NAME;
-      const jid = env.LOCAL_MIRROR_MATRIX_JID;
-      if (!groupName || !jid) continue;
-      const roomId = jid.replace(/^matrix:/, '');
-      const rank = roster[bot]?.rank ?? 99;
-      const key = groupName.toLowerCase();
-      if (!map[key] || rank < map[key].rank) {
-        map[key] = { bot, roomId, jid, rank };
-      }
-    } catch {
-      // Skip bots with missing/broken env
-    }
-  }
-  // Strip rank from return type
-  const result: Record<string, { bot: string; roomId: string; jid: string }> = {};
-  for (const [k, v] of Object.entries(map)) {
-    result[k] = { bot: v.bot, roomId: v.roomId, jid: v.jid };
-  }
-  return result;
-}
 
 export async function send(room: string, message: string): Promise<void> {
   const root = resolveRoot();
