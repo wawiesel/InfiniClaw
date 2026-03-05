@@ -365,6 +365,10 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
         throw new Error(`git stash failed${detail ? `: ${detail}` : ''}`);
       }
     }
+    const workingTreeStatus = execSync('git status --porcelain', execOpts).trim();
+    if (workingTreeStatus) {
+      throw new Error(`git working tree not clean after stash:\n${workingTreeStatus}`);
+    }
     try {
       // Rebase
       const output = execSync('git rebase origin/main', execOpts).trim();
