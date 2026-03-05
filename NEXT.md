@@ -1,11 +1,11 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05T18:00Z.
+Updated 2026-03-05T18:10Z.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
-- **2-second ack** — bot should acknowledge within 2s of being triggered, even if real work takes longer. Cid implementing in `f28eb09` — verify it works in practice.
+- **2-second ack** — implemented in `f28eb09` (👀 reaction + typing indicator). Verify it works in practice after Cid restart.
 - **Thread discipline** — bots spam main room too much. More work in threads, only post summaries/results to main timeline. Cid editing main.ts and delegate-runner.ts for this — monitor result.
 - **Parker ineffective as autonomous monitor**. Fixed: idle containers now wake for pending messages/tasks (group-queue.ts). Still needed: periodic heartbeat so Parker can do proactive health work without external trigger.
 - **Matrix sluggish on Poseidon** (Captain report). Server responds <1ms locally — likely Element client or network issue. Investigate client-side or consider lighter Matrix client.
@@ -28,6 +28,7 @@ Updated 2026-03-05T18:00Z.
 
 ## LOW — Reliability
 
+- **Max session age** — implemented in `1aa34a8`. Containers auto-recycle after `MAX_SESSION_AGE_MS` (default 8h). Prevents 65h+ stale sessions. Verify in production.
 - Session OOM still possible — V8 heap OOM (exit 137) from large JSONL sessions. Agent-runner backup files (.claude/backups/) can restore old session IDs even after manual cleanup. Full cleanup chain: DB sessions table -> JSONL file -> .claude/backups/.
 - Image hash cache files (`_runtime/data/image-hash-*`) prevent rebuild even when images are removed. Must delete hash files to force rebuild.
 - Container exit 125 from missing agent-runner mount — partially fixed with `mountIfExists` but root cause (build context) should be revisited.
