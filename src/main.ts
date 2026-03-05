@@ -228,8 +228,14 @@ function resolveReplyThread(
   chatJid: string,
   messages: NewMessage[],
 ): string | undefined {
+  // Find the most recent triggered/human thread message — that's where we should reply.
+  // Scanning from end to find the latest thread message that triggered us.
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.thread_id && !botMatrixUserIds.has(m.sender)) return m.thread_id;
+  }
+  // Also check last message (could be a bot thread message we're continuing)
   const lastMsg = messages[messages.length - 1];
-  // If the message is in a thread, reply in that thread
   if (lastMsg?.thread_id) return lastMsg.thread_id;
   // Work thread override (set by setWorkThread MCP tool)
   if (workThreadIds[chatJid]) {
