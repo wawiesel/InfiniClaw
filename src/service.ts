@@ -493,7 +493,12 @@ function rebuildImageIfChanged(root: string, bot: string): void {
   const currentHash = computeBuildContextHash(root, bot);
   let storedHash = '';
   try { storedHash = fs.readFileSync(hashFile, 'utf8').trim(); } catch { /* first run */ }
-  if (currentHash === storedHash) {
+  // Also rebuild if the image was removed (e.g. podman rmi)
+  let imageExists = true;
+  try {
+    execSync(`podman image exists nanoclaw-${bot}:latest`, { stdio: 'pipe' });
+  } catch { imageExists = false; }
+  if (currentHash === storedHash && imageExists) {
     console.log(`${bot}: container image up to date`);
     return;
   }
