@@ -439,7 +439,13 @@ export function getSystemStatus(rootDir: string): SystemStatus {
  */
 export function getRecentLogLines(rootDir: string, bot: string, logType: 'error' | 'stdout' = 'error', lines = 50): string[] {
   const ext = logType === 'error' ? 'error.log' : 'log';
+  const logsDir = path.resolve(rootDir, '_runtime', 'logs');
   const logPath = path.join(rootDir, '_runtime', 'logs', `${bot}.${ext}`);
+  const resolved = path.resolve(logPath);
+  if (!resolved.startsWith(logsDir + path.sep)) {
+    console.warn(`[status] Blocked log read outside logs dir for bot "${bot}"`);
+    return [];
+  }
   if (!fs.existsSync(logPath)) return [];
 
   try {

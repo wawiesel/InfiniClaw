@@ -18,7 +18,9 @@ const ROOT_DIR = process.env.INFINICLAW_ROOT || path.resolve(process.cwd(), '..'
 
 function relativeTime(iso: string | undefined): string {
   if (!iso) return '';
-  const diffMs = Date.now() - new Date(iso).getTime();
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return 'unknown';
+  const diffMs = Date.now() - parsed.getTime();
   if (diffMs < 0) return 'in the future';
   const s = Math.floor(diffMs / 1000);
   if (s < 60) return `${s}s ago`;
@@ -227,7 +229,7 @@ async function startMcpServer(): Promise<void> {
     'get_logs',
     'Get recent log lines from a bot.',
     {
-      bot: z.string().describe('Bot persona name (e.g. nora, cid, johnny5)'),
+      bot: z.string().regex(/^[a-z0-9_-]+$/i, 'Invalid bot name').describe('Bot persona name (e.g. nora, cid, johnny5)'),
       log_type: z.enum(['error', 'stdout']).default('error').describe('Log type'),
       lines: z.number().int().min(1).max(200).default(50).describe('Number of lines'),
     },
