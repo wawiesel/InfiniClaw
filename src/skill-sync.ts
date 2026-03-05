@@ -19,7 +19,7 @@ export function loadSkillsToSession(
   }
   fs.mkdirSync(sessionSkillsDir, { recursive: true });
 
-  let roleSkills: string[] = [];
+  let roleSkills: unknown;
   try {
     roleSkills = JSON.parse(fs.readFileSync(skillsFile, 'utf-8'));
   } catch (err) {
@@ -27,8 +27,19 @@ export function loadSkillsToSession(
     return;
   }
 
-  for (const skillName of roleSkills) {
-    const srcDir = path.join(skillsPoolDir, skillName);
+  if (!Array.isArray(roleSkills)) {
+    logger.warn({ skillsFile }, 'skills.json is not an array, no skills loaded');
+    return;
+  }
+  const normalizedRoleSkills = roleSkills.filter((s): s is string => typeof s === 'string');
+  const resolvedSkillsPoolDir = path.resolve(skillsPoolDir);
+
+  for (const skillName of normalizedRoleSkills) {
+    const srcDir = path.resolve(skillsPoolDir, skillName);
+    if (!srcDir.startsWith(resolvedSkillsPoolDir + path.sep)) {
+      logger.warn({ skillName }, 'skill-sync: skipping skill with path traversal');
+      continue;
+    }
     if (!fs.existsSync(srcDir) || !fs.statSync(srcDir).isDirectory()) {
       logger.warn({ skillName, srcDir }, 'Skill not found in pool, skipping');
       continue;
