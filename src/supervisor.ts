@@ -462,6 +462,17 @@ async function healthLoop(): Promise<void> {
 // ── Heartbeat — nudge idle bots to do autonomous work ──────────────
 
 const HEARTBEAT_INTERVAL = parseInt(process.env.HEARTBEAT_INTERVAL_MS || '', 10) || 30 * 60_000; // 30 min default
+const MIN_SESSION_AGE_MS = parseInt(process.env.MIN_SESSION_AGE_MS || '', 10) || 6 * 3_600_000; // 6h
+const MAX_SESSION_AGE_MS = parseInt(process.env.MAX_SESSION_AGE_MS || '', 10) || 8 * 3_600_000; // 8h
+const DREAM_DURATION_MS = parseInt(process.env.DREAM_DURATION_MS || '', 10) || 30 * 60_000; // 30m
+const DREAM_IDLE_WINDOW_MS = parseInt(process.env.DREAM_IDLE_WINDOW_MS || '', 10) || 15 * 60_000; // 15m
+const DREAM_LOOP_INTERVAL_MS = 5 * 60_000; // 5m
+
+type DreamPhase = 'idle' | 'dreaming' | 'recycling';
+const botDreamPhase = new Map<string, DreamPhase>();
+const botDreamStartedAt = new Map<string, number>();
+const botIdleSince = new Map<string, number>();
+let dreamingBot: string | null = null; // only one at a time
 
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {
@@ -471,6 +482,88 @@ function hasRunningContainer(bot: string): boolean {
     }).trim();
     return out.length > 0;
   } catch { return false; }
+}
+
+/** Get container start time in ms for the bot's main container, or null if missing. */
+function getContainerStartTime(bot: string): number | null {
+  try {
+    const out = execSync(`podman inspect nanoclaw-${bot}-main-* --format '{{.State.StartedAt}}'`, {
+      encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
+    }).trim();
+    if (!out) return null;
+    const ts = Date.parse(out.split('\n')[0].trim());
+    return Number.isFinite(ts) ? ts : null;
+  } catch { return null; }
+}
+
+async function dreamLoop(conns: RoomConn[]): Promise<void> {
+  await sleep(2 * 60_000); // slight delay so room sync/login starts first
+  while (true) {
+    try {
+      const now = Date.now();
+
+      // Enforce dream duration for currently dreaming bot.
+      if (dreamingBot) {
+        const started = botDreamStartedAt.get(dreamingBot);
+        if (started && now - started >= DREAM_DURATION_MS) {
+          const bot = dreamingBot;
+          botDreamPhase.set(bot, 'recycling');
+          const taskPath = `/workspace/ipc/tasks/restart-${bot}-${now}.json`;
+          fs.mkdirSync('/workspace/ipc/tasks', { recursive: true });
+          fs.writeFileSync(taskPath, JSON.stringify({ type: 'restart_bot', bot }));
+          log(`dream: ${bot} transitioned to recycling; wrote ${taskPath}`);
+          botDreamStartedAt.delete(bot);
+          botDreamPhase.set(bot, 'idle');
+          dreamingBot = null;
+        }
+      }
+
+      // Only one dreaming bot fleet-wide.
+      if (dreamingBot) {
+        await sleep(DREAM_LOOP_INTERVAL_MS);
+        continue;
+      }
+
+      const root = resolveRoot();
+      const botRooms = buildBotRoomMap();
+      for (const bot of getActiveBots()) {
+        if (botDreamPhase.get(bot) === 'dreaming' || botDreamPhase.get(bot) === 'recycling') continue;
+
+        const startTime = getContainerStartTime(bot);
+        if (!startTime) {
+          botIdleSince.delete(bot);
+          continue;
+        }
+
+        const sessionAge = now - startTime;
+        const isRunning = hasRunningContainer(bot);
+        if (isRunning) botIdleSince.delete(bot);
+        else if (!botIdleSince.has(bot)) botIdleSince.set(bot, now);
+
+        const idleFor = isRunning ? 0 : now - (botIdleSince.get(bot) || now);
+        const shouldDream = sessionAge > MAX_SESSION_AGE_MS
+          || (sessionAge > MIN_SESSION_AGE_MS && !isRunning && idleFor >= DREAM_IDLE_WINDOW_MS);
+        if (!shouldDream) continue;
+
+        const roomName = botRooms[bot];
+        if (!roomName) continue;
+        const conn = conns.find((c) => c.name === roomName);
+        if (!conn?.accessToken) continue;
+        const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+        const name = env?.ASSISTANT_NAME || bot;
+        await matrixSend(conn.homeserver, conn.accessToken, conn.roomId,
+          `${name}, begin your dream period. Review recent conversation history, consolidate your memory files, and optimize your standing orders for a fresh session. You have ${Math.floor(DREAM_DURATION_MS / 60_000)} minutes. Reply when done.`);
+        botDreamPhase.set(bot, 'dreaming');
+        botDreamStartedAt.set(bot, now);
+        dreamingBot = bot;
+        log(`dream: ${bot} entered dreaming for ${Math.floor(DREAM_DURATION_MS / 60_000)} minutes`);
+        break;
+      }
+    } catch (err) {
+      log(`dream loop error: ${errStr(err)}`);
+    }
+    await sleep(DREAM_LOOP_INTERVAL_MS);
+  }
 }
 
 /**
@@ -773,6 +866,7 @@ async function main(): Promise<void> {
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));
   gitSyncLoop(conns).catch((err) => log(`git sync loop fatal: ${errStr(err)}`));
   heartbeatLoop(conns).catch((err) => log(`heartbeat loop fatal: ${errStr(err)}`));
+  dreamLoop(conns).catch((err) => log(`dream loop fatal: ${errStr(err)}`));
 
   await Promise.all(loops);
 }
