@@ -1,14 +1,10 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05T19:20Z.
+Updated 2026-03-05T19:52Z.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
-- **Dream period** (Captain directive). Before recycling, bots get a 30-minute "dream" period to review room history, collapse memories, optimize instructions/standing orders, and prepare for a fresh start. **Scheduling rules** (all configurable via env vars): (1) **Never more than one bot dreaming at a time** — supervisor coordinates fleet-wide. (2) **Activity-based trigger** — supervisor schedules a dream when a bot has been running >MIN_SESSION_AGE_MS (default 6h) AND has no pending tasks for the next 30 minutes. The hard max MAX_SESSION_AGE_MS (default 8h) forces a dream regardless. (3) **Supervisor-driven** — the supervisor owns dream scheduling, not the bot. It tracks each bot's session age and idle state, picks the best candidate, sends a "dream" prompt via IPC, waits for completion, then allows the next bot to dream. Implementation: add dream state machine to supervisor (IDLE→DREAMING→RECYCLING). Config env vars: `MIN_DREAM_AGE_MS`, `MAX_SESSION_AGE_MS`, `DREAM_DURATION_MS`.
-- **Bots have no autonomous work mechanism** — supervisor heartbeat implemented (sends nudge every 30min to idle bots mentioning them by name, triggering wake). Needs deployment verification. Config: `HEARTBEAT_INTERVAL_MS` env var.
-- **Thread discipline** — implemented in `f28eb09` — needs verification in practice.
-- **Parker autonomous monitoring** — idle-wake deployed. Parker's scheduled health cron fires hourly but SSL errors prevented execution — should work now with `containerNetwork: "host"`. Verify.
 - **Rolling health metrics** — Captain wants 1-day and 7-day rolling metrics as the key numbers, not cumulative. `health-check.sh` now computes rolling deltas from JSONL history. Need more snapshot collection time to show meaningful data.
 
 ## MEDIUM — Next Up
@@ -34,6 +30,10 @@ Updated 2026-03-05T19:20Z.
 
 - Supervisor self-command fix — supervisor now processes `!restart`/`!join` sent via its own intercom account. Root cause was self-skip at line 641.
 - Status indicator throttle — indicators stop editing after 5 minutes. Previously they edited the room message every 15s indefinitely, flooding rooms with hundreds of status edits per hour per bot.
+- Dream period state machine — `032bef0`. IDLE→DREAMING→RECYCLING, deployed to instance dists.
+- Supervisor heartbeat deployment — verified working on HERACLES.
+- Thread discipline + 2-second ack — `f28eb09`. Reaction + typing indicator + lobe threading.
+- Parker autonomous monitoring — SSL fixed (`containerNetwork: "host"`), health cron verified ✅.
 - Rolling health metrics — `health-check.sh` reports 24h/7d rolling deltas from JSONL history.
 - S3 push timeout — 30s timeout in `stop()`.
 - Max session age (8h) — `1aa34a8`. Containers auto-recycle via `MAX_SESSION_AGE_MS`.
