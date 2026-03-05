@@ -15,6 +15,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 
+import { logger } from 'nanoclaw/logger.js';
 import { loadMachineConfig } from './machine-config.js';
 import { instanceDir } from './service.js';
 
@@ -60,10 +61,11 @@ function walkDir(dir: string, base: string = dir): string[] {
   const results: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    // Skip broken symlinks
-    if (entry.isSymbolicLink() && !fs.existsSync(full)) continue;
-    // Use statSync to follow symlinks (Dirent reports symlink type, not target)
-    const stat = fs.statSync(full);
+    const stat = fs.lstatSync(full);
+    if (stat.isSymbolicLink()) {
+      logger.debug({ path: full }, 'S3 push: skipping symlink during directory walk');
+      continue;
+    }
     if (stat.isDirectory()) {
       results.push(...walkDir(full, base));
     } else {
@@ -148,6 +150,11 @@ export async function pullBot(root: string, bot: string): Promise<void> {
           // Compute local path from key
           const relativeToBot = obj.Key.slice(`${bot}/`.length);
           const localPath = path.join(instance, relativeToBot);
+          const resolved = path.resolve(localPath);
+          if (!resolved.startsWith(path.resolve(instance) + path.sep)) {
+            logger.warn({ key: obj.Key }, 'S3 pull: skipping key with path traversal');
+            continue;
+          }
           try {
             await downloadFile(s3.client, s3.bucket, obj.Key, localPath);
             count++;
