@@ -62,7 +62,9 @@ function walkDir(dir: string, base: string = dir): string[] {
     const full = path.join(dir, entry.name);
     // Skip broken symlinks
     if (entry.isSymbolicLink() && !fs.existsSync(full)) continue;
-    if (entry.isDirectory()) {
+    // Use statSync to follow symlinks (Dirent reports symlink type, not target)
+    const stat = fs.statSync(full);
+    if (stat.isDirectory()) {
       results.push(...walkDir(full, base));
     } else {
       results.push(path.relative(base, full));
