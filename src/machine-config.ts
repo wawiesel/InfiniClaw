@@ -18,6 +18,7 @@ export interface MachineConfig {
   bots: string[];
   secretsPath: string;
   s3?: S3Config;
+  containerNetwork?: string; // e.g. "host" — passed as --network to podman run
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.config', 'infiniclaw', 'machine.json');
@@ -56,6 +57,10 @@ export function loadMachineConfig(): MachineConfig {
     bots: raw.bots as string[],
     secretsPath: raw.secretsPath as string,
   };
+
+  if (typeof raw.containerNetwork === 'string') {
+    config.containerNetwork = raw.containerNetwork;
+  }
 
   if (raw.s3) {
     const s3 = raw.s3 as Record<string, unknown>;
