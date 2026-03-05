@@ -127,20 +127,37 @@ async function ensurePodmanRuntimeAvailable(): Promise<void> {
     if (machine.Starting && !machine.Running) {
       logger.warn({ machineName }, 'Podman machine stuck in starting state; forcing stop');
       try {
-        execSync(`podman machine stop ${machineName}`, { stdio: 'pipe', timeout: 30000 });
+        spawnSync('podman', ['machine', 'stop', machineName], {
+          stdio: 'pipe',
+          timeout: 30000,
+        });
       } catch {
         // Best effort: a stale "starting" state may not stop cleanly.
       }
     } else if (machine.Running) {
       logger.warn({ machineName }, 'Podman machine reports running but API is unavailable; restarting');
       try {
-        execSync(`podman machine stop ${machineName}`, { stdio: 'pipe', timeout: 30000 });
+        spawnSync('podman', ['machine', 'stop', machineName], {
+          stdio: 'pipe',
+          timeout: 30000,
+        });
       } catch {
         // Best effort before restart.
       }
     }
 
-    execSync(`podman machine start ${machineName}`, { stdio: 'pipe', timeout: 180000 });
+    const startResult = spawnSync('podman', ['machine', 'start', machineName], {
+      stdio: 'pipe',
+      timeout: 180000,
+    });
+    if (startResult.error) {
+      throw startResult.error;
+    }
+    if (startResult.status !== 0) {
+      throw new Error(
+        `podman machine start failed with exit code ${startResult.status ?? 'unknown'}`,
+      );
+    }
   } catch (err) {
     logger.error({ err, machineName }, 'Failed to start Podman machine');
     throw err;
@@ -187,6 +204,9 @@ export async function ensureContainerSystemRunning(): Promise<void> {
     console.error(
       '╚════════════════════════════════════════════════════════════════╝\n',
     );
-    throw new Error('Podman is required but not available');
+    const originalError = err instanceof Error ? err : new Error(String(err));
+    throw new Error(`Podman bootstrap failed: ${originalError.message}`, {
+      cause: originalError,
+    });
   }
 }
