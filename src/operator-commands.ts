@@ -1,4 +1,3 @@
-import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -15,10 +14,6 @@ import type { MatrixChannel } from './channels/matrix.js';
 const MY_NAME = ASSISTANT_NAME.toLowerCase();
 const PERSONA = process.env.PERSONA_NAME || ASSISTANT_NAME.toLowerCase();
 
-function sendIntercom(room: string, message: string): void {
-    const script = path.join(loadMachineConfig().secretsPath, 'operator', 'intercom-send.sh');
-    execSync(`bash "${script}" "${room}" "${message}"`, { stdio: 'pipe', timeout: 15000 });
-}
 
 export function getCaptainUserId(): string {
     return CAPTAIN_USER_ID;
@@ -83,11 +78,9 @@ export function handleOperatorCommand(
         return true;
     }
 
-    // !operator — authorized only
+    // !operator — handled by the supervisor process.
     if (cmd.startsWith('!operator')) {
-        if (!isAuthorized(msg.sender)) return false;
-        handleOperatorTmux(cmd.replace(/^!operator\s*/, '').trim(), msg.chat_jid, msg.thread_id, matrix);
-        return true;
+        return true; // consumed, no-op — supervisor handles it
     }
 
     // !allow <bot> <path> [minutes] — authorized only
@@ -174,30 +167,3 @@ export function buildTodoMessage(chatJid: string): string {
     return lines.join('\n');
 }
 
-// ── !operator tmux handler ─────────────────────────────────────────
-
-const OPERATOR_SESSION = 'operator';
-
-function handleOperatorTmux(text: string, chatJid: string, threadId: string | undefined, matrix: MatrixChannel | null): void {
-    void (async () => {
-        try {
-            let existed = true;
-            try { execFileSync('tmux', ['has-session', '-t', OPERATOR_SESSION], { stdio: 'pipe' }); } catch { existed = false; }
-            if (!existed) {
-                execFileSync('tmux', ['new-session', '-d', '-s', OPERATOR_SESSION, '-c', loadMachineConfig().secretsPath, 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
-                await new Promise(r => setTimeout(r, 3000));
-            }
-            if (text) {
-                execFileSync('tmux', ['send-keys', '-t', OPERATOR_SESSION, '-l', text.trim()], { stdio: 'pipe' });
-                execFileSync('tmux', ['send-keys', '-t', OPERATOR_SESSION, 'Enter'], { stdio: 'pipe' });
-            }
-            const status = existed ? 'sent to running operator' : 'started new operator session';
-            const msg = text ? `🔧 ${os.hostname()}: ${status} — "${text.slice(0, 100)}"` : `🔧 ${os.hostname()}: ${status}`;
-            const room = (process.env.MAIN_GROUP_NAME || '').toLowerCase();
-            try { sendIntercom(room, msg); } catch { reply(matrix, chatJid, msg, threadId); }
-        } catch (err) {
-            logger.error({ err }, '!operator failed');
-            reply(matrix, chatJid, `⛔ !operator failed: ${err instanceof Error ? err.message : String(err)}`, threadId);
-        }
-    })();
-}
