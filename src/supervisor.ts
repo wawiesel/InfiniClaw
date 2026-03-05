@@ -7,6 +7,7 @@
  *
  * Run: node dist/supervisor.js
  */
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -261,6 +262,30 @@ async function handleCommand(cmd: string, conn: RoomConn): Promise<void> {
       await handleLifecycleCommand(action, parsed.target, conn);
       return;
     }
+  }
+
+  // !operator — send text to operator tmux session
+  if (cmd.startsWith('!operator')) {
+    const text = cmd.slice('!operator'.length).trim();
+    const SESSION = 'operator';
+    try {
+      let existed = true;
+      try { execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' }); } catch { existed = false; }
+      if (!existed) {
+        execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', loadMachineConfig().secretsPath, 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
+        await sleep(3000);
+      }
+      if (text) {
+        execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', text], { stdio: 'pipe' });
+        execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
+      }
+      const status = existed ? 'sent to running operator' : 'started new operator session';
+      await reply(conn, `${HOSTNAME}: ${status}`);
+    } catch (err) {
+      log(`!operator failed: ${errStr(err)}`);
+      await reply(conn, `${HOSTNAME}: !operator failed — ${errStr(err)}`);
+    }
+    return;
   }
 
   // !roster — each machine reports its bots in this room
