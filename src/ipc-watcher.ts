@@ -88,9 +88,6 @@ async function handleTextMessage(
     return;
   }
 
-  const sender = typeof data.sender === 'string' && data.sender.trim()
-    ? data.sender.trim()
-    : deps.defaultSenderForGroup(sourceGroup);
   const explicitThreadId = typeof data.threadId === 'string' ? data.threadId : undefined;
   const body = String(data.text);
   const isDelegateHeader = body.startsWith('💭');
@@ -161,12 +158,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
             .filter((f) => f.endsWith('.json'));
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
+            const processingPath = `${filePath}.processing`;
+            const errorPath = `${filePath}.error`;
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              fs.unlinkSync(filePath);
+              fs.renameSync(filePath, processingPath);
+              const data = JSON.parse(fs.readFileSync(processingPath, 'utf-8'));
 
               if (data.type === 'message' && data.chatJid && data.text) {
-                handleTextMessage(
+                await handleTextMessage(
                   {
                     chatJid: data.chatJid as string,
                     text: data.text as string,
@@ -178,25 +177,22 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   sourceGroup,
                   isMain,
                   deps,
-                ).catch((err) => {
-                  logger.error({ file, sourceGroup, err }, 'Error delivering IPC message');
-                });
+                );
               } else {
                 // Extended message types (image, file)
                 const targetGroup = registeredGroups[data.chatJid as string];
                 const authorized = isMain || !!(targetGroup && targetGroup.folder === sourceGroup);
-                handleInfiniClawMessage(data as Parameters<typeof handleInfiniClawMessage>[0], {
+                await handleInfiniClawMessage(data as Parameters<typeof handleInfiniClawMessage>[0], {
                   authorized,
                   sourceGroup,
                   sendImage: deps.sendImage,
                   sendFile: deps.sendFile,
-                }).catch((err) => {
-                  logger.error({ file, sourceGroup, err }, 'Error delivering InfiniClaw IPC message');
                 });
               }
+              fs.unlinkSync(processingPath);
             } catch (err) {
               logger.error({ file, sourceGroup, err }, 'Error processing IPC message');
-              try { fs.unlinkSync(filePath); } catch { /* already gone */ }
+              try { fs.renameSync(processingPath, errorPath); } catch { /* already gone or couldn't move */ }
             }
           }
         }
@@ -212,9 +208,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
             .filter((f) => f.endsWith('.json'));
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
+            const processingPath = `${filePath}.processing`;
+            const errorPath = `${filePath}.error`;
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              fs.unlinkSync(filePath);
+              fs.renameSync(filePath, processingPath);
+              const data = JSON.parse(fs.readFileSync(processingPath, 'utf-8'));
 
               // Try base task types first (schedule, pause, resume, cancel, refresh, register)
               const baseTypes = ['schedule_task', 'pause_task', 'resume_task', 'cancel_task', 'refresh_groups', 'register_group'];
@@ -251,13 +249,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn({ type: data.type }, 'Unknown IPC task type');
                 }
               }
+              fs.unlinkSync(processingPath);
             } catch (err) {
               logger.error({ file, sourceGroup, err }, 'Error processing IPC task');
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              try {
-                fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
-              } catch { /* file may already be gone */ }
+              try { fs.renameSync(processingPath, errorPath); } catch { /* already gone or couldn't move */ }
             }
           }
         }
