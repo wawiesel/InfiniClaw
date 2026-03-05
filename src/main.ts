@@ -101,6 +101,7 @@ import { appendConversationLog } from './conversation-log.js';
 import { statusMessage } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { uploadContent } from './s3-sync.js';
+import { exportHistoryToS3 } from './history-export.js';
 
 // ── Git version info (resolved once at module load) ────────────────────────
 import { execSync as gitExecSync } from 'child_process';
@@ -1819,6 +1820,14 @@ async function main(): Promise<void> {
   };
   writeStatusSnapshot();
   persistentTimers.push(setInterval(writeStatusSnapshot, STATUS_SNAPSHOT_INTERVAL));
+
+  // Export conversation history to S3 every 15 minutes
+  const HISTORY_EXPORT_INTERVAL = 15 * 60 * 1000;
+  persistentTimers.push(setInterval(() => {
+    void exportHistoryToS3(DATA_DIR, ASSISTANT_NAME, registeredGroups).catch((err) => {
+      logger.warn({ err }, 'History export error');
+    });
+  }, HISTORY_EXPORT_INTERVAL));
 
   // Start subsystems
   startSchedulerLoop({
