@@ -395,18 +395,8 @@ export function deployBot(root: string, bot: string): void {
   const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
 
   restorePersona(root, bot);
-  let mainRequiresTrigger = profileEnv.REQUIRES_TRIGGER === 'true';
-  // Commanding officer (lowest rank among active bots on this room) never requires trigger
-  if (mainRequiresTrigger && mainGroupName) {
-    const roomMap = buildRoomMap(root);
-    const co = roomMap[mainGroupName.toLowerCase()];
-    if (co && co.bot === bot) {
-      mainRequiresTrigger = false;
-      console.log(`${bot}: promoted to commanding officer of ${mainGroupName} (trigger disabled)`);
-    }
-  }
   if (mainJid && mainGroupName) {
-    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, mainRequiresTrigger);
+    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
     console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
   }
 
@@ -721,6 +711,7 @@ export async function start(onlyBot?: string): Promise<void> {
       deployBot(root, bot);
       installPlistAndLoad(bot, process.execPath, instance, logs, root);
       console.log(`${bot}: started (com.infiniclaw.${bot})`);
+      try { sendRosterSignal(root, bot, 'join'); } catch { /* best effort */ }
     } catch (err) {
       console.error(`${bot}: failed to start -`, err);
     }
@@ -737,6 +728,7 @@ export async function stop(onlyBot?: string): Promise<void> {
   for (const bot of bots) {
     const pp = plistPath(bot);
     if (fs.existsSync(pp)) {
+      try { sendRosterSignal(root, bot, 'leave'); } catch { /* best effort */ }
       try { syncPersona(root, bot); } catch { /* best effort */ }
       unloadPlist(pp);
       fs.unlinkSync(pp);
@@ -827,6 +819,47 @@ export function chat(bot: string): void {
     stdio: 'inherit',
   });
   process.exit(result.status ?? 1);
+}
+
+// ── Roster signals ──────────────────────────────────────────────────
+
+/** Send a !roster join/leave signal via intercom to a bot's room. */
+function sendRosterSignal(root: string, bot: string, action: 'join' | 'leave'): void {
+  const config = loadMachineConfig();
+  const profileEnv = loadProfileEnv(root, bot);
+  const roomName = profileEnv.MAIN_GROUP_NAME;
+  if (!roomName) return;
+
+  // Map MAIN_GROUP_NAME to intercom room key
+  const roomKey = roomName.toLowerCase();
+
+  let rank = 99;
+  if (action === 'join') {
+    try {
+      const roster = JSON.parse(fs.readFileSync(path.join(config.secretsPath, 'roster.json'), 'utf-8'));
+      rank = roster[bot]?.rank ?? 99;
+    } catch { /* default rank */ }
+  }
+
+  const message = action === 'join'
+    ? `!roster join ${bot} ${rank}`
+    : `!roster leave ${bot}`;
+
+  const intercomScript = path.join(config.secretsPath, 'operator', 'intercom-send.sh');
+  if (!fs.existsSync(intercomScript)) {
+    console.warn(`${bot}: intercom-send.sh not found, skipping roster signal`);
+    return;
+  }
+
+  try {
+    execSync(`bash "${intercomScript}" "${roomKey}" "${message}"`, {
+      stdio: 'pipe',
+      timeout: 15000,
+    });
+    console.log(`${bot}: roster ${action} sent to ${roomKey}`);
+  } catch (err) {
+    console.warn(`${bot}: roster signal failed:`, err instanceof Error ? err.message : err);
+  }
 }
 
 // ── Send (operator message to bot room) ─────────────────────────────
@@ -1025,9 +1058,8 @@ export function holodeckCreate(bot: string, branch: string): void {
       );
     }
   }
-  const hdRequiresTrigger = profileEnv.REQUIRES_TRIGGER === 'true';
   if (mainJid && mainGroupName) {
-    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, hdRequiresTrigger);
+    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
   }
 
   // 8. Mark instance data as current

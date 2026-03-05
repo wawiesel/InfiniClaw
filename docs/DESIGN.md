@@ -45,10 +45,10 @@ All bots share: read-only home directory access, ability to edit own persona CLA
 ### Commanding Officer
 
 Each room has a **commanding officer (CO)** — the lowest-rank active bot on that room. The CO:
-- Responds to all messages (`REQUIRES_TRIGGER=false`), not just `@BotName` callouts
 - Gets a star badge in their Matrix display name (e.g. "BotName ⭐")
+- All bots require @callout — CO designation is for rank/authority and display badge only
 
-CO promotion is automatic at deploy time based on `roster.json` ranks and which bots are active across all machines. Bots query the live roster via the `crew_roster` MCP tool, which reads `crew-status.json` generated at deploy from fleet-wide presence data.
+CO election is dynamic via `!roster join/leave` intercom signals sent at CLI start/stop. Display name badges: ⭐ = CO, 🟢 = active, 🔴 = dismissed/offline. Bots query the live roster via the `crew_roster` MCP tool, which reads `crew-status.json` generated at deploy from fleet-wide presence data.
 
 ### Containers
 
@@ -182,20 +182,39 @@ Two-tier design: read-only everywhere, write access where needed.
 
 ### Operator Commands
 
-The Captain controls the fleet via `!` commands in Matrix, processed by the host (not the bot):
+The Captain controls the fleet via `!` commands typed in Matrix. Every `!` command is delivered to ALL bots on ALL machines — each bot decides whether the command applies to it (may be a no-op). Commands are processed by the host process, not the bot's container.
 
 | Command | Effect |
 |---------|--------|
-| `!allow <path> [minutes]` | Grant temporary rw mount access for a bot. Requires restart. |
-| `!deny <path>` | Revoke a mount grant. |
-| `!todo` | Show the bot's current task list. |
-| `!operator <request>` | Summon a human operator via cascade dispatch. Bots see but don't respond. |
+| `!todo` | All bots reply with their task list. |
+| `!todo <bot>` | Only that bot replies with its task list. |
+| `!dismiss` | All bots enter dormant mode. |
+| `!dismiss <bot>` | Only that bot enters dormant mode. |
+| `!join` | All bots exit dormant mode. |
+| `!join <bot>` | Only that bot exits dormant mode. |
+| `!restart` | All bots restart (process exit → launchd KeepAlive restarts with fresh container). |
+| `!restart <bot>` | Only that bot restarts. |
+| `!roster` | Each machine lists its bots. |
+| `!operator <text>` | Send text to operator tmux session. Captain/intercom only. |
+| `!allow <bot> <path> [minutes]` | Grant temporary rw mount. Captain/intercom only. |
+| `!deny <bot> <path>` | Revoke a mount grant. Captain/intercom only. |
+
+#### Dormant Mode (`!dismiss` / `!join`)
+
+Dormant mode is a lightweight pause — the bot process stays alive but stops doing work:
+
+1. **`!dismiss`**: Stops active containers, sends intercom "X has left", sets display name to "X 🔴", drops all non-`!` messages (not stored, not processed). The process keeps running and listening for `!` commands.
+2. **`!join`**: Clears the dormant flag, sends intercom "X has joined", sets display name to "X 🟢", resumes normal message processing.
+
+No cross-bot dependency. Each bot manages its own state. No launchctl manipulation, no CLI shelling out. The bot never dies — it just stops working.
+
+#### Restart (`!restart`)
+
+For deploying code updates that require a container rebuild. The bot calls `process.exit(0)` and launchd KeepAlive restarts the process automatically. On startup, the container image is rebuilt, picking up any code changes. Display name briefly shows "X 🔄" before restart.
 
 ### Chat Activity Tracking
 
-The host tracks per-room state: current objective, last progress, last completion, last error — all with timestamps, persisted to the database. This provides state continuity across restarts and powers the todo enforcement system.
-
-**Todo enforcement:** Every 2 minutes, the host checks if the bot has an active task list. If the list is empty or has no in-progress items, a reminder is injected into the message loop.
+The host tracks per-room state: current objective, last progress, last completion, last error — all with timestamps, persisted to the database. This provides state continuity across restarts.
 
 ### Holodeck
 
@@ -290,17 +309,9 @@ Intercom credentials are stored in `operator/intercom.json` in the secrets repo.
 
 ### Operator Callout (`!operator`)
 
-The Captain can summon a human operator from any Matrix room by typing `!operator <request>`. Bots see the message as context but don't respond to it.
+The Captain can send commands to a human operator's tmux session from any Matrix room by typing `!operator <text>`. The text is sent as keystrokes to the `operator` tmux session on each machine. If no session exists, one is created with `claude` as the initial command. Captain/intercom only.
 
-**Cascade dispatch:** Each machine runs `matrix-watch.sh`, which polls Matrix for `!operator` mentions via intercom accounts. When a mention is detected:
-
-1. The first operator in the cascade sends "Hold please, contacting X, Y, Z" to the room.
-2. Each operator waits `position * ESCALATION_TIMEOUT` (default 5 minutes) before handling.
-3. If a higher-priority operator handles it first (claimed in `dispatch-log.json` via git), the others skip it.
-
-Operator ordering is deterministic per-request: each hostname is hashed with the event ID, sorted, producing a random but reproducible sequence.
-
-**Dual watchers:** Operators run both `matrix-watch.sh` and `inbox-watch.sh`. Matrix watch handles live `!operator` callouts from any room. Inbox watch polls git for cross-machine tasks — the fallback channel when Matrix is down. Both are required; neither replaces the other.
+Operators also run `inbox-watch.sh` which polls git for cross-machine tasks — the fallback channel when Matrix is down.
 
 ## Startup Checklist
 

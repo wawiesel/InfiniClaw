@@ -38,7 +38,7 @@ const ignoreTriggerStr = (process.env.IGNORE_TRIGGERS || '').trim();
 export const IGNORE_PATTERNS: RegExp[] = ignoreTriggerStr
   ? ignoreTriggerStr.split(',').map((t) => {
       const cleaned = t.trim().replace(/^@/, '');
-      return new RegExp(`^@?${escapeRegex(cleaned)}\\b`, 'i');
+      return new RegExp(`\\b${escapeRegex(cleaned)}\\b`, 'i');
     })
   : [];
 

@@ -102,7 +102,7 @@ import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots } from './service.js';
-import { handleOperatorCommand, buildTodoMessage, readTodoItems } from './operator-commands.js';
+import { handleOperatorCommand, isDismissed, buildTodoMessage, readTodoItems } from './operator-commands.js';
 import { getSystemStatus } from './status.js';
 
 // ── Module-level state ─────────────────────────────────────────────────
@@ -123,28 +123,71 @@ let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
 
-/** Resolve which thread a response should go to. Thread on the triggering message. */
+// ── Dynamic CO roster ──────────────────────────────────────────────────
+// Active bots in each room: botName → rank
+const roomRoster: Record<string, Map<string, number>> = {};
+// Current CO per room
+const roomCO: Record<string, string | undefined> = {};
+// Reference to matrix channel for display name updates
+let matrixRef: MatrixChannel | null = null;
+
+/** Intercept !roster intercom signals for roster state updates. Returns true if consumed. */
+function handleRosterSignal(msg: { content: string; chat_jid: string }): boolean {
+  const match = msg.content.match(/^!roster\s+(join|leave)\s+(\S+)(?:\s+(\d+))?/);
+  if (!match) return false;
+  const [, action, botName, rankStr] = match;
+  const chatJid = msg.chat_jid;
+
+  if (!roomRoster[chatJid]) roomRoster[chatJid] = new Map();
+
+  if (action === 'join') {
+    roomRoster[chatJid].set(botName, parseInt(rankStr || '99', 10));
+  } else {
+    roomRoster[chatJid].delete(botName);
+  }
+
+  void rerankCO(chatJid);
+  return true; // consumed, don't pass to bot
+}
+
+/** Recalculate CO for a room and update display name badge. */
+async function rerankCO(chatJid: string): Promise<void> {
+  const roster = roomRoster[chatJid];
+  if (!roster || roster.size === 0) { roomCO[chatJid] = undefined; return; }
+
+  // Lowest rank = CO
+  let coBotName: string | undefined;
+  let coRank = Infinity;
+  for (const [name, rank] of roster) {
+    if (rank < coRank) { coBotName = name; coRank = rank; }
+  }
+
+  const previousCO = roomCO[chatJid];
+  roomCO[chatJid] = coBotName;
+
+  if (!matrixRef) return;
+
+  if (coBotName === ASSISTANT_NAME && previousCO !== ASSISTANT_NAME) {
+    // This bot was promoted to CO
+    await matrixRef.setDisplayName(`${ASSISTANT_NAME} ⭐`);
+  } else if (previousCO === ASSISTANT_NAME && coBotName !== ASSISTANT_NAME) {
+    // This bot was demoted from CO
+    await matrixRef.setDisplayName(`${ASSISTANT_NAME} 🟢`);
+  }
+}
+
+/** Resolve which thread a response should go to. Reply where the message was. */
 function resolveReplyThread(
   chatJid: string,
   messages: NewMessage[],
-  group: { requiresTrigger?: boolean },
 ): string | undefined {
   const lastMsg = messages[messages.length - 1];
-  // If the message is already in a thread, reply there
+  // If the message is in a thread, reply in that thread
   if (lastMsg?.thread_id) return lastMsg.thread_id;
   // Work thread override (set by setWorkThread MCP tool)
   if (workThreadIds[chatJid]) return workThreadIds[chatJid];
-  // For requiresTrigger groups: auto-thread on the @trigger message
-  if (group.requiresTrigger === true) {
-    const triggerMsg = [...messages].reverse().find(
-      (m) => !m.thread_id && m.id?.startsWith('$') && TRIGGER_PATTERN.test(m.content.trim()),
-    );
-    if (triggerMsg) return triggerMsg.id;
-  }
-  // Thread on the last human message
-  return [...messages].reverse().find(
-    (m) => !botMatrixUserIds.has(m.sender) && m.id?.startsWith('$'),
-  )?.id;
+  // Main timeline message → reply on main timeline (no auto-threading)
+  return undefined;
 }
 
 // Exit-137 (SIGKILL) backoff — prevents tight respawn loops when containers are killed externally.
@@ -628,21 +671,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     m => m.thread_id && botParticipatesInThread(chatJid, m.thread_id),
   );
 
-  if (group.requiresTrigger === true || (!isMainGroup && group.requiresTrigger !== false)) {
-    // Non-CO: need explicit callout or participating thread
-    if (!hasTrigger && !hasParticipatingThread) {
-      lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
-      saveState();
-      return true;
-    }
-  } else {
-    // CO: respond to main timeline human messages OR callouts OR participating threads
-    const hasMainTimeline = humanMessages.some(m => !m.thread_id);
-    if (!hasMainTimeline && !hasTrigger && !hasParticipatingThread) {
-      lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
-      saveState();
-      return true;
-    }
+  // ALL bots: need explicit callout or participating thread
+  if (!hasTrigger && !hasParticipatingThread) {
+    lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    return true;
   }
 
   // Filter context by thread participation — exclude threads bot isn't part of
@@ -654,7 +687,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   setObjectiveFromMessages(chatJid, contextMessages);
 
-  activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, contextMessages, group);
+  activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, contextMessages);
   logger.info(
     { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], msgCount: contextMessages.length },
     'Thread routing resolved',
@@ -957,21 +990,11 @@ async function handleGroupMessagesInLoop(
     m => m.thread_id && botParticipatesInThread(chatJid, m.thread_id),
   );
 
-  if (group.requiresTrigger === true || (!isMainGroup && group.requiresTrigger !== false)) {
-    // Non-CO: need explicit callout or participating thread
-    if (!hasTrigger && !hasParticipatingThread) {
-      lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
-      saveState();
-      return;
-    }
-  } else {
-    // CO: respond to main timeline human messages OR callouts OR participating threads
-    const hasMainTimeline = humanMessages.some(m => !m.thread_id);
-    if (!hasMainTimeline && !hasTrigger && !hasParticipatingThread) {
-      lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
-      saveState();
-      return;
-    }
+  // ALL bots: need explicit callout or participating thread
+  if (!hasTrigger && !hasParticipatingThread) {
+    lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
+    saveState();
+    return;
   }
 
   // Collect all pending messages since last agent response, filtered by thread participation
@@ -995,7 +1018,7 @@ async function handleGroupMessagesInLoop(
   const rawFormatted = formatMessages(messagesToSend);
   const formatted = threadCtx ? `${threadCtx}\n\n${rawFormatted}` : rawFormatted;
 
-  activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend, group);
+  activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
 
   // Interrupt: if container is busy and message is from captain/operator/trigger,
   // send interrupt IPC to kill running claude and resume with the new message
@@ -1058,6 +1081,10 @@ async function startMessageLoop(): Promise<void> {
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
+    if (isDismissed()) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+      continue;
+    }
     try {
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
@@ -1266,6 +1293,9 @@ async function main(): Promise<void> {
     for (const ch of channels) {
       if (ch.setPresenceStatus) await ch.setPresenceStatus('offline', 'shutting down...');
     }
+    if (matrixRef) {
+      try { await matrixRef.setDisplayName(`${ASSISTANT_NAME} 🔴`); } catch { /* best-effort */ }
+    }
     syncPersonas();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
@@ -1280,15 +1310,12 @@ async function main(): Promise<void> {
     MATRIX_HOMESERVER &&
     (MATRIX_ACCESS_TOKEN || (MATRIX_USERNAME && MATRIX_PASSWORD))
   ) {
-    // CO badge: if this bot doesn't require trigger on its main room, it's the commanding officer
-    const mainGroup = Object.values(registeredGroups).find((g) => g.folder === MAIN_GROUP_FOLDER);
-    const isCommandingOfficer = mainGroup?.requiresTrigger === false;
-    const displayName = isCommandingOfficer ? `${ASSISTANT_NAME} ⭐` : ASSISTANT_NAME;
-
     matrix = new MatrixChannel({
-      displayName,
+      displayName: `${ASSISTANT_NAME} 🟢`,
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
+        if (isDismissed()) return;
+        if (handleRosterSignal(msg)) return;
         storeMessage(msg);
         if (msg.id && msg.id.startsWith('$')) {
           const group = registeredGroups[msg.chat_jid];
@@ -1300,6 +1327,7 @@ async function main(): Promise<void> {
       },
       registeredGroups: () => registeredGroups,
     });
+    matrixRef = matrix;
   }
 
   let localCli: LocalCliChannel | null = null;
@@ -1307,6 +1335,7 @@ async function main(): Promise<void> {
     localCli = new LocalCliChannel({
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
+        if (isDismissed()) return;
         storeMessage(msg);
       },
       onChatMetadata: (chatJid, timestamp, name) =>
@@ -1663,63 +1692,6 @@ async function main(): Promise<void> {
       logger.debug({ chatJid, group: group.name }, 'Sent periodic memory-save reminder');
     }
   }, MEMORY_SAVE_INTERVAL_MS));
-
-  // Periodic todo list enforcement (every 2 minutes)
-  const TODO_ENFORCE_INTERVAL_MS = 2 * 60 * 1000;
-  persistentTimers.push(setInterval(() => {
-    for (const [chatJid, group] of Object.entries(registeredGroups)) {
-      const status = queue.getGroupStatus(chatJid);
-      if (!status.active || status.idleWaiting) continue;
-
-      // Read todo file
-      const todosDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'todos');
-      if (!fs.existsSync(todosDir)) {
-        injectSystemNotice(chatJid, '[System] TodoWrite reminder: Your todo list is empty. Please update it to reflect your current work.');
-        logger.debug({ chatJid, group: group.name }, 'Sent todo enforcement reminder (no todos dir)');
-        continue;
-      }
-
-      const sessionId = getSession(group.folder);
-      if (!sessionId) continue;
-
-      const sessionFile = path.join(todosDir, `${sessionId}-agent-${sessionId}.json`);
-      let hasInProgress = false;
-      try {
-        if (fs.existsSync(sessionFile)) {
-          const raw = fs.readFileSync(sessionFile, 'utf-8').trim();
-          if (raw && raw !== '[]') {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              hasInProgress = parsed.some((t: { status?: string }) => t.status === 'in_progress');
-            }
-          }
-        }
-      } catch {
-        // Ignore parse errors
-      }
-
-      if (!hasInProgress) {
-        injectSystemNotice(chatJid, '[System] TodoWrite reminder: Your todo list has no in_progress items. Please update it to reflect what you are currently working on.');
-        logger.debug({ chatJid, group: group.name }, 'Sent todo enforcement reminder (no in_progress)');
-      }
-
-      // Check for pending verifications assigned to this bot
-      const vFilePath = path.join(process.cwd(), '_runtime', 'data', 'verifications.json');
-      try {
-        if (fs.existsSync(vFilePath)) {
-          const vData = JSON.parse(fs.readFileSync(vFilePath, 'utf-8')) as Array<{
-            id: string; assigned_to: string; status: string; task_description: string; requested_by: string;
-          }>;
-          const myName = ASSISTANT_NAME;
-          const pendingForMe = vData.filter((v) => v.status === 'pending' && v.assigned_to.toLowerCase() === myName.toLowerCase());
-          if (pendingForMe.length > 0) {
-            const list = pendingForMe.map((v) => `- ${v.id}: "${v.task_description}" (from ${v.requested_by})`).join('\n');
-            injectSystemNotice(chatJid, `[System] You have ${pendingForMe.length} pending verification request(s) assigned to you:\n${list}\nUse \`submit_verification\` after reviewing each task.`);
-          }
-        }
-      } catch { /* ok */ }
-    }
-  }, TODO_ENFORCE_INTERVAL_MS));
 
   // ── Startup checklist ──────────────────────────────────────────────
   function buildStartupChecklist(): string {

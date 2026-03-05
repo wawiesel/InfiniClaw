@@ -9,7 +9,6 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import {
   loadBotDirectory,
-  resolveRecipientJid,
   guessMimeTypeFromFilename,
 } from './bot-messaging.js';
 
@@ -35,19 +34,6 @@ function errMsg(err: unknown): string {
 
 export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
   const { server, writeIpcFile, messagesDir, tasksDir, ipcDir, chatJid, groupFolder, isMain } = ctx;
-
-  const emitChatMessageTo = (chatJidTarget: string, text: string, sender?: string, threadId?: string): void => {
-    const data: Record<string, string | undefined> = {
-      type: 'message',
-      chatJid: chatJidTarget,
-      text,
-      sender: sender || undefined,
-      threadId: threadId || undefined,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-    writeIpcFile(messagesDir, data);
-  };
 
   // ── Crew roster ────────────────────────────────────────────────────
 
@@ -89,96 +75,6 @@ export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
       }
       const lines = recipients.map((name) => `- ${name}`);
       return { content: [{ type: 'text' as const, text: `Available recipients:\n${lines.join('\n')}` }] };
-    },
-  );
-
-  server.tool(
-    'send_message',
-    'Send a text message to another bot by name (e.g., "Johnny5" or "Cid"). Use thread_id to reply within a Matrix thread.',
-    {
-      text: z.string().describe('The message text to send'),
-      recipient: z.string().describe('Bot name to send to (e.g., "Johnny5", "Cid")'),
-      thread_id: z.string().optional().describe('Matrix thread root event ID to reply in a thread (MSC3440)'),
-    },
-    async (args) => {
-      const resolved = resolveRecipientJid(args.recipient, ipcDir);
-      if (!resolved) {
-        const dir = loadBotDirectory(ipcDir);
-        const available = Object.keys(dir).join(', ') || 'none';
-        return {
-          content: [{ type: 'text' as const, text: `Unknown recipient "${args.recipient}". Available: ${available}` }],
-          isError: true,
-        };
-      }
-      if (resolved === chatJid) {
-        return {
-          content: [{ type: 'text' as const, text: `Cannot send to ${args.recipient} — they are in your own room. Just speak in the conversation instead.` }],
-          isError: true,
-        };
-      }
-      // Only the CO can send cross-room messages via intercom
-      try {
-        const crew = JSON.parse(fs.readFileSync('/workspace/project/data/crew-status.json', 'utf-8'));
-        const me = crew.crew?.find((c: { name: string }) => c.name === crew.thisBot || c.name === process.env.ASSISTANT_NAME);
-        if (!me?.isCommandingOfficer) {
-          return {
-            content: [{ type: 'text' as const, text: `Only the Commanding Officer can send cross-room messages. You are not the current CO.` }],
-            isError: true,
-          };
-        }
-      } catch {
-        return {
-          content: [{ type: 'text' as const, text: `Cannot verify CO status — crew-status.json unavailable. Cross-room send blocked.` }],
-          isError: true,
-        };
-      }
-      emitChatMessageTo(resolved, args.text, undefined, args.thread_id);
-      return { content: [{ type: 'text' as const, text: `Message sent to ${args.recipient}.` }] };
-    },
-  );
-
-  server.tool(
-    'send_and_open_thread',
-    `Send a message to the main timeline and return its Matrix event ID so you can immediately use it as thread_id in a delegate tool or follow-up send_message.
-
-Use this when you want to post a brief summary line (e.g. "💭 Lobe delegation - reason") and then put all detail/output in a thread. Returns { event_id } on success.`,
-    {
-      text: z.string().describe('The message text to post on the main timeline'),
-      timeout_ms: z.number().int().positive().max(30000).default(15000).describe('How long to wait for the event ID to be written (default 15s)'),
-    },
-    async (args) => {
-      const idsFile = path.join(ipcDir, 'last_event_ids.json');
-      const sentBefore = (() => {
-        try {
-          if (!fs.existsSync(idsFile)) return '';
-          const d = JSON.parse(fs.readFileSync(idsFile, 'utf-8')) as Record<string, string>;
-          return d.lastSentAt || '';
-        } catch { return ''; }
-      })();
-
-      emitChatMessageTo(chatJid, args.text);
-
-      const timeoutMs = Math.max(1000, Math.min(args.timeout_ms ?? 15000, 30000));
-      const deadline = Date.now() + timeoutMs;
-      const pollIntervalMs = 200;
-
-      while (Date.now() < deadline) {
-        await new Promise<void>((r) => setTimeout(r, pollIntervalMs));
-        try {
-          if (!fs.existsSync(idsFile)) continue;
-          const d = JSON.parse(fs.readFileSync(idsFile, 'utf-8')) as Record<string, string>;
-          if (d.lastSent && d.lastSentAt && d.lastSentAt !== sentBefore) {
-            return {
-              content: [{ type: 'text' as const, text: `event_id: ${d.lastSent}` }],
-            };
-          }
-        } catch { /* keep polling */ }
-      }
-
-      return {
-        content: [{ type: 'text' as const, text: 'send_and_open_thread: timed out waiting for event ID. Message was sent but thread_id unavailable.' }],
-        isError: true,
-      };
     },
   );
 

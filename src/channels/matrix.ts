@@ -781,9 +781,10 @@ export class MatrixChannel implements Channel {
       const roomName = await this.getRoomName(roomId);
       this.opts.onChatMetadata(matrixJid, timestamp, roomName);
 
-      // Only deliver full messages for registered rooms
+      // Only deliver full messages for registered rooms (but ! commands bypass)
       const groups = this.opts.registeredGroups();
-      if (!groups[matrixJid]) {
+      const body = msgtype === 'm.text' ? (content.body as string || '') : '';
+      if (!groups[matrixJid] && !body.startsWith('!')) {
         logger.debug({ matrixJid, registeredJids: Object.keys(groups) }, 'Matrix message from unregistered room');
         return;
       }
@@ -863,6 +864,16 @@ export class MatrixChannel implements Channel {
       throw err;
     }
 
+  }
+
+  /** Update the bot's Matrix display name (e.g. for CO badge changes). */
+  async setDisplayName(name: string): Promise<void> {
+    if (!this.client || !this._connected) return;
+    try {
+      await this.client.setDisplayName(name);
+    } catch (err) {
+      logger.warn({ err, name }, 'Failed to update display name');
+    }
   }
 
   private async sendTextReturningId(jid: string, text: string, threadId?: string): Promise<string | undefined> {
