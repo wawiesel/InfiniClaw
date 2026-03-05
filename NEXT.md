@@ -1,7 +1,7 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05T19:05Z.
+Updated 2026-03-05T19:20Z.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
@@ -22,6 +22,7 @@ Updated 2026-03-05T19:05Z.
 
 ## LOW — Infrastructure
 
+- **Supervisor deployment gotcha** — supervisor runs from `_runtime/instances/<first-bot>/dist/supervisor.js`, NOT from the project root `dist/`. After `npm run build` in the project root, you must also copy `dist/supervisor.js` to the instance dir or do a full `!restart` to trigger deploy. Operators: remember this when deploying supervisor changes.
 - Rename supervisor to "relay" — name conflicts with pm2. It's a message relay, not a process manager.
 
 ## LOW — Reliability
