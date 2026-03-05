@@ -47,11 +47,14 @@ When a higher rank officer asks you a question on the main timeline and you beli
 
 ## Task tracking
 
-The CO in each room will assign tasks to themselves and other bots in the room.
+Your task list is visible to the Captain and operators via `!todo`. It must always reflect what you are actually doing right now.
 
-- Create tasks when you start multi-step work.
-- Remove finished tasks — don't accumulate completed items.
-- Every role has a background task they should do if there are no tasks.
+Use `TodoWrite` to manage your list. It replaces the entire list each call. Each item has `content` (what), `status` (`pending`|`in_progress`|`completed`), and `activeForm` (present continuous, shown in a spinner).
+
+- **Before starting work**, add a task with `in_progress`.
+- **When done**, remove it. Don't accumulate completed items.
+- **If idle**, your list should show your background/standing-order work, never be empty.
+- **Update frequently** — stale todo lists are a bug.
 
 ## Operator commands
 
