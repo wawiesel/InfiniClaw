@@ -107,6 +107,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
   const processIpcFiles = async () => {
+    try { await processIpcFilesInner(); } catch (err) {
+      logger.error({ err }, 'IPC watcher unexpected error — recovering');
+    }
+    setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+  };
+
+  const processIpcFilesInner = async () => {
     let groupFolders: string[];
     try {
       groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
@@ -115,7 +122,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
       });
     } catch (err) {
       logger.error({ err }, 'Error reading IPC base directory');
-      setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
       return;
     }
 
@@ -242,8 +248,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
     }
-
-    setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };
 
   processIpcFiles();

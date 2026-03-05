@@ -1448,6 +1448,40 @@ async function main(): Promise<void> {
     if (count > 0) logger.info({ count }, 'Pruned expired allow-list entries');
   }, 5 * 60 * 1000));
 
+  // Prune stale in-memory thread maps every 30 minutes (entries older than 6 hours)
+  const STALE_THREAD_TTL = 6 * 60 * 60 * 1000;
+  const STALE_THREAD_CHECK = 30 * 60 * 1000;
+  const threadMapLastSeen: Record<string, number> = {};
+  persistentTimers.push(setInterval(() => {
+    const now = Date.now();
+    let pruned = 0;
+    for (const jid of Object.keys(workThreadIds)) {
+      if (!threadMapLastSeen[`w:${jid}`]) threadMapLastSeen[`w:${jid}`] = now;
+      if (now - threadMapLastSeen[`w:${jid}`] > STALE_THREAD_TTL) {
+        delete workThreadIds[jid];
+        delete threadMapLastSeen[`w:${jid}`];
+        pruned++;
+      }
+    }
+    for (const jid of Object.keys(activeReplyThreadIds)) {
+      if (!threadMapLastSeen[`r:${jid}`]) threadMapLastSeen[`r:${jid}`] = now;
+      if (now - threadMapLastSeen[`r:${jid}`] > STALE_THREAD_TTL) {
+        delete activeReplyThreadIds[jid];
+        delete threadMapLastSeen[`r:${jid}`];
+        pruned++;
+      }
+    }
+    for (const jid of Object.keys(progressToolCallThreadIds)) {
+      if (!threadMapLastSeen[`p:${jid}`]) threadMapLastSeen[`p:${jid}`] = now;
+      if (now - threadMapLastSeen[`p:${jid}`] > STALE_THREAD_TTL) {
+        delete progressToolCallThreadIds[jid];
+        delete threadMapLastSeen[`p:${jid}`];
+        pruned++;
+      }
+    }
+    if (pruned > 0) logger.info({ pruned }, 'Pruned stale thread map entries');
+  }, STALE_THREAD_CHECK));
+
   // Periodic status snapshot
   const STATUS_SNAPSHOT_INTERVAL = 30_000;
   const appendMetricsHistory = () => {
