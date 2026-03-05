@@ -459,6 +459,51 @@ async function healthLoop(): Promise<void> {
   }
 }
 
+// ── Heartbeat — nudge idle bots to do autonomous work ──────────────
+
+const HEARTBEAT_INTERVAL = parseInt(process.env.HEARTBEAT_INTERVAL_MS || '', 10) || 30 * 60_000; // 30 min default
+
+/** Check if a bot has a running container. */
+function hasRunningContainer(bot: string): boolean {
+  try {
+    const out = execSync(`podman ps --filter "name=nanoclaw-${bot}" --format "{{.Names}}"`, {
+      encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
+    }).trim();
+    return out.length > 0;
+  } catch { return false; }
+}
+
+/**
+ * Periodic heartbeat: nudge idle bots to check NEXT.md.
+ * Sends a message to the bot's room mentioning it by name, which triggers
+ * the bot's trigger pattern and wakes it to do autonomous work.
+ */
+async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
+  await sleep(5 * 60_000); // wait 5 min before first heartbeat
+  while (true) {
+    try {
+      const root = resolveRoot();
+      const botRooms = buildBotRoomMap();
+      for (const bot of getActiveBots()) {
+        if (hasRunningContainer(bot)) continue; // already working
+        const roomName = botRooms[bot];
+        if (!roomName) continue;
+        const conn = conns.find((c) => c.name === roomName);
+        if (!conn?.accessToken) continue;
+        // Get the bot's display name for the trigger
+        const env = loadProfileEnv(root, bot);
+        const name = env?.ASSISTANT_NAME || bot;
+        await matrixSend(conn.homeserver, conn.accessToken, conn.roomId,
+          `${name}, check NEXT.md and work on the highest priority item you can act on.`);
+        log(`heartbeat: nudged ${name} in ${roomName}`);
+      }
+    } catch (err) {
+      log(`heartbeat error: ${errStr(err)}`);
+    }
+    await sleep(HEARTBEAT_INTERVAL);
+  }
+}
+
 // ── Command handling ───────────────────────────────────────────────
 
 async function handleLifecycleCommand(
@@ -727,6 +772,7 @@ async function main(): Promise<void> {
   // Start background loops (non-blocking alongside room sync loops)
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));
   gitSyncLoop(conns).catch((err) => log(`git sync loop fatal: ${errStr(err)}`));
+  heartbeatLoop(conns).catch((err) => log(`heartbeat loop fatal: ${errStr(err)}`));
 
   await Promise.all(loops);
 }
