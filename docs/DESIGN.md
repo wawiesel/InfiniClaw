@@ -12,7 +12,7 @@ InfiniClaw is a multi-bot orchestration layer built on a maintained NanoClaw for
 - **No redactions.** Status messages are never deleted. They have a live state and a finished state: `⏳ working (3m)` → `⏳ worked (3m)`.
 - **No silent failures.** Every failed message send must be retried or surfaced as a visible error. If a bot can't deliver, it logs the failure with full context and retries. Silent `.catch(() => {})` is a bug.
 - **System actions get an emoji prefix.** Any message that isn't a direct conversation response (restarts, working indicator, brain reload, startup) must start with an emoji.
-- **Work with Claude Code, not against it.** Bots run on the Claude Agent SDK. When the SDK has a preferred way to do something, use it. If the SDK introduces a tool that overlaps with ours, prefer one-way sync from the SDK over blocking it.
+- **Work with Claude Code, not against it.** Bots run on Claude Code CLI (spawned by the agent-runner inside containers). When Claude Code has a preferred way to do something, use it. If it introduces a tool that overlaps with ours, prefer one-way sync over blocking it.
 - **Fix code and process, not behavior.** When a bot behaves incorrectly, fix the underlying system — the code, the IPC flow, the routing logic — not the bot's in-context behavior. Workarounds that patch behavior without addressing root cause accumulate debt and mask real problems.
 - **SSL passthrough.** Containers and host processes must forward corporate SSL variables (`SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`) and mount host certificates for TLS inspection proxies.
 
@@ -52,7 +52,7 @@ CO election is dynamic via `!roster join/leave` intercom signals sent at CLI sta
 
 ### Containers
 
-One bot = one Podman container. Each container runs the agent-runner (Claude Agent SDK) with the bot's persona, tools, and mounts. The host injects secrets as env vars — nothing is baked into images.
+One bot = one Podman container. Each container runs the agent-runner (which spawns Claude Code CLI) with the bot's persona, tools, and mounts. The host injects secrets as env vars — nothing is baked into images.
 
 Containers run with memory caps (`CONTAINER_MEMORY_MB`, default 6GB) and optional CPU limits. There must never be multiple containers for the same bot, except interrupt lobes (which use `containerNameTag: 'interrupt'` to coexist).
 
@@ -224,7 +224,7 @@ The host tracks per-room state: current objective, last progress, last completio
 
 ### Holodeck
 
-Architects can test changes in isolation before deploying to production. The holodeck creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), and runs as its own launchd service in terminal-only mode (no Matrix). CLI commands: `holodeck create|chat|teardown|promote`. Promote merges the branch and redeploys the live bot.
+Architects can test changes in isolation before deploying to production. The holodeck creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), and runs as its own pm2 process in terminal-only mode (no Matrix). CLI commands: `holodeck create|chat|teardown|promote`. Promote merges the branch and redeploys the live bot.
 
 ## Safety
 
@@ -295,7 +295,7 @@ Bot detects problem (MCP down, health check fails, OOM)
   → Bot reports resolution via Matrix
 ```
 
-**Operator (escape hatch only):** Cross-machine coordination when Matrix is down, OS-level fixes (launchd, podman, network), secret rotation requiring human auth, emergency intervention for restart loops.
+**Operator (escape hatch only):** Cross-machine coordination when Matrix is down, OS-level fixes (pm2, podman, network), secret rotation requiring human auth, emergency intervention for restart loops.
 
 ### Intercom System
 

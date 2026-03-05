@@ -20,6 +20,7 @@ import {
   ensurePodmanReady,
   killStaleContainers,
   loadProfileEnv,
+  sendRosterSignal,
 } from './service.js';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -235,16 +236,20 @@ async function handleLifecycleCommand(
     log(`!${action} ${bot}`);
     try {
       if (action === 'dismiss') {
+        try { sendRosterSignal(root, bot, 'leave'); } catch { /* best effort */ }
         stopBot(bot);
         killStaleContainers(bot);
         await reply(conn, `${HOSTNAME}: ${bot} stopped`);
       } else if (action === 'join') {
         bootstrapBot(root, bot);
+        try { sendRosterSignal(root, bot, 'join'); } catch { /* best effort */ }
         await reply(conn, `${HOSTNAME}: ${bot} started`);
       } else {
+        try { sendRosterSignal(root, bot, 'leave'); } catch { /* best effort */ }
         stopBot(bot);
         killStaleContainers(bot);
         bootstrapBot(root, bot);
+        try { sendRosterSignal(root, bot, 'join'); } catch { /* best effort */ }
         await reply(conn, `${HOSTNAME}: ${bot} restarted`);
       }
     } catch (err) {

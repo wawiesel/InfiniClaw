@@ -818,7 +818,7 @@ export function chat(bot: string): void {
 // ── Roster signals ──────────────────────────────────────────────────
 
 /** Send a !roster join/leave signal via intercom to a bot's room. */
-function sendRosterSignal(root: string, bot: string, action: 'join' | 'leave'): void {
+export function sendRosterSignal(root: string, bot: string, action: 'join' | 'leave'): void {
   const config = loadMachineConfig();
   const profileEnv = loadProfileEnv(root, bot);
   const roomName = profileEnv.MAIN_GROUP_NAME;
