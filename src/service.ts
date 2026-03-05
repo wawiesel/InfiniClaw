@@ -713,10 +713,8 @@ export async function start(onlyBot?: string): Promise<void> {
 
   ensurePodmanReady();
 
-  // Pull state from S3 before deploying (warn on failure)
-  try { await pullAll(root); } catch (err) {
-    console.warn(`S3 pull failed — continuing: ${err instanceof Error ? err.message : err}`);
-  }
+  // S3 is backup-only. Pull is manual (`cli sync pull`) for bot transport.
+  // Push happens automatically on stop.
 
   // Stop targeted services so old code stops before we build
   for (const bot of bots) { pm2Stop(pm2Name(bot)); }

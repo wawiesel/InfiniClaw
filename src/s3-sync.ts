@@ -1,6 +1,8 @@
 /**
- * S3 sync for multi-machine deployment.
- * Pushes/pulls bot state (messages.db, matrix-bot.json, sessions) to/from MinIO.
+ * S3 backup for bot conversation state.
+ * Push: automatic on stop — backs up messages.db, matrix-bot.json, sessions.
+ * Pull: manual only (`cli sync pull`) — for transporting a bot to another machine.
+ * Pull overwrites local files without merging. Never auto-pull on start.
  * Skips silently if S3 is not configured. Warns and continues on network failure.
  */
 import fs from 'fs';
@@ -118,6 +120,10 @@ export async function pullBot(root: string, bot: string): Promise<void> {
   if (!s3) return;
 
   const instance = instanceDir(root, bot);
+  const dbPath = path.join(instance, 'store', 'messages.db');
+  if (fs.existsSync(dbPath)) {
+    console.warn(`${bot}: ⚠️  local state exists — pull will overwrite`);
+  }
   console.log(`${bot}: pulling state from S3...`);
   let count = 0;
 
