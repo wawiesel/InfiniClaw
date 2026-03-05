@@ -33,6 +33,16 @@ export function loadSkillsToSession(
       logger.warn({ skillName, srcDir }, 'Skill not found in pool, skipping');
       continue;
     }
-    fs.symlinkSync(srcDir, path.join(sessionSkillsDir, skillName));
+    const dest = path.join(sessionSkillsDir, skillName);
+    try {
+      fs.symlinkSync(srcDir, dest);
+    } catch (err: any) {
+      if (err.code === 'EEXIST') {
+        fs.rmSync(dest, { recursive: true });
+        fs.symlinkSync(srcDir, dest);
+      } else {
+        throw err;
+      }
+    }
   }
 }
