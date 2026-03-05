@@ -11,6 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
+import { resolveRecipientJid } from './bot-messaging.js';
 import { registerInfiniClawTools } from './tools.js';
 
 const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
@@ -43,24 +44,49 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
+  `Send a message. Without recipient: sends to your room. With recipient: sends cross-room via intercom relay to the recipient's room.
+
+Use list_recipients to see available bots. Cross-room messages appear as "YourName: message" in the target room via the intercom account.`,
   {
     text: z.string().describe('The message text to send'),
+    recipient: z.string().optional().describe('Name of another bot to message cross-room (e.g. "Cid"). Use list_recipients to see available bots.'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
   },
   async (args) => {
-    const data: Record<string, string | undefined> = {
+    let targetJid = chatJid;
+    let crossRoom = false;
+
+    if (args.recipient) {
+      const resolved = resolveRecipientJid(args.recipient, IPC_DIR);
+      if (!resolved) {
+        return {
+          content: [{ type: 'text' as const, text: `Unknown recipient "${args.recipient}". Use list_recipients to see available bots.` }],
+          isError: true,
+        };
+      }
+      if (resolved !== chatJid) {
+        targetJid = resolved;
+        crossRoom = true;
+      }
+    }
+
+    const data: Record<string, string | boolean | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: targetJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
     };
 
+    if (crossRoom) {
+      data.crossRoom = true;
+      data.senderName = process.env.NANOCLAW_ASSISTANT_NAME || 'Unknown';
+    }
+
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    return { content: [{ type: 'text' as const, text: crossRoom ? `Cross-room message sent to ${args.recipient}.` : 'Message sent.' }] };
   },
 );
 

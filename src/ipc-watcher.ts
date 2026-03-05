@@ -14,6 +14,7 @@ import {
   handleInfiniClawCommand,
   handleInfiniClawMessage,
 } from './ipc-commands.js';
+import { sendViaIntercom } from './intercom-relay.js';
 import { logger } from 'nanoclaw/logger.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 
@@ -55,6 +56,8 @@ interface TextMessageData {
   text: string;
   sender?: string;
   threadId?: string;
+  crossRoom?: boolean;
+  senderName?: string;
 }
 
 async function handleTextMessage(
@@ -63,6 +66,18 @@ async function handleTextMessage(
   isMain: boolean,
   deps: IpcDeps,
 ): Promise<void> {
+  // Cross-room messages go through intercom relay
+  if (data.crossRoom && data.senderName) {
+    const text = `${data.senderName}: ${data.text}`;
+    const sent = await sendViaIntercom(data.chatJid, text);
+    if (sent) {
+      logger.info({ chatJid: data.chatJid, senderName: data.senderName, sourceGroup }, 'Cross-room message relayed via intercom');
+    } else {
+      logger.error({ chatJid: data.chatJid, sourceGroup }, 'Failed to relay cross-room message via intercom');
+    }
+    return;
+  }
+
   const registeredGroups = deps.registeredGroups();
   const targetGroup = registeredGroups[data.chatJid];
   const isCrossBotTarget = data.chatJid.startsWith('matrix:');
@@ -157,6 +172,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     text: data.text as string,
                     sender: data.sender as string | undefined,
                     threadId: data.threadId as string | undefined,
+                    crossRoom: data.crossRoom as boolean | undefined,
+                    senderName: data.senderName as string | undefined,
                   },
                   sourceGroup,
                   isMain,
