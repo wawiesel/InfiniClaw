@@ -1,7 +1,7 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-05T18:28Z.
+Updated 2026-03-05T19:05Z.
 
 ## HIGH PRIORITY — Captain Directives (blocking progress)
 
@@ -18,7 +18,7 @@ Updated 2026-03-05T18:28Z.
 - **Tool call breadcrumbs** (Captain idea). Tool calls should have single-line hash in Matrix, full content to S3.
 - **Lobe delegation CWD too restrictive**. `delegate-runner.ts` only allows `/workspace/*` roots. Health scripts needing `/_runtime/` fail.
 - **Concurrency ceiling starvation**. When MAX_CONCURRENT_CONTAINERS reached, lower-priority bots starve.
-- **Matrix sluggish on Poseidon** (Captain report). Server responds <1ms locally but conduwuit logs show 500 errors on federated rooms ("non-create event for room of unknown version") and UIAA auth errors. These may cause client retries and perceived sluggishness. Consider leaving problematic federated rooms or upgrading conduwuit.
+- **Matrix sluggish on Poseidon** (Captain report). Server responds <1ms locally but conduwuit logs show 500 errors on federated rooms ("non-create event for room of unknown version") and UIAA auth errors. Contributing factor: status indicator spam — bots were editing room messages every 15s indefinitely (now throttled to stop after 5min). Consider leaving problematic federated rooms or upgrading conduwuit.
 
 ## LOW — Infrastructure
 
@@ -32,6 +32,7 @@ Updated 2026-03-05T18:28Z.
 
 ## Recently Completed
 
+- Status indicator throttle — indicators stop editing after 5 minutes. Previously they edited the room message every 15s indefinitely, flooding rooms with hundreds of status edits per hour per bot.
 - Rolling health metrics — `health-check.sh` reports 24h/7d rolling deltas from JSONL history.
 - S3 push timeout — 30s timeout in `stop()`.
 - Max session age (8h) — `1aa34a8`. Containers auto-recycle via `MAX_SESSION_AGE_MS`.

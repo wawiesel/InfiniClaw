@@ -320,6 +320,7 @@ const INDICATOR_DELAY_MS = 5_000;
 const INDICATOR_FAST_INTERVAL_MS = 5_000;
 const INDICATOR_SLOW_INTERVAL_MS = 15_000;
 const INDICATOR_SLOW_THRESHOLD_MS = 55_000; // switch at ~1 minute
+const INDICATOR_STOP_THRESHOLD_MS = 300_000; // stop editing after 5 minutes
 
 function formatElapsed(startedAt: number): string {
   const secs = Math.round((Date.now() - startedAt) / 1000);
@@ -328,7 +329,7 @@ function formatElapsed(startedAt: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-/** Create an adaptive timer: fast (5s) for the first minute, then slow (15s). */
+/** Create an adaptive timer: fast (5s) for the first minute, slow (15s) until 5min, then stop. */
 function createAdaptiveTimer(
   startedAt: number,
   onTick: () => void,
@@ -336,10 +337,24 @@ function createAdaptiveTimer(
   chatJid: string,
 ): ReturnType<typeof setInterval> {
   const fastTimer = setInterval(() => {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= INDICATOR_STOP_THRESHOLD_MS) {
+      // Stop editing after 5 minutes — status is clear by now
+      const indicator = registry[chatJid];
+      if (indicator?.timer) clearInterval(indicator.timer);
+      return;
+    }
     onTick();
-    if (Date.now() - startedAt >= INDICATOR_SLOW_THRESHOLD_MS && registry[chatJid]?.timer === fastTimer) {
+    if (elapsed >= INDICATOR_SLOW_THRESHOLD_MS && registry[chatJid]?.timer === fastTimer) {
       clearInterval(fastTimer);
-      const slowTimer = setInterval(onTick, INDICATOR_SLOW_INTERVAL_MS);
+      const slowTimer = setInterval(() => {
+        if (Date.now() - startedAt >= INDICATOR_STOP_THRESHOLD_MS) {
+          const indicator = registry[chatJid];
+          if (indicator?.timer) clearInterval(indicator.timer);
+          return;
+        }
+        onTick();
+      }, INDICATOR_SLOW_INTERVAL_MS);
       registry[chatJid].timer = slowTimer;
     }
   }, INDICATOR_FAST_INTERVAL_MS);
