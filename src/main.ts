@@ -127,6 +127,12 @@ import { getActiveBots } from './service.js';
 import { handleOperatorCommand, buildTodoMessage, readTodoItems } from './operator-commands.js';
 import { getSystemStatus } from './status.js';
 
+// ── Display name helper ────────────────────────────────────────────────
+const BOT_LOCATION = os.hostname().toUpperCase();
+function botDisplayName(badge: string): string {
+  return `${ASSISTANT_NAME} (${BOT_LOCATION}) ${badge}`;
+}
+
 // ── Module-level state ─────────────────────────────────────────────────
 
 let lastTimestamp = '';
@@ -196,10 +202,10 @@ async function rerankCO(chatJid: string): Promise<void> {
 
   if (coBotName === ASSISTANT_NAME && previousCO !== ASSISTANT_NAME) {
     // This bot was promoted to CO
-    await matrixRef.setDisplayName(`${ASSISTANT_NAME} ⭐`);
+    await matrixRef.setDisplayName(botDisplayName('⭐'));
   } else if (previousCO === ASSISTANT_NAME && coBotName !== ASSISTANT_NAME) {
     // This bot was demoted from CO
-    await matrixRef.setDisplayName(`${ASSISTANT_NAME} 🟢`);
+    await matrixRef.setDisplayName(botDisplayName('🟢'));
   }
 }
 
@@ -1458,7 +1464,7 @@ async function main(): Promise<void> {
       if (ch.setPresenceStatus) await ch.setPresenceStatus('offline', 'shutting down...');
     }
     if (matrixRef) {
-      try { await matrixRef.setDisplayName(`${ASSISTANT_NAME} 🔴`); } catch { /* best-effort */ }
+      try { await matrixRef.setDisplayName(botDisplayName('🔴')); } catch { /* best-effort */ }
     }
     syncPersonas();
     await queue.shutdown(10000);
@@ -1507,7 +1513,7 @@ async function main(): Promise<void> {
     (MATRIX_ACCESS_TOKEN || (MATRIX_USERNAME && MATRIX_PASSWORD))
   ) {
     matrix = new MatrixChannel({
-      displayName: `${ASSISTANT_NAME} ${initialBadge}`,
+      displayName: botDisplayName(initialBadge),
       onMessage: (_chatJid, msg) => {
         const safeMsg = normalizeInboundMessage(msg);
         if (!safeMsg) {
