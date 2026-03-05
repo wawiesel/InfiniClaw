@@ -26,8 +26,9 @@ const CONFIG_DIR = path.join(os.homedir(), '.config', 'infiniclaw');
 const ALLOW_LIST_PATH = path.join(CONFIG_DIR, 'allow-list.json');
 
 function expandTilde(p: string): string {
-  if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
-  return p;
+  const expanded = p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
+  // Resolve .. and . components to prevent path traversal
+  return path.resolve(expanded);
 }
 
 // Dotfile paths that are explicitly safe for bot mounts
@@ -49,9 +50,27 @@ export function loadAllowList(): AllowList {
         parsed.mounts !== null &&
         !Array.isArray(parsed.mounts)
       ) {
-        return parsed as AllowList;
+        // Deep-validate each bot's entry array
+        const mounts = parsed.mounts as Record<string, unknown>;
+        const valid = Object.values(mounts).every(entries => {
+          if (!Array.isArray(entries)) return false;
+          return entries.every((e: unknown) =>
+            typeof e === 'object' && e !== null &&
+            'path' in e && typeof (e as Record<string, unknown>).path === 'string' &&
+            'expiresAt' in e && (
+              (e as Record<string, unknown>).expiresAt === null ||
+              typeof (e as Record<string, unknown>).expiresAt === 'string'
+            )
+          );
+        });
+        if (!valid) {
+          logger.warn('Invalid allow-list entry schema, using empty default');
+        } else {
+          return parsed as AllowList;
+        }
+      } else {
+        logger.warn('Invalid allow-list schema, using empty default');
       }
-      logger.warn('Invalid allow-list schema, using empty default');
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to load allow-list');
@@ -71,8 +90,15 @@ export function grantMount(bot: string, rawPath: string, durationMinutes?: numbe
   if (hasDotfileSegment(expanded)) {
     throw new Error(`Dotfile paths not allowed: ${rawPath}`);
   }
-  if (!fs.existsSync(expanded)) {
+  // Resolve symlinks to check the real path, not just the link
+  let real: string;
+  try {
+    real = fs.realpathSync(expanded);
+  } catch {
     throw new Error(`Path does not exist: ${expanded}`);
+  }
+  if (hasDotfileSegment(real)) {
+    throw new Error(`Dotfile paths not allowed (symlink target): ${real}`);
   }
 
   const list = loadAllowList();
@@ -114,7 +140,9 @@ export function pruneExpired(): number {
     const before = list.mounts[bot].length;
     list.mounts[bot] = list.mounts[bot].filter(e => {
       if (!e.expiresAt) return true;
-      return new Date(e.expiresAt).getTime() > now;
+      const t = new Date(e.expiresAt).getTime();
+      // Treat invalid (NaN) expiry dates as expired and prune them
+      return !isNaN(t) && t > now;
     });
     pruned += before - list.mounts[bot].length;
   }
@@ -133,23 +161,38 @@ export function mountsForBot(bot: string): VolumeMount[] {
   const usedBasenames = new Set<string>();
 
   for (const entry of entries) {
-    if (entry.expiresAt && new Date(entry.expiresAt).getTime() <= now) continue;
+    if (entry.expiresAt) {
+      const t = new Date(entry.expiresAt).getTime();
+      // Treat invalid (NaN) expiry dates as expired — consistent with pruneExpired
+      if (isNaN(t) || t <= now) continue;
+    }
 
     const expanded = expandTilde(entry.path);
     if (hasDotfileSegment(expanded)) continue;
-    if (!fs.existsSync(expanded)) continue;
 
-    let basename = path.basename(expanded);
-    if (usedBasenames.has(basename)) {
-      let n = 2;
-      while (usedBasenames.has(`${basename}-${n}`)) n++;
-      basename = `${basename}-${n}`;
+    // Resolve symlinks to prevent symlink-based path escapes
+    let real: string;
+    try {
+      real = fs.realpathSync(expanded);
+    } catch {
+      continue; // path doesn't exist or is unresolvable
     }
-    usedBasenames.add(basename);
+    if (hasDotfileSegment(real)) continue;
+
+    const basename = path.basename(real);
+    if (!basename) continue; // guard against root or empty-basename paths
+
+    let mountName = basename;
+    if (usedBasenames.has(mountName)) {
+      let n = 2;
+      while (usedBasenames.has(`${mountName}-${n}`)) n++;
+      mountName = `${mountName}-${n}`;
+    }
+    usedBasenames.add(mountName);
 
     mounts.push({
-      hostPath: expanded,
-      containerPath: `/workspace/extra/${basename}`,
+      hostPath: real,
+      containerPath: `/workspace/extra/${mountName}`,
       readonly: false,
     });
   }
