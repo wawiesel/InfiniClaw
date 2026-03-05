@@ -2,7 +2,7 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { DATA_DIR, MAX_CONCURRENT_CONTAINERS, MAX_SESSION_AGE_MS } from './config.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -25,6 +25,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  spawnedAt: number;
 }
 
 export class GroupQueue {
@@ -49,6 +50,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        spawnedAt: 0,
       };
       this.groups.set(groupJid, state);
     }
@@ -152,6 +154,15 @@ export class GroupQueue {
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
+
+    // Recycle container if it has exceeded max session age
+    if (state.spawnedAt > 0 && Date.now() - state.spawnedAt > MAX_SESSION_AGE_MS) {
+      const ageH = ((Date.now() - state.spawnedAt) / 3600000).toFixed(1);
+      logger.info({ groupJid, ageH }, 'Container exceeded max session age, recycling');
+      this.closeStdin(groupJid);
+      return;
+    }
+
     if (state.pendingTasks.length > 0 || state.pendingMessages) {
       this.closeStdin(groupJid);
     }
@@ -206,6 +217,7 @@ export class GroupQueue {
     state.idleWaiting = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
+    state.spawnedAt = Date.now();
     this.activeCount++;
 
     logger.debug(
@@ -241,6 +253,7 @@ export class GroupQueue {
     state.idleWaiting = false;
     state.isTaskContainer = true;
     state.runningTaskId = task.id;
+    state.spawnedAt = Date.now();
     this.activeCount++;
 
     logger.debug(
