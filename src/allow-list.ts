@@ -40,7 +40,18 @@ function hasDotfileSegment(p: string): boolean {
 export function loadAllowList(): AllowList {
   try {
     if (fs.existsSync(ALLOW_LIST_PATH)) {
-      return JSON.parse(fs.readFileSync(ALLOW_LIST_PATH, 'utf-8'));
+      const parsed: unknown = JSON.parse(fs.readFileSync(ALLOW_LIST_PATH, 'utf-8'));
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        'mounts' in parsed &&
+        typeof parsed.mounts === 'object' &&
+        parsed.mounts !== null &&
+        !Array.isArray(parsed.mounts)
+      ) {
+        return parsed as AllowList;
+      }
+      logger.warn('Invalid allow-list schema, using empty default');
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to load allow-list');
