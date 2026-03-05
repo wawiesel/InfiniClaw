@@ -2,13 +2,12 @@
  * InfiniClaw Podman bootstrap.
  * Machine management, image availability checks, orphaned container cleanup.
  */
-import { execSync, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, CONTAINER_IMAGE } from 'nanoclaw/config.js';
 import { logger } from 'nanoclaw/logger.js';
-import { stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
 
 type PodmanMachineListEntry = {
   Name: string;
@@ -21,13 +20,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function canReachPodmanApi(): boolean {
-  try {
-    execSync('podman info', { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
+function isSafePodmanArg(value: string): boolean {
+  return value.length > 0 && !value.startsWith('-') && !/[\s\x00-\x1f\x7f]/.test(value);
+}
+
+function getContainerImageOrThrow(): string {
+  const image = (CONTAINER_IMAGE || '').trim();
+  if (!isSafePodmanArg(image)) {
+    throw new Error(`Invalid container image reference: ${CONTAINER_IMAGE}`);
   }
+  return image;
+}
+
+function isSafeMachineName(name: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name);
+}
+
+function canReachPodmanApi(): boolean {
+  const result = spawnSync('podman', ['info'], { stdio: 'pipe' });
+  return result.status === 0;
 }
 
 function podmanCommandSucceeded(args: string[]): boolean {
@@ -36,8 +47,9 @@ function podmanCommandSucceeded(args: string[]): boolean {
 }
 
 function ensurePodmanImageAvailable(): void {
-  if (podmanCommandSucceeded(['image', 'exists', CONTAINER_IMAGE])) {
-    logger.debug({ image: CONTAINER_IMAGE }, 'Podman image available');
+  const image = getContainerImageOrThrow();
+  if (podmanCommandSucceeded(['image', 'exists', image])) {
+    logger.debug({ image }, 'Podman image available');
     return;
   }
 
@@ -45,14 +57,14 @@ function ensurePodmanImageAvailable(): void {
   const buildContext = path.join(process.cwd(), 'container');
   if (!fs.existsSync(dockerfilePath) || !fs.existsSync(buildContext)) {
     throw new Error(
-      `Container image ${CONTAINER_IMAGE} missing and build context not found`,
+      `Container image ${image} missing and build context not found`,
     );
   }
 
-  logger.warn({ image: CONTAINER_IMAGE }, 'Podman image missing; rebuilding');
+  logger.warn({ image }, 'Podman image missing; rebuilding');
   const buildResult = spawnSync(
     'podman',
-    ['build', '-t', CONTAINER_IMAGE, '-f', dockerfilePath, buildContext],
+    ['build', '-t', image, '-f', dockerfilePath, buildContext],
     {
       stdio: 'inherit',
       timeout: 30 * 60 * 1000,
@@ -61,23 +73,23 @@ function ensurePodmanImageAvailable(): void {
 
   if (buildResult.error) {
     throw new Error(
-      `Failed to rebuild container image ${CONTAINER_IMAGE}: ${buildResult.error.message}`,
+      `Failed to rebuild container image ${image}: ${buildResult.error.message}`,
     );
   }
 
   if (buildResult.status !== 0) {
     throw new Error(
-      `Failed to rebuild container image ${CONTAINER_IMAGE} (exit code ${buildResult.status ?? 'unknown'})`,
+      `Failed to rebuild container image ${image} (exit code ${buildResult.status ?? 'unknown'})`,
     );
   }
 
-  if (!podmanCommandSucceeded(['image', 'exists', CONTAINER_IMAGE])) {
+  if (!podmanCommandSucceeded(['image', 'exists', image])) {
     throw new Error(
-      `Container image ${CONTAINER_IMAGE} is still missing after rebuild`,
+      `Container image ${image} is still missing after rebuild`,
     );
   }
 
-  logger.info({ image: CONTAINER_IMAGE }, 'Podman image rebuilt and ready');
+  logger.info({ image }, 'Podman image rebuilt and ready');
 }
 
 async function waitForPodmanApi(timeoutMs: number): Promise<boolean> {
@@ -90,10 +102,19 @@ async function waitForPodmanApi(timeoutMs: number): Promise<boolean> {
 }
 
 function getPodmanMachines(): PodmanMachineListEntry[] {
-  const output = execSync('podman machine list --format json', {
+  const result = spawnSync('podman', ['machine', 'list', '--format', 'json'], {
     stdio: ['pipe', 'pipe', 'pipe'],
     encoding: 'utf-8',
   });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `podman machine list failed with exit code ${result.status ?? 'unknown'}`,
+    );
+  }
+  const output = result.stdout || '[]';
   const parsed: unknown = JSON.parse(output || '[]');
   if (!Array.isArray(parsed)) return [];
   return parsed.filter(
@@ -124,6 +145,9 @@ async function ensurePodmanRuntimeAvailable(): Promise<void> {
       throw new Error('No podman machine exists. Run: podman machine init');
     }
     machineName = machine.Name;
+    if (!isSafeMachineName(machineName)) {
+      throw new Error(`Invalid podman machine name: ${machineName}`);
+    }
     if (machine.Starting && !machine.Running) {
       logger.warn({ machineName }, 'Podman machine stuck in starting state; forcing stop');
       try {
@@ -171,9 +195,40 @@ async function ensurePodmanRuntimeAvailable(): Promise<void> {
   throw new Error('Podman machine started but API did not become ready');
 }
 
+type PodmanPsEntry = {
+  Names?: string[] | string;
+};
+
+function getRunningContainerNames(): string[] {
+  const result = spawnSync('podman', ['ps', '--format', 'json'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    encoding: 'utf-8',
+  });
+  if (result.status !== 0) return [];
+
+  const parsed: unknown = JSON.parse(result.stdout || '[]');
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((entry) => {
+    const names = (entry as PodmanPsEntry)?.Names;
+    if (Array.isArray(names)) return names.filter((n): n is string => typeof n === 'string');
+    return typeof names === 'string' ? [names] : [];
+  });
+}
+
 export function cleanupOrphanedPodmanContainers(): void {
   const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const stopped = stopContainersByPrefix(`nanoclaw-${botTag}-`);
+  const prefix = `nanoclaw-${botTag}-`;
+  const stopped: string[] = [];
+  for (const name of getRunningContainerNames()) {
+    if (!name.startsWith(prefix)) continue;
+    const result = spawnSync('podman', ['stop', '-t', '1', name], {
+      stdio: 'pipe',
+      timeout: 10000,
+    });
+    if (result.status === 0) {
+      stopped.push(name);
+    }
+  }
   if (stopped.length > 0) {
     logger.info({ count: stopped.length, names: stopped }, 'Stopped orphaned podman containers');
   }
