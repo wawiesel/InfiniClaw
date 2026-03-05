@@ -352,12 +352,19 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
     }).trim();
     const newCommits = parseInt(countStr, 10) || 0;
     if (newCommits === 0) return { ok: true, output: 'up to date', newCommits: 0 };
-    // Stash any uncommitted changes (bots may have WIP edits) — non-fatal if stash fails
+    // Stash any uncommitted changes (bots may have WIP edits)
     let didStash = false;
     try {
-      const stashOutput = execSync('git stash', execOpts).trim();
+      const stashOutput = execSync('git stash --include-untracked', execOpts).trim();
       didStash = !stashOutput.includes('No local changes');
-    } catch { /* stash failed (e.g. index.lock, no user config) — proceed without stashing */ }
+    } catch (err) {
+      const detail = execErrOutput(err);
+      if (detail.includes('No local changes to save')) {
+        didStash = false;
+      } else {
+        throw new Error(`git stash failed${detail ? `: ${detail}` : ''}`);
+      }
+    }
     try {
       // Rebase
       const output = execSync('git rebase origin/main', execOpts).trim();
@@ -833,6 +840,14 @@ function log(msg: string): void {
 
 function errStr(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function execErrOutput(err: unknown): string {
+  if (!err || typeof err !== 'object') return '';
+  const maybe = err as { stdout?: unknown; stderr?: unknown };
+  const stdout = typeof maybe.stdout === 'string' ? maybe.stdout.trim() : '';
+  const stderr = typeof maybe.stderr === 'string' ? maybe.stderr.trim() : '';
+  return [stdout, stderr].filter(Boolean).join('\n').trim();
 }
 
 function sleep(ms: number): Promise<void> {
