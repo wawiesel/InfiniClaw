@@ -17,6 +17,7 @@ import {
   getPersonaContainerConfig,
   readPersonaGroupMcpServers,
 } from './container-mounts.js';
+import { assertValidGroupFolder } from 'nanoclaw/group-folder.js';
 import {
   normalizeProviderSecrets,
   mapCertPathSecretsToContainer,
@@ -79,6 +80,8 @@ const ALLOWED_ENV_VARS = [
   'GIT_SSL_CAINFO',
   'NODE_TLS_REJECT_UNAUTHORIZED',
 ];
+const SAFE_CONTAINER_NAME_TAG = /^[a-zA-Z0-9_.-]{1,32}$/;
+const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function collectContainerSecrets(projectRoot: string): Record<string, string> {
   const secrets: Record<string, string> = {};
@@ -260,7 +263,12 @@ function buildContainerArgs(
   // Inject CONTAINER_ENV_* as container environment variables
   for (const [key, value] of Object.entries(process.env)) {
     if (key.startsWith('CONTAINER_ENV_') && value) {
-      args.push('-e', `${key.slice('CONTAINER_ENV_'.length)}=${value}`);
+      const envName = key.slice('CONTAINER_ENV_'.length);
+      if (!SAFE_ENV_NAME.test(envName)) {
+        logger.warn({ key }, 'Skipping invalid CONTAINER_ENV_* name');
+        continue;
+      }
+      args.push('-e', `${envName}=${value}`);
     }
   }
 
@@ -283,6 +291,8 @@ export async function runContainerAgent(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
+  assertValidGroupFolder(group.folder);
+
   // Pre-flight: verify podman is reachable, recover if not
   try {
     execSync('podman info', { stdio: 'pipe', timeout: 5000 });
@@ -320,7 +330,7 @@ export async function runContainerAgent(
   }
 
   // Write bot directory to IPC dir so the MCP server can resolve recipients
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', input.groupFolder);
+  const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   try {
     const botDir = buildBotDirectory();
@@ -344,8 +354,18 @@ export async function runContainerAgent(
     }
   } catch { /* machine.json not required */ }
 
+  const containerNameTag = input.containerNameTag?.trim();
+  const safeContainerNameTag = containerNameTag && SAFE_CONTAINER_NAME_TAG.test(containerNameTag)
+    ? containerNameTag
+    : undefined;
+  if (containerNameTag && !safeContainerNameTag) {
+    logger.warn({ containerNameTag }, 'Ignoring invalid containerNameTag');
+  }
+
   const effectiveInput: ContainerInput & { disallowedTools?: string[] } = {
     ...input,
+    groupFolder: group.folder,
+    ...(safeContainerNameTag ? { containerNameTag: safeContainerNameTag } : {}),
     disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
     ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
     ...(mcpServers ? { mcpServers } : {}),
@@ -353,14 +373,14 @@ export async function runContainerAgent(
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const botTag = (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  const nameTag = input.containerNameTag ? `-${input.containerNameTag}` : '';
+  const nameTag = safeContainerNameTag ? `-${safeContainerNameTag}` : '';
   const containerName = `nanoclaw-${botTag}-${safeName}${nameTag}-${Date.now()}`;
-  if (!input.containerNameTag) {
+  if (!safeContainerNameTag) {
     killExistingContainersForGroup(botTag, safeName);
   }
 
   const personaContainerConfig = getPersonaContainerConfig();
-  const portPublish = input.containerNameTag ? [] : personaContainerConfig.portPublish;
+  const portPublish = safeContainerNameTag ? [] : personaContainerConfig.portPublish;
   const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaContainerConfig.memoryMb);
   const configTimeout = input.timeoutOverrideMs || group.containerConfig?.timeout || CONTAINER_TIMEOUT;
   const timeoutMinutes = Math.round(configTimeout / 60_000);
