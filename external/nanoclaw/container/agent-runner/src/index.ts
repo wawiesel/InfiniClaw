@@ -284,17 +284,21 @@ function runClaude(
         }
 
         // Tool result — emit progress
-        if (event.type === 'tool_result') {
-          if (currentToolName) {
-            const formatted = formatToolCallWithOutput(
-              currentToolName,
-              currentToolInput,
-              event.content,
-            );
-            emitProgress(formatted);
+        // Claude Code stream-json wraps tool results as: {"type":"user","message":{"content":[{"type":"tool_result",...}]}}
+        if (event.type === 'user' && event.message?.content) {
+          const blocks = Array.isArray(event.message.content) ? event.message.content : [];
+          for (const block of blocks) {
+            if (block.type === 'tool_result' && currentToolName) {
+              const formatted = formatToolCallWithOutput(
+                currentToolName,
+                currentToolInput,
+                block.content,
+              );
+              emitProgress(formatted);
+              currentToolName = undefined;
+              currentToolInput = undefined;
+            }
           }
-          currentToolName = undefined;
-          currentToolInput = undefined;
           return;
         }
 
