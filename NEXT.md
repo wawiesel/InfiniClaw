@@ -14,6 +14,8 @@ Updated 2026-03-05 06:10 PM EST.
 - **Bots not reading Captain's directives** — Captain updated main and engineer CLAUDE.md directives (commit `8b75*`). Asked bots to pull and review. Bots didn't read them, leading to Captain frustration. Bots must `git pull` and review directive changes when told to.
 - **Duplicate bot instances** — Two Parkers were running (one on mac139160, one on Poseidon). Fixed on Poseidon (machine.json trimmed). mac139160 Parker needs `!dismiss parker`. HERACLES machine.json also trimmed to `["cid"]` only.
 
+- **Plain `!` should list operator commands** — Captain directive. Sending just `!` (no subcommand) should print a help summary of all available operator commands.
+
 ## MEDIUM — Next Up
 
 - **Concurrency ceiling starvation**. FIFO `waitingGroups` drain in `group-queue.ts` (upstream nanoclaw). Active groups hog slots across rapid messages; waiting groups queue fairly but can lag. Fix = priority-aware `drainWaiting()`. Needs Captain approval before touching upstream.
