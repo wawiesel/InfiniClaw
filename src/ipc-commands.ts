@@ -21,7 +21,7 @@ import {
   deployBot as serviceDeployBot,
   stopBot as serviceStopBot,
   rebuildImage as serviceRebuildImage,
-  refreshPlist as serviceRefreshPlist,
+  refreshStartScript as serviceRefreshStartScript,
   resolveRoot,
   instanceDir,
   loadProfileEnv,
@@ -328,9 +328,9 @@ async function handleSelfRestart(bot: string, chatJid: string | null, ctx: Infin
   const mainJid = getMainRoomJid(ctx) || chatJid;
   await safeSend(ctx, mainJid, botStatusLine(bot, '⭕️'));
   try {
-    serviceRefreshPlist(resolveRoot(), bot);
+    serviceRefreshStartScript(resolveRoot(), bot);
   } catch (err) {
-    logger.warn({ bot, err }, 'Plist refresh failed — restarting anyway');
+    logger.warn({ bot, err }, 'Start script refresh failed — restarting anyway');
   }
   setTimeout(() => process.exit(0), 500);
 }
@@ -437,14 +437,14 @@ async function handleBotStatus(data: CommandData, ctx: InfiniClawIpcContext): Pr
       ? fs.readFileSync(errorLogPath, 'utf8').split('\n').slice(-50).join('\n').trim()
       : '(no error log)';
 
-    let pm2Info = '';
+    let serviceInfo = '';
     try {
-      pm2Info = execSync(`pm2 show infiniclaw-${bot} 2>&1`, { timeout: 5_000 }).toString().trim();
+      serviceInfo = execSync(`npx pm2 show infiniclaw-${bot} 2>&1`, { timeout: 5_000, cwd: resolveRoot() }).toString().trim();
     } catch (e) {
-      pm2Info = e instanceof Error ? e.message : 'unknown';
+      serviceInfo = e instanceof Error ? e.message : 'not running';
     }
 
-    const parts = [`**${bot} status:**\n\`\`\`\n${pm2Info}\n\`\`\``];
+    const parts = [`**${bot} status:**\n\`\`\`\n${serviceInfo}\n\`\`\``];
     if (lastErrors && lastErrors !== '(no error log)') {
       parts.push(`**Last errors:**\n\`\`\`\n${truncateOutput(lastErrors)}\n\`\`\``);
     }
@@ -690,11 +690,11 @@ async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext
   if (!chatJid) return;
   const hdBot = `${bot}-holodeck`;
   try {
-    let pm2Info = '';
+    let serviceInfo = '';
     try {
-      pm2Info = execSync(`pm2 show infiniclaw-${hdBot} 2>&1`, { timeout: 5_000 }).toString().trim();
+      serviceInfo = execSync(`npx pm2 show infiniclaw-${hdBot} 2>&1`, { timeout: 5_000, cwd: resolveRoot() }).toString().trim();
     } catch (e) {
-      pm2Info = e instanceof Error ? e.message : 'not running';
+      serviceInfo = e instanceof Error ? e.message : 'not running';
     }
     const root = resolveRoot();
     const instance = instanceDir(root, hdBot);
@@ -705,7 +705,7 @@ async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext
       `**${hdBot} holodeck status:**`,
       `Instance: ${exists ? instance : 'not deployed'}`,
       `Worktree: ${worktreeExists ? worktree : 'none'}`,
-      `\`\`\`\n${pm2Info}\n\`\`\``,
+      `\`\`\`\n${serviceInfo}\n\`\`\``,
     ];
     await safeSend(ctx, chatJid, parts.join('\n'));
   } catch (err) {

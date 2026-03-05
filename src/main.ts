@@ -102,7 +102,7 @@ import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots } from './service.js';
-import { handleOperatorCommand, isDismissed, buildTodoMessage, readTodoItems } from './operator-commands.js';
+import { handleOperatorCommand, buildTodoMessage, readTodoItems } from './operator-commands.js';
 import { getSystemStatus } from './status.js';
 
 // ── Module-level state ─────────────────────────────────────────────────
@@ -1081,10 +1081,6 @@ async function startMessageLoop(): Promise<void> {
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
-    if (isDismissed()) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-      continue;
-    }
     try {
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
@@ -1314,7 +1310,6 @@ async function main(): Promise<void> {
       displayName: `${ASSISTANT_NAME} 🟢`,
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
-        if (isDismissed()) return;
         if (handleRosterSignal(msg)) return;
         storeMessage(msg);
         if (msg.id && msg.id.startsWith('$')) {
@@ -1335,7 +1330,6 @@ async function main(): Promise<void> {
     localCli = new LocalCliChannel({
       onMessage: (_chatJid, msg) => {
         if (handleOperatorCommand(msg, matrix, injectSystemNotice)) return;
-        if (isDismissed()) return;
         storeMessage(msg);
       },
       onChatMetadata: (chatJid, timestamp, name) =>

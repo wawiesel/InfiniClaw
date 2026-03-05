@@ -8,7 +8,6 @@ import { getAllRegisteredGroups, getSession } from 'nanoclaw/db.js';
 import { logger } from 'nanoclaw/logger.js';
 import { grantMount, revokeMount } from './allow-list.js';
 import { loadMachineConfig } from './machine-config.js';
-import { stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
 import type { MatrixChannel } from './channels/matrix.js';
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -42,14 +41,6 @@ function reply(matrix: MatrixChannel | null, chatJid: string, text: string, thre
     })();
 }
 
-// ── Dormant mode ──────────────────────────────────────────────────
-
-let dismissed = false;
-
-export function isDismissed(): boolean {
-    return dismissed;
-}
-
 // ── Main handler ───────────────────────────────────────────────────
 
 export function handleOperatorCommand(
@@ -75,49 +66,11 @@ export function handleOperatorCommand(
         return true;
     }
 
-    // !dismiss [bot] — enter dormant mode
-    const dismiss = parseTarget(cmd, '!dismiss');
-    if (dismiss.matched) {
-        if (!dismiss.forMe) return true;
-        dismissed = true;
-        logger.info('Entering dormant mode');
-        stopContainersByPrefix(`nanoclaw-${PERSONA}-`);
-        void (async () => {
-            const room = (process.env.MAIN_GROUP_NAME || '').toLowerCase();
-            try { sendIntercom(room, `${ASSISTANT_NAME} has left`); } catch { /* */ }
-            if (matrix?.isConnected()) await matrix.setDisplayName(`${ASSISTANT_NAME} 🔴`);
-        })();
-        return true;
-    }
-
-    // !join [bot] — exit dormant mode
-    const join = parseTarget(cmd, '!join');
-    if (join.matched) {
-        if (!join.forMe) return true;
-        dismissed = false;
-        logger.info('Exiting dormant mode');
-        void (async () => {
-            const room = (process.env.MAIN_GROUP_NAME || '').toLowerCase();
-            try { sendIntercom(room, `${ASSISTANT_NAME} has joined`); } catch { /* */ }
-            if (matrix?.isConnected()) await matrix.setDisplayName(`${ASSISTANT_NAME} 🟢`);
-        })();
-        return true;
-    }
-
-    // !restart [bot] — exit process, launchd brings it back with fresh container
-    const restart = parseTarget(cmd, '!restart');
-    if (restart.matched) {
-        if (!restart.forMe) return true;
-        logger.info('Restarting via process exit (launchd KeepAlive)');
-        void (async () => {
-            const room = (process.env.MAIN_GROUP_NAME || '').toLowerCase();
-            try { sendIntercom(room, `${ASSISTANT_NAME} is restarting`); } catch { /* */ }
-            if (matrix?.isConnected()) await matrix.setDisplayName(`${ASSISTANT_NAME} 🔄`);
-            // Give intercom/display name a moment to send
-            await new Promise(r => setTimeout(r, 1000));
-            process.exit(0);
-        })();
-        return true;
+    // !dismiss, !join, !restart — handled by the supervisor process.
+    // Bots no longer manage their own lifecycle. The supervisor watches
+    // Matrix via intercom accounts and calls service.ts directly.
+    if (cmd.startsWith('!dismiss') || cmd.startsWith('!join') || cmd.startsWith('!restart')) {
+        return true; // consumed, no-op — supervisor handles it
     }
 
     // !roster — list bots on this machine

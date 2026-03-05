@@ -1,6 +1,6 @@
 /**
  * NanoClaw Status — Core status gathering module
- * Read-only: opens its own SQLite connection, shells out to launchctl/podman.
+ * Read-only: opens its own SQLite connection, shells out to pm2/podman.
  */
 import { execSync } from 'child_process';
 import Database from 'better-sqlite3';
@@ -97,33 +97,21 @@ function parseNumber(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
-// ── Service status via launchctl ───────────────────────────────────
+// ── Service status via pm2 ─────────────────────────────────────────
 
 function getBotServiceStatus(bot: string): { service: 'running' | 'stopped'; pid?: number } {
-  const label = `com.infiniclaw.${bot}`;
-  const raw = safeExec(`launchctl list ${label} 2>/dev/null`);
+  const name = `infiniclaw-${bot}`;
+  const raw = safeExec('npx pm2 jlist 2>/dev/null');
   if (!raw) return { service: 'stopped' };
-
-  // launchctl list <label> outputs key-value pairs; look for PID
-  const pidMatch = raw.match(/"PID"\s*=\s*(\d+)/);
-  if (pidMatch) {
-    return { service: 'running', pid: parseInt(pidMatch[1], 10) };
+  try {
+    const list = JSON.parse(raw) as Array<{ name: string; pid?: number; pm2_env?: { status?: string } }>;
+    const proc = list.find((p) => p.name === name);
+    if (!proc) return { service: 'stopped' };
+    const running = proc.pm2_env?.status === 'online';
+    return { service: running ? 'running' : 'stopped', pid: running ? proc.pid : undefined };
+  } catch {
+    return { service: 'stopped' };
   }
-
-  // Fallback: try tabular output format "PID\tStatus\tLabel"
-  const lines = raw.split('\n');
-  for (const line of lines) {
-    const parts = line.trim().split(/\s+/);
-    if (parts.length >= 3 && parts[2] === label) {
-      const pid = parseInt(parts[0], 10);
-      if (!isNaN(pid) && pid > 0) {
-        return { service: 'running', pid };
-      }
-    }
-  }
-
-  // If we got output at all, the service is loaded
-  return { service: 'running' };
 }
 
 // ── Podman ─────────────────────────────────────────────────────────

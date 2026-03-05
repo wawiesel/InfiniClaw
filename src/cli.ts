@@ -2,6 +2,7 @@
 import {
   start, stop, chat, send, sync,
   holodeckCreate, holodeckChat, holodeckTeardown, holodeckPromote,
+  startSupervisor, stopSupervisor, resolveRoot,
 } from './service.js';
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -60,7 +61,19 @@ switch (cmd) {
     }
     break;
   }
+  case 'supervisor': {
+    const sub = args[0];
+    if (sub === 'start') {
+      startSupervisor(resolveRoot());
+    } else if (sub === 'stop') {
+      stopSupervisor();
+    } else {
+      console.error('Usage: cli supervisor start|stop');
+      process.exit(1);
+    }
+    break;
+  }
   default:
-    console.error('Usage: cli start|stop|chat|send|sync|holodeck');
+    console.error('Usage: cli start|stop|chat|send|sync|holodeck|supervisor');
     process.exit(1);
 }

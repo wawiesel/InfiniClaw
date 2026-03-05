@@ -182,35 +182,41 @@ Two-tier design: read-only everywhere, write access where needed.
 
 ### Operator Commands
 
-The Captain controls the fleet via `!` commands typed in Matrix. Every `!` command is delivered to ALL bots on ALL machines — each bot decides whether the command applies to it (may be a no-op). Commands are processed by the host process, not the bot's container.
+The Captain controls the fleet via `!` commands typed in Matrix. Commands are processed by a lightweight **supervisor** process (one per machine), not by each bot's host process. Each machine's supervisor only acts on its local bots. Untargeted commands (e.g. `!dismiss` with no bot name) are scoped to the room — only bots whose `MAIN_GROUP_NAME` matches the room are affected on each machine.
 
 | Command | Effect |
 |---------|--------|
 | `!todo` | All bots reply with their task list. |
 | `!todo <bot>` | Only that bot replies with its task list. |
-| `!dismiss` | All bots enter dormant mode. |
-| `!dismiss <bot>` | Only that bot enters dormant mode. |
-| `!join` | All bots exit dormant mode. |
-| `!join <bot>` | Only that bot exits dormant mode. |
-| `!restart` | All bots restart (process exit → launchd KeepAlive restarts with fresh container). |
-| `!restart <bot>` | Only that bot restarts. |
+| `!dismiss` | Fully stop all bots in the room (process manager stop + container cleanup). |
+| `!dismiss <bot>` | Fully stop that bot. |
+| `!join` | Fully start all bots assigned to the room (deploy + start via process manager). |
+| `!join <bot>` | Fully start that bot. |
+| `!restart` | Full stop + redeploy + start for all bots in the room. |
+| `!restart <bot>` | Full stop + redeploy + start for that bot. |
 | `!roster` | Each machine lists its bots. |
 | `!operator <text>` | Send text to operator tmux session. Captain/intercom only. |
 | `!allow <bot> <path> [minutes]` | Grant temporary rw mount. Captain/intercom only. |
 | `!deny <bot> <path>` | Revoke a mount grant. Captain/intercom only. |
 
-#### Dormant Mode (`!dismiss` / `!join`)
+#### Dismiss and Join (`!dismiss` / `!join`)
 
-Dormant mode is a lightweight pause — the bot process stays alive but stops doing work:
+`!dismiss` and `!join` are full lifecycle commands — there is no dormant mode.
 
-1. **`!dismiss`**: Stops active containers, sends intercom "X has left", sets display name to "X 🔴", drops all non-`!` messages (not stored, not processed). The process keeps running and listening for `!` commands.
-2. **`!join`**: Clears the dormant flag, sends intercom "X has joined", sets display name to "X 🟢", resumes normal message processing.
-
-No cross-bot dependency. Each bot manages its own state. No launchctl manipulation, no CLI shelling out. The bot never dies — it just stops working.
+- **`!dismiss`**: Stops the bot via the process manager (pm2 stop + delete), kills any running containers, sends intercom "X has left", sets display name to "X 🔴". The bot process does not stay alive.
+- **`!join`**: Deploys fresh code, rebuilds the container image if needed, starts the bot via the process manager, sends intercom "X has joined", sets display name to "X 🟢".
 
 #### Restart (`!restart`)
 
-For deploying code updates that require a container rebuild. The bot calls `process.exit(0)` and launchd KeepAlive restarts the process automatically. On startup, the container image is rebuilt, picking up any code changes. Display name briefly shows "X 🔄" before restart.
+Full cycle: stop the bot, kill containers, deploy fresh code, rebuild the container image if needed, start the bot via the process manager. Display name briefly shows "X 🔄" during the cycle.
+
+#### Supervisor
+
+A lightweight always-on process, one per machine. The supervisor connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or intercom senders. It manages bot lifecycle by calling service functions directly — no shelling out to the CLI.
+
+Each machine's supervisor only handles its local bots (determined by `machine.json`). Untargeted commands are room-scoped: the supervisor matches the room against each bot's `MAIN_GROUP_NAME` to determine which bots are affected.
+
+Started automatically by `npm run cli start` and runs as a managed process alongside bots.
 
 ### Chat Activity Tracking
 
