@@ -82,12 +82,12 @@ IPC command → container writes JSON to /workspace/ipc/output/
 
 Bots see all room messages as context but only **respond** when it's their job. The host collects all bot Matrix user IDs at startup (`collectBotMatrixUserIds`) and uses them to distinguish human from bot messages.
 
-**Response triggers (human messages only):**
-- **Callout** — a human message contains `@BotName`
-- **Participating thread** — a human posts in a thread the bot previously sent a message in
+**Response triggers:**
+- **Callout** — a message (human or bot) contains `BotName` (case-insensitive word boundary match: `\bBotName\b`)
+- **Participating thread** — someone posts in a thread the bot previously sent a message in
 - **CO main timeline** — the commanding officer responds to any unaddressed human message on the main timeline
 
-**Bot messages never trigger a response.** They are included in the prompt as context so bots know what other bots said, but they don't cause a container spawn.
+**Bot-to-bot communication:** Bots can trigger each other by including the target bot's name in the message. This enables natural collaboration — e.g. Cid says "Parker, what's the status?" and Parker's container spawns to respond. Bot messages without a callout are included as context but don't trigger a response.
 
 **Thread participation** — a bot "participates" in a thread if it has previously sent a message there (`is_from_me = 1`). Messages from threads the bot doesn't participate in are excluded from context.
 

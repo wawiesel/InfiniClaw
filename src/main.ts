@@ -679,24 +679,28 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const filteredMessages = missedMessages.filter((msg) => !shouldIgnoreMessage(msg));
   if (filteredMessages.length === 0) return true;
 
-  // Separate human messages from bot messages — only humans can trigger a response
-  // Host commands (!operator) are visible as context but don't trigger responses
-  const humanMessages = filteredMessages.filter(m =>
-    !botMatrixUserIds.has(m.sender) && !/^!operator\b/i.test(m.content.trim()));
-  if (humanMessages.length === 0) {
-    // Only bot messages / host commands — advance cursor, don't respond
+  // Separate actionable messages from noise.
+  // A message triggers a response if it's from a human OR from a bot that calls out this bot.
+  // Host commands (!operator) are visible as context but don't trigger responses.
+  const actionableMessages = filteredMessages.filter(m => {
+    if (/^!operator\b/i.test(m.content.trim())) return false;
+    if (!botMatrixUserIds.has(m.sender)) return true; // human
+    return TRIGGER_PATTERN.test(m.content.trim()); // bot callout
+  });
+  if (actionableMessages.length === 0) {
+    // Only non-actionable messages — advance cursor, don't respond
     lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
     saveState();
     return true;
   }
 
-  // Response decision: only human messages trigger responses
-  const hasTrigger = humanMessages.some(m => TRIGGER_PATTERN.test(m.content.trim()));
-  const hasParticipatingThread = humanMessages.some(
+  // Response decision
+  const hasTrigger = actionableMessages.some(m => TRIGGER_PATTERN.test(m.content.trim()));
+  const hasParticipatingThread = actionableMessages.some(
     m => m.thread_id && botParticipatesInThread(chatJid, m.thread_id),
   );
 
-  // ALL bots: need explicit callout or participating thread
+  // Need explicit callout or participating thread
   if (!hasTrigger && !hasParticipatingThread) {
     lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
     saveState();
@@ -998,24 +1002,28 @@ async function handleGroupMessagesInLoop(
     standingOrderCycles[chatJid] = 0;
   }
 
-  // Separate human messages from bot messages — only humans can trigger a response
-  // Host commands (!operator) are visible as context but don't trigger responses
-  const humanMessages = filtered.filter(m =>
-    !botMatrixUserIds.has(m.sender) && !/^!operator\b/i.test(m.content.trim()));
-  if (humanMessages.length === 0) {
-    // Only bot messages / host commands — advance cursor, don't respond
+  // Separate actionable messages from noise.
+  // A message triggers a response if it's from a human OR from a bot that calls out this bot.
+  // Host commands (!operator) are visible as context but don't trigger responses.
+  const actionableMessages = filtered.filter(m => {
+    if (/^!operator\b/i.test(m.content.trim())) return false;
+    if (!botMatrixUserIds.has(m.sender)) return true; // human
+    return TRIGGER_PATTERN.test(m.content.trim()); // bot callout
+  });
+  if (actionableMessages.length === 0) {
+    // Only non-actionable messages — advance cursor, don't respond
     lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
     saveState();
     return;
   }
 
-  // Response decision: only human messages trigger responses
-  const hasTrigger = humanMessages.some(m => TRIGGER_PATTERN.test(m.content.trim()));
-  const hasParticipatingThread = humanMessages.some(
+  // Response decision
+  const hasTrigger = actionableMessages.some(m => TRIGGER_PATTERN.test(m.content.trim()));
+  const hasParticipatingThread = actionableMessages.some(
     m => m.thread_id && botParticipatesInThread(chatJid, m.thread_id),
   );
 
-  // ALL bots: need explicit callout or participating thread
+  // Need explicit callout or participating thread
   if (!hasTrigger && !hasParticipatingThread) {
     lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
     saveState();
