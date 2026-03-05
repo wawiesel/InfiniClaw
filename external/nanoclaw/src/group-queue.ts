@@ -66,7 +66,11 @@ export class GroupQueue {
 
     if (state.active) {
       state.pendingMessages = true;
-      logger.debug({ groupJid }, 'Container active, message queued');
+      if (state.idleWaiting) {
+        // Container is alive but idle — close it so drainGroup re-processes messages
+        this.closeStdin(groupJid);
+      }
+      logger.debug({ groupJid, idle: state.idleWaiting }, 'Container active, message queued');
       return;
     }
 
@@ -143,12 +147,12 @@ export class GroupQueue {
 
   /**
    * Mark the container as idle-waiting (finished work, waiting for IPC input).
-   * If tasks are pending, preempt the idle container immediately.
+   * If tasks or messages are pending, preempt the idle container immediately.
    */
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
-    if (state.pendingTasks.length > 0) {
+    if (state.pendingTasks.length > 0 || state.pendingMessages) {
       this.closeStdin(groupJid);
     }
   }
