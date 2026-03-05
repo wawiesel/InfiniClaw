@@ -162,6 +162,31 @@ function toRoomId(jid: string): string {
   return jid.slice('matrix:'.length);
 }
 
+function isValidMatrixRoomId(roomId: string): boolean {
+  return /^[!#][^:\s]+:[^\s]+$/.test(roomId);
+}
+
+function parseRoomIdFromJid(jid: string): string | null {
+  if (!jid.startsWith('matrix:')) return null;
+  const roomId = toRoomId(jid).trim();
+  return isValidMatrixRoomId(roomId) ? roomId : null;
+}
+
+function isValidMatrixEventId(eventId: string): boolean {
+  return /^\$[^\s]+$/.test(eventId);
+}
+
+function isValidMatrixMxcUri(mxcUrl: string): boolean {
+  return /^mxc:\/\/[^/\s]+\/[^\s?#]+$/.test(mxcUrl.trim());
+}
+
+function sanitizeGroupFolderSegment(folder: string): string | null {
+  const trimmed = folder.trim();
+  if (!trimmed || trimmed === '.' || trimmed === '..') return null;
+  if (trimmed.includes('/') || trimmed.includes('\\')) return null;
+  return /^[a-zA-Z0-9._-]+$/.test(trimmed) ? trimmed : null;
+}
+
 function escapeHtml(input: string): string {
   return input
     .replace(/&/g, '&amp;')
@@ -202,10 +227,50 @@ function findClosingDoubleDollar(text: string, from: number): number {
 
 function sanitizeHref(url: string): string | null {
   const trimmed = url.trim();
-  if (/^(https?:\/\/|mailto:|file:\/\/)/i.test(trimmed)) {
+  if (/^(https?:\/\/|mailto:)/i.test(trimmed)) {
     return escapeHtml(trimmed);
   }
   return null;
+}
+
+function sanitizeRenderedHtmlLinks(html: string): string {
+  return html.replace(/\shref=(["'])(.*?)\1/gi, (_m, quote, rawUrl: string) => {
+    const safe = sanitizeHref(rawUrl);
+    if (!safe) return ' href="#"';
+    return ` href=${quote}${safe}${quote}`;
+  });
+}
+
+function createSafeMarkdownRenderer() {
+  const renderer = new marked.Renderer();
+  const origListitem = renderer.listitem.bind(renderer);
+  renderer.listitem = (item) => {
+    const result = origListitem(item);
+    return result.replace(/<p>([\s\S]*?)<\/p>/g, '$1');
+  };
+  renderer.html = (token: any) => {
+    const raw = typeof token === 'string'
+      ? token
+      : (typeof token?.raw === 'string' ? token.raw : (typeof token?.text === 'string' ? token.text : ''));
+    return escapeHtml(raw);
+  };
+  renderer.link = (token: any) => {
+    const href = typeof token?.href === 'string' ? token.href : '';
+    const text = typeof token?.text === 'string' ? token.text : '';
+    const safeHref = sanitizeHref(href);
+    const safeText = text || escapeHtml(href);
+    if (!safeHref) return safeText;
+    return `<a href="${safeHref}">${safeText}</a>`;
+  };
+  renderer.image = (token: any) => {
+    const href = typeof token?.href === 'string' ? token.href : '';
+    const text = typeof token?.text === 'string' ? token.text : 'image';
+    const safeHref = sanitizeHref(href);
+    const alt = escapeHtml(text || 'image');
+    if (!safeHref) return alt;
+    return `<a href="${safeHref}">${alt}</a>`;
+  };
+  return renderer;
 }
 
 function normalizeSenderPrefixForMarkdown(text: string): string {
@@ -215,6 +280,35 @@ function normalizeSenderPrefixForMarkdown(text: string): string {
   const body = match[2];
   if (!sender || !body) return text;
   return `${sender}: \n\n${body}`;
+}
+
+async function renderMarkdownForMatrix(text: string): Promise<string> {
+  // Strategy: Extract math to protect it, apply markdown, then restore math
+  const mathTokens: string[] = [];
+  const mathPlaceholder = (htmlStr: string): string => {
+    const idx = mathTokens.push(htmlStr) - 1;
+    return `@@MATH_${idx}@@`;
+  };
+
+  // Extract inline and display math before markdown processing
+  let working = text;
+  working = working.replace(/\$\$([^\$]+)\$\$/g, (_m, latex) => {
+    return mathPlaceholder(`<div data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></div>`);
+  });
+  working = working.replace(/\$([^\$\n]+)\$/g, (_m, latex) => {
+    return mathPlaceholder(`<span data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></span>`);
+  });
+
+  const html = await marked(working, {
+    breaks: true,
+    gfm: true,
+    renderer: createSafeMarkdownRenderer(),
+  });
+
+  // Restore math placeholders
+  return sanitizeRenderedHtmlLinks(
+    html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? ''),
+  );
 }
 
 export function toFormattedBodyWithMarkdownAndMath(text: string): {
@@ -878,7 +972,11 @@ export class MatrixChannel implements Channel {
 
   private async sendTextReturningId(jid: string, text: string, threadId?: string): Promise<string | undefined> {
     if (!this.client || !this._connected) return undefined;
-    const roomId = toRoomId(jid);
+    const roomId = parseRoomIdFromJid(jid);
+    if (!roomId) {
+      logger.warn({ jid }, 'Invalid Matrix room jid; send skipped');
+      return undefined;
+    }
     if (threadId) {
       logger.info({ roomId, threadId }, 'Matrix sendMessage with thread');
     }
@@ -887,40 +985,13 @@ export class MatrixChannel implements Channel {
     // This covers: <details> tool call blocks, <font> status messages, <small> headers.
     // We do NOT match HTML anywhere in the text — markdown content may contain inline HTML
     // (e.g. delegate headers) and marked handles that fine.
-    const isPreformattedHtml = /^<[a-z]/i.test(text.trimStart());
+    const isPreformattedHtml = /^<(details|font|small)\b/i.test(text.trimStart());
 
     let html: string;
     if (isPreformattedHtml) {
       html = text;
     } else {
-      // Strategy: Extract math to protect it, apply markdown, then restore math
-      const mathTokens: string[] = [];
-      const mathPlaceholder = (htmlStr: string): string => {
-        const idx = mathTokens.push(htmlStr) - 1;
-        return `@@MATH_${idx}@@`;
-      };
-
-      // Extract inline and display math before markdown processing
-      let working = normalizedText;
-      working = working.replace(/\$\$([^\$]+)\$\$/g, (_m, latex) => {
-        return mathPlaceholder(`<div data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></div>`);
-      });
-      working = working.replace(/\$([^\$\n]+)\$/g, (_m, latex) => {
-        return mathPlaceholder(`<span data-mx-maths="${escapeHtml(latex.trim())}"><code>${escapeHtml(latex.trim())}</code></span>`);
-      });
-
-      // Apply markdown with custom renderer to strip <p> tags inside list items
-      // (marked generates "loose" lists with <p> when items are separated by blank lines)
-      const renderer = new marked.Renderer();
-      const origListitem = renderer.listitem.bind(renderer);
-      renderer.listitem = (item) => {
-        const result = origListitem(item);
-        return result.replace(/<p>([\s\S]*?)<\/p>/g, '$1');
-      };
-      html = await marked(working, { breaks: true, gfm: true, renderer });
-
-      // Restore math placeholders
-      html = html.replace(/@@MATH_(\d+)@@/g, (_m, idxText) => mathTokens[Number(idxText)] ?? '');
+      html = await renderMarkdownForMatrix(normalizedText);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -973,7 +1044,15 @@ export class MatrixChannel implements Channel {
 
   async sendReaction(jid: string, eventId: string, emoji: string): Promise<void> {
     if (!this.client || !this._connected) return;
-    const roomId = toRoomId(jid);
+    const roomId = parseRoomIdFromJid(jid);
+    if (!roomId) {
+      logger.warn({ jid }, 'Invalid Matrix room jid; reaction skipped');
+      return;
+    }
+    if (!isValidMatrixEventId(eventId)) {
+      logger.warn({ eventId }, 'Invalid Matrix event id; reaction skipped');
+      return;
+    }
     try {
       const content = {
         'm.relates_to': {
@@ -1006,16 +1085,23 @@ export class MatrixChannel implements Channel {
 
   async editMessage(jid: string, eventId: string, newText: string): Promise<void> {
     if (!this.client || !this._connected) return;
-    const roomId = toRoomId(jid);
+    const roomId = parseRoomIdFromJid(jid);
+    if (!roomId) {
+      logger.warn({ jid }, 'Invalid Matrix room jid; edit skipped');
+      return;
+    }
+    if (!isValidMatrixEventId(eventId)) {
+      logger.warn({ eventId }, 'Invalid Matrix event id; edit skipped');
+      return;
+    }
     try {
       const normalizedEdit = normalizeSenderPrefixForMarkdown(newText);
-      const isPreformattedHtml = /^<[a-z]/i.test(newText.trimStart());
+      const isPreformattedHtml = /^<(details|font|small)\b/i.test(newText.trimStart());
       let editHtml: string;
       if (isPreformattedHtml) {
         editHtml = newText;
       } else {
-        editHtml = await marked(normalizedEdit, { breaks: true, gfm: true }) as string;
-        editHtml = editHtml.trim();
+        editHtml = (await renderMarkdownForMatrix(normalizedEdit)).trim();
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const newContent: Record<string, any> = {
@@ -1072,7 +1158,15 @@ export class MatrixChannel implements Channel {
 
   async redactMessage(jid: string, eventId: string): Promise<void> {
     if (!this.client || !this._connected) return;
-    const roomId = toRoomId(jid);
+    const roomId = parseRoomIdFromJid(jid);
+    if (!roomId) {
+      logger.warn({ jid }, 'Invalid Matrix room jid; redact skipped');
+      return;
+    }
+    if (!isValidMatrixEventId(eventId)) {
+      logger.warn({ eventId }, 'Invalid Matrix event id; redact skipped');
+      return;
+    }
     try {
       await this.enqueueSend(() => withTimeout(
         this.client!.redactEvent(roomId, eventId),
@@ -1202,7 +1296,8 @@ export class MatrixChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.client || !this._connected) return;
-    const roomId = toRoomId(jid);
+    const roomId = parseRoomIdFromJid(jid);
+    if (!roomId) return;
     try {
       await withTimeout(
         this.client.setTyping(roomId, isTyping, 30000),
@@ -1216,6 +1311,15 @@ export class MatrixChannel implements Channel {
 
   private async downloadMedia(mxcUrl: string, filename: string, groupFolder: string): Promise<string | null> {
     if (!this.client) return null;
+    if (!isValidMatrixMxcUri(mxcUrl)) {
+      logger.warn({ mxcUrl }, 'Invalid Matrix MXC URL; media download skipped');
+      return null;
+    }
+    const safeGroupFolder = sanitizeGroupFolderSegment(groupFolder);
+    if (!safeGroupFolder) {
+      logger.warn({ groupFolder }, 'Unsafe group folder; media download skipped');
+      return null;
+    }
     try {
       const { data, contentType } = await withTimeout(
         this.client.downloadContent(mxcUrl),
@@ -1230,15 +1334,22 @@ export class MatrixChannel implements Channel {
 
       // Sanitize filename: strip path separators, limit length
       const sanitized = filename.replace(/[/\\]/g, '_').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
-      const timestamped = `${Date.now()}-${sanitized}`;
+      const safeFilename = sanitized || 'attachment.bin';
+      const timestamped = `${Date.now()}-${safeFilename}`;
 
-      const mediaDir = path.join(DATA_DIR, 'ipc', groupFolder, 'media');
+      const ipcRoot = path.resolve(DATA_DIR, 'ipc');
+      const mediaDir = path.resolve(ipcRoot, safeGroupFolder, 'media');
+      const allowedPrefix = `${ipcRoot}${path.sep}`;
+      if (!mediaDir.startsWith(allowedPrefix)) {
+        logger.warn({ mediaDir, ipcRoot }, 'Resolved media path escaped IPC root; download skipped');
+        return null;
+      }
       fs.mkdirSync(mediaDir, { recursive: true });
 
       const hostPath = path.join(mediaDir, timestamped);
       fs.writeFileSync(hostPath, data);
 
-      const containerPath = `/workspace/ipc/${groupFolder}/media/${timestamped}`;
+      const containerPath = `/workspace/ipc/${safeGroupFolder}/media/${timestamped}`;
       logger.info({ filename, contentType, size: data.length, containerPath }, 'Media downloaded to IPC');
       return containerPath;
     } catch (err) {
