@@ -19,7 +19,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 
-import { loadMachineConfig, loadFleet, writeFleet, loadMachines, writeMachines, isMachineActive } from './machine-config.js';
+import { loadMachineConfig, loadFleet, writeFleet, loadMachines, writeMachines, isMachineActive, clearMachineConfigCache } from './machine-config.js';
 import { removeBotMounts } from './allow-list.js';
 import {
   resolveRoot,
@@ -715,6 +715,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
             if (entry.machine === HOSTNAME && entry.status === 'transit') {
               log(`transport: materializing ${bot}`);
               fleetUpdate(bot, { status: 'active' });
+              clearMachineConfigCache(); // so bootstrapBot sees updated active state
               writeFleet(liveFleet);
               secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${HOSTNAME}`);
               fleetDirty = false;
@@ -1000,6 +1001,7 @@ async function handleLifecycleCommand(
         await reply(conn, `${HOSTNAME}: ${name} dismissed`);
       } else if (action === 'join') {
         fleetUpdate(bot, { status: 'active', machine: HOSTNAME });
+        clearMachineConfigCache(); // so bootstrapBot sees updated active state
         bootstrapBot(root, bot);
         await reply(conn, `${HOSTNAME}: ${name} started (rank ${rank})`);
       } else {
