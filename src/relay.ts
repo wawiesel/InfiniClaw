@@ -272,7 +272,18 @@ async function matrixSend(homeserver: string, token: string, roomId: string, tex
     {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ msgtype: 'm.text', body: text }),
+      body: JSON.stringify({
+        msgtype: 'm.text',
+        body: text,
+        format: 'org.matrix.custom.html',
+        formatted_body: text
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+          .replace(/`([^`]+)`/g, '<code>$1</code>')
+          .replace(/\n/g, '<br>'),
+      }),
     },
   );
   if (!resp.ok) {
