@@ -126,6 +126,20 @@ function isAuthorized(sender: string, captainUserId: string): boolean {
   return sender === captainUserId || /-intercom:/.test(sender);
 }
 
+/** Is this machine the "speaker" — lowest-sorted active hostname? Used to avoid duplicate replies. */
+function isSpeaker(): boolean {
+  try {
+    const machines = loadMachines();
+    const active = Object.entries(machines)
+      .filter(([_, m]) => m.active)
+      .map(([name]) => name)
+      .sort();
+    return active.length === 0 || active[0] === HOSTNAME;
+  } catch {
+    return true; // can't load machines — assume we should reply
+  }
+}
+
 // ── Matrix API helpers ─────────────────────────────────────────────
 
 async function matrixLogin(homeserver: string, username: string, password: string): Promise<{ accessToken: string; userId: string }> {
@@ -995,17 +1009,21 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     return;
   }
 
-  // !health — run health check, upload to S3, show fleet summary
+  // !health — run health check, upload to S3, show fleet summary (only speaker replies)
   if (cmd === '!health') {
-    // Run local health check and upload
+    // Every machine runs its local health check and uploads
     const report = runHealthCheck();
     if (report) {
       await uploadHealthToS3(report);
     }
-    // Fetch all reports from S3 and show summary
-    const reports = await fetchAllHealthReports();
-    const summary = formatHealthSummary(reports);
-    await reply(conn, summary);
+    // Only the speaker (lowest-sorted active hostname) replies with the aggregated summary
+    if (isSpeaker()) {
+      // Brief delay so other machines can upload first
+      await sleep(3_000);
+      const reports = await fetchAllHealthReports();
+      const summary = formatHealthSummary(reports);
+      await reply(conn, summary);
+    }
     return;
   }
 
@@ -1225,12 +1243,11 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     return;
   }
 
-  // !fleet [room] — show fleet status with real running state
+  // !fleet [room] — show fleet status (each machine reports only its local bots)
   if (cmd === '!fleet' || cmd === '!fleet room') {
     const roomOnly = cmd === '!fleet room';
     try {
       const fleet = liveFleet;
-      const machines = (() => { try { return loadMachines(); } catch { return {}; } })();
       // Check real pm2 state on this machine
       let pm2Procs: Array<{ name: string; pm2_env?: { status?: string } }> = [];
       try {
@@ -1249,20 +1266,18 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
 
       const botRooms = buildBotRoomMap();
 
-      // Filter bots if room-only
-      const botEntries = Object.entries(fleet).filter(([name]) => {
-        if (!roomOnly) return true;
-        return botRooms[name] === conn.name;
+      // Only show bots assigned to this machine
+      const botEntries = Object.entries(fleet).filter(([name, entry]) => {
+        if (entry.machine !== HOSTNAME) return false;
+        if (roomOnly) return botRooms[name] === conn.name;
+        return true;
       });
 
-      if (roomOnly && botEntries.length === 0) return;
+      if (botEntries.length === 0) return; // no local bots — stay silent
 
-      // Real status for bots on this machine + mismatch detection
+      // Real status + mismatch detection
       const warnings: string[] = [];
-      function botStatus(name: string, entry: { machine: string | null; active: boolean }): string {
-        if (entry.machine !== HOSTNAME) {
-          return entry.active ? '??' : 'OFF';
-        }
+      function botStatus(name: string, entry: { active: boolean }): string {
         const pm2 = pm2Procs.find((p) => p.name === `infiniclaw-${name}`);
         const pm2Online = pm2?.pm2_env?.status === 'online';
         const hasContainer = runningContainers.has(name);
@@ -1280,15 +1295,6 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
         return 'OFF';
       }
 
-      const lines: string[] = [];
-      if (!roomOnly) {
-        lines.push('**Machines**');
-        for (const [name, m] of Object.entries(machines)) {
-          lines.push(`  ${m.active ? 'ON ' : 'OFF'} ${name} (${m.os}, ${m.user || '?'})`);
-        }
-        lines.push('');
-      }
-
       // Group by role
       const byRole: Record<string, typeof botEntries> = {};
       for (const entry of botEntries) {
@@ -1296,12 +1302,13 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
         if (!byRole[role]) byRole[role] = [];
         byRole[role].push(entry);
       }
-      lines.push(roomOnly ? `**${conn.name}**` : '**Bots**');
+      const machineActive = isMachineActive();
+      const lines: string[] = [`**${HOSTNAME}** (${machineActive ? 'active' : 'deactivated'})`];
       for (const [role, bots] of Object.entries(byRole)) {
         lines.push(`  ${role}:`);
         for (const [name, entry] of bots.sort((a, b) => a[1].rank - b[1].rank)) {
           const status = botStatus(name, entry);
-          lines.push(`    ${status} #${entry.rank} ${name} → ${entry.machine || 'unassigned'}`);
+          lines.push(`    ${status} #${entry.rank} ${name}`);
         }
       }
       if (warnings.length) lines.push('', ...warnings);
