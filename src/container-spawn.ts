@@ -219,7 +219,7 @@ function buildContainerArgs(
   portPublish: string[] = [],
   memoryMb?: number,
 ): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = ['run', '-i', '--rm', '--network', 'host', '--name', containerName];
 
   args.push('--pull=never');
 
