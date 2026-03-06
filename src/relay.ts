@@ -1389,16 +1389,17 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
         const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
         const name = env?.ASSISTANT_NAME || botId;
 
-        // Get the SHA the bot instance is running
+        // Get the SHA the bot instance is running + behind count
         let sha = '';
         try {
           const distMain = path.join(root, '_runtime', 'instances', botId, 'dist', 'main.js');
           if (fs.existsSync(distMain)) {
             const stat = fs.statSync(distMain);
             const age = Math.round((Date.now() - stat.mtimeMs) / 60_000);
-            // Find the commit that was current when dist was deployed
             const commitSha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
-            sha = `${commitSha} (${age}m ago)`;
+            const behind = execSync('git rev-list HEAD..origin/main --count 2>/dev/null || echo ?', { cwd: root, ...execOpts }).trim();
+            const behindStr = behind !== '0' && behind !== '?' ? ` ↓${behind}` : '';
+            sha = `${commitSha}${behindStr} (${age}m ago)`;
           }
         } catch { /* best effort */ }
 
