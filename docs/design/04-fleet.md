@@ -4,15 +4,24 @@
 
 Messages go to **rooms**, not to bots directly. Each room is a Matrix room mapped to a NanoClaw "group" (the upstream term from its WhatsApp origins). Multiple bots can share a room.
 
-## Machines and Presence
+## Ships and Presence
 
-Bots are distributed across machines. Each machine runs a subset of the fleet, configured in fleet.json (`bots.<name>.machine`). Secrets are shared via a private git repo (`~/.config/infiniclaw/secrets/`).
+Bots are distributed across ships (machines). Each ship runs a subset of the fleet, configured in fleet.json (`bots.<name>.machine`). Secrets are shared via a private git repo (`~/.config/infiniclaw/secrets/`).
 
-**Every machine runs a relay at all times**, even when deactivated. A deactivated machine (`active: false` in machines.json) keeps its relay running and listening for commands but does not start bots. This ensures all machines stay reachable — an operator can `!activate` a machine remotely at any time.
+**Every ship runs a helm (relay) at all times**, even when decommissioned. A decommissioned ship (`active: false` in machines.json) keeps its helm running and listening for commands but does not start bots. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
 
-Machines are ranked in `machines.json` (`rank` field). The lowest-rank **active** machine is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay. Per-machine commands (`!fleet`, `!sync`) still reply from each machine with its local state.
+Ships are ranked in `machines.json` (`rank` field). The lowest-rank **active** ship is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every helm. Per-ship commands (`!fleet`, `!provision`) reply from each ship with its local state.
 
-Each machine writes its own presence file to `operator/presence/<hostname>.json` in the secrets repo at deploy time. All machines read all presence files to determine fleet-wide bot availability.
+Each ship writes its own presence file to `operator/presence/<hostname>.json` in the secrets repo at deploy time. All ships read all presence files to determine fleet-wide bot availability.
+
+## Transport
+
+`!transport <bot> <ship>` moves a bot between ships via a two-phase git protocol:
+
+1. **Dematerialize** — source ship stops the bot, writes `machine: targetShip, active: false` to fleet.json, and pushes.
+2. **Materialize** — target ship's 30s secrets sync sees the inactive bot assigned to it, activates it, starts it, and pushes the updated state.
+
+Transport uses git (not Matrix) because it must survive relay restarts and network blips. If the target ship's helm missed a Matrix message, the bot would be lost. The git protocol guarantees delivery.
 
 ## Roles and Rank
 

@@ -81,6 +81,11 @@ const RETRY_DELAY_BASE = 10_000;
 const RETRY_DELAY_MAX = 5 * 60_000; // cap at 5 minutes
 const STARTUP_SYNC_DELAY = 3_000;
 
+// Configurable intervals (env vars in milliseconds, or use defaults)
+const GIT_SYNC_INTERVAL = parseInt(process.env.GIT_SYNC_INTERVAL || '', 10) || 10 * 60_000;    // default 10 min
+const SECRETS_SYNC_INTERVAL = parseInt(process.env.SECRETS_SYNC_INTERVAL || '', 10) || 30_000;  // default 30s
+const HEALTH_INTERVAL = parseInt(process.env.HEALTH_INTERVAL || '', 10) || 30 * 60_000;         // default 30 min
+
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
 type FleetEntry = { role: string; rank: number; machine: string | null; active: boolean; title?: string };
@@ -122,6 +127,39 @@ function rankSwap<T extends { rank: number }>(
   sorted[idx][1].rank = sorted[swapIdx][1].rank;
   sorted[swapIdx][1].rank = oldRank;
   return { target, swap: sorted[swapIdx][0], targetRank: sorted[idx][1].rank, swapRank: sorted[swapIdx][1].rank };
+}
+
+// ── Sync/rebuild helpers (shared by !provision and !refit) ────────
+
+function formatSyncResult(name: string, r: { ok: boolean; newCommits: number; output: string }): string {
+  if (!r.ok) return `${name}: failed — ${r.output.slice(0, 200)}`;
+  return r.newCommits > 0 ? `${name}: pulled ${r.newCommits} commit(s)` : `${name}: up to date`;
+}
+
+function rebuildInfiniClaw(): string {
+  const root = resolveRoot();
+  try {
+    const nodeBinDir = path.dirname(process.execPath);
+    execSync('npm run build', {
+      cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe',
+      env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` },
+    });
+    try { installGitHooks(); } catch { /* best effort */ }
+    // Deploy dist files to active bot instances
+    const distDir = path.join(root, 'dist');
+    if (fs.existsSync(distDir)) {
+      const jsFiles = fs.readdirSync(distDir).filter(f => f.endsWith('.js'));
+      for (const bot of getActiveBots()) {
+        const dstDir = path.join(root, '_runtime', 'instances', bot, 'dist');
+        for (const f of jsFiles) {
+          try { fs.copyFileSync(path.join(distDir, f), path.join(dstDir, f)); } catch { /* instance may not exist yet */ }
+        }
+      }
+    }
+    return 'infiniclaw: rebuild succeeded';
+  } catch (err) {
+    return `infiniclaw: rebuild FAILED — ${errStr(err).slice(0, 200)}`;
+  }
 }
 
 function loadIntercomConfig(): IntercomConfig {
@@ -280,7 +318,6 @@ function resolveBots(target: string | undefined, roomName: string): string[] {
 
 // ── Health check + S3 ─────────────────────────────────────────
 
-const HEALTH_INTERVAL = 30 * 60_000; // 30 minutes
 const HEALTH_S3_PREFIX = 'health';
 
 function getS3Client(): { client: S3Client; bucket: string } | null {
@@ -451,8 +488,6 @@ function installGitHooks(): void {
 
 // ── Git sync ──────────────────────────────────────────────────
 
-const GIT_SYNC_INTERVAL = 10 * 60_000; // 10 minutes
-
 function gitSync(): { ok: boolean; output: string; newCommits: number } {
   const root = resolveRoot();
   const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
@@ -518,44 +553,23 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
         }
       } else if (result.newCommits > 0) {
         log(`git sync: pulled ${result.newCommits} new commit(s)`);
-        // Rebuild after pulling new code
-        const root = resolveRoot();
-        try {
-          const nodeBinDir = path.dirname(process.execPath);
-          execSync('npm run build', {
-            cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe',
-            env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` },
-          });
-          log('git sync: rebuild succeeded');
-          // Hooks may have been updated by the pull
-          try { installGitHooks(); } catch { /* best effort */ }
-          // Deploy all dist/*.js to active bot instances and restart relay
-          const distDir = path.join(root, 'dist');
-          if (fs.existsSync(distDir)) {
-            const jsFiles = fs.readdirSync(distDir).filter(f => f.endsWith('.js'));
-            for (const bot of getActiveBots()) {
-              const dstDir = path.join(root, '_runtime', 'instances', bot, 'dist');
-              for (const f of jsFiles) {
-                try { fs.copyFileSync(path.join(distDir, f), path.join(dstDir, f)); } catch { /* instance may not exist yet */ }
-              }
-            }
-            log(`git sync: deployed ${jsFiles.length} dist files to instances`);
-            // Restart all bots so they pick up new code
-            for (const bot of getActiveBots()) {
-              try {
-                bootstrapBot(root, bot);
-                log(`git sync: restarted ${bot}`);
-              } catch (err) {
-                log(`git sync: failed to restart ${bot}: ${errStr(err)}`);
-              }
-            }
-          }
-        } catch (err) {
-          log(`git sync: rebuild FAILED: ${errStr(err)}`);
-          const msg = `⚠️ ${HOSTNAME}: git pull succeeded (${result.newCommits} commits) but build failed — engineer please fix.\n\`\`\`\n${errStr(err).slice(0, 500)}\n\`\`\``;
+        const buildResult = rebuildInfiniClaw();
+        log(`git sync: ${buildResult}`);
+        if (buildResult.includes('FAILED')) {
+          const msg = `⚠️ ${HOSTNAME}: git pull succeeded (${result.newCommits} commits) but build failed — engineer please fix.\n\`\`\`\n${buildResult}\n\`\`\``;
           for (const conn of conns) {
             if (conn.accessToken) {
               await reply(conn, msg).catch(() => {});
+            }
+          }
+        } else {
+          // Restart all bots so they pick up new code
+          for (const bot of getActiveBots()) {
+            try {
+              bootstrapBot(resolveRoot(), bot);
+              log(`git sync: restarted ${bot}`);
+            } catch (err) {
+              log(`git sync: failed to restart ${bot}: ${errStr(err)}`);
             }
           }
         }
@@ -570,8 +584,6 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
 }
 
 // ── Secrets repo sync ──────────────────────────────────────────
-
-const SECRETS_SYNC_INTERVAL = 30_000; // 30 seconds
 
 function secretsRepoPath(): string {
   return loadMachineConfig().secretsPath;
@@ -686,16 +698,15 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
           }
         } catch { /* no fleet on disk */ }
 
-        // Check for transport pickups — bots assigned here but not active
-        if (!isMachineActive()) { /* deactivated — skip transport pickup */ }
+        // Materialize — bots assigned here but not active (dematerialized on source ship)
+        if (!isMachineActive()) { /* decommissioned — skip materialize */ }
         else try {
           for (const [bot, entry] of Object.entries(liveFleet)) {
             if (entry.machine === HOSTNAME && !entry.active) {
-              log(`secrets sync: transport pickup — activating ${bot}`);
+              log(`transport: materializing ${bot}`);
               fleetUpdate(bot, { active: true });
-              // Transport phase 2: write + push immediately so source machine sees completion
               writeFleet(liveFleet);
-              secretsGitCommit(['bots/fleet.json'], `transport phase 2: ${bot} activated on ${HOSTNAME}`);
+              secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${HOSTNAME}`);
               fleetDirty = false;
               const root = resolveRoot();
               try {
@@ -704,17 +715,45 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
                 updatePresence(root);
                 for (const c of conns) {
                   if (c.accessToken) {
-                    await reply(c, `${HOSTNAME}: ${bot} transported and started`).catch(() => {});
+                    await reply(c, `${HOSTNAME}: ${bot} materialized and started`).catch(() => {});
                   }
                 }
               } catch (err) {
-                log(`transport pickup failed for ${bot}: ${errStr(err)}`);
+                log(`transport: materialize failed for ${bot}: ${errStr(err)}`);
               }
             }
           }
         } catch (err) {
-          log(`transport pickup check failed: ${errStr(err)}`);
+          log(`transport: materialize check failed: ${errStr(err)}`);
         }
+
+        // Check inbox for pending items targeting this ship
+        try {
+          const inboxPath = path.join(secretsRepoPath(), 'operator', 'inbox.md');
+          if (fs.existsSync(inboxPath)) {
+            const content = fs.readFileSync(inboxPath, 'utf-8');
+            const pending = content
+              .split('\n')
+              .filter(line => /^- \[ \]/.test(line))
+              .filter(line => {
+                const targetMatch = line.match(/\(target:\s*([^,)]+)/i);
+                if (!targetMatch) return false;
+                const target = targetMatch[1].trim();
+                return target === HOSTNAME || target.toLowerCase() === 'all';
+              });
+            if (pending.length > 0) {
+              log(`inbox: ${pending.length} pending item(s) for ${HOSTNAME}`);
+              // Notify operator via tmux
+              try {
+                const SESSION = 'operator';
+                execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' });
+                const msg = `📬 ${pending.length} inbox item(s) for ${HOSTNAME}. Read operator/inbox.md`;
+                execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', msg], { stdio: 'pipe' });
+                execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
+              } catch { /* no operator session — skip */ }
+            }
+          }
+        } catch { /* inbox check is best-effort */ }
       }
     } catch (err) {
       log(`secrets sync loop error: ${errStr(err)}`);
@@ -949,7 +988,7 @@ async function handleLifecycleCommand(
 
   if (action !== 'dismiss') {
     if (!isMachineActive()) {
-      await reply(conn, `${HOSTNAME}: machine is deactivated — use !activate first`);
+      await reply(conn, `${HOSTNAME}: ship is decommissioned — use !commission first`);
       return;
     }
     try { ensurePodmanReady(); } catch (err) {
@@ -1003,9 +1042,9 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     }
   }
 
-  // !operator — send text to operator tmux session
-  if (cmd.startsWith('!operator')) {
-    const text = cmd.slice('!operator'.length).trim();
+  // !helm — send text to operator tmux session
+  if (cmd.startsWith('!helm')) {
+    const text = cmd.slice('!helm'.length).trim();
     const SESSION = 'operator';
     try {
       let existed = true;
@@ -1021,22 +1060,21 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
       const status = existed ? 'sent to running operator' : 'started new operator session';
       await reply(conn, `${HOSTNAME}: ${status}`);
     } catch (err) {
-      log(`!operator failed: ${errStr(err)}`);
-      await reply(conn, `${HOSTNAME}: !operator failed — ${errStr(err)}`);
+      log(`!helm failed: ${errStr(err)}`);
+      await reply(conn, `${HOSTNAME}: !helm failed — ${errStr(err)}`);
     }
     return;
   }
 
   // !health — run health check, upload to S3, show fleet summary (only speaker replies)
   if (cmd === '!health') {
-    // Every machine runs its local health check and uploads
+    // Every ship runs its local health check and uploads
     const report = runHealthCheck();
     if (report) {
       await uploadHealthToS3(report);
     }
-    // Only the speaker (lowest-sorted active hostname) replies with the aggregated summary
+    // Only the speaker (lowest-rank active ship) replies with the aggregated summary
     if (isSpeaker()) {
-      // Brief delay so other machines can upload first
       await sleep(3_000);
       const reports = await fetchAllHealthReports();
       const summary = formatHealthSummary(reports);
@@ -1045,15 +1083,13 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     return;
   }
 
-  // !deactivate [machine] — stop all bots, keep relay running. No arg = all machines.
-  if (cmd === '!deactivate' || cmd.startsWith('!deactivate ')) {
-    const targetMachine = cmd.slice('!deactivate'.length).trim() || null;
-    // If a specific machine is targeted and it's not us, skip silently
-    if (targetMachine && targetMachine !== HOSTNAME) return;
+  // !decommission [ship] — stop all bots, keep helm running. No arg = all ships.
+  if (cmd === '!decommission' || cmd.startsWith('!decommission ')) {
+    const targetShip = cmd.slice('!decommission'.length).trim() || null;
+    if (targetShip && targetShip !== HOSTNAME) return;
     try {
       const machines = loadMachines();
       if (!machines[HOSTNAME]) { await reply(conn, `${HOSTNAME}: not in machines.json`); return; }
-      // Stop all running bots (fleet.json unchanged)
       for (const bot of getActiveBots()) {
         stopBot(bot);
         killStaleContainers(bot);
@@ -1062,25 +1098,24 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
       saveDismissedBots(dismissedBots);
       machines[HOSTNAME].active = false;
       writeMachines(machines);
-      secretsGitCommit(['operator/machines.json'], `deactivate ${HOSTNAME}: bots stopped, relay only`);
-      await reply(conn, `${HOSTNAME}: deactivated — all bots stopped, relay still running`);
+      secretsGitCommit(['operator/machines.json'], `decommission ${HOSTNAME}: bots stopped, helm only`);
+      await reply(conn, `${HOSTNAME}: decommissioned — all bots stopped, helm still running`);
     } catch (err) {
-      await reply(conn, `${HOSTNAME}: deactivate failed — ${errStr(err)}`);
+      await reply(conn, `${HOSTNAME}: decommission failed — ${errStr(err)}`);
     }
     return;
   }
 
-  // !activate [machine] — mark machine active, start bots. No arg = all machines.
-  if (cmd === '!activate' || cmd.startsWith('!activate ')) {
-    const targetMachine = cmd.slice('!activate'.length).trim() || null;
-    if (targetMachine && targetMachine !== HOSTNAME) return;
+  // !commission [ship] — mark ship active, start assigned bots. No arg = all ships.
+  if (cmd === '!commission' || cmd.startsWith('!commission ')) {
+    const targetShip = cmd.slice('!commission'.length).trim() || null;
+    if (targetShip && targetShip !== HOSTNAME) return;
     try {
       const machines = loadMachines();
       if (!machines[HOSTNAME]) { await reply(conn, `${HOSTNAME}: not in machines.json`); return; }
       machines[HOSTNAME].active = true;
       writeMachines(machines);
-      secretsGitCommit(['operator/machines.json'], `activate ${HOSTNAME}`);
-      // Start bots that are active and assigned to this machine
+      secretsGitCommit(['operator/machines.json'], `commission ${HOSTNAME}`);
       const fleet = loadFleet();
       const root = resolveRoot();
       ensurePodmanReady();
@@ -1094,16 +1129,16 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
         }
       }
       updatePresence(root);
-      await reply(conn, `${HOSTNAME}: activated — started ${started.join(', ') || 'no bots assigned'}`);
+      await reply(conn, `${HOSTNAME}: commissioned — started ${started.join(', ') || 'no bots assigned'}`);
     } catch (err) {
-      await reply(conn, `${HOSTNAME}: activate failed — ${errStr(err)}`);
+      await reply(conn, `${HOSTNAME}: commission failed — ${errStr(err)}`);
     }
     return;
   }
 
-  // !sync [target] — sync repos. No arg = secrets + infiniclaw. Named targets from paths.json.
-  if (cmd === '!sync' || cmd.startsWith('!sync ')) {
-    const target = cmd.slice('!sync'.length).trim() || null;
+  // !provision [target] — sync repos. No arg = secrets + infiniclaw. Named targets from paths.json.
+  if (cmd === '!provision' || cmd.startsWith('!provision ')) {
+    const target = cmd.slice('!provision'.length).trim() || null;
     const results: string[] = [];
 
     // Helper: sync a git repo at a given path
@@ -1124,42 +1159,18 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
 
     try {
       if (!target) {
-        // Default: sync secrets + infiniclaw
         const secretsResult = secretsGitSync();
-        results.push(`secrets: ${secretsResult.ok ? (secretsResult.newCommits > 0 ? `pulled ${secretsResult.newCommits} commit(s)` : 'up to date') : `failed — ${secretsResult.output.slice(0, 200)}`}`);
+        results.push(formatSyncResult('secrets', secretsResult));
         const icResult = gitSync();
-        results.push(`infiniclaw: ${icResult.ok ? (icResult.newCommits > 0 ? `pulled ${icResult.newCommits} commit(s)` : 'up to date') : `failed — ${icResult.output.slice(0, 200)}`}`);
-        // Rebuild + install hooks if infiniclaw had new commits
-        if (icResult.ok && icResult.newCommits > 0) {
-          const root = resolveRoot();
-          try {
-            const nodeBinDir = path.dirname(process.execPath);
-            execSync('npm run build', { cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe', env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` } });
-            results.push('infiniclaw: rebuild succeeded');
-            try { installGitHooks(); } catch { /* best effort */ }
-          } catch (err) {
-            results.push(`infiniclaw: rebuild FAILED — ${errStr(err).slice(0, 200)}`);
-          }
-        }
+        results.push(formatSyncResult('infiniclaw', icResult));
+        if (icResult.ok && icResult.newCommits > 0) results.push(rebuildInfiniClaw());
       } else if (target === 'secrets') {
-        const r = secretsGitSync();
-        results.push(`secrets: ${r.ok ? (r.newCommits > 0 ? `pulled ${r.newCommits} commit(s)` : 'up to date') : `failed — ${r.output.slice(0, 200)}`}`);
+        results.push(formatSyncResult('secrets', secretsGitSync()));
       } else if (target === 'infiniclaw') {
         const r = gitSync();
-        results.push(`infiniclaw: ${r.ok ? (r.newCommits > 0 ? `pulled ${r.newCommits} commit(s)` : 'up to date') : `failed — ${r.output.slice(0, 200)}`}`);
-        if (r.ok && r.newCommits > 0) {
-          const root = resolveRoot();
-          try {
-            const nodeBinDir = path.dirname(process.execPath);
-            execSync('npm run build', { cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe', env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` } });
-            results.push('infiniclaw: rebuild succeeded');
-            try { installGitHooks(); } catch { /* best effort */ }
-          } catch (err) {
-            results.push(`infiniclaw: rebuild FAILED — ${errStr(err).slice(0, 200)}`);
-          }
-        }
+        results.push(formatSyncResult('infiniclaw', r));
+        if (r.ok && r.newCommits > 0) results.push(rebuildInfiniClaw());
       } else {
-        // Try paths.json for named repos
         let paths: Record<string, string> = {};
         try {
           const configDir = path.dirname(secretsRepoPath());
@@ -1168,51 +1179,83 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
         if (paths[target]) {
           results.push(syncRepo(target, paths[target]));
         } else {
-          results.push(`unknown target "${target}" — not in paths.json on ${HOSTNAME}`);
-          await reply(conn, `${HOSTNAME}: ${results.join('\n')}`);
+          await reply(conn, `${HOSTNAME}: unknown target "${target}" — not in paths.json`);
           return;
         }
       }
       await reply(conn, `${HOSTNAME}:\n${results.join('\n')}`);
     } catch (err) {
-      await reply(conn, `${HOSTNAME}: !sync failed — ${errStr(err)}`);
+      await reply(conn, `${HOSTNAME}: !provision failed — ${errStr(err)}`);
     }
     return;
   }
 
-  // !transport <bot> <machine> — initiate bot transport to another machine
+  // !refit [ship] — full overhaul: sync repos, rebuild, restart all bots + helm. No arg = all ships.
+  if (cmd === '!refit' || cmd.startsWith('!refit ')) {
+    const targetShip = cmd.slice('!refit'.length).trim() || null;
+    if (targetShip && targetShip !== HOSTNAME) return;
+    const results: string[] = [];
+    try {
+      // 1. Sync repos
+      const secretsResult = secretsGitSync();
+      results.push(formatSyncResult('secrets', secretsResult));
+      const icResult = gitSync();
+      results.push(formatSyncResult('infiniclaw', icResult));
+      // 2. Rebuild
+      results.push(rebuildInfiniClaw());
+      // 3. Restart all bots
+      const root = resolveRoot();
+      for (const bot of getActiveBots()) {
+        try {
+          bootstrapBot(root, bot);
+          results.push(`${bot}: restarted`);
+        } catch (err) {
+          results.push(`${bot}: restart failed — ${errStr(err).slice(0, 100)}`);
+        }
+      }
+      updatePresence(root);
+      // 4. Persist fleet state before helm restart
+      persistFleet();
+      await reply(conn, `${HOSTNAME}: refit complete\n${results.join('\n')}\nrestarting helm...`);
+      // 5. Restart helm (relay) — must be last
+      await sleep(1_000);
+      try {
+        execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
+      } catch { /* pm2 restart kills us — this catch may never run */ }
+    } catch (err) {
+      await reply(conn, `${HOSTNAME}: !refit failed — ${errStr(err)}`);
+    }
+    return;
+  }
+
+  // !transport <bot> <ship> — beam bot to another ship (two-phase)
   if (cmd.startsWith('!transport ')) {
     const parts = cmd.slice('!transport '.length).trim().split(/\s+/);
     if (parts.length !== 2) {
-      await reply(conn, `Usage: !transport <bot> <machine>`);
+      await reply(conn, `Usage: !transport <bot> <ship>`);
       return;
     }
-    const [bot, targetMachine] = parts;
+    const [bot, targetShip] = parts;
     if (!liveFleet[bot]) { await reply(conn, `Unknown bot: ${bot}`); return; }
-    // Validate target machine
     try {
       const machines = loadMachines();
-      if (!machines[targetMachine]) { await reply(conn, `Unknown machine: ${targetMachine}`); return; }
-      if (!machines[targetMachine].active) { await reply(conn, `${targetMachine} is deactivated`); return; }
+      if (!machines[targetShip]) { await reply(conn, `Unknown ship: ${targetShip}`); return; }
+      if (!machines[targetShip].active) { await reply(conn, `${targetShip} is decommissioned`); return; }
     } catch { /* machines.json missing — skip validation */ }
-    if (liveFleet[bot].machine !== HOSTNAME) {
-      // Not our bot — ignore, the other machine handles it
-      return;
-    }
-    // Phase 1: stop bot, mark inactive, set machine to target
-    // Transport is the exception — must write + push immediately so target machine picks up
+    if (liveFleet[bot].machine !== HOSTNAME) return;
+    // Dematerialize — stop bot, assign to target ship, push so target can materialize
     try {
       stopBot(bot);
       killStaleContainers(bot);
       dismissedBots.add(bot);
       saveDismissedBots(dismissedBots);
       removeBotMounts(bot);
-      fleetUpdate(bot, { active: false, machine: targetMachine });
+      fleetUpdate(bot, { active: false, machine: targetShip });
       writeFleet(liveFleet);
-      const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} → ${targetMachine}`);
+      const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetShip}`);
       fleetDirty = false;
       if (!result.ok) throw new Error(result.error);
-      await reply(conn, `${HOSTNAME}: ${bot} stopped and assigned to ${targetMachine}. Waiting for ${targetMachine} to pick up.`);
+      await reply(conn, `${HOSTNAME}: ${bot} dematerialized — awaiting materialization on ${targetShip}`);
     } catch (err) {
       await reply(conn, `${HOSTNAME}: transport failed — ${errStr(err)}`);
     }

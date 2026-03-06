@@ -1,8 +1,10 @@
 # 06 — Commands
 
-The Captain controls the fleet via `!` commands typed in Matrix. Commands are processed by a lightweight **relay** process (one per machine), not by each bot's host process. Each machine's relay only acts on its local bots. Untargeted commands (e.g. `!dismiss` with no bot name) are scoped to the room — only bots whose `MAIN_GROUP_NAME` matches the room are affected on each machine.
+The Captain controls the fleet via `!` commands typed in Matrix. Commands are processed by a lightweight **relay** process (one per ship), not by each bot's host process. Each ship's relay only acts on its local bots. Untargeted commands (e.g. `!dismiss` with no bot name) are scoped to the room — only bots whose `MAIN_GROUP_NAME` matches the room are affected on each ship.
 
 ## Command Reference
+
+### Bot Commands
 
 | Command | Effect |
 |---------|--------|
@@ -11,37 +13,54 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 | `!dismiss <bot>` | Stop bot, update fleet.json. |
 | `!join <bot>` | Start bot, update fleet.json. |
 | `!restart <bot>` | Full stop + redeploy + start. |
-| `!transport <bot> <machine>` | Move bot to another machine (two-phase). |
-| `!promote <target>` | Raise rank (bot within role, or machine). |
-| `!demote <target>` | Lower rank (bot within role, or machine). |
-| `!fleet` | Full fleet + machine status with real running state. |
-| `!fleet room` | Bots in this room only. |
-| `!health` | Fleet health summary from S3. |
-| `!activate [machine]` | Activate machine(s), start assigned bots. No arg = all. |
-| `!deactivate [machine]` | Stop all bots on machine(s), keep relay running. No arg = all. |
-| `!sync` | Sync secrets + infiniclaw repos on all machines. |
-| `!sync secrets` | Sync secrets repo only. |
-| `!sync infiniclaw` | Sync infiniclaw repo only, rebuild on new commits. |
-| `!sync <name>` | Sync any named repo from paths.json. |
+| `!transport <bot> <ship>` | Beam bot to another ship (dematerialize/materialize). |
+| `!promote <target>` | Raise rank (bot within role, or ship). |
+| `!demote <target>` | Lower rank (bot within role, or ship). |
 | `!allow <bot> <path> [min]` | Grant temporary rw mount. Captain/intercom only. |
 | `!deny <bot> <path>` | Revoke a mount grant. Captain/intercom only. |
-| `!operator <text>` | Send text to operator tmux session. |
 
-## Relay
+### Ship Commands
 
-A lightweight always-on process, one per machine (`src/relay.ts`). The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or intercom senders. It manages bot lifecycle by calling service functions directly.
+| Command | Effect |
+|---------|--------|
+| `!commission [ship]` | Commission ship(s), start assigned bots. No arg = all. |
+| `!decommission [ship]` | Stop all bots on ship(s), keep helm running. No arg = all. |
+| `!provision [target]` | Sync repos. No arg = secrets + infiniclaw. Named targets from paths.json. |
+| `!refit [ship]` | Full overhaul: sync, rebuild, restart bots + helm. No arg = all. |
 
-**The relay runs on every machine, always.** Even deactivated machines keep their relay running — they just don't start bots. This ensures every machine stays reachable for commands like `!activate`, `!fleet`, and `!health`. Deactivation (`!deactivate`) stops all bots but leaves the relay listening.
+### Fleet Commands
 
-When a command arrives (e.g. `!restart cid`), every machine's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning machine acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
+| Command | Effect |
+|---------|--------|
+| `!fleet` | Fleet status — each ship reports its local bots. |
+| `!fleet room` | Bots in this room only. |
+| `!health` | Fleet health summary from S3 (speaker replies). |
+
+### Operator Commands
+
+| Command | Effect |
+|---------|--------|
+| `!helm <text>` | Send text to operator tmux session on each ship. |
+
+## Relay (Helm)
+
+A lightweight always-on process, one per ship (`src/relay.ts`). The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or intercom senders. It manages bot lifecycle by calling service functions directly.
+
+**The relay runs on every ship, always.** Even decommissioned ships keep their helm running — they just don't start bots. This ensures every ship stays reachable for commands like `!commission`, `!fleet`, and `!health`. Decommissioning (`!decommission`) stops all bots but leaves the helm listening.
+
+When a command arrives (e.g. `!restart cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
 
 Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay`.
 
 ### Auto-sync loops
 
 - **InfiniClaw repo**: Pull every 10 minutes, rebuild on new commits, redeploy all dist files to bot instances and restart them.
-- **Secrets repo**: Pull every 30 seconds. On new commits, check for transport pickups (bots assigned to this machine but inactive → activate and start).
+- **Secrets repo**: Pull every 30 seconds. On new commits, check for transport materializations (bots assigned to this ship but inactive → activate and start).
 - **Health**: Run `health-check.sh` every 30 minutes, upload to S3.
+
+### Speaker election
+
+Ships are ranked in `machines.json`. The lowest-rank **active** ship is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay. Per-ship commands (`!fleet`, `!provision`) reply from each ship with its local state.
 
 ## IPC Commands (bot → host)
 
