@@ -503,6 +503,7 @@ const botDreamPhase = new Map<string, DreamPhase>();
 const botDreamStartedAt = new Map<string, number>();
 const botIdleSince = new Map<string, number>();
 let dreamingBot: string | null = null; // only one at a time
+const dismissedBots = new Set<string>(); // bots explicitly stopped via !dismiss
 
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {
@@ -557,6 +558,7 @@ async function dreamLoop(conns: RoomConn[]): Promise<void> {
       const root = resolveRoot();
       const botRooms = buildBotRoomMap();
       for (const bot of getActiveBots()) {
+        if (dismissedBots.has(bot)) continue; // explicitly dismissed — skip dream cycles
         if (botDreamPhase.get(bot) === 'dreaming' || botDreamPhase.get(bot) === 'recycling') continue;
 
         const startTime = getContainerStartTime(bot);
@@ -608,6 +610,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
       const root = resolveRoot();
       const botRooms = buildBotRoomMap();
       for (const bot of getActiveBots()) {
+        if (dismissedBots.has(bot)) continue; // explicitly dismissed — skip nudges
         if (hasRunningContainer(bot)) continue; // already working
         const roomName = botRooms[bot];
         if (!roomName) continue;
@@ -651,7 +654,7 @@ async function handleLifecycleCommand(
   // Load roster for rank info
   let roster: Record<string, { rank?: number }> = {};
   try {
-    roster = JSON.parse(fs.readFileSync(path.join(loadMachineConfig().secretsPath, 'roster.json'), 'utf-8'));
+    roster = JSON.parse(fs.readFileSync(path.join(loadMachineConfig().secretsPath, 'bots', 'roster.json'), 'utf-8'));
   } catch { /* no roster */ }
 
   for (const bot of bots) {
@@ -663,11 +666,14 @@ async function handleLifecycleCommand(
       if (action === 'dismiss') {
         stopBot(bot);
         killStaleContainers(bot);
+        dismissedBots.add(bot);
         await reply(conn, `${HOSTNAME}: ${name} stopped`);
       } else if (action === 'join') {
+        dismissedBots.delete(bot);
         bootstrapBot(root, bot);
         await reply(conn, `${HOSTNAME}: ${name} started (rank ${rank})`);
       } else {
+        dismissedBots.delete(bot);
         stopBot(bot);
         killStaleContainers(bot);
         bootstrapBot(root, bot);
@@ -700,7 +706,7 @@ async function handleCommand(cmd: string, conn: RoomConn): Promise<void> {
       let existed = true;
       try { execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' }); } catch { existed = false; }
       if (!existed) {
-        execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', loadMachineConfig().secretsPath, 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
+        execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(loadMachineConfig().secretsPath), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
         await sleep(3000);
       }
       if (text) {
