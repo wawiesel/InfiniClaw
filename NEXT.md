@@ -33,7 +33,7 @@ Updated 2026-03-06 10:15 AM EST.
 
 ## LOW — Reliability
 
-- **Pre-commit hook for dist/** — installed on HERACLES. Poseidon needs same hook.
+- ~~Pre-commit hook for dist/~~ — installed on both HERACLES and Poseidon.
 - **Session OOM still possible** — V8 heap OOM (exit 137) from large JSONL sessions. Cleanup: DB sessions table, JSONL file, .claude/backups/.
 
 ## Recently Completed

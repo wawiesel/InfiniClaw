@@ -78,32 +78,40 @@ for bot in sorted(bots):
     last_ts = None
     errors = 0
 
+    # Parse both main log and error log — events (spawns, kills, memory)
+    # are in the main log; errors are in the error log.
+    logs_to_parse = []
+    if os.path.exists(main_log):
+        logs_to_parse.append(main_log)
+    logs_to_parse.append(error_log)
+
     try:
-        with open(error_log, 'r', errors='replace') as f:
-            for line in f:
-                clean = strip_ansi(line.strip())
-                if 'SIGKILL' in clean:
-                    sigkills += 1
-                if 'SIGTERM' in clean:
-                    sigterms += 1
-                if 'isOomKill' in clean and 'true' in clean.lower():
-                    oom_kills += 1
-                if 'Spawning container' in clean:
-                    spawns += 1
-                if 'ERROR' in clean:
-                    errors += 1
-                m = re.search(r'rssMB.*?(\d+)', clean)
-                if m:
-                    last_rss = int(m.group(1))
-                m = re.search(r'heapMB.*?(\d+)', clean)
-                if m:
-                    last_heap = int(m.group(1))
-                m = re.search(r'limitMB.*?(\d+)', clean)
-                if m:
-                    limit_mb = int(m.group(1))
-                m = re.match(r'\[(\d{2}:\d{2}:\d{2}\.\d+)\]', clean)
-                if m:
-                    last_ts = m.group(1)
+        for log_file in logs_to_parse:
+            with open(log_file, 'r', errors='replace') as f:
+                for line in f:
+                    clean = strip_ansi(line.strip())
+                    if 'SIGKILL' in clean:
+                        sigkills += 1
+                    if 'SIGTERM' in clean:
+                        sigterms += 1
+                    if 'isOomKill' in clean and 'true' in clean.lower():
+                        oom_kills += 1
+                    if 'Spawning container' in clean:
+                        spawns += 1
+                    if 'ERROR' in clean:
+                        errors += 1
+                    m = re.search(r'rssMB.*?(\d+)', clean)
+                    if m:
+                        last_rss = int(m.group(1))
+                    m = re.search(r'heapMB.*?(\d+)', clean)
+                    if m:
+                        last_heap = int(m.group(1))
+                    m = re.search(r'limitMB.*?(\d+)', clean)
+                    if m and int(m.group(1)) > 0:
+                        limit_mb = int(m.group(1))
+                    m = re.match(r'\[(\d{2}:\d{2}:\d{2}\.\d+)\]', clean)
+                    if m:
+                        last_ts = m.group(1)
     except Exception as e:
         report["bots"][bot] = {"error": str(e)}
         continue
@@ -265,7 +273,10 @@ else:
         print(f"\n--- {bot} [{d['status']}] ---")
         print(f"  Log age: {d['log_age_min']}min | Error: {d['error_log_kb']}KB | Main: {d['main_log_kb']}KB")
         if d["rss_mb"] is not None:
-            print(f"  Memory: RSS={d['rss_mb']}MB heap={d['heap_mb']}MB limit={d['limit_mb']}MB ({d['mem_pct']}%)")
+            mem_line = f"  Memory: RSS={d['rss_mb']}MB heap={d['heap_mb']}MB"
+            if d["limit_mb"] is not None:
+                mem_line += f" limit={d['limit_mb']}MB ({d['mem_pct']}%)"
+            print(mem_line)
         print(f"  Cumulative: spawns={d['spawns']} SIGKILLs={d['sigkills']} SIGTERMs={d['sigterms']} OOM={d['oom_kills']} errors={d['errors']}")
         if d["last_ts"]:
             print(f"  Last entry: {d['last_ts']}")
