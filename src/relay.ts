@@ -312,10 +312,13 @@ function parseTarget(cmd: string, prefix: string): { matched: boolean; target?: 
  * - Untargeted (`!restart` in Engineering): returns local bots whose
  *   MAIN_GROUP_NAME matches the room the command arrived in.
  */
-function resolveBots(target: string | undefined, roomName: string): string[] {
+function resolveBots(target: string | undefined, roomName: string, action?: string): string[] {
   const local = getActiveBots();
   if (target) {
-    return local.includes(target) ? [target] : [];
+    if (local.includes(target)) return [target];
+    // For !join, also match inactive bots assigned to this machine
+    if (action === 'join' && liveFleet[target]?.machine === HOSTNAME) return [target];
+    return [];
   }
   // No target — scope to bots in this room on this machine
   const botRooms = buildBotRoomMap();
@@ -967,7 +970,7 @@ async function handleLifecycleCommand(
   conn: RoomConn,
 ): Promise<void> {
   const root = resolveRoot();
-  const bots = resolveBots(target, conn.name);
+  const bots = resolveBots(target, conn.name, action);
 
   // No local bots matched — silently ignore. Another machine handles it,
   // or the room simply has no bots from this machine.
