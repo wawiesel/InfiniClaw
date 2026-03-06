@@ -171,7 +171,12 @@ function loadIntercomConfig(): IntercomConfig {
 
 function resolveCaptainUserId(): string {
   const root = resolveRoot();
-  for (const bot of getActiveBots()) {
+  // Check ALL bots assigned to this machine, not just active ones.
+  // Captain must be able to control the relay even when all bots are dismissed.
+  const fleet = loadFleet();
+  const hostname = os.hostname();
+  for (const [bot, entry] of Object.entries(fleet)) {
+    if (entry.machine !== hostname) continue;
     try {
       const env = loadProfileEnv(root, bot);
       if (env.CAPTAIN_USER_ID) return env.CAPTAIN_USER_ID;
