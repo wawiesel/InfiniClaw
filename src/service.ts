@@ -15,7 +15,6 @@ import { parseEnvFile } from 'nanoclaw/env-utils.js';
 import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
 
 import { loadMachineConfig, loadFleet } from './machine-config.js';
-import { pullAll, pushAll } from './s3-sync.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -685,23 +684,50 @@ export function stopBot(bot: string): void {
 
 const RELAY_PM2_NAME = 'infiniclaw-relay';
 
-export function startRelay(root: string): void {
+/**
+ * Install: build project, start relay via pm2, set up pm2 startup.
+ * The relay bootstraps all assigned bots on its own startup.
+ */
+export async function installRelay(): Promise<void> {
+  const root = resolveRoot();
+  const logs = logDir(root);
+  fs.mkdirSync(logs, { recursive: true });
+
+  // Build
+  console.log('Building...');
+  const nodeBinDir = path.dirname(process.execPath);
+  execSync('npm run build', {
+    cwd: root, stdio: 'inherit',
+    env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` },
+  });
+
+  // Start relay
+  startRelay();
+
+  // Set up pm2 startup + save so relay survives reboots
+  try {
+    execFileSync(PM2_BIN, ['startup'], { stdio: 'inherit' });
+  } catch {
+    console.warn('pm2 startup failed — you may need to run it manually with sudo');
+  }
+  try { execFileSync(PM2_BIN, ['save'], { stdio: 'pipe' }); } catch { /* ok */ }
+
+  console.log('\nRelay installed. It will auto-start bots on startup.');
+  console.log('Check status: npx pm2 list');
+}
+
+/**
+ * Start the relay process via pm2. The relay handles bot startup internally.
+ */
+export function startRelay(): void {
+  const root = resolveRoot();
   const logs = logDir(root);
   fs.mkdirSync(logs, { recursive: true });
   pm2Stop(RELAY_PM2_NAME);
 
-  // The relay runs from the same instance as the first active bot
-  // (it only needs compiled dist/relay.js + node_modules).
-  const bots = getActiveBots();
-  if (bots.length === 0) {
-    console.log('relay: no active bots — skipping');
-    return;
-  }
-  const instance = instanceDir(root, bots[0]);
-  const distFile = path.join(instance, 'dist', 'relay.js');
+  const distFile = path.join(root, 'dist', 'relay.js');
   if (!fs.existsSync(distFile)) {
-    console.log('relay: dist/relay.js not found — skipping (build first)');
-    return;
+    throw new Error('dist/relay.js not found — run `npm run build` first');
   }
 
   const outLog = path.join(logs, 'relay.log');
@@ -734,228 +760,37 @@ export function startRelay(root: string): void {
   console.log('relay: started');
 }
 
+/**
+ * Stop the relay + all bots.
+ */
 export function stopRelay(): void {
+  const root = resolveRoot();
+
+  // Stop all bots
+  for (const bot of getActiveBots()) {
+    pm2Stop(pm2Name(bot));
+    pm2Stop(pm2Name(holodeckBotName(bot)));
+    console.log(`${bot}: stopped`);
+  }
+  killStaleContainers();
+  removeStaleProcesses();
+
+  // Stop relay
   pm2Stop(RELAY_PM2_NAME);
   console.log('relay: stopped');
 }
 
-// ── Top-level commands ─────────────────────────────────────────────────
-
-export async function start(onlyBot?: string): Promise<void> {
-  const root = resolveRoot();
-  const allBots = getActiveBots();
-  const bots = onlyBot ? allBots.filter(b => b === onlyBot) : allBots;
-  if (onlyBot && bots.length === 0) {
-    throw new Error(`Bot "${onlyBot}" not found in machine.json (active: ${allBots.join(', ')})`);
-  }
-  const logs = logDir(root);
-  fs.mkdirSync(logs, { recursive: true });
-
-  ensurePodmanReady();
-
-  // S3 is backup-only. Pull is manual (`cli sync pull`) for bot transport.
-  // Push happens automatically on stop.
-
-  // Stop targeted services so old code stops before we build
-  for (const bot of bots) { pm2Stop(pm2Name(bot)); }
-  removeStaleProcesses();
-  killRogueProcesses();
-  spawnSync('sleep', ['1']);
-  killStaleContainers(onlyBot);
-
-  for (const bot of bots) {
-    try {
-      const instance = instanceDir(root, bot);
-      deployBot(root, bot);
-      pm2StartBot(bot, process.execPath, instance, logs, root);
-      console.log(`${bot}: started (${pm2Name(bot)})`);
-    } catch (err) {
-      console.error(`${bot}: failed to start -`, err);
-    }
-  }
-
-  // Start relay (watches Matrix for !join/!dismiss/!restart)
-  startRelay(root);
-
-  // Save pm2 process list so `pm2 resurrect` can restore after reboot
-  try { execFileSync(PM2_BIN, ['save'], { stdio: 'pipe' }); } catch { /* ok */ }
-
-  console.log('\nInfiniClaw running. Check status:\n  npx pm2 list');
-}
-
-export async function stop(onlyBot?: string): Promise<void> {
-  const root = resolveRoot();
-  const allBots = getActiveBots();
-  const bots = onlyBot ? allBots.filter(b => b === onlyBot) : allBots;
-
-  for (const bot of bots) {
-    try { syncPersona(root, bot); } catch { /* best effort */ }
-    pm2Stop(pm2Name(bot));
-    console.log(`${bot}: stopped`);
-
-    // Stop holodeck instance if running
-    pm2Stop(pm2Name(holodeckBotName(bot)));
-  }
-
-  removeStaleProcesses();
-  if (!onlyBot) {
-    killRogueProcesses();
-    stopRelay();
-  }
-  killStaleContainers(onlyBot);
-
-  // Push state to S3 before returning so data is not lost on exit.
-  // Timeout after 30s to avoid hanging on network issues.
+/**
+ * Uninstall: stop everything, remove pm2 startup.
+ */
+export function uninstallRelay(): void {
+  stopRelay();
   try {
-    const pushPromise = pushAll(root);
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('S3 push timed out after 30s')), 30_000),
-    );
-    await Promise.race([pushPromise, timeout]);
-    console.log('S3 backup complete.');
-  } catch (err) {
-    console.warn(`S3 push failed: ${err instanceof Error ? err.message : err}`);
+    execFileSync(PM2_BIN, ['unstartup'], { stdio: 'inherit' });
+  } catch {
+    console.warn('pm2 unstartup failed — you may need to run it manually');
   }
-
-  console.log('InfiniClaw stopped.');
-}
-
-export async function sync(direction: 'push' | 'pull'): Promise<void> {
-  const root = resolveRoot();
-  if (direction === 'push') {
-    await pushAll(root);
-  } else {
-    await pullAll(root);
-  }
-}
-
-export function chat(bot: string): void {
-  const root = resolveRoot();
-  const instance = instanceDir(root, bot);
-
-  if (!fs.existsSync(instance)) {
-    throw new Error(`Missing instance for ${bot}. Run 'start' first.`);
-  }
-
-  rsyncInstance(root, instance);
-
-  // Build if needed
-  const distMain = path.join(instance, 'dist', 'main.js');
-  let needsBuild = !fs.existsSync(distMain);
-  if (!needsBuild) {
-    try {
-      const srcFiles = execFileSync('find', [path.join(instance, 'src'), '-name', '*.ts', '-newer', distMain], {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
-      needsBuild = srcFiles.length > 0;
-    } catch {
-      needsBuild = true;
-    }
-  }
-  if (needsBuild) {
-    console.log('Building TypeScript...');
-    execSync('npm run build', { cwd: instance, stdio: 'inherit' });
-  }
-
-  const profileEnv = loadProfileEnv(root, bot);
-  const env = applyBrainEnv(profileEnv);
-
-  ensurePodmanReady();
-
-  // Build the full env for the child process
-  const childEnv: Record<string, string> = {
-    ...process.env as Record<string, string>,
-    ...env,
-    INFINICLAW_ROOT: root,
-    PERSONA_NAME: bot,
-    LOCAL_CHANNEL_ENABLED: '1',
-    LOCAL_CHAT_JID: env.LOCAL_MIRROR_MATRIX_JID || 'local:terminal',
-    LOCAL_CHAT_NAME: `${bot} (Terminal)`,
-  };
-
-  // exec into node (replaces this process)
-  const result = spawnSync('node', ['dist/main.js'], {
-    cwd: instance,
-    env: childEnv,
-    stdio: 'inherit',
-  });
-  process.exit(result.status ?? 1);
-}
-
-// ── Send (operator message to bot room) ─────────────────────────────
-
-export async function send(room: string, message: string): Promise<void> {
-  const root = resolveRoot();
-  const config = loadMachineConfig();
-  const localBots = config.bots;
-
-  // Find the room's Matrix room ID and homeserver from any local bot's config
-  let roomId: string | undefined;
-  let homeserver: string | undefined;
-  for (const bot of localBots) {
-    try {
-      const env = loadProfileEnv(root, bot);
-      if (env.MAIN_GROUP_NAME?.toLowerCase() === room.toLowerCase()) {
-        const jid = env.LOCAL_MIRROR_MATRIX_JID;
-        roomId = jid?.replace(/^matrix:/, '');
-        homeserver = env.MATRIX_HOMESERVER;
-        if (roomId) break;
-      }
-    } catch { /* skip */ }
-  }
-  if (!roomId) {
-    throw new Error(`Unknown room: ${room}. No local bot has MAIN_GROUP_NAME matching it.`);
-  }
-
-  // Find a local bot that's in this room and has a valid Matrix access token
-  let accessToken: string | undefined;
-  let senderBot: string | undefined;
-  for (const bot of localBots) {
-    try {
-      const env = loadProfileEnv(root, bot);
-      const botJid = env.LOCAL_MIRROR_MATRIX_JID?.replace(/^matrix:/, '');
-      if (botJid !== roomId) continue;
-      const inst = instanceDir(root, bot);
-      const storageFile = path.join(inst, 'store', 'matrix-bot.json');
-      if (fs.existsSync(storageFile)) {
-        const storage = JSON.parse(fs.readFileSync(storageFile, 'utf-8'));
-        const token = storage.kvStore?.matrix_access_token;
-        if (token) {
-          accessToken = token;
-          senderBot = bot;
-          if (env.MATRIX_HOMESERVER) homeserver = env.MATRIX_HOMESERVER;
-          break;
-        }
-      }
-    } catch { /* skip */ }
-  }
-  if (!accessToken || !senderBot || !homeserver) {
-    throw new Error('No local bot with a stored Matrix access token. Run \'start\' first.');
-  }
-
-  // Send to Matrix — bots pick it up via room sync
-  const txnId = `op-${Date.now()}`;
-  const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`;
-  const resp = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      msgtype: 'm.text',
-      body: `[Operator]: ${message}`,
-      format: 'org.matrix.custom.html',
-      formatted_body: `<details><summary>📞 Operator</summary>${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</details>`,
-    }),
-  });
-
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Matrix send failed (${resp.status}): ${body}`);
-  }
-  console.log(`Sent to ${room} (via ${senderBot})`);
+  console.log('Relay uninstalled.');
 }
 
 // ── Holodeck (blue-green test instances) ───────────────────────────────
@@ -1062,10 +897,6 @@ export function holodeckCreate(bot: string, branch: string): void {
   console.log(`  Chat: npm run cli holodeck chat ${bot}`);
   console.log(`  Logs: tail -f ${logs}/${hdBot}.log`);
   console.log(`  Teardown: npm run cli holodeck teardown ${bot}`);
-}
-
-export function holodeckChat(bot: string): void {
-  chat(holodeckBotName(bot));
 }
 
 export function holodeckTeardown(bot: string): void {

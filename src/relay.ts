@@ -1234,6 +1234,32 @@ async function main(): Promise<void> {
 
   log(`watching ${conns.length} room(s): ${conns.map((c) => c.name).join(', ')}`);
 
+  // Bootstrap all bots assigned to this machine
+  if (isMachineActive()) {
+    try {
+      ensurePodmanReady();
+      const fleet = loadFleet();
+      const root = resolveRoot();
+      removeStaleProcesses();
+      killStaleContainers();
+      for (const [bot, entry] of Object.entries(fleet)) {
+        if (entry.machine === HOSTNAME && entry.active) {
+          try {
+            bootstrapBot(root, bot);
+            log(`bootstrap: ${bot} started`);
+          } catch (err) {
+            log(`bootstrap: ${bot} failed — ${errStr(err)}`);
+          }
+        }
+      }
+      updatePresence(root);
+    } catch (err) {
+      log(`bootstrap failed: ${errStr(err)}`);
+    }
+  } else {
+    log('machine is deactivated — skipping bot startup');
+  }
+
   // Stagger startup to avoid thundering herd
   const loops = conns.map((conn, i) =>
     sleep(i * STARTUP_SYNC_DELAY).then(() => dialtone(conn, captainUserId)),
