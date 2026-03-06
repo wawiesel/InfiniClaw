@@ -126,15 +126,14 @@ function isAuthorized(sender: string, captainUserId: string): boolean {
   return sender === captainUserId || /-intercom:/.test(sender);
 }
 
-/** Is this machine the "speaker" — lowest-sorted active hostname? Used to avoid duplicate replies. */
+/** Is this machine the "speaker" — lowest-rank active machine? Used to avoid duplicate replies. */
 function isSpeaker(): boolean {
   try {
     const machines = loadMachines();
     const active = Object.entries(machines)
       .filter(([_, m]) => m.active)
-      .map(([name]) => name)
-      .sort();
-    return active.length === 0 || active[0] === HOSTNAME;
+      .sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
+    return active.length === 0 || active[0][0] === HOSTNAME;
   } catch {
     return true; // can't load machines — assume we should reply
   }
@@ -1303,7 +1302,8 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
         byRole[role].push(entry);
       }
       const machineActive = isMachineActive();
-      const lines: string[] = [`**${HOSTNAME}** (${machineActive ? 'active' : 'deactivated'})`];
+      const machineRank = (() => { try { return loadMachines()[HOSTNAME]?.rank ?? '?'; } catch { return '?'; } })();
+      const lines: string[] = [`**${HOSTNAME}** #${machineRank} (${machineActive ? 'active' : 'deactivated'})`];
       for (const [role, bots] of Object.entries(byRole)) {
         lines.push(`  ${role}:`);
         for (const [name, entry] of bots.sort((a, b) => a[1].rank - b[1].rank)) {

@@ -135,6 +135,7 @@ export interface MachineEntry {
   os: string;
   user: string | null;
   active: boolean;
+  rank: number;
 }
 
 /** Load all machines from operator/machines.json. */

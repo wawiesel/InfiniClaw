@@ -10,6 +10,8 @@ Bots are distributed across machines. Each machine runs a subset of the fleet, c
 
 **Every machine runs a relay at all times**, even when deactivated. A deactivated machine (`active: false` in machines.json) keeps its relay running and listening for commands but does not start bots. This ensures all machines stay reachable — an operator can `!activate` a machine remotely at any time.
 
+Machines are ranked in `machines.json` (`rank` field). The lowest-rank **active** machine is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay. Per-machine commands (`!fleet`, `!sync`) still reply from each machine with its local state.
+
 Each machine writes its own presence file to `operator/presence/<hostname>.json` in the secrets repo at deploy time. All machines read all presence files to determine fleet-wide bot availability.
 
 ## Roles and Rank
