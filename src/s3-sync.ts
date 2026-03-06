@@ -80,7 +80,7 @@ async function uploadFile(client: S3Client, bucket: string, key: string, filePat
 export async function uploadContent(key: string, content: string): Promise<void> {
   const s3 = getClient();
   if (!s3) return;
-  await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: content }));
+  await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: content, ACL: 'public-read' }));
 }
 
 /** Returns the public HTTP URL for an S3 key, or null if S3 not configured. */
@@ -101,6 +101,7 @@ export async function uploadHtml(key: string, html: string): Promise<void> {
     Key: key,
     Body: html,
     ContentType: 'text/html; charset=utf-8',
+    ACL: 'public-read',
   }));
 }
 
