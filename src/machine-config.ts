@@ -122,7 +122,15 @@ export function botsPath(): string {
 /** Load the full fleet config (all bots, not just this machine's). */
 export function loadFleet(): Record<string, BotEntry> {
   const raw = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
-  return raw.bots || {};
+  const bots: Record<string, BotEntry> = raw.bots || {};
+  // Migrate legacy active:boolean → status enum
+  for (const entry of Object.values(bots)) {
+    if (!entry.status && 'active' in entry) {
+      entry.status = (entry as any).active ? 'active' : 'dismissed';
+      delete (entry as any).active;
+    }
+  }
+  return bots;
 }
 
 /** Write updated fleet config back to disk. */
