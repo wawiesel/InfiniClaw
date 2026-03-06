@@ -497,7 +497,7 @@ set +a
 # Computed vars
 export PERSONA_NAME="${bot}"
 export INFINICLAW_ROOT="${root}"
-export PATH="${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin"
+export PATH="${path.dirname(process.execPath)}:${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin"
 export HOME="${os.homedir()}"
 
 # Brain env → Anthropic/Claude SDK env (mirrors applyBrainEnv)
@@ -668,7 +668,7 @@ export function startRelay(): void {
         ...process.env,
         INFINICLAW_ROOT: root,
         HOME: os.homedir(),
-        PATH: `${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`,
+        PATH: `${path.dirname(process.execPath)}:${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`,
       },
     },
   );
