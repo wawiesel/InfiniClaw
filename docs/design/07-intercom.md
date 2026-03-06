@@ -24,7 +24,7 @@ Operators on each machine use intercom to communicate with bots and to issue `!`
 
 ### Bots → Bots (CO Only)
 
-Only the CO can use the intercom. `send_message` checks `crew-status.json` at runtime — non-CO bots get an error. Messages appear as `<BotName> (<SourceRoom>): <message>`.
+Only the CO can use the intercom. `send_message` checks `IS_CO` env var at runtime — non-CO bots get an error. Messages appear as `<BotName> (<SourceRoom>): <message>`.
 
 ### Relays → Rooms
 

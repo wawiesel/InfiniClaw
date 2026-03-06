@@ -30,7 +30,8 @@ A Node.js process (`src/relay.ts`) that runs on **every machine** via pm2 as `in
 | `!promote <bot>` / `!demote <bot>` | Swap rank within role |
 | `!fleet` / `!fleet room` | Fleet status with real state check |
 | `!health` | Fleet health summary via S3 |
-| `!activate` / `!deactivate` | Machine lifecycle |
+| `!activate [machine]` / `!deactivate [machine]` | Machine lifecycle (no arg = all) |
+| `!sync [target]` | Sync repos (secrets, infiniclaw, or any paths.json name) |
 | `!operator <text>` | Send text to tmux `operator` session |
 | `!allow <bot> <path> [min]` / `!deny <bot> <path>` | Mount grants |
 

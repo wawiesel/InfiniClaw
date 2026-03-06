@@ -1009,8 +1009,11 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     return;
   }
 
-  // !deactivate — stop all bots on this machine, keep relay running
-  if (cmd === '!deactivate') {
+  // !deactivate [machine] — stop all bots, keep relay running. No arg = all machines.
+  if (cmd === '!deactivate' || cmd.startsWith('!deactivate ')) {
+    const targetMachine = cmd.slice('!deactivate'.length).trim() || null;
+    // If a specific machine is targeted and it's not us, skip silently
+    if (targetMachine && targetMachine !== HOSTNAME) return;
     try {
       const machines = loadMachines();
       if (!machines[HOSTNAME]) { await reply(conn, `${HOSTNAME}: not in machines.json`); return; }
@@ -1031,8 +1034,10 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     return;
   }
 
-  // !activate — mark machine active, start bots assigned here
-  if (cmd === '!activate') {
+  // !activate [machine] — mark machine active, start bots. No arg = all machines.
+  if (cmd === '!activate' || cmd.startsWith('!activate ')) {
+    const targetMachine = cmd.slice('!activate'.length).trim() || null;
+    if (targetMachine && targetMachine !== HOSTNAME) return;
     try {
       const machines = loadMachines();
       if (!machines[HOSTNAME]) { await reply(conn, `${HOSTNAME}: not in machines.json`); return; }
@@ -1056,6 +1061,85 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
       await reply(conn, `${HOSTNAME}: activated — started ${started.join(', ') || 'no bots assigned'}`);
     } catch (err) {
       await reply(conn, `${HOSTNAME}: activate failed — ${errStr(err)}`);
+    }
+    return;
+  }
+
+  // !sync [target] — sync repos. No arg = secrets + infiniclaw. Named targets from paths.json.
+  if (cmd === '!sync' || cmd.startsWith('!sync ')) {
+    const target = cmd.slice('!sync'.length).trim() || null;
+    const results: string[] = [];
+
+    // Helper: sync a git repo at a given path
+    const syncRepo = (name: string, repoPath: string): string => {
+      const resolved = repoPath.replace(/^~/, os.homedir());
+      if (!fs.existsSync(path.join(resolved, '.git'))) return `${name}: not a git repo`;
+      try {
+        const opts = { cwd: resolved, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
+        execSync('git fetch origin', opts);
+        const count = parseInt(execSync('git rev-list HEAD..origin/main --count', { ...opts, timeout: 5_000 }).trim(), 10) || 0;
+        if (count === 0) return `${name}: up to date`;
+        execSync('git pull --rebase', opts);
+        return `${name}: pulled ${count} commit(s)`;
+      } catch (err) {
+        return `${name}: sync failed — ${errStr(err).slice(0, 200)}`;
+      }
+    };
+
+    try {
+      if (!target) {
+        // Default: sync secrets + infiniclaw
+        const secretsResult = secretsGitSync();
+        results.push(`secrets: ${secretsResult.ok ? (secretsResult.newCommits > 0 ? `pulled ${secretsResult.newCommits} commit(s)` : 'up to date') : `failed — ${secretsResult.output.slice(0, 200)}`}`);
+        const icResult = gitSync();
+        results.push(`infiniclaw: ${icResult.ok ? (icResult.newCommits > 0 ? `pulled ${icResult.newCommits} commit(s)` : 'up to date') : `failed — ${icResult.output.slice(0, 200)}`}`);
+        // Rebuild + install hooks if infiniclaw had new commits
+        if (icResult.ok && icResult.newCommits > 0) {
+          const root = resolveRoot();
+          try {
+            const nodeBinDir = path.dirname(process.execPath);
+            execSync('npm run build', { cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe', env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` } });
+            results.push('infiniclaw: rebuild succeeded');
+            try { installGitHooks(); } catch { /* best effort */ }
+          } catch (err) {
+            results.push(`infiniclaw: rebuild FAILED — ${errStr(err).slice(0, 200)}`);
+          }
+        }
+      } else if (target === 'secrets') {
+        const r = secretsGitSync();
+        results.push(`secrets: ${r.ok ? (r.newCommits > 0 ? `pulled ${r.newCommits} commit(s)` : 'up to date') : `failed — ${r.output.slice(0, 200)}`}`);
+      } else if (target === 'infiniclaw') {
+        const r = gitSync();
+        results.push(`infiniclaw: ${r.ok ? (r.newCommits > 0 ? `pulled ${r.newCommits} commit(s)` : 'up to date') : `failed — ${r.output.slice(0, 200)}`}`);
+        if (r.ok && r.newCommits > 0) {
+          const root = resolveRoot();
+          try {
+            const nodeBinDir = path.dirname(process.execPath);
+            execSync('npm run build', { cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe', env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` } });
+            results.push('infiniclaw: rebuild succeeded');
+            try { installGitHooks(); } catch { /* best effort */ }
+          } catch (err) {
+            results.push(`infiniclaw: rebuild FAILED — ${errStr(err).slice(0, 200)}`);
+          }
+        }
+      } else {
+        // Try paths.json for named repos
+        let paths: Record<string, string> = {};
+        try {
+          const configDir = path.dirname(secretsRepoPath());
+          paths = JSON.parse(fs.readFileSync(path.join(configDir, 'paths.json'), 'utf-8'));
+        } catch { /* no paths.json */ }
+        if (paths[target]) {
+          results.push(syncRepo(target, paths[target]));
+        } else {
+          results.push(`unknown target "${target}" — not in paths.json on ${HOSTNAME}`);
+          await reply(conn, `${HOSTNAME}: ${results.join('\n')}`);
+          return;
+        }
+      }
+      await reply(conn, `${HOSTNAME}:\n${results.join('\n')}`);
+    } catch (err) {
+      await reply(conn, `${HOSTNAME}: !sync failed — ${errStr(err)}`);
     }
     return;
   }

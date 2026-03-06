@@ -17,12 +17,15 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 | `!fleet` | Full fleet + machine status with real running state. |
 | `!fleet room` | Bots in this room only. |
 | `!health` | Fleet health summary from S3. |
-| `!activate` | Activate this machine, start assigned bots. |
-| `!deactivate` | Stop all bots, keep relay running. |
+| `!activate [machine]` | Activate machine(s), start assigned bots. No arg = all. |
+| `!deactivate [machine]` | Stop all bots on machine(s), keep relay running. No arg = all. |
+| `!sync` | Sync secrets + infiniclaw repos on all machines. |
+| `!sync secrets` | Sync secrets repo only. |
+| `!sync infiniclaw` | Sync infiniclaw repo only, rebuild on new commits. |
+| `!sync <name>` | Sync any named repo from paths.json. |
 | `!allow <bot> <path> [min]` | Grant temporary rw mount. Captain/intercom only. |
 | `!deny <bot> <path>` | Revoke a mount grant. Captain/intercom only. |
 | `!operator <text>` | Send text to operator tmux session. |
-| `!` | Show all commands. |
 
 ## Relay
 
