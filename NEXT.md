@@ -1,7 +1,7 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-06 08:45 AM EST.
+Updated 2026-03-06 10:15 AM EST.
 
 ## HIGH PRIORITY — Captain Directives
 
@@ -11,20 +11,14 @@ Updated 2026-03-06 08:45 AM EST.
 - **Health metrics: look at trends** — "you need to look at health metrics in the 1-day / 7-day rolling and look at trend." Not just collect snapshots — analyze and report trends.
 - **Bots not reading Captain's directives** — Bots must `git pull` and review directive changes when told to.
 
-## HIGH — Needs Restart
+## HIGH — Needs Captain Action
 
-These features are committed but not yet active on running bots:
-- **Tool call breadcrumbs** (`4c7a968`) — single-line hash in Matrix, full HTML to S3
-- **Bot display names** (`37fee0e`) — `Name (HOSTNAME)` with CO/active/offline badges
-- **Rerank fix** (`918e2b7`) — `restarted` msg includes `(rank N)`
-- **Bare `!` help** (`e095361`) — lists all operator commands
-- **Fleet reorg** — `machine.json` eliminated, `fleet.json` is single source of truth, new commands: `!transport`, `!promote`, `!demote`
-- **Secrets repo sync loop** — 30-second pull/push cycle with transport pickup
+- **Stop old `infiniclaw-supervisor` pm2 process** — relay is now running (`infiniclaw-relay` started 2026-03-06T14:29), but old supervisor pm2 (id 5, 14h uptime) is still alive alongside it. Captain must: `pm2 stop infiniclaw-supervisor && pm2 delete infiniclaw-supervisor`. Then `pm2 save`.
 
 ## MEDIUM — Next Up
 
 - **Concurrency ceiling starvation** — FIFO `waitingGroups` drain in `group-queue.ts` (upstream nanoclaw). Fix = priority-aware `drainWaiting()`. Needs Captain approval before touching upstream.
-- **Cid SIGKILL death spirals** — Extended periods of SIGKILL loops (duplicate processes, podman EOF, session OOM). Need better resilience: faster detection, cooldown backoff, session clearing on repeated OOM.
+- **Cid SIGKILL death spirals** — exit-137 cooldown + backoff already implemented in main.ts (`KILL_137_COOLDOWN_MS=60s`, `KILL_137_MAX_CONSECUTIVE=3`). Zero new kills in last 20h. Monitor; may be resolved.
 
 ## MEDIUM — Blocked on Captain
 
@@ -34,7 +28,7 @@ These features are committed but not yet active on running bots:
 
 - **Poseidon: update S3 endpoint to remove containerNetwork dependency** — currently uses `containerNetwork: "host"` to reach S3. Update S3 endpoint on Poseidon so it's reachable without host networking, then remove the `machines` section from fleet.json entirely.
 - **Podman SSH connection drops on macOS** — SSH socket dies silently after sleep/wake. Fix: `podman machine stop && podman machine start`. Root cause unknown.
-- Rename supervisor to "relay" — name conflicts with pm2.
+- ~~Rename supervisor to "relay"~~ — done (`93ea3ca`), relay running. Old pm2 process cleanup needed (see HIGH).
 - **Matrix sluggish on Poseidon** — conduwuit 500 errors on federated rooms. Status indicator spam throttled (5min cap).
 
 ## LOW — Reliability
@@ -51,3 +45,6 @@ These features are committed but not yet active on running bots:
 - Parker rank 1 engineer, Cid rank 2 engineer. Ranks in fleet.json only.
 - Security hardening sweep (Cid) — 23 files hardened, all 59 tests passing.
 - Supervisor auto-deploy, self-command fix, status indicator throttle, dream state machine, thread discipline, rolling health metrics, max session age (8h).
+- Skip heartbeat/dream nudges for dismissed bots (`5f86566`) — relay deployed 2026-03-06T14:29.
+- Relay rename (`93ea3ca`) — `supervisor.ts → relay.ts`, IPC health/fleet commands, dist deploy fix.
+- Exit-137 cooldown backoff in main.ts — `KILL_137_COOLDOWN_MS=60s`, `MAX_CONSECUTIVE=3`.
