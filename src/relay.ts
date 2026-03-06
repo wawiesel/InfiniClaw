@@ -523,6 +523,19 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
       ...execOpts, timeout: 5_000,
     }).trim();
     const newCommits = parseInt(countStr, 10) || 0;
+    // Push local commits that are ahead of origin
+    const aheadStr = execSync('git rev-list origin/main..HEAD --count', {
+      ...execOpts, timeout: 5_000,
+    }).trim();
+    const aheadCount = parseInt(aheadStr, 10) || 0;
+    if (aheadCount > 0) {
+      try {
+        execSync('git push origin main', { ...execOpts, timeout: 30_000 });
+        log(`git sync: pushed ${aheadCount} local commit(s)`);
+      } catch (pushErr) {
+        log(`git sync: push failed: ${errStr(pushErr)}`);
+      }
+    }
     if (newCommits === 0) return { ok: true, output: 'up to date', newCommits: 0 };
     // Stash any uncommitted changes (bots may have WIP edits)
     let didStash = false;
