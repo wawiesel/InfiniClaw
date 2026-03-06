@@ -869,15 +869,15 @@ async function handleFleetStatus(data: CommandData, ctx: InfiniClawIpcContext): 
     const fleet = JSON.parse(fs.readFileSync(fleetPath, 'utf-8'));
     const bots = fleet.bots || {};
     const lines: string[] = [`**Fleet status** (${os.hostname()}):\n`];
-    const byRole: Record<string, Array<[string, { rank: number; machine: string | null; active: boolean }]>> = {};
-    for (const [name, entry] of Object.entries(bots) as Array<[string, { role: string; rank: number; machine: string | null; active: boolean }]>) {
+    const byRole: Record<string, Array<[string, { rank: number; machine: string | null; status: string }]>> = {};
+    for (const [name, entry] of Object.entries(bots) as Array<[string, { role: string; rank: number; machine: string | null; status: string }]>) {
       if (!byRole[entry.role]) byRole[entry.role] = [];
       byRole[entry.role].push([name, entry]);
     }
     for (const [role, entries] of Object.entries(byRole)) {
       lines.push(`**${role}:**`);
       for (const [name, entry] of entries.sort((a, b) => a[1].rank - b[1].rank)) {
-        const status = entry.active ? 'ON ' : 'OFF';
+        const status = entry.status === 'active' ? 'ON ' : entry.status === 'transit' ? 'TRN' : 'OFF';
         lines.push(`  ${status} #${entry.rank} ${name} → ${entry.machine || 'unassigned'}`);
       }
     }

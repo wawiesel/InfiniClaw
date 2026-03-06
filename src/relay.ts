@@ -88,7 +88,8 @@ const HEALTH_INTERVAL = parseInt(process.env.HEALTH_INTERVAL || '', 10) || 30 * 
 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
-type FleetEntry = { role: string; rank: number; machine: string | null; active: boolean; title?: string };
+type BotStatus = 'active' | 'dismissed' | 'transit';
+type FleetEntry = { role: string; rank: number; machine: string | null; status: BotStatus; title?: string };
 let liveFleet: Record<string, FleetEntry> = {};
 let fleetDirty = false;
 
@@ -563,8 +564,9 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             }
           }
         } else {
-          // Restart all bots so they pick up new code
+          // Restart running bots so they pick up new code (skip dismissed)
           for (const bot of getActiveBots()) {
+            if (liveFleet[bot]?.status !== 'active') continue;
             try {
               bootstrapBot(resolveRoot(), bot);
               log(`git sync: restarted ${bot}`);
@@ -691,9 +693,9 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
           for (const [bot, entry] of Object.entries(diskFleet)) {
             if (!liveFleet[bot]) { liveFleet[bot] = entry; continue; }
             // Transport pickup: bot assigned to us but inactive (phase 1 by another machine)
-            if (entry.machine === HOSTNAME && !entry.active && liveFleet[bot].machine !== HOSTNAME) {
+            if (entry.machine === HOSTNAME && entry.status === 'transit' && liveFleet[bot].machine !== HOSTNAME) {
               liveFleet[bot].machine = HOSTNAME;
-              liveFleet[bot].active = false; // will be activated below
+              liveFleet[bot].status = 'transit'; // will be materialized below
             }
           }
         } catch { /* no fleet on disk */ }
@@ -702,9 +704,9 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
         if (!isMachineActive()) { /* decommissioned — skip materialize */ }
         else try {
           for (const [bot, entry] of Object.entries(liveFleet)) {
-            if (entry.machine === HOSTNAME && !entry.active) {
+            if (entry.machine === HOSTNAME && entry.status === 'transit') {
               log(`transport: materializing ${bot}`);
-              fleetUpdate(bot, { active: true });
+              fleetUpdate(bot, { status: 'active' });
               writeFleet(liveFleet);
               secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${HOSTNAME}`);
               fleetDirty = false;
@@ -825,27 +827,7 @@ const botDreamPhase = new Map<string, DreamPhase>();
 const botDreamStartedAt = new Map<string, number>();
 const botIdleSince = new Map<string, number>();
 let dreamingBot: string | null = null; // only one at a time
-// Dismissed bots persist across relay restarts via a local file.
-const DISMISSED_BOTS_FILE = path.join(os.homedir(), '.config', 'infiniclaw', 'dismissed-bots.json');
-
-function loadDismissedBots(): Set<string> {
-  try {
-    if (fs.existsSync(DISMISSED_BOTS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(DISMISSED_BOTS_FILE, 'utf-8'));
-      if (Array.isArray(data)) return new Set(data.filter((x): x is string => typeof x === 'string'));
-    }
-  } catch { /* ignore */ }
-  return new Set<string>();
-}
-
-function saveDismissedBots(set: Set<string>): void {
-  try {
-    fs.mkdirSync(path.dirname(DISMISSED_BOTS_FILE), { recursive: true });
-    fs.writeFileSync(DISMISSED_BOTS_FILE, JSON.stringify([...set]));
-  } catch { /* ignore */ }
-}
-
-const dismissedBots = loadDismissedBots(); // persisted across relay restarts
+// Bot state is tracked in liveFleet[bot].status: 'active' | 'dismissed' | 'transit'
 
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {
@@ -900,7 +882,7 @@ async function dreamLoop(conns: RoomConn[]): Promise<void> {
       const root = resolveRoot();
       const botRooms = buildBotRoomMap();
       for (const bot of getActiveBots()) {
-        if (dismissedBots.has(bot)) continue; // explicitly dismissed — skip dream cycles
+        if (liveFleet[bot]?.status !== 'active') continue; // inactive — skip dream cycles
         if (botDreamPhase.get(bot) === 'dreaming' || botDreamPhase.get(bot) === 'recycling') continue;
 
         const startTime = getContainerStartTime(bot);
@@ -952,7 +934,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
       const root = resolveRoot();
       const botRooms = buildBotRoomMap();
       for (const bot of getActiveBots()) {
-        if (dismissedBots.has(bot)) continue; // explicitly dismissed — skip nudges
+        if (liveFleet[bot]?.status !== 'active') continue; // inactive — skip nudges
         if (hasRunningContainer(bot)) continue; // already working
         const roomName = botRooms[bot];
         if (!roomName) continue;
@@ -1006,19 +988,13 @@ async function handleLifecycleCommand(
       if (action === 'dismiss') {
         stopBot(bot);
         killStaleContainers(bot);
-        dismissedBots.add(bot);
-        saveDismissedBots(dismissedBots);
-        fleetUpdate(bot, { active: false });
-        await reply(conn, `${HOSTNAME}: ${name} stopped`);
+        fleetUpdate(bot, { status: 'dismissed' });
+        await reply(conn, `${HOSTNAME}: ${name} dismissed`);
       } else if (action === 'join') {
-        dismissedBots.delete(bot);
-        saveDismissedBots(dismissedBots);
-        fleetUpdate(bot, { active: true, machine: HOSTNAME });
+        fleetUpdate(bot, { status: 'active', machine: HOSTNAME });
         bootstrapBot(root, bot);
         await reply(conn, `${HOSTNAME}: ${name} started (rank ${rank})`);
       } else {
-        dismissedBots.delete(bot);
-        saveDismissedBots(dismissedBots);
         stopBot(bot);
         killStaleContainers(bot);
         bootstrapBot(root, bot);
@@ -1093,9 +1069,8 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
       for (const bot of getActiveBots()) {
         stopBot(bot);
         killStaleContainers(bot);
-        dismissedBots.add(bot);
+        fleetUpdate(bot, { status: 'dismissed' });
       }
-      saveDismissedBots(dismissedBots);
       machines[HOSTNAME].active = false;
       writeMachines(machines);
       secretsGitCommit(['operator/machines.json'], `decommission ${HOSTNAME}: bots stopped, helm only`);
@@ -1121,9 +1096,7 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
       ensurePodmanReady();
       const started: string[] = [];
       for (const [name, entry] of Object.entries(fleet)) {
-        if (entry.machine === HOSTNAME && entry.active) {
-          dismissedBots.delete(name);
-          saveDismissedBots(dismissedBots);
+        if (entry.machine === HOSTNAME && entry.status === 'active') {
           bootstrapBot(root, name);
           started.push(name);
         }
@@ -1247,10 +1220,8 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     try {
       stopBot(bot);
       killStaleContainers(bot);
-      dismissedBots.add(bot);
-      saveDismissedBots(dismissedBots);
       removeBotMounts(bot);
-      fleetUpdate(bot, { active: false, machine: targetShip });
+      fleetUpdate(bot, { status: 'transit', machine: targetShip });
       writeFleet(liveFleet);
       const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetShip}`);
       fleetDirty = false;
@@ -1350,18 +1321,20 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
 
       // Real status + mismatch detection
       const warnings: string[] = [];
-      function botStatus(name: string, entry: { active: boolean }): string {
+      function botStatus(name: string, entry: { status: BotStatus }): string {
         const pm2 = pm2Procs.find((p) => p.name === `infiniclaw-${name}`);
         const pm2Online = pm2?.pm2_env?.status === 'online';
         const hasContainer = runningContainers.has(name);
         const running = pm2Online || hasContainer;
-        if (entry.active && !running) {
+        if (entry.status === 'active' && !running) {
           warnings.push(`⚠️ ${name}: fleet says active but not running — restarting`);
           try { bootstrapBot(resolveRoot(), name); } catch { /* best effort */ }
-        } else if (!entry.active && running) {
-          warnings.push(`⚠️ ${name}: fleet says inactive but running — stopping`);
+        } else if (entry.status !== 'active' && running) {
+          warnings.push(`⚠️ ${name}: fleet says ${entry.status} but running — stopping`);
           try { stopBot(name); killStaleContainers(name); } catch { /* best effort */ }
         }
+        if (entry.status === 'transit') return 'TRN';
+        if (entry.status === 'dismissed') return 'DIS';
         if (pm2Online && hasContainer) return 'ON ';
         if (pm2Online) return 'PM2';
         if (hasContainer) return 'CTR';
@@ -1574,7 +1547,7 @@ async function main(): Promise<void> {
       removeStaleProcesses();
       killStaleContainers();
       for (const [bot, entry] of Object.entries(liveFleet)) {
-        if (entry.machine === HOSTNAME && entry.active) {
+        if (entry.machine === HOSTNAME && entry.status === 'active') {
           try {
             bootstrapBot(root, bot);
             log(`bootstrap: ${bot} started`);

@@ -15,11 +15,13 @@ export interface S3Config {
   secretKey: string;
 }
 
+export type BotStatus = 'active' | 'dismissed' | 'transit';
+
 export interface BotEntry {
   role: string;
   rank: number;
   machine: string | null;
-  active: boolean;
+  status: BotStatus;
   title?: string;
 }
 
@@ -80,7 +82,7 @@ export function loadMachineConfig(): MachineConfig {
     if (!isValidBotName(name)) {
       throw new Error(`fleet.json: invalid bot name "${name}"`);
     }
-    if (entry.machine === hostname && entry.active === true) {
+    if (entry.machine === hostname && entry.status === 'active') {
       bots.push(name);
     }
   }
