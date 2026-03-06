@@ -636,7 +636,27 @@ const botDreamPhase = new Map<string, DreamPhase>();
 const botDreamStartedAt = new Map<string, number>();
 const botIdleSince = new Map<string, number>();
 let dreamingBot: string | null = null; // only one at a time
-const dismissedBots = new Set<string>(); // bots explicitly stopped via !dismiss
+// Dismissed bots persist across relay restarts via a local file.
+const DISMISSED_BOTS_FILE = path.join(os.homedir(), '.config', 'infiniclaw', 'dismissed-bots.json');
+
+function loadDismissedBots(): Set<string> {
+  try {
+    if (fs.existsSync(DISMISSED_BOTS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DISMISSED_BOTS_FILE, 'utf-8'));
+      if (Array.isArray(data)) return new Set(data.filter((x): x is string => typeof x === 'string'));
+    }
+  } catch { /* ignore */ }
+  return new Set<string>();
+}
+
+function saveDismissedBots(set: Set<string>): void {
+  try {
+    fs.mkdirSync(path.dirname(DISMISSED_BOTS_FILE), { recursive: true });
+    fs.writeFileSync(DISMISSED_BOTS_FILE, JSON.stringify([...set]));
+  } catch { /* ignore */ }
+}
+
+const dismissedBots = loadDismissedBots(); // persisted across relay restarts
 
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {
@@ -804,6 +824,7 @@ async function handleLifecycleCommand(
         stopBot(bot);
         killStaleContainers(bot);
         dismissedBots.add(bot);
+        saveDismissedBots(dismissedBots);
         // Update fleet.json
         try {
           const fleet = loadFleet();
@@ -813,6 +834,7 @@ async function handleLifecycleCommand(
         await reply(conn, `${HOSTNAME}: ${name} stopped`);
       } else if (action === 'join') {
         dismissedBots.delete(bot);
+        saveDismissedBots(dismissedBots);
         // Update fleet.json
         try {
           const fleet = loadFleet();
@@ -823,6 +845,7 @@ async function handleLifecycleCommand(
         await reply(conn, `${HOSTNAME}: ${name} started (rank ${rank})`);
       } else {
         dismissedBots.delete(bot);
+        saveDismissedBots(dismissedBots);
         stopBot(bot);
         killStaleContainers(bot);
         bootstrapBot(root, bot);
@@ -896,6 +919,7 @@ async function handleCommand(cmd: string, conn: RoomConn): Promise<void> {
         killStaleContainers(bot);
         dismissedBots.add(bot);
       }
+      saveDismissedBots(dismissedBots);
       machines[HOSTNAME].active = false;
       writeMachines(machines);
       secretsGitCommit(['operator/machines.json'], `deactivate ${HOSTNAME}: bots stopped, relay only`);
@@ -922,6 +946,7 @@ async function handleCommand(cmd: string, conn: RoomConn): Promise<void> {
       for (const [name, entry] of Object.entries(fleet)) {
         if (entry.machine === HOSTNAME && entry.active) {
           dismissedBots.delete(name);
+          saveDismissedBots(dismissedBots);
           bootstrapBot(root, name);
           started.push(name);
         }
@@ -959,6 +984,7 @@ async function handleCommand(cmd: string, conn: RoomConn): Promise<void> {
       stopBot(bot);
       killStaleContainers(bot);
       dismissedBots.add(bot);
+      saveDismissedBots(dismissedBots);
       removeBotMounts(bot);
       fleet[bot].active = false;
       fleet[bot].machine = targetMachine;
