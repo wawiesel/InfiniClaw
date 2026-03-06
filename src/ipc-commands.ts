@@ -56,6 +56,7 @@ import { statusMessage } from './formatting.js';
 const RESTART_COOLDOWN_MS = 60_000; // 60 seconds
 const REBUILD_COOLDOWN_MS = 5 * 60_000; // 5 minutes — image builds are expensive
 const GIT_PUSH_COOLDOWN_MS = 60_000; // 60 seconds
+const GIT_PULL_COOLDOWN_MS = 60_000; // 60 seconds
 const MAX_IPC_BINARY_BYTES = 10 * 1024 * 1024; // 10MB
 const cooldowns: Record<string, number> = {};
 
@@ -601,6 +602,71 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
   }
 }
 
+async function handleGitPull(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'git_pull')) return;
+  const chatJid = parseChatJid(data);
+
+  const cooldownMsg = checkCooldown('git_pull', GIT_PULL_COOLDOWN_MS);
+  if (cooldownMsg) {
+    await safeSend(ctx, chatJid, cooldownMsg);
+    return;
+  }
+
+  const root = resolveRoot();
+  const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
+
+  try {
+    // Fetch + check for new commits
+    execSync('git fetch origin', execOpts);
+    const countStr = execSync('git rev-list HEAD..origin/main --count', { ...execOpts, timeout: 5_000 }).trim();
+    const newCommits = parseInt(countStr, 10) || 0;
+
+    if (newCommits === 0) {
+      await safeSend(ctx, chatJid, '✅ git_pull: already up to date');
+      return;
+    }
+
+    // Stash, rebase, restore
+    let didStash = false;
+    try {
+      const stashOutput = execSync('git stash --include-untracked', execOpts).trim();
+      didStash = !stashOutput.includes('No local changes');
+    } catch (err) {
+      const detail = err instanceof Error ? (err as any).stderr?.toString() || '' : '';
+      if (!detail.includes('No local changes to save')) throw err;
+    }
+    try {
+      execSync('git rebase origin/main', execOpts);
+    } finally {
+      if (didStash) { try { execSync('git stash pop', execOpts); } catch { /* leave in stash */ } }
+    }
+
+    // Rebuild
+    const nodeBinDir = path.dirname(process.execPath);
+    execSync('npm run build', {
+      cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe',
+      env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` },
+    });
+
+    // Deploy dist files to all active bot instances
+    const distDir = path.join(root, 'dist');
+    if (fs.existsSync(distDir)) {
+      const jsFiles = fs.readdirSync(distDir).filter(f => f.endsWith('.js'));
+      for (const bot of getActiveBots()) {
+        const dstDir = path.join(root, '_runtime', 'instances', bot, 'dist');
+        for (const f of jsFiles) {
+          try { fs.copyFileSync(path.join(distDir, f), path.join(dstDir, f)); } catch { /* instance may not exist */ }
+        }
+      }
+    }
+
+    await safeSend(ctx, chatJid, `✅ git_pull: pulled ${newCommits} commit(s), rebuilt, deployed`);
+  } catch (err) {
+    logger.error({ err }, 'git_pull failed');
+    await safeSend(ctx, chatJid, `⛔ git_pull failed: ${errStr(err)}`);
+  }
+}
+
 // ── Holodeck handlers ────────────────────────────────────────────────────
 
 async function handleHolodeckCreate(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
@@ -991,6 +1057,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   health_check: handleHealthCheck,
   fleet_status: handleFleetStatus,
   git_push: handleGitPush,
+  git_pull: handleGitPull,
   holodeck_create: handleHolodeckCreate,
   holodeck_teardown: handleHolodeckTeardown,
   holodeck_promote: handleHolodeckPromote,

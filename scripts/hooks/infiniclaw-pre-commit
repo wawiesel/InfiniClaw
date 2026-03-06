@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# infiniclaw-managed
+# Pre-commit rules: blocked paths and role-based restrictions.
+set -euo pipefail
+
+staged=$(git diff --cached --name-only)
+
+# ── Blocked for everyone ──
+
+if echo "$staged" | grep -q '^dist/'; then
+  echo "ERROR: dist/ files staged for commit. Remove them with:"
+  echo "  git reset HEAD dist/"
+  exit 1
+fi
+
+if echo "$staged" | grep -q 'node_modules/'; then
+  echo "ERROR: node_modules/ files staged for commit."
+  exit 1
+fi
+
+# ── Role-based restrictions (ASSISTANT_ROLE set inside containers) ──
+
+# ── Role-based restrictions (ASSISTANT_ROLE set inside containers) ──
+
+role="${ASSISTANT_ROLE:-}"
+
+if [[ "$role" == "engineer" ]]; then
+  if echo "$staged" | grep -q '^docs/design/'; then
+    echo "ERROR: engineers cannot modify docs/design/"
+    exit 1
+  fi
+  if echo "$staged" | grep -q '^external/'; then
+    if [[ "${IS_CO:-}" != "true" ]]; then
+      echo "ERROR: only the CO engineer can modify external/"
+      exit 1
+    fi
+  fi
+fi

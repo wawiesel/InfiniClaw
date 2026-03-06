@@ -126,7 +126,8 @@ const GIT_VERSION = (() => {
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
-import { getActiveBots } from './service.js';
+import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
+import { loadFleet } from './machine-config.js';
 import { handleOperatorCommand, buildTodoMessage, readTodoItems } from './operator-commands.js';
 import { getSystemStatus } from './status.js';
 
@@ -156,15 +157,15 @@ let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
 
-// ── CO roster (initialized from crew-status.json at startup) ────────────
+// ── CO roster (initialized from fleet.json at startup, updated via lifecycle messages) ──
 const roomRoster: Record<string, Map<string, number>> = {};
 const roomCO: Record<string, string | undefined> = {};
 let matrixRef: MatrixChannel | null = null;
 
 /** Parse relay lifecycle messages to update CO roster at runtime. */
 function handleLifecycleMessage(msg: { content: string; chat_jid: string; sender: string }): boolean {
-  // Relay messages: "HOSTNAME: Name stopped" / "HOSTNAME: Name started (rank N)" / "HOSTNAME: Name restarted"
-  const match = msg.content.match(/^\S+: (\S+) (stopped|started|restarted)(?:\s+\(rank (\d+)\))?$/);
+  // Relay messages: "HOSTNAME: Name stopped" / "HOSTNAME: Name started (rank N)" / "HOSTNAME: Name restarted" / "HOSTNAME: Name reranked (rank N)"
+  const match = msg.content.match(/^\S+: (\S+) (stopped|started|restarted|reranked)(?:\s+\(rank (\d+)\))?$/);
   if (!match) return false;
   // Only process messages from intercom accounts (relay sends via intercom)
   if (!msg.sender.includes('-intercom')) return false;
@@ -176,7 +177,7 @@ function handleLifecycleMessage(msg: { content: string; chat_jid: string; sender
 
   if (action === 'stopped') {
     roomRoster[chatJid].delete(botName);
-  } else if (action === 'started') {
+  } else if (action === 'started' || action === 'reranked') {
     const rank = rankStr ? parseInt(rankStr, 10) : 99;
     roomRoster[chatJid].set(botName, rank);
   }
@@ -205,9 +206,11 @@ async function rerankCO(chatJid: string): Promise<void> {
 
   if (coBotName === ASSISTANT_NAME && previousCO !== ASSISTANT_NAME) {
     // This bot was promoted to CO
+    process.env.IS_CO = 'true';
     await matrixRef.setDisplayName(botDisplayName('⭐'));
   } else if (previousCO === ASSISTANT_NAME && coBotName !== ASSISTANT_NAME) {
     // This bot was demoted from CO
+    process.env.IS_CO = '';
     await matrixRef.setDisplayName(botDisplayName('🟢'));
   }
 }
@@ -1570,36 +1573,41 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Determine initial CO status from crew-status.json before connecting
+  // Determine initial CO status from fleet.json before connecting
   let initialBadge = '🟢';
   try {
-    const crewFile = path.join(DATA_DIR, 'crew-status.json');
-    if (fs.existsSync(crewFile)) {
-      const crewData = JSON.parse(fs.readFileSync(crewFile, 'utf-8'));
-      const roomNameToJid: Record<string, string> = {};
-      for (const [jid, group] of Object.entries(registeredGroups)) {
-        roomNameToJid[group.name.toLowerCase()] = jid;
+    const fleet = loadFleet();
+    const root = resolveRoot();
+    const roomNameToJid: Record<string, string> = {};
+    for (const [jid, group] of Object.entries(registeredGroups)) {
+      roomNameToJid[group.name.toLowerCase()] = jid;
+    }
+    // Build roster from active bots in fleet.json
+    for (const [botId, entry] of Object.entries(fleet)) {
+      if (!entry.active) continue;
+      const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
+      const room = (env?.MAIN_GROUP_NAME || '').toLowerCase();
+      const jid = roomNameToJid[room];
+      if (!jid) continue;
+      const name = env?.ASSISTANT_NAME || botId;
+      if (!roomRoster[jid]) roomRoster[jid] = new Map();
+      roomRoster[jid].set(name, entry.rank ?? 99);
+    }
+    // Determine CO for each room (lowest rank)
+    for (const [jid, roster] of Object.entries(roomRoster)) {
+      let coBotName: string | undefined;
+      let coRank = Infinity;
+      for (const [name, rank] of roster) {
+        if (rank < coRank) { coBotName = name; coRank = rank; }
       }
-      for (const member of crewData.crew || []) {
-        if (!member.present) continue;
-        const jid = roomNameToJid[member.room?.toLowerCase()];
-        if (!jid) continue;
-        if (!roomRoster[jid]) roomRoster[jid] = new Map();
-        roomRoster[jid].set(member.name, member.rank);
-      }
-      // Determine CO for each room
-      for (const [jid, roster] of Object.entries(roomRoster)) {
-        let coBotName: string | undefined;
-        let coRank = Infinity;
-        for (const [name, rank] of roster) {
-          if (rank < coRank) { coBotName = name; coRank = rank; }
-        }
-        roomCO[jid] = coBotName;
-        if (coBotName === ASSISTANT_NAME) initialBadge = '⭐';
+      roomCO[jid] = coBotName;
+      if (coBotName === ASSISTANT_NAME) {
+        initialBadge = '⭐';
+        process.env.IS_CO = 'true';
       }
     }
   } catch (err) {
-    logger.warn({ err }, 'Failed to read crew-status.json for initial CO badge');
+    logger.warn({ err }, 'Failed to read fleet.json for initial CO badge');
   }
 
   // Create Matrix channel

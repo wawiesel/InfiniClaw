@@ -6,7 +6,9 @@ Messages go to **rooms**, not to bots directly. Each room is a Matrix room mappe
 
 ## Machines and Presence
 
-Bots are distributed across machines. Each machine runs a subset of the fleet, configured in `~/.config/infiniclaw/machine.json`. Secrets are shared via a private git repo (`~/.config/infiniclaw/secrets/`).
+Bots are distributed across machines. Each machine runs a subset of the fleet, configured in fleet.json (`bots.<name>.machine`). Secrets are shared via a private git repo (`~/.config/infiniclaw/secrets/`).
+
+**Every machine runs a relay at all times**, even when deactivated. A deactivated machine (`active: false` in machines.json) keeps its relay running and listening for commands but does not start bots. This ensures all machines stay reachable — an operator can `!activate` a machine remotely at any time.
 
 Each machine writes its own presence file to `operator/presence/<hostname>.json` in the secrets repo at deploy time. All machines read all presence files to determine fleet-wide bot availability.
 

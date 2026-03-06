@@ -28,9 +28,11 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 
 A lightweight always-on process, one per machine (`src/relay.ts`). The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or intercom senders. It manages bot lifecycle by calling service functions directly.
 
-Each machine's relay only handles its local bots (determined by fleet.json). Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME` to determine which bots are affected.
+**The relay runs on every machine, always.** Even deactivated machines keep their relay running — they just don't start bots. This ensures every machine stays reachable for commands like `!activate`, `!fleet`, and `!health`. Deactivation (`!deactivate`) stops all bots but leaves the relay listening.
 
-Started automatically by `npm run cli start` and runs as pm2 process `infiniclaw-relay`.
+When a command arrives (e.g. `!restart cid`), every machine's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning machine acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
+
+Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay`.
 
 ### Auto-sync loops
 
@@ -49,6 +51,7 @@ Engineers can trigger system operations from inside their containers via IPC:
 | `rebuild_image` | Rebuild container image |
 | `health_check` | Run health check and return results |
 | `fleet_status` | Return fleet.json status |
+| `git_pull` | Pull InfiniClaw, rebuild, deploy to instances |
 | `git_push` | Push InfiniClaw repo |
 | `bot_status` | Get pm2 + error log status |
 | `send_to_room` | Send message to another room |

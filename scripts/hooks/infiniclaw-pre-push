@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# infiniclaw-managed
+# Pre-push hook: type-check and test before allowing push.
+# Caches result by commit hash to skip on immediate retry.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+CACHE_FILE="$REPO_ROOT/.git/pre-push-cache"
+CURRENT_HASH="$(git rev-parse HEAD)"
+CACHE_TTL=300  # 5 minutes
+
+# Skip if same commit was validated recently
+if [[ -f "$CACHE_FILE" ]]; then
+  cached_hash=$(sed -n '1p' "$CACHE_FILE")
+  cached_time=$(sed -n '2p' "$CACHE_FILE")
+  now=$(date +%s)
+  if [[ "$cached_hash" == "$CURRENT_HASH" && $(( now - cached_time )) -lt $CACHE_TTL ]]; then
+    echo "pre-push: skipping (validated ${cached_hash:0:7} $(( now - cached_time ))s ago)"
+    exit 0
+  fi
+fi
+
+echo "pre-push: type-checking nanoclaw..."
+npx tsc --noEmit -p external/nanoclaw/tsconfig.json
+
+echo "pre-push: type-checking InfiniClaw..."
+npx tsc --noEmit
+
+echo "pre-push: running tests..."
+npm test --if-present 2>&1
+
+# Cache successful validation
+printf '%s\n%s\n' "$CURRENT_HASH" "$(date +%s)" > "$CACHE_FILE"
+
+echo "pre-push: all checks passed"

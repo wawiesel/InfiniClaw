@@ -10,7 +10,7 @@ There are **3 layers** of communication, each serving a different purpose:
 
 ## 1. Relay
 
-A Node.js process (`src/relay.ts`) that runs alongside bots on each machine via pm2 as `infiniclaw-relay`. It long-polls Matrix `/sync` on all three room intercom accounts simultaneously.
+A Node.js process (`src/relay.ts`) that runs on **every machine** via pm2 as `infiniclaw-relay`. It long-polls Matrix `/sync` on all three room intercom accounts simultaneously. The relay runs at all times, even on deactivated machines — deactivation stops bots but keeps the relay listening.
 
 ### How it works
 
@@ -34,13 +34,13 @@ A Node.js process (`src/relay.ts`) that runs alongside bots on each machine via 
 | `!operator <text>` | Send text to tmux `operator` session |
 | `!allow <bot> <path> [min]` / `!deny <bot> <path>` | Mount grants |
 
-### Multi-machine awareness
+### Multi-machine fan-out
 
-When you say `!restart cid` in Engineering, *every* machine's relay sees it. Each checks if `cid` is assigned to this machine in fleet.json. Only the machine that owns `cid` acts — others silently ignore.
+Every `!` command is broadcast to all machines. When you say `!restart cid` in Engineering, every machine's relay sees it. Each checks if `cid` is local (via fleet.json). Only the owning machine acts — the rest silently ignore. This works because all relays connect to the same intercom accounts.
 
 ### Authorization
 
-Only the Captain (`CAPTAIN_USER_ID` from bot env) and intercom accounts (`/-intercom:/` sender pattern) can issue commands.
+Only the Captain (`CAPTAIN_USER_ID` from bot env) and intercom accounts (`/-intercom:/` sender pattern) can issue commands. Operators send commands via `intercom-send.sh`, which uses the same intercom accounts the relays poll — so operator commands are inherently authorized.
 
 ### Replies
 
@@ -48,17 +48,23 @@ Relay replies via the same intercom account. All replies are prefixed with `HOST
 
 ## 2. Intercom
 
-Two systems using the same intercom Matrix accounts:
+Intercom accounts are **write-only broadcast channels** — not user identities. Three uses:
 
-### a) Operator → Bot (shell script)
+### a) Operator → Bots and Relays
 
 ```bash
 bash operator/intercom-send.sh <room> "<message>"
 ```
 
-### b) Bot → Bot cross-room
+This is how operators on each machine communicate with bots and issue `!` commands across the fleet. Operators do not have their own Matrix accounts — they operate exclusively through intercom.
+
+### b) Bot → Bot cross-room (CO only)
 
 Bots can `send_message()` with a recipient in another room. The host routes it through the intercom relay.
+
+### c) Relay → Room (replies)
+
+Relays respond to commands via the same intercom account, prefixed with `HOSTNAME:`.
 
 ## 3. Operator (tmux session)
 
