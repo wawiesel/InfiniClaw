@@ -1287,77 +1287,110 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     return;
   }
 
-  // !fleet [room] — show fleet status (each machine reports only its local bots)
+  // !fleet [room] — show fleet status (each ship reports its local bots + ship info)
   if (cmd === '!fleet' || cmd === '!fleet room') {
     const roomOnly = cmd === '!fleet room';
     try {
       const fleet = liveFleet;
-      // Check real pm2 state on this machine
+      const root = resolveRoot();
+      const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
+
+      // Check real pm2 state
       let pm2Procs: Array<{ name: string; pm2_env?: { status?: string } }> = [];
       try {
-        const out = execSync('npx pm2 jlist 2>/dev/null', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
-        pm2Procs = JSON.parse(out);
+        pm2Procs = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', { ...execOpts, cwd: root }));
       } catch { /* empty */ }
-      // Check real container state on this machine
-      let runningContainers = new Set<string>();
+
+      // Check real container state
+      const runningContainers = new Set<string>();
       try {
-        const out = execSync('podman ps --format "{{.Names}}" 2>/dev/null', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
-        for (const line of out.trim().split('\n')) {
+        for (const line of execSync('podman ps --format "{{.Names}}"', execOpts).trim().split('\n')) {
           const match = line.match(/^nanoclaw-([^-]+)-/);
           if (match) runningContainers.add(match[1]);
         }
       } catch { /* empty */ }
 
       const botRooms = buildBotRoomMap();
-
-      // Only show bots assigned to this machine
       const botEntries = Object.entries(fleet).filter(([name, entry]) => {
         if (entry.machine !== HOSTNAME) return false;
         if (roomOnly) return botRooms[name] === conn.name;
         return true;
       });
 
-      if (botEntries.length === 0) return; // no local bots — stay silent
-
-      // Real status + mismatch detection
+      // Always reply (even with 0 bots) so ship info is shown
       const warnings: string[] = [];
-      function botStatus(name: string, entry: { status: BotStatus }): string {
-        const pm2 = pm2Procs.find((p) => p.name === `infiniclaw-${name}`);
+
+      // Activity indicator: container running = working, pm2 only = idle
+      function botLine(botId: string, entry: FleetEntry): string {
+        const pm2 = pm2Procs.find((p) => p.name === `infiniclaw-${botId}`);
         const pm2Online = pm2?.pm2_env?.status === 'online';
-        const hasContainer = runningContainers.has(name);
+        const hasContainer = runningContainers.has(botId);
         const running = pm2Online || hasContainer;
+
+        // Mismatch detection
         if (entry.status === 'active' && !running) {
-          warnings.push(`⚠️ ${name}: fleet says active but not running — restarting`);
-          try { bootstrapBot(resolveRoot(), name); } catch { /* best effort */ }
+          warnings.push(`⚠️ ${botId}: active but not running — restarting`);
+          try { bootstrapBot(root, botId); } catch { /* best effort */ }
         } else if (entry.status !== 'active' && running) {
-          warnings.push(`⚠️ ${name}: fleet says ${entry.status} but running — stopping`);
-          try { stopBot(name); killStaleContainers(name); } catch { /* best effort */ }
+          warnings.push(`⚠️ ${botId}: ${entry.status} but running — stopping`);
+          try { stopBot(botId); killStaleContainers(botId); } catch { /* best effort */ }
         }
-        if (entry.status === 'transit') return 'TRN';
-        if (entry.status === 'dismissed') return 'DIS';
-        if (pm2Online && hasContainer) return 'ON ';
-        if (pm2Online) return 'PM2';
-        if (hasContainer) return 'CTR';
-        return 'OFF';
+
+        // Activity: 🔴 off, 🟡 idle (pm2 up, no container), 🟢 working (container running)
+        let activity = '🔴';
+        if (entry.status === 'transit') activity = '🚀';
+        else if (hasContainer) activity = '🟢';
+        else if (pm2Online) activity = '🟡';
+
+        const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
+        const name = env?.ASSISTANT_NAME || botId;
+
+        // Get the SHA the bot instance is running
+        let sha = '';
+        try {
+          const distMain = path.join(root, '_runtime', 'instances', botId, 'dist', 'main.js');
+          if (fs.existsSync(distMain)) {
+            const stat = fs.statSync(distMain);
+            const age = Math.round((Date.now() - stat.mtimeMs) / 60_000);
+            // Find the commit that was current when dist was deployed
+            const commitSha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+            sha = `${commitSha} (${age}m ago)`;
+          }
+        } catch { /* best effort */ }
+
+        return `  ${activity} ${name} — ${entry.role} #${entry.rank} ${entry.status}${sha ? ` | ${sha}` : ''}`;
       }
 
-      // Group by role
-      const byRole: Record<string, typeof botEntries> = {};
-      for (const entry of botEntries) {
-        const role = entry[1].role;
-        if (!byRole[role]) byRole[role] = [];
-        byRole[role].push(entry);
-      }
-      const machineActive = isMachineActive();
+      // Ship header
       const machineRank = (() => { try { return loadMachines()[HOSTNAME]?.rank ?? '?'; } catch { return '?'; } })();
-      const lines: string[] = [`**${HOSTNAME}** #${machineRank} (${machineActive ? 'active' : 'deactivated'})`];
-      for (const [role, bots] of Object.entries(byRole)) {
-        lines.push(`  ${role}:`);
-        for (const [name, entry] of bots.sort((a, b) => a[1].rank - b[1].rank)) {
-          const status = botStatus(name, entry);
-          lines.push(`    ${status} #${entry.rank} ${name}`);
+      const machineActive = isMachineActive();
+      const lines: string[] = [`**${HOSTNAME}** #${machineRank} (${machineActive ? 'commissioned' : 'decommissioned'})`];
+
+      // Bots
+      if (botEntries.length > 0) {
+        for (const [botId, entry] of botEntries.sort((a, b) => a[1].rank - b[1].rank)) {
+          lines.push(botLine(botId, entry));
         }
+      } else {
+        lines.push('  (no bots assigned)');
       }
+
+      // Ship systems — one compact line
+      const relayPm2 = pm2Procs.find(p => p.name === 'infiniclaw-relay');
+      const helmIcon = relayPm2?.pm2_env?.status === 'online' ? '🟢' : '🔴';
+
+      const repoStatus = (cwd: string): string => {
+        try {
+          const sha = execSync('git rev-parse --short HEAD', { cwd, ...execOpts }).trim();
+          const dirty = execSync('git status --porcelain', { cwd, ...execOpts }).trim();
+          const behind = execSync('git rev-list HEAD..origin/main --count 2>/dev/null || echo ?', { cwd, ...execOpts }).trim();
+          return `${sha}${dirty ? '*' : ''}${behind !== '0' && behind !== '?' ? ` ↓${behind}` : ''}`;
+        } catch { return '?'; }
+      };
+
+      lines.push(`${helmIcon} helm | ic:${repoStatus(root)} | secrets:${repoStatus(secretsRepoPath())}`);
+
+
       if (warnings.length) lines.push('', ...warnings);
       await reply(conn, lines.join('\n'));
     } catch (err) {
