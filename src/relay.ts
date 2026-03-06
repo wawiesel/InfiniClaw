@@ -545,6 +545,12 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
       // Rebase
       const output = execSync('git rebase origin/main', execOpts).trim();
       return { ok: true, output, newCommits };
+    } catch (rebaseErr) {
+      // Origin is authoritative — abort and reset to origin/main
+      log(`git sync: rebase conflict, resetting to origin/main`);
+      try { execSync('git rebase --abort', execOpts); } catch { /* ignore */ }
+      execSync('git reset --hard origin/main', execOpts);
+      return { ok: true, output: 'reset to origin/main (rebase conflict auto-resolved)', newCommits };
     } finally {
       // Restore stashed changes
       if (didStash) {
