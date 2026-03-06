@@ -105,6 +105,25 @@ function persistFleet(): void {
   }
 }
 
+// ── Rank swap (shared by bots and machines) ──────────────────────
+
+/** Swap rank of target with its neighbor. Mutates entries in place. Returns null if at boundary. */
+function rankSwap<T extends { rank: number }>(
+  entries: [string, T][],
+  target: string,
+  direction: 'up' | 'down',
+): { target: string; swap: string; targetRank: number; swapRank: number } | null {
+  const sorted = [...entries].sort((a, b) => a[1].rank - b[1].rank);
+  const idx = sorted.findIndex(([name]) => name === target);
+  if (idx < 0) return null;
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= sorted.length) return null;
+  const oldRank = sorted[idx][1].rank;
+  sorted[idx][1].rank = sorted[swapIdx][1].rank;
+  sorted[swapIdx][1].rank = oldRank;
+  return { target, swap: sorted[swapIdx][0], targetRank: sorted[idx][1].rank, swapRank: sorted[swapIdx][1].rank };
+}
+
 function loadIntercomConfig(): IntercomConfig {
   const config = loadMachineConfig();
   const configPath = path.join(config.secretsPath, 'operator', 'intercom.json');
@@ -1200,44 +1219,56 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     return;
   }
 
-  // !promote <bot> — swap rank with the bot above (lower rank number = higher priority)
-  // !demote <bot> — swap rank with the bot below
+  // !promote <target> / !demote <target> — swap rank with neighbor (works for bots and machines)
   if (cmd.startsWith('!promote ') || cmd.startsWith('!demote ')) {
     const isPromote = cmd.startsWith('!promote');
-    const bot = cmd.slice(isPromote ? '!promote '.length : '!demote '.length).trim();
-    // Only the machine that owns the target bot handles the rank swap.
-    // Other machines get rerank via Matrix lifecycle messages.
-    const local = getActiveBots();
-    if (!local.includes(bot)) return;
-    if (!liveFleet[bot]) { await reply(conn, `Unknown bot: ${bot}`); return; }
-    const role = liveFleet[bot].role;
-    const sameRole = Object.entries(liveFleet)
-      .filter(([_, b]) => b.role === role)
-      .sort((a, b) => a[1].rank - b[1].rank);
-    const idx = sameRole.findIndex(([name]) => name === bot);
-    const swapIdx = isPromote ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= sameRole.length) {
-      await reply(conn, `${bot} is already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
+    const direction = isPromote ? 'up' : 'down';
+    const target = cmd.slice(isPromote ? '!promote '.length : '!demote '.length).trim();
+
+    // Check if target is a machine
+    const machines = (() => { try { return loadMachines(); } catch { return null; } })();
+    if (machines && machines[target]) {
+      // Machine rerank — only the speaker handles it to avoid duplicate writes
+      if (!isSpeaker()) return;
+      const result = rankSwap(Object.entries(machines), target, direction);
+      if (!result) {
+        await reply(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank machine`);
+        return;
+      }
+      writeMachines(machines);
+      secretsGitCommit(['operator/machines.json'], `rerank machines: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
+      await reply(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank}`);
       return;
     }
-    const [swapName] = sameRole[swapIdx];
-    const oldRank = liveFleet[bot].rank;
-    fleetUpdate(bot, { rank: liveFleet[swapName].rank });
-    fleetUpdate(swapName, { rank: oldRank });
-    await reply(conn, `${bot} now rank ${liveFleet[bot].rank}, ${swapName} now rank ${liveFleet[swapName].rank} (in ${role})`);
+
+    // Bot rerank — only the machine that owns the target bot handles it
+    const local = getActiveBots();
+    if (!local.includes(target)) return;
+    if (!liveFleet[target]) { await reply(conn, `Unknown: ${target}`); return; }
+    const role = liveFleet[target].role;
+    const sameRole = Object.entries(liveFleet).filter(([_, b]) => b.role === role);
+    const result = rankSwap(sameRole, target, direction);
+    if (!result) {
+      await reply(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
+      return;
+    }
+    // Apply to liveFleet (rankSwap mutated the filtered copies, not liveFleet directly)
+    fleetUpdate(result.target, { rank: result.targetRank });
+    fleetUpdate(result.swap, { rank: result.swapRank });
+    await reply(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank} (in ${role})`);
 
     // Send rerank lifecycle messages so bots update CO instantly
     const root = resolveRoot();
-    const botEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-    const swapEnv = (() => { try { return loadProfileEnv(root, swapName); } catch { return null; } })();
-    const botDisplayName = botEnv?.ASSISTANT_NAME || bot;
-    const swapDisplayName = swapEnv?.ASSISTANT_NAME || swapName;
+    const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
+    const swapEnv = (() => { try { return loadProfileEnv(root, result.swap); } catch { return null; } })();
+    const botDisplayName = botEnv?.ASSISTANT_NAME || target;
+    const swapDisplayName = swapEnv?.ASSISTANT_NAME || result.swap;
     const botRoom = (botEnv?.MAIN_GROUP_NAME || '').toLowerCase();
 
     const targetConn = (allConns || []).find(c => c.name === botRoom) || conn;
     if (targetConn.accessToken) {
-      await reply(targetConn, `${HOSTNAME}: ${botDisplayName} reranked (rank ${liveFleet[bot].rank})`);
-      await reply(targetConn, `${HOSTNAME}: ${swapDisplayName} reranked (rank ${liveFleet[swapName].rank})`);
+      await reply(targetConn, `${HOSTNAME}: ${botDisplayName} reranked (rank ${result.targetRank})`);
+      await reply(targetConn, `${HOSTNAME}: ${swapDisplayName} reranked (rank ${result.swapRank})`);
     }
     return;
   }

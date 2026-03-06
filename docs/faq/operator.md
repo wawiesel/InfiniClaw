@@ -27,7 +27,7 @@ A Node.js process (`src/relay.ts`) that runs on **every machine** via pm2 as `in
 | `!dismiss <bot>` | Stop bot, update fleet.json |
 | `!restart <bot>` | Stop + deploy + start (full redeploy) |
 | `!transport <bot> <machine>` | Two-phase bot migration |
-| `!promote <bot>` / `!demote <bot>` | Swap rank within role |
+| `!promote <target>` / `!demote <target>` | Swap rank (bot within role, or machine) |
 | `!fleet` / `!fleet room` | Fleet status with real state check |
 | `!health` | Fleet health summary via S3 |
 | `!activate [machine]` / `!deactivate [machine]` | Machine lifecycle (no arg = all) |

@@ -12,8 +12,8 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 | `!join <bot>` | Start bot, update fleet.json. |
 | `!restart <bot>` | Full stop + redeploy + start. |
 | `!transport <bot> <machine>` | Move bot to another machine (two-phase). |
-| `!promote <bot>` | Raise rank within role. |
-| `!demote <bot>` | Lower rank within role. |
+| `!promote <target>` | Raise rank (bot within role, or machine). |
+| `!demote <target>` | Lower rank (bot within role, or machine). |
 | `!fleet` | Full fleet + machine status with real running state. |
 | `!fleet room` | Bots in this room only. |
 | `!health` | Fleet health summary from S3. |
