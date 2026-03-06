@@ -1389,7 +1389,7 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
           }
         } catch { /* best effort */ }
 
-        return `  ${activity} ${name} — ${entry.role} #${entry.rank} ${entry.status}${sha ? ` | ${sha}` : ''}`;
+        return `  ${activity} ${name} — ${entry.role} #${entry.rank} ${entry.status}${sha ? ` · ${sha}` : ''}`;
       }
 
       // Ship header
@@ -1419,7 +1419,7 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
         } catch { return '?'; }
       };
 
-      lines.push(`${helmIcon} helm | ic:${repoStatus(root)} | secrets:${repoStatus(secretsRepoPath())}`);
+      lines.push(`${helmIcon} helm · ic:${repoStatus(root)} · secrets:${repoStatus(secretsRepoPath())}`);
 
 
       if (warnings.length) lines.push('', ...warnings);
