@@ -83,6 +83,27 @@ export async function uploadContent(key: string, content: string): Promise<void>
   await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: content }));
 }
 
+/** Returns the public HTTP URL for an S3 key, or null if S3 not configured. */
+export function getPublicS3Url(key: string): string | null {
+  const config = loadMachineConfig();
+  if (!config.s3) return null;
+  const { endpoint, bucket } = config.s3;
+  const base = endpoint.replace(/\/$/, '');
+  return `${base}/${bucket}/${key}`;
+}
+
+/** Upload HTML content with text/html content-type. */
+export async function uploadHtml(key: string, html: string): Promise<void> {
+  const s3 = getClient();
+  if (!s3) return;
+  await s3.client.send(new PutObjectCommand({
+    Bucket: s3.bucket,
+    Key: key,
+    Body: html,
+    ContentType: 'text/html; charset=utf-8',
+  }));
+}
+
 async function downloadFile(client: S3Client, bucket: string, key: string, filePath: string): Promise<void> {
   const resp = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   if (!resp.Body) return;

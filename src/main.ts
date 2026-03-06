@@ -100,7 +100,7 @@ import { shouldIgnoreMessage } from './message-filtering.js';
 import { appendConversationLog } from './conversation-log.js';
 import { statusMessage } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
-import { uploadContent } from './s3-sync.js';
+import { uploadContent, uploadHtml, getPublicS3Url } from './s3-sync.js';
 import { exportHistoryToS3 } from './history-export.js';
 
 // ── Git version info (resolved once at module load) ────────────────────────
@@ -343,14 +343,88 @@ function normalizeInboundMessage(msg: NewMessage): NewMessage | null {
   };
 }
 
-/** Compact single-line breadcrumb for a tool call. Full content uploaded to S3 async. */
-function toolCallBreadcrumb(text: string): { html: string; s3Key: string } {
+/** Build a standalone HTML page for a tool call, with surrounding conversation context. */
+function generateToolCallPage(opts: {
+  toolCallHtml: string;
+  botName: string;
+  groupName: string;
+  timestamp: number;
+  contextMessages: import('nanoclaw/types.js').NewMessage[];
+}): string {
+  const { toolCallHtml, botName, groupName, timestamp, contextMessages } = opts;
+  const dateStr = new Date(timestamp).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+
+  const msgHtml = contextMessages.map((m) => {
+    const isBot = m.is_from_me || m.is_bot_message;
+    const sender = esc(m.sender_name || m.sender);
+    const ts = new Date(m.timestamp).toISOString().slice(11, 19);
+    const content = esc(m.content || '').replace(/\n/g, '<br>');
+    return `<div class="msg ${isBot ? 'bot' : 'human'}">
+      <span class="meta">${sender} <span class="ts">${ts}</span></span>
+      <div class="body">${content}</div>
+    </div>`;
+  }).join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tool call - ${esc(botName)} - ${esc(groupName)}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#c9d1d9;font-family:ui-monospace,monospace;font-size:13px;line-height:1.6;padding:16px}
+h1{font-size:15px;color:#58a6ff;margin-bottom:4px}
+.meta-bar{color:#6e7681;font-size:11px;margin-bottom:16px;border-bottom:1px solid #21262d;padding-bottom:8px}
+.section-label{color:#6e7681;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:16px 0 8px}
+.msg{padding:6px 10px;margin-bottom:4px;border-radius:4px;border-left:3px solid transparent}
+.msg.human{border-left-color:#388bfd;background:#161b22}
+.msg.bot{border-left-color:#3fb950;background:#0d1117}
+.msg .meta{color:#6e7681;font-size:11px}
+.msg .ts{color:#484f58}
+.msg .body{margin-top:2px;white-space:pre-wrap;word-break:break-word}
+.tool-call-block{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:12px;margin-top:8px;overflow-x:auto}
+.tool-call-block details{margin-bottom:8px}
+.tool-call-block summary{cursor:pointer;color:#e6edf3;font-weight:600;padding:4px 0}
+.tool-call-block summary:hover{color:#58a6ff}
+pre{background:#0d1117;border:1px solid #21262d;border-radius:4px;padding:10px;overflow-x:auto;font-size:12px}
+code{font-family:inherit}
+</style>
+</head>
+<body>
+<h1>🔧 Tool call - ${esc(botName)}</h1>
+<div class="meta-bar">${esc(groupName)} &middot; ${esc(dateStr)}</div>
+${contextMessages.length > 0 ? `<div class="section-label">Recent context</div>
+<div class="context">${msgHtml}</div>` : ''}
+<div class="section-label">Tool call</div>
+<div class="tool-call-block">${toolCallHtml}</div>
+</body>
+</html>`;
+}
+
+/** Compact single-line breadcrumb for a tool call. Full HTML page uploaded to S3 async. */
+function toolCallBreadcrumb(
+  text: string,
+  contextMessages: import('nanoclaw/types.js').NewMessage[],
+  groupName: string,
+): { html: string; s3Key: string; pageHtml: string } {
   const hash = crypto.createHash('sha1').update(text).digest('hex').slice(0, 7);
   const titleMatch = text.match(/🔧\s*([^<]{1,60})/);
   const title = titleMatch ? titleMatch[1].trim() : 'Tool call';
   const s3Key = `tool-calls/${ASSISTANT_NAME}/${Date.now()}-${hash}.html`;
-  const html = `<font color="#888888">🔧 <em>${esc(title)}</em> · <code>${hash}</code></font>`;
-  return { html, s3Key };
+  const url = getPublicS3Url(s3Key);
+  const hashEl = url
+    ? `<a href="${url}"><code>${hash}</code></a>`
+    : `<code>${hash}</code>`;
+  const html = `<font color="#888888">🔧 <em>${esc(title)}</em> · ${hashEl}</font>`;
+  const pageHtml = generateToolCallPage({
+    toolCallHtml: text,
+    botName: ASSISTANT_NAME,
+    groupName,
+    timestamp: Date.now(),
+    contextMessages,
+  });
+  return { html, s3Key, pageHtml };
 }
 
 const esc = (s: string): string =>
@@ -697,9 +771,15 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
   const isToolCall = text.includes('<details>');
   let toolCallHtml = '';
   if (isToolCall) {
-    const bc = toolCallBreadcrumb(text);
+    const group = registeredGroups[ctx.chatJid];
+    const groupName = group?.name ?? ctx.chatJid;
+    const threadId = activeReplyThreadIds[ctx.chatJid];
+    const contextMessages = threadId
+      ? getThreadMessages(ctx.chatJid, threadId, 20)
+      : getRecentMessages(ctx.chatJid, ASSISTANT_NAME, 10).reverse();
+    const bc = toolCallBreadcrumb(text, contextMessages, groupName);
     toolCallHtml = bc.html;
-    void uploadContent(bc.s3Key, text).catch((err) => {
+    void uploadHtml(bc.s3Key, bc.pageHtml).catch((err) => {
       logger.warn({ err }, 'Failed to upload tool call to S3');
     });
   }
