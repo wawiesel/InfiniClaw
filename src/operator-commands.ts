@@ -178,6 +178,25 @@ export function handleOperatorCommand(
         return true;
     }
 
+    // ! (bare) — print operator command help
+    if (cmd === '!') {
+        const help = [
+            '📟 Operator commands:',
+            '  !todo [bot]               — show bot\'s active tasks',
+            '  !roster                   — list bots on this machine',
+            '  !dismiss <bot>            — stop a bot',
+            '  !join <bot>               — start a bot',
+            '  !restart <bot>            — restart a bot',
+            '  !allow <bot> <path> [min] — grant rw mount (authorized)',
+            '  !deny <bot> <path>        — revoke rw mount (authorized)',
+            '  !operator <cmd>           — supervisor operator commands',
+            '  !health                   — fleet health summary (Parker)',
+            '  !                         — this help',
+        ].join('\n');
+        reply(matrix, msg.chat_jid, help, msg.thread_id);
+        return true;
+    }
+
     return false;
 }
 
