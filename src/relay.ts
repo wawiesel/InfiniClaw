@@ -1280,6 +1280,9 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     // Apply to liveFleet (rankSwap mutated the filtered copies, not liveFleet directly)
     fleetUpdate(result.target, { rank: result.targetRank });
     fleetUpdate(result.swap, { rank: result.swapRank });
+    writeFleet(liveFleet);
+    secretsGitCommit(['bots/fleet.json'], `rerank ${role}: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
+    fleetDirty = false;
     await reply(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank} (in ${role})`);
 
     // Send rerank lifecycle messages so bots update CO instantly
