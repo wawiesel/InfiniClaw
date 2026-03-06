@@ -571,6 +571,22 @@ async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): 
 }
 
 
+async function handleRestartRelay(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'restart_relay')) return;
+  const chatJid = parseChatJid(data);
+  logger.info('restart_relay requested via IPC');
+  try {
+    const root = resolveRoot();
+    if (chatJid) await ctx.sendMessage(chatJid, '🔄 Restarting relay...');
+    execSync('npx pm2 restart infiniclaw-relay', { cwd: root, encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
+    logger.info('restart_relay succeeded');
+    if (chatJid) await ctx.sendMessage(chatJid, '✅ Relay restarted');
+  } catch (err) {
+    logger.error({ err }, 'restart_relay failed');
+    if (chatJid) await ctx.sendMessage(chatJid, `⛔ restart_relay failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   if (requireMain(ctx, 'git_push')) return;
   const chatJid = parseChatJid(data);
@@ -1051,6 +1067,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_thread: handleSetThread,
   send_to_room: handleSendToRoom,
   restart_wksm: handleRestartWksm,
+  restart_relay: handleRestartRelay,
   request_verification: handleRequestVerification,
   submit_verification: handleSubmitVerification,
 
