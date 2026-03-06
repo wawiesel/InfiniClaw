@@ -1,7 +1,8 @@
 /**
  * Machine configuration.
- * Reads ~/.config/infiniclaw/machine.json to determine which bots run on this machine,
- * where secrets are stored, and optional S3 sync settings.
+ * Reads fleet.json from the secrets repo (~/.config/infiniclaw/secrets/bots/fleet.json)
+ * to determine which bots run on this machine, S3 settings, and per-machine options.
+ * No machine.json needed — secretsPath is by convention ~/.config/infiniclaw/secrets.
  */
 import fs from 'fs';
 import os from 'os';
@@ -14,14 +15,23 @@ export interface S3Config {
   secretKey: string;
 }
 
+export interface BotEntry {
+  role: string;
+  rank: number;
+  machine: string | null;
+  active: boolean;
+  title?: string;
+}
+
 export interface MachineConfig {
   bots: string[];
   secretsPath: string;
   s3?: S3Config;
-  containerNetwork?: string; // e.g. "host" — passed as --network to podman run
 }
 
-const CONFIG_PATH = path.join(os.homedir(), '.config', 'infiniclaw', 'machine.json');
+const SECRETS_PATH = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets');
+const FLEET_PATH = path.join(SECRETS_PATH, 'bots', 'fleet.json');
+const MACHINES_PATH = path.join(SECRETS_PATH, 'operator', 'machines.json');
 const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 let cached: MachineConfig | null = null;
@@ -41,77 +51,54 @@ function isValidBotName(name: string): boolean {
 export function loadMachineConfig(): MachineConfig {
   if (cached) return cached;
 
-  if (!fs.existsSync(CONFIG_PATH)) {
+  if (!fs.existsSync(FLEET_PATH)) {
     throw new Error(
-      `Missing machine config: ${CONFIG_PATH}\n` +
-      'Create it with at minimum:\n' +
-      '{\n  "bots": ["bot1", "bot2"],\n  "secretsPath": "/path/to/secrets"\n}',
+      `Missing fleet config: ${FLEET_PATH}\n` +
+      'Clone the secrets repo to ~/.config/infiniclaw/secrets',
     );
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    parsed = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
   } catch (err) {
-    throw new Error(`machine.json: invalid JSON in ${CONFIG_PATH}: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`fleet.json: invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!isRecord(parsed)) {
-    throw new Error('machine.json: top-level JSON must be an object');
+    throw new Error('fleet.json: top-level JSON must be an object');
   }
   const raw = parsed;
 
-  if (!Array.isArray(raw.bots) || raw.bots.length === 0) {
-    throw new Error(`machine.json: "bots" must be a non-empty array`);
+  // Resolve bots assigned to this machine
+  const hostname = os.hostname();
+  if (!isRecord(raw.bots)) {
+    throw new Error('fleet.json: "bots" must be an object');
   }
-  const bots = raw.bots.map((value, i) => {
-    if (!isNonEmptyString(value)) {
-      throw new Error(`machine.json: bots[${i}] must be a non-empty string`);
+  const bots: string[] = [];
+  for (const [name, entry] of Object.entries(raw.bots)) {
+    if (!isRecord(entry)) continue;
+    if (!isValidBotName(name)) {
+      throw new Error(`fleet.json: invalid bot name "${name}"`);
     }
-    const bot = value.trim();
-    if (!isValidBotName(bot)) {
-      throw new Error(`machine.json: invalid bot name "${bot}"`);
+    if (entry.machine === hostname && entry.active === true) {
+      bots.push(name);
     }
-    return bot;
-  });
-  if (new Set(bots).size !== bots.length) {
-    throw new Error('machine.json: "bots" must not contain duplicates');
-  }
-
-  if (!isNonEmptyString(raw.secretsPath)) {
-    throw new Error(`machine.json: "secretsPath" must be a non-empty string`);
-  }
-  const secretsPath = path.resolve(raw.secretsPath.trim());
-  if (!path.isAbsolute(secretsPath)) {
-    throw new Error('machine.json: "secretsPath" must be an absolute path');
-  }
-  if (!fs.existsSync(secretsPath)) {
-    throw new Error(`machine.json: secretsPath does not exist: ${secretsPath}`);
-  }
-  const secretsStat = fs.statSync(secretsPath);
-  if (!secretsStat.isDirectory()) {
-    throw new Error(`machine.json: secretsPath must be a directory: ${secretsPath}`);
   }
 
   const config: MachineConfig = {
     bots,
-    secretsPath,
+    secretsPath: SECRETS_PATH,
   };
 
-  if (typeof raw.containerNetwork === 'string') {
-    if (!/^[a-z][a-z0-9_-]*$/i.test(raw.containerNetwork)) {
-      throw new Error(`machine.json: "containerNetwork" must be a valid network name (got "${raw.containerNetwork}")`);
-    }
-    config.containerNetwork = raw.containerNetwork;
-  }
-
+  // S3 config
   if (raw.s3) {
     if (!isRecord(raw.s3)) {
-      throw new Error('machine.json: "s3" must be an object');
+      throw new Error('fleet.json: "s3" must be an object');
     }
     const s3 = raw.s3;
     if (!isNonEmptyString(s3.endpoint) || !isNonEmptyString(s3.bucket) ||
         !isNonEmptyString(s3.accessKey) || !isNonEmptyString(s3.secretKey)) {
-      throw new Error('machine.json: "s3" requires endpoint, bucket, accessKey, secretKey');
+      throw new Error('fleet.json: "s3" requires endpoint, bucket, accessKey, secretKey');
     }
     config.s3 = {
       endpoint: s3.endpoint.trim(),
@@ -123,6 +110,52 @@ export function loadMachineConfig(): MachineConfig {
 
   cached = config;
   return config;
+}
+
+/** Path to the bots subdirectory inside secretsPath. */
+export function botsPath(): string {
+  return path.join(loadMachineConfig().secretsPath, 'bots');
+}
+
+/** Load the full fleet config (all bots, not just this machine's). */
+export function loadFleet(): Record<string, BotEntry> {
+  const raw = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
+  return raw.bots || {};
+}
+
+/** Write updated fleet config back to disk. */
+export function writeFleet(fleet: Record<string, BotEntry>): void {
+  const raw = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
+  raw.bots = fleet;
+  fs.writeFileSync(FLEET_PATH, JSON.stringify(raw, null, 2) + '\n');
+}
+
+export interface MachineEntry {
+  ip: string | null;
+  os: string;
+  user: string | null;
+  active: boolean;
+}
+
+/** Load all machines from operator/machines.json. */
+export function loadMachines(): Record<string, MachineEntry> {
+  return JSON.parse(fs.readFileSync(MACHINES_PATH, 'utf-8'));
+}
+
+/** Write updated machines config back to disk. */
+export function writeMachines(machines: Record<string, MachineEntry>): void {
+  fs.writeFileSync(MACHINES_PATH, JSON.stringify(machines, null, 2) + '\n');
+}
+
+/** Check if this machine is active. */
+export function isMachineActive(): boolean {
+  try {
+    const machines = loadMachines();
+    const hostname = os.hostname();
+    return machines[hostname]?.active !== false;
+  } catch {
+    return true; // default to active if machines.json missing
+  }
 }
 
 /** Clear cached config (for testing or reload). */

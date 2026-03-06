@@ -35,7 +35,7 @@ const SAFE_GROUP_FOLDER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 export function buildBotDirectory(): Record<string, string> {
   let profilesDir: string;
   try {
-    profilesDir = loadMachineConfig().secretsPath;
+    profilesDir = path.join(loadMachineConfig().secretsPath, 'bots');
   } catch {
     return {};
   }
@@ -158,7 +158,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
     // Mount memory from secrets repo
     try {
       const config = loadMachineConfig();
-      const secretsBase = normalizeBasePath(config.secretsPath);
+      const secretsBase = normalizeBasePath(path.join(config.secretsPath, 'bots'));
       const memoryDir = resolveWithinBase(secretsBase, personaName, 'memory');
       fs.mkdirSync(memoryDir, { recursive: true });
       const realMemoryDir = fs.realpathSync(memoryDir);

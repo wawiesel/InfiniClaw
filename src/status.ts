@@ -325,7 +325,7 @@ function getTokenUsage(instanceDir: string, mainGroupFolder: string): TokenUsage
 function getBrainConfig(_rootDir: string, bot: string): { model?: string; provider?: string } {
   let envPath: string;
   try {
-    envPath = path.join(loadMachineConfig().secretsPath, bot, 'env');
+    envPath = path.join(loadMachineConfig().secretsPath, 'bots', bot, 'env');
   } catch {
     return {};
   }

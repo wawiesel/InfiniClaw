@@ -23,7 +23,6 @@ import {
   mapCertPathSecretsToContainer,
 } from './container-secrets.js';
 import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
-import { loadMachineConfig } from './machine-config.js';
 
 import {
   CONTAINER_IMAGE,
@@ -223,12 +222,6 @@ function buildContainerArgs(
 
   args.push('--pull=never');
 
-  // Machine-level network override (e.g. "host" for machines with port 443 forwarding)
-  try {
-    const mc = loadMachineConfig();
-    if (mc.containerNetwork) args.push('--network', mc.containerNetwork);
-  } catch { /* machine.json not required for this */ }
-
   const hostUid = process.getuid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--userns=keep-id', '-e', 'HOME=/home/node');
@@ -343,16 +336,6 @@ export async function runContainerAgent(
   const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
   const roleDir = rootDir && role ? path.join(rootDir, 'bots', role) : undefined;
   let mcpServers = roleDir ? readPersonaGroupMcpServers(roleDir) : undefined;
-
-  // With --network host, host.containers.internal doesn't resolve — rewrite to localhost
-  try {
-    if (loadMachineConfig().containerNetwork === 'host' && mcpServers) {
-      const rewritten = JSON.parse(
-        JSON.stringify(mcpServers).replace(/host\.containers\.internal/g, 'localhost'),
-      );
-      mcpServers = rewritten;
-    }
-  } catch { /* machine.json not required */ }
 
   const containerNameTag = input.containerNameTag?.trim();
   const safeContainerNameTag = containerNameTag && SAFE_CONTAINER_NAME_TAG.test(containerNameTag)

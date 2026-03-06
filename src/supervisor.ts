@@ -19,7 +19,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 
-import { loadMachineConfig } from './machine-config.js';
+import { loadMachineConfig, loadFleet, writeFleet, loadMachines, writeMachines, isMachineActive } from './machine-config.js';
 import {
   resolveRoot,
   getActiveBots,
@@ -440,6 +440,127 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
   }
 }
 
+// ── Secrets repo sync ──────────────────────────────────────────
+
+const SECRETS_SYNC_INTERVAL = 30_000; // 30 seconds
+
+function secretsRepoPath(): string {
+  return loadMachineConfig().secretsPath;
+}
+
+/** Commit a change to the secrets repo: stash → add → commit → push → pop. */
+function secretsGitCommit(files: string[], message: string): { ok: boolean; error?: string } {
+  const cwd = secretsRepoPath();
+  const opts = { cwd, encoding: 'utf-8' as const, timeout: 15_000, stdio: 'pipe' as const };
+  try {
+    // Stash any other uncommitted changes
+    let didStash = false;
+    try {
+      const out = execSync('git stash --include-untracked', opts).trim();
+      didStash = !out.includes('No local changes');
+    } catch (err) {
+      if (!execErrOutput(err).includes('No local changes')) {
+        didStash = false;
+      }
+    }
+    try {
+      for (const f of files) execSync(`git add ${f}`, opts);
+      execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, opts);
+      execSync('git push', { ...opts, timeout: 30_000 });
+      return { ok: true };
+    } finally {
+      if (didStash) {
+        try { execSync('git stash pop', opts); } catch { /* leave in stash */ }
+      }
+    }
+  } catch (err) {
+    return { ok: false, error: errStr(err) };
+  }
+}
+
+/** Pull secrets repo with rebase. */
+function secretsGitSync(): { ok: boolean; newCommits: number; output: string } {
+  const cwd = secretsRepoPath();
+  const opts = { cwd, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
+  if (fs.existsSync(path.join(cwd, '.git', 'REBASE_HEAD'))) {
+    try { execSync('git rebase --abort', opts); } catch { /* ignore */ }
+  }
+  try {
+    execSync('git fetch origin', opts);
+    const countStr = execSync('git rev-list HEAD..origin/main --count', { ...opts, timeout: 5_000 }).trim();
+    const newCommits = parseInt(countStr, 10) || 0;
+    if (newCommits === 0) return { ok: true, output: 'up to date', newCommits: 0 };
+    let didStash = false;
+    try {
+      const out = execSync('git stash --include-untracked', opts).trim();
+      didStash = !out.includes('No local changes');
+    } catch (err) {
+      if (!execErrOutput(err).includes('No local changes')) throw err;
+    }
+    try {
+      const output = execSync('git rebase origin/main', opts).trim();
+      return { ok: true, output, newCommits };
+    } finally {
+      if (didStash) {
+        try { execSync('git stash pop', opts); } catch { /* conflict — leave in stash */ }
+      }
+    }
+  } catch (err) {
+    return { ok: false, output: errStr(err), newCommits: -1 };
+  }
+}
+
+/** Periodic secrets repo sync loop. */
+async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
+  await sleep(10_000);
+  while (true) {
+    try {
+      const result = secretsGitSync();
+      if (!result.ok) {
+        log(`secrets sync FAILED: ${result.output}`);
+        for (const conn of conns) {
+          if (conn.accessToken) {
+            await reply(conn, `⚠️ ${HOSTNAME}: secrets repo sync failed — operator please fix.\n\`\`\`\n${result.output.slice(0, 500)}\n\`\`\``).catch(() => {});
+          }
+        }
+      } else if (result.newCommits > 0) {
+        log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
+        // Check for transport pickups — bots assigned here but not active
+        if (!isMachineActive()) { /* deactivated — skip transport pickup */ }
+        else try {
+          const fleet = loadFleet();
+          for (const [bot, entry] of Object.entries(fleet)) {
+            if (entry.machine === HOSTNAME && !entry.active) {
+              log(`secrets sync: transport pickup — activating ${bot}`);
+              entry.active = true;
+              writeFleet(fleet);
+              secretsGitCommit(['bots/fleet.json'], `transport phase 2: ${bot} activated on ${HOSTNAME}`);
+              const root = resolveRoot();
+              try {
+                ensurePodmanReady();
+                bootstrapBot(root, bot);
+                updatePresence(root);
+                for (const c of conns) {
+                  if (c.accessToken) {
+                    await reply(c, `${HOSTNAME}: ${bot} transported and started`).catch(() => {});
+                  }
+                }
+              } catch (err) {
+                log(`transport pickup failed for ${bot}: ${errStr(err)}`);
+              }
+            }
+          }
+        } catch (err) {
+          log(`transport pickup check failed: ${errStr(err)}`);
+        }
+      }
+    } catch (err) {
+      log(`secrets sync loop error: ${errStr(err)}`);
+    }
+    await sleep(SECRETS_SYNC_INTERVAL);
+  }
+}
+
 function appendHealthHistory(report: string): void {
   const root = resolveRoot();
   const historyFile = path.join(root, '_runtime', 'data', 'health-history.jsonl');
@@ -645,17 +766,21 @@ async function handleLifecycleCommand(
   if (bots.length === 0) return;
 
   if (action !== 'dismiss') {
+    if (!isMachineActive()) {
+      await reply(conn, `${HOSTNAME}: machine is deactivated — use !activate first`);
+      return;
+    }
     try { ensurePodmanReady(); } catch (err) {
       await reply(conn, `${HOSTNAME}: podman not ready — ${errStr(err)}`);
       return;
     }
   }
 
-  // Load roster for rank info
+  // Load fleet for rank info
   let roster: Record<string, { rank?: number }> = {};
   try {
-    roster = JSON.parse(fs.readFileSync(path.join(loadMachineConfig().secretsPath, 'bots', 'roster.json'), 'utf-8'));
-  } catch { /* no roster */ }
+    roster = loadFleet();
+  } catch { /* no fleet */ }
 
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
@@ -667,9 +792,21 @@ async function handleLifecycleCommand(
         stopBot(bot);
         killStaleContainers(bot);
         dismissedBots.add(bot);
+        // Update fleet.json
+        try {
+          const fleet = loadFleet();
+          if (fleet[bot]) { fleet[bot].active = false; writeFleet(fleet); }
+          secretsGitCommit(['bots/fleet.json'], `fleet: dismiss ${bot} on ${HOSTNAME}`);
+        } catch { /* best effort */ }
         await reply(conn, `${HOSTNAME}: ${name} stopped`);
       } else if (action === 'join') {
         dismissedBots.delete(bot);
+        // Update fleet.json
+        try {
+          const fleet = loadFleet();
+          if (fleet[bot]) { fleet[bot].active = true; fleet[bot].machine = HOSTNAME; writeFleet(fleet); }
+          secretsGitCommit(['bots/fleet.json'], `fleet: join ${bot} on ${HOSTNAME}`);
+        } catch { /* best effort */ }
         bootstrapBot(root, bot);
         await reply(conn, `${HOSTNAME}: ${name} started (rank ${rank})`);
       } else {
@@ -736,24 +873,207 @@ async function handleCommand(cmd: string, conn: RoomConn): Promise<void> {
     return;
   }
 
-  // !roster — each machine reports its bots in this room
-  if (cmd === '!roster') {
-    const botRooms = buildBotRoomMap();
-    const roomBots = getActiveBots().filter((b) => botRooms[b] === conn.name);
-    if (roomBots.length === 0) return; // no local bots in this room
-    // Check pm2 status for each bot
-    let pm2Procs: Array<{ name: string; pm2_env?: { status?: string } }> = [];
+  // !deactivate — stop all bots on this machine, keep relay running
+  if (cmd === '!deactivate') {
     try {
-      const { execSync } = await import('child_process');
-      const out = execSync('npx pm2 jlist 2>/dev/null', { encoding: 'utf-8', timeout: 5000 });
-      pm2Procs = JSON.parse(out);
-    } catch { /* empty */ }
-    const lines = roomBots.map((bot) => {
-      const proc = pm2Procs.find((p) => p.name === `infiniclaw-${bot}`);
-      const running = proc?.pm2_env?.status === 'online';
-      return `${running ? 'ON' : 'OFF'}  ${bot}`;
-    });
-    await reply(conn, `${HOSTNAME}:\n${lines.join('\n')}`);
+      const machines = loadMachines();
+      if (!machines[HOSTNAME]) { await reply(conn, `${HOSTNAME}: not in machines.json`); return; }
+      // Stop all running bots (fleet.json unchanged)
+      for (const bot of getActiveBots()) {
+        stopBot(bot);
+        killStaleContainers(bot);
+        dismissedBots.add(bot);
+      }
+      machines[HOSTNAME].active = false;
+      writeMachines(machines);
+      secretsGitCommit(['operator/machines.json'], `deactivate ${HOSTNAME}: bots stopped, relay only`);
+      await reply(conn, `${HOSTNAME}: deactivated — all bots stopped, relay still running`);
+    } catch (err) {
+      await reply(conn, `${HOSTNAME}: deactivate failed — ${errStr(err)}`);
+    }
+    return;
+  }
+
+  // !activate — mark machine active, start bots assigned here
+  if (cmd === '!activate') {
+    try {
+      const machines = loadMachines();
+      if (!machines[HOSTNAME]) { await reply(conn, `${HOSTNAME}: not in machines.json`); return; }
+      machines[HOSTNAME].active = true;
+      writeMachines(machines);
+      secretsGitCommit(['operator/machines.json'], `activate ${HOSTNAME}`);
+      // Start bots that are active and assigned to this machine
+      const fleet = loadFleet();
+      const root = resolveRoot();
+      ensurePodmanReady();
+      const started: string[] = [];
+      for (const [name, entry] of Object.entries(fleet)) {
+        if (entry.machine === HOSTNAME && entry.active) {
+          dismissedBots.delete(name);
+          bootstrapBot(root, name);
+          started.push(name);
+        }
+      }
+      updatePresence(root);
+      await reply(conn, `${HOSTNAME}: activated — started ${started.join(', ') || 'no bots assigned'}`);
+    } catch (err) {
+      await reply(conn, `${HOSTNAME}: activate failed — ${errStr(err)}`);
+    }
+    return;
+  }
+
+  // !transport <bot> <machine> — initiate bot transport to another machine
+  if (cmd.startsWith('!transport ')) {
+    const parts = cmd.slice('!transport '.length).trim().split(/\s+/);
+    if (parts.length !== 2) {
+      await reply(conn, `Usage: !transport <bot> <machine>`);
+      return;
+    }
+    const [bot, targetMachine] = parts;
+    const fleet = loadFleet();
+    if (!fleet[bot]) { await reply(conn, `Unknown bot: ${bot}`); return; }
+    // Validate target machine
+    try {
+      const machines = loadMachines();
+      if (!machines[targetMachine]) { await reply(conn, `Unknown machine: ${targetMachine}`); return; }
+      if (!machines[targetMachine].active) { await reply(conn, `${targetMachine} is deactivated`); return; }
+    } catch { /* machines.json missing — skip validation */ }
+    if (fleet[bot].machine !== HOSTNAME) {
+      // Not our bot — ignore, the other machine handles it
+      return;
+    }
+    // Phase 1: stop bot, mark inactive, set machine to target
+    try {
+      stopBot(bot);
+      killStaleContainers(bot);
+      dismissedBots.add(bot);
+      fleet[bot].active = false;
+      fleet[bot].machine = targetMachine;
+      writeFleet(fleet);
+      const result = secretsGitCommit(['bots/fleet.json'], `transport phase 1: ${bot} → ${targetMachine}`);
+      if (!result.ok) throw new Error(result.error);
+      await reply(conn, `${HOSTNAME}: ${bot} stopped and assigned to ${targetMachine}. Waiting for ${targetMachine} to pick up.`);
+    } catch (err) {
+      await reply(conn, `${HOSTNAME}: transport failed — ${errStr(err)}`);
+    }
+    return;
+  }
+
+  // !promote <bot> — swap rank with the bot above (lower rank number = higher priority)
+  // !demote <bot> — swap rank with the bot below
+  if (cmd.startsWith('!promote ') || cmd.startsWith('!demote ')) {
+    const isPromote = cmd.startsWith('!promote');
+    const bot = cmd.slice(isPromote ? '!promote '.length : '!demote '.length).trim();
+    const fleet = loadFleet();
+    if (!fleet[bot]) { await reply(conn, `Unknown bot: ${bot}`); return; }
+    const role = fleet[bot].role;
+    const sameRole = Object.entries(fleet)
+      .filter(([_, b]) => b.role === role)
+      .sort((a, b) => a[1].rank - b[1].rank);
+    const idx = sameRole.findIndex(([name]) => name === bot);
+    const swapIdx = isPromote ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= sameRole.length) {
+      await reply(conn, `${bot} is already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
+      return;
+    }
+    const [swapName, swapEntry] = sameRole[swapIdx];
+    const oldRank = fleet[bot].rank;
+    fleet[bot].rank = swapEntry.rank;
+    fleet[swapName].rank = oldRank;
+    writeFleet(fleet);
+    const result = secretsGitCommit(['bots/fleet.json'], `fleet: ${isPromote ? 'promote' : 'demote'} ${bot} (swap with ${swapName})`);
+    if (result.ok) {
+      await reply(conn, `${bot} now rank ${fleet[bot].rank}, ${swapName} now rank ${fleet[swapName].rank} (in ${role})`);
+    } else {
+      await reply(conn, `Rank swap done locally but push failed: ${result.error}`);
+    }
+    return;
+  }
+
+  // !fleet [room] — show fleet status with real running state
+  if (cmd === '!fleet' || cmd === '!fleet room') {
+    const roomOnly = cmd === '!fleet room';
+    try {
+      const fleet = loadFleet();
+      const machines = (() => { try { return loadMachines(); } catch { return {}; } })();
+      // Check real pm2 state on this machine
+      let pm2Procs: Array<{ name: string; pm2_env?: { status?: string } }> = [];
+      try {
+        const out = execSync('npx pm2 jlist 2>/dev/null', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
+        pm2Procs = JSON.parse(out);
+      } catch { /* empty */ }
+      // Check real container state on this machine
+      let runningContainers = new Set<string>();
+      try {
+        const out = execSync('podman ps --format "{{.Names}}" 2>/dev/null', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' });
+        for (const line of out.trim().split('\n')) {
+          const match = line.match(/^nanoclaw-([^-]+)-/);
+          if (match) runningContainers.add(match[1]);
+        }
+      } catch { /* empty */ }
+
+      const botRooms = buildBotRoomMap();
+
+      // Filter bots if room-only
+      const botEntries = Object.entries(fleet).filter(([name]) => {
+        if (!roomOnly) return true;
+        return botRooms[name] === conn.name;
+      });
+
+      if (roomOnly && botEntries.length === 0) return;
+
+      // Real status for bots on this machine + mismatch detection
+      const warnings: string[] = [];
+      function botStatus(name: string, entry: { machine: string | null; active: boolean }): string {
+        if (entry.machine !== HOSTNAME) {
+          return entry.active ? '??' : 'OFF';
+        }
+        const pm2 = pm2Procs.find((p) => p.name === `infiniclaw-${name}`);
+        const pm2Online = pm2?.pm2_env?.status === 'online';
+        const hasContainer = runningContainers.has(name);
+        const running = pm2Online || hasContainer;
+        if (entry.active && !running) {
+          warnings.push(`⚠️ ${name}: fleet says active but not running — restarting`);
+          try { bootstrapBot(resolveRoot(), name); } catch { /* best effort */ }
+        } else if (!entry.active && running) {
+          warnings.push(`⚠️ ${name}: fleet says inactive but running — stopping`);
+          try { stopBot(name); killStaleContainers(name); } catch { /* best effort */ }
+        }
+        if (pm2Online && hasContainer) return 'ON ';
+        if (pm2Online) return 'PM2';
+        if (hasContainer) return 'CTR';
+        return 'OFF';
+      }
+
+      const lines: string[] = [];
+      if (!roomOnly) {
+        lines.push('**Machines**');
+        for (const [name, m] of Object.entries(machines)) {
+          lines.push(`  ${m.active ? 'ON ' : 'OFF'} ${name} (${m.os}, ${m.user || '?'})`);
+        }
+        lines.push('');
+      }
+
+      // Group by role
+      const byRole: Record<string, typeof botEntries> = {};
+      for (const entry of botEntries) {
+        const role = entry[1].role;
+        if (!byRole[role]) byRole[role] = [];
+        byRole[role].push(entry);
+      }
+      lines.push(roomOnly ? `**${conn.name}**` : '**Bots**');
+      for (const [role, bots] of Object.entries(byRole)) {
+        lines.push(`  ${role}:`);
+        for (const [name, entry] of bots.sort((a, b) => a[1].rank - b[1].rank)) {
+          const status = botStatus(name, entry);
+          lines.push(`    ${status} #${entry.rank} ${name} → ${entry.machine || 'unassigned'}`);
+        }
+      }
+      if (warnings.length) lines.push('', ...warnings);
+      await reply(conn, lines.join('\n'));
+    } catch (err) {
+      await reply(conn, `!fleet failed: ${errStr(err)}`);
+    }
     return;
   }
 }
@@ -909,6 +1229,7 @@ async function main(): Promise<void> {
   // Start background loops (non-blocking alongside room sync loops)
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));
   gitSyncLoop(conns).catch((err) => log(`git sync loop fatal: ${errStr(err)}`));
+  secretsSyncLoop(conns).catch((err) => log(`secrets sync loop fatal: ${errStr(err)}`));
   heartbeatLoop(conns).catch((err) => log(`heartbeat loop fatal: ${errStr(err)}`));
   dreamLoop(conns).catch((err) => log(`dream loop fatal: ${errStr(err)}`));
 

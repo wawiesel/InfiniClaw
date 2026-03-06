@@ -123,12 +123,6 @@ export function handleOperatorCommand(
         return true; // consumed, no-op — supervisor handles it
     }
 
-    // !roster — list bots on this machine
-    if (cmd === '!roster') {
-        reply(matrix, msg.chat_jid, `📋 ${os.hostname()}: ${loadMachineConfig().bots.join(', ')}`, msg.thread_id);
-        return true;
-    }
-
     // !operator — handled by the supervisor process.
     if (cmd.startsWith('!operator')) {
         return true; // consumed, no-op — supervisor handles it
@@ -183,14 +177,20 @@ export function handleOperatorCommand(
         const help = [
             '📟 Operator commands:',
             '  !todo [bot]               — show bot\'s active tasks',
-            '  !roster                   — list bots on this machine',
+            '  !fleet                    — full fleet + machine status',
+            '  !fleet room               — bots in this room only',
             '  !dismiss <bot>            — stop a bot',
             '  !join <bot>               — start a bot',
             '  !restart <bot>            — restart a bot',
+            '  !transport <bot> <machine> — move bot to another machine',
+            '  !promote <bot>            — raise rank within role',
+            '  !demote <bot>             — lower rank within role',
+            '  !activate                 — activate this machine',
+            '  !deactivate               — stop all bots, keep relay',
             '  !allow <bot> <path> [min] — grant rw mount (authorized)',
             '  !deny <bot> <path>        — revoke rw mount (authorized)',
-            '  !operator <cmd>           — supervisor operator commands',
-            '  !health                   — fleet health summary (Parker)',
+            '  !operator <cmd>           — send to operator tmux',
+            '  !health                   — fleet health summary',
             '  !                         — this help',
         ].join('\n');
         reply(matrix, msg.chat_jid, help, msg.thread_id);

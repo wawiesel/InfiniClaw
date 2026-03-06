@@ -169,7 +169,7 @@ function applyBrainMode(
   model?: string,
 ): string {
   const config = loadMachineConfig();
-  const envFile = path.join(config.secretsPath, bot, 'env');
+  const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
   if (!fs.existsSync(envFile)) {
     throw new Error(`Missing profile env: ${envFile}`);
   }
@@ -197,7 +197,7 @@ function applyBrainMode(
 }
 
 export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'unknown'; model: string } {
-  const envFile = path.join(loadMachineConfig().secretsPath, bot, 'env');
+  const envFile = path.join(loadMachineConfig().secretsPath, 'bots', bot, 'env');
   if (!fs.existsSync(envFile)) return { mode: 'unknown', model: '' };
   try {
     const vars = parseEnvFile(envFile);
