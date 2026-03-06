@@ -715,8 +715,8 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
             if (entry.machine === HOSTNAME && entry.status === 'transit') {
               log(`transport: materializing ${bot}`);
               fleetUpdate(bot, { status: 'active' });
-              clearMachineConfigCache(); // so bootstrapBot sees updated active state
               writeFleet(liveFleet);
+              clearMachineConfigCache(); // so bootstrapBot sees updated active state
               secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${HOSTNAME}`);
               fleetDirty = false;
               const root = resolveRoot();
@@ -1001,6 +1001,7 @@ async function handleLifecycleCommand(
         await reply(conn, `${HOSTNAME}: ${name} dismissed`);
       } else if (action === 'join') {
         fleetUpdate(bot, { status: 'active', machine: HOSTNAME });
+        writeFleet(liveFleet); // persist to disk BEFORE bootstrapBot reads it
         clearMachineConfigCache(); // so bootstrapBot sees updated active state
         bootstrapBot(root, bot);
         await reply(conn, `${HOSTNAME}: ${name} started (rank ${rank})`);
