@@ -612,6 +612,13 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               log(`git sync: failed to restart ${bot}: ${errStr(err)}`);
             }
           }
+          // Restart relay itself to pick up new relay code
+          try {
+            log('git sync: restarting relay to pick up new code');
+            execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
+          } catch (err) {
+            log(`git sync: relay self-restart failed: ${errStr(err)}`);
+          }
         }
       } else {
         log('git sync: up to date');
