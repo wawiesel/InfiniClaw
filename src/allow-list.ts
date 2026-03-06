@@ -25,6 +25,8 @@ interface VolumeMount {
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'infiniclaw');
 const ALLOW_LIST_PATH = path.join(CONFIG_DIR, 'allow-list.json');
+const PATHS_PATH = path.join(CONFIG_DIR, 'paths.json');
+const FLEET_PATH = path.join(CONFIG_DIR, 'secrets', 'bots', 'fleet.json');
 
 function expandTilde(p: string): string {
   const expanded = p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
@@ -166,6 +168,16 @@ export function revokeMount(bot: string, rawPath: string): boolean {
   return true;
 }
 
+/** Remove all mounts for a bot (e.g. after transport away). */
+export function removeBotMounts(bot: string): void {
+  const normalizedBot = normalizeBotName(bot);
+  const list = loadAllowList();
+  if (!list.mounts[normalizedBot]) return;
+  delete list.mounts[normalizedBot];
+  saveAllowList(list);
+  logger.info({ bot: normalizedBot }, 'All mounts removed');
+}
+
 export function pruneExpired(): number {
   const list = loadAllowList();
   const now = Date.now();
@@ -188,18 +200,48 @@ export function pruneExpired(): number {
   return pruned;
 }
 
+/** Load paths.json (per-machine logical name → local path). */
+function loadPaths(): Record<string, string> {
+  try {
+    return JSON.parse(fs.readFileSync(PATHS_PATH, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+/** Get role-based rw paths for a bot from fleet.json roles + paths.json. */
+function roleMounts(bot: string): AllowEntry[] {
+  try {
+    const fleet = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
+    const botEntry = fleet.bots?.[bot];
+    if (!botEntry?.role) return [];
+    const roleConfig = fleet.roles?.[botEntry.role];
+    if (!roleConfig?.rw) return [];
+    const paths = loadPaths();
+    return roleConfig.rw
+      .map((name: string) => paths[name])
+      .filter((p: string | undefined): p is string => !!p)
+      .map((p: string) => ({ path: p, expiresAt: null }));
+  } catch {
+    return [];
+  }
+}
+
 export function mountsForBot(bot: string): VolumeMount[] {
   const normalizedBot = normalizeBotName(bot);
   const list = loadAllowList();
-  const entries = list.mounts[normalizedBot] || [];
+  // Merge role-based mounts with per-bot overrides
+  const roleEntries = roleMounts(normalizedBot);
+  const botEntries = list.mounts[normalizedBot] || [];
+  const allEntries = [...roleEntries, ...botEntries];
   const now = Date.now();
   const mounts: VolumeMount[] = [];
   const usedBasenames = new Set<string>();
+  const seenPaths = new Set<string>();
 
-  for (const entry of entries) {
+  for (const entry of allEntries) {
     if (entry.expiresAt) {
       const t = new Date(entry.expiresAt).getTime();
-      // Treat invalid (NaN) expiry dates as expired — consistent with pruneExpired
       if (isNaN(t) || t <= now) continue;
     }
 
@@ -207,8 +249,11 @@ export function mountsForBot(bot: string): VolumeMount[] {
     try {
       real = normalizeHostPath(entry.path);
     } catch {
-      continue; // path doesn't exist or is unresolvable
+      continue;
     }
+
+    if (seenPaths.has(real)) continue;
+    seenPaths.add(real);
 
     let mountName = safeMountName(real);
     if (usedBasenames.has(mountName)) {

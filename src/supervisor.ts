@@ -20,6 +20,7 @@ import {
 } from '@aws-sdk/client-s3';
 
 import { loadMachineConfig, loadFleet, writeFleet, loadMachines, writeMachines, isMachineActive } from './machine-config.js';
+import { removeBotMounts } from './allow-list.js';
 import {
   resolveRoot,
   getActiveBots,
@@ -947,6 +948,7 @@ async function handleCommand(cmd: string, conn: RoomConn): Promise<void> {
       stopBot(bot);
       killStaleContainers(bot);
       dismissedBots.add(bot);
+      removeBotMounts(bot);
       fleet[bot].active = false;
       fleet[bot].machine = targetMachine;
       writeFleet(fleet);
