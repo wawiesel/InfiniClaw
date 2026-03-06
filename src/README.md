@@ -10,7 +10,7 @@ InfiniClaw wraps NanoClaw (`external/nanoclaw/`) with Matrix-specific logic. Eac
 Host machine (macOS / Linux)
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2
-├── supervisor.ts       → Lightweight Matrix watcher for bot lifecycle (!join, !dismiss, !restart)
+├── relay.ts            → Supervisor relay: Matrix watcher for bot lifecycle (!join, !dismiss, !restart)
 ├── main.ts             → Message loop, indicators, container lifecycle
 ├── container-spawn.ts  → Build podman args, delegate to upstream runContainer()
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)
@@ -38,7 +38,7 @@ Host machine (macOS / Linux)
 
 ## Key flows
 
-**Start:** `cli.ts` → `service.ts:startAll()` → for each bot in `machine.json`: `deployBot()` → rsync nanoclaw, write crew status, start via pm2. After all bots start, also starts the supervisor process.
+**Start:** `cli.ts` → `service.ts:startAll()` → for each bot in fleet.json: `deployBot()` → rsync nanoclaw, write crew status, start via pm2. After all bots start, also starts the relay process.
 
 **Message:** Matrix event → `main.ts` message loop → `processGroupMessages()` → `container-spawn.ts:runContainerAgent()` → podman container runs agent-runner → output markers parsed → sent to Matrix.
 

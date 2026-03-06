@@ -2,14 +2,14 @@
 
 ## Overview
 
-InfiniClaw has a fleet-wide health monitoring system that tracks container health, memory usage, OOM kills, restart patterns, and session storage across all machines. The supervisor process handles periodic collection, S3 storage, and the `!health` command.
+InfiniClaw has a fleet-wide health monitoring system that tracks container health, memory usage, OOM kills, restart patterns, and session storage across all machines. The relay process handles periodic collection, S3 storage, and the `!health` command.
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌─────────────┐
 │  mac139160   │     │  HERACLES   │
-│  supervisor  │     │  supervisor  │
+│  relay  │     │  relay  │
 │      │       │     │      │       │
 │  health-     │     │  health-     │
 │  check.sh    │     │  check.sh    │
@@ -36,8 +36,8 @@ InfiniClaw has a fleet-wide health monitoring system that tracks container healt
 |-----------|------|---------|
 | `health-check.sh` | `scripts/health-check.sh` | Collects health metrics from local bot logs |
 | `fleet-health.sh` | `scripts/fleet-health.sh` | Aggregates reports from multiple machines (standalone) |
-| Supervisor health loop | `src/supervisor.ts` | Periodic collection + S3 upload |
-| `!health` command | `src/supervisor.ts` | On-demand fleet health summary |
+| Supervisor health loop | `src/relay.ts` | Periodic collection + S3 upload |
+| `!health` command | `src/relay.ts` | On-demand fleet health summary |
 
 ## What Gets Measured
 
@@ -67,16 +67,16 @@ Per machine:
 
 ### Periodic Collection (automatic)
 
-The supervisor runs `health-check.sh --json` every **30 minutes** and uploads the result to S3 at `health/<machine>.json`. Each machine overwrites its own report — there is one latest snapshot per machine, no history versioning (yet).
+The relay runs `health-check.sh --json` every **30 minutes** and uploads the result to S3 at `health/<machine>.json`. Each machine overwrites its own report — there is one latest snapshot per machine, no history versioning (yet).
 
-- First run: 60 seconds after supervisor startup
+- First run: 60 seconds after relay startup
 - Interval: 30 minutes
 - S3 key: `health/<hostname>.json`
 - Fails silently if S3 is not configured
 
 ### `!health` Command (on-demand)
 
-Type `!health` in any room. Every machine's supervisor:
+Type `!health` in any room. Every machine's relay:
 
 1. Runs `health-check.sh --json` locally
 2. Uploads result to S3
@@ -87,7 +87,7 @@ The response includes: active bots per machine, memory usage, OOM counts, sessio
 
 ### Git Sync (automatic)
 
-The supervisor also runs `git fetch origin && git rebase origin/main` every **10 minutes**. If new commits are pulled, it auto-rebuilds (`npm run build`). On failure:
+The relay also runs `git fetch origin && git rebase origin/main` every **10 minutes**. If new commits are pulled, it auto-rebuilds (`npm run build`). On failure:
 
 - **Rebase conflict**: alerts all rooms — engineer must fix immediately
 - **Build failure**: alerts all rooms with error output

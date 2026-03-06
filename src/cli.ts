@@ -2,7 +2,7 @@
 import {
   start, stop, chat, send, sync,
   holodeckCreate, holodeckChat, holodeckTeardown, holodeckPromote,
-  startSupervisor, stopSupervisor, resolveRoot,
+  startRelay, stopRelay, resolveRoot,
 } from './service.js';
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -91,19 +91,19 @@ switch (cmd) {
     }
     break;
   }
-  case 'supervisor': {
+  case 'relay': {
     const sub = args[0];
     if (sub === 'start') {
-      runSync(() => startSupervisor(resolveRoot()));
+      runSync(() => startRelay(resolveRoot()));
     } else if (sub === 'stop') {
-      runSync(() => stopSupervisor());
+      runSync(() => stopRelay());
     } else {
-      console.error('Usage: cli supervisor start|stop');
+      console.error('Usage: cli relay start|stop');
       process.exit(1);
     }
     break;
   }
   default:
-    console.error('Usage: cli start|stop|chat|send|sync|holodeck|supervisor');
+    console.error('Usage: cli start|stop|chat|send|sync|holodeck|relay');
     process.exit(1);
 }

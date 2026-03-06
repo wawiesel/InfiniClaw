@@ -198,7 +198,7 @@ Note: bot restart is required for changes to take effect.`,
 The host daemon will:
 1. Stage your code changes and run \`tsc --noEmit\` to validate
 2. If validation fails: stay running and report errors to chat — fix them and retry
-3. If validation passes: send "restarting..." and exit for supervisor restart
+3. If validation passes: send "restarting..." and exit for relay restart
 
 Use this after making code changes that require a process restart.`,
     {

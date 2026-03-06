@@ -161,12 +161,12 @@ const roomRoster: Record<string, Map<string, number>> = {};
 const roomCO: Record<string, string | undefined> = {};
 let matrixRef: MatrixChannel | null = null;
 
-/** Parse supervisor lifecycle messages to update CO roster at runtime. */
+/** Parse relay lifecycle messages to update CO roster at runtime. */
 function handleLifecycleMessage(msg: { content: string; chat_jid: string; sender: string }): boolean {
-  // Supervisor messages: "HOSTNAME: Name stopped" / "HOSTNAME: Name started (rank N)" / "HOSTNAME: Name restarted"
+  // Relay messages: "HOSTNAME: Name stopped" / "HOSTNAME: Name started (rank N)" / "HOSTNAME: Name restarted"
   const match = msg.content.match(/^\S+: (\S+) (stopped|started|restarted)(?:\s+\(rank (\d+)\))?$/);
   if (!match) return false;
-  // Only process messages from intercom accounts (supervisor sends via intercom)
+  // Only process messages from intercom accounts (relay sends via intercom)
   if (!msg.sender.includes('-intercom')) return false;
 
   const [, botName, action, rankStr] = match;

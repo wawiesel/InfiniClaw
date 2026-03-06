@@ -635,7 +635,7 @@ function pm2StartBot(bot: string, nodeBin: string, instance: string, logs: strin
 
 export function removeStaleProcesses(): void {
   const validNames = new Set(getActiveBots().map(pm2Name));
-  validNames.add('infiniclaw-supervisor');
+  validNames.add('infiniclaw-relay');
   try {
     const out = execFileSync(PM2_BIN, ['jlist'], { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' });
     const list = JSON.parse(out) as Array<{ name: string }>;
@@ -681,38 +681,38 @@ export function stopBot(bot: string): void {
   pm2Stop(pm2Name(bot));
 }
 
-// ── Supervisor ──────────────────────────────────────────────────────
+// ── Relay ────────────────────────────────────────────────────────────
 
-const SUPERVISOR_PM2_NAME = 'infiniclaw-supervisor';
+const RELAY_PM2_NAME = 'infiniclaw-relay';
 
-export function startSupervisor(root: string): void {
+export function startRelay(root: string): void {
   const logs = logDir(root);
   fs.mkdirSync(logs, { recursive: true });
-  pm2Stop(SUPERVISOR_PM2_NAME);
+  pm2Stop(RELAY_PM2_NAME);
 
-  // The supervisor runs from the same instance as the first active bot
-  // (it only needs compiled dist/supervisor.js + node_modules).
+  // The relay runs from the same instance as the first active bot
+  // (it only needs compiled dist/relay.js + node_modules).
   const bots = getActiveBots();
   if (bots.length === 0) {
-    console.log('supervisor: no active bots — skipping');
+    console.log('relay: no active bots — skipping');
     return;
   }
   const instance = instanceDir(root, bots[0]);
-  const distFile = path.join(instance, 'dist', 'supervisor.js');
+  const distFile = path.join(instance, 'dist', 'relay.js');
   if (!fs.existsSync(distFile)) {
-    console.log('supervisor: dist/supervisor.js not found — skipping (build first)');
+    console.log('relay: dist/relay.js not found — skipping (build first)');
     return;
   }
 
-  const outLog = path.join(logs, 'supervisor.log');
-  const errLog = path.join(logs, 'supervisor.error.log');
+  const outLog = path.join(logs, 'relay.log');
+  const errLog = path.join(logs, 'relay.error.log');
 
   execFileSync(
     PM2_BIN,
     [
       'start',
       process.execPath,
-      '--name', SUPERVISOR_PM2_NAME,
+      '--name', RELAY_PM2_NAME,
       '--cwd', root,
       '--output', outLog,
       '--error', errLog,
@@ -731,12 +731,12 @@ export function startSupervisor(root: string): void {
       },
     },
   );
-  console.log('supervisor: started');
+  console.log('relay: started');
 }
 
-export function stopSupervisor(): void {
-  pm2Stop(SUPERVISOR_PM2_NAME);
-  console.log('supervisor: stopped');
+export function stopRelay(): void {
+  pm2Stop(RELAY_PM2_NAME);
+  console.log('relay: stopped');
 }
 
 // ── Top-level commands ─────────────────────────────────────────────────
@@ -774,8 +774,8 @@ export async function start(onlyBot?: string): Promise<void> {
     }
   }
 
-  // Start supervisor (watches Matrix for !join/!dismiss/!restart)
-  startSupervisor(root);
+  // Start relay (watches Matrix for !join/!dismiss/!restart)
+  startRelay(root);
 
   // Save pm2 process list so `pm2 resurrect` can restore after reboot
   try { execFileSync(PM2_BIN, ['save'], { stdio: 'pipe' }); } catch { /* ok */ }
@@ -800,7 +800,7 @@ export async function stop(onlyBot?: string): Promise<void> {
   removeStaleProcesses();
   if (!onlyBot) {
     killRogueProcesses();
-    stopSupervisor();
+    stopRelay();
   }
   killStaleContainers(onlyBot);
 

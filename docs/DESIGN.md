@@ -26,7 +26,7 @@ Feature docs, ordered from foundational to high-level:
 | [03](design/03-ipc.md) | IPC | Container ↔ host communication, namespaces, cooldowns |
 | [04](design/04-fleet.md) | Fleet | Rooms, machines, presence, roles, rank |
 | [05](design/05-commanding-officer.md) | Commanding Officer | CO election, badges, crew-status.json |
-| [06](design/06-commands.md) | Commands | Operator `!` commands, supervisor process |
+| [06](design/06-commands.md) | Commands | Operator `!` commands, relay process, IPC |
 | [07](design/07-intercom.md) | Intercom | Cross-room relay accounts, operator messaging |
 | [08](design/08-autonomy.md) | Autonomy | Self-healing, image rebuilds, IPC tasks, holodeck |
 | [09](design/09-configuration.md) | Configuration | CLAUDE.md layers, MCP, brain, sessions, startup |

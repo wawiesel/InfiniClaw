@@ -116,16 +116,14 @@ export function handleOperatorCommand(
         return true;
     }
 
-    // !dismiss, !join, !restart — handled by the supervisor process.
-    // Bots no longer manage their own lifecycle. The supervisor watches
-    // Matrix via intercom accounts and calls service.ts directly.
+    // !dismiss, !join, !restart — handled by the relay process.
     if (cmd.startsWith('!dismiss') || cmd.startsWith('!join') || cmd.startsWith('!restart')) {
-        return true; // consumed, no-op — supervisor handles it
+        return true; // consumed, no-op — relay handles it
     }
 
-    // !operator — handled by the supervisor process.
+    // !operator — handled by the relay process.
     if (cmd.startsWith('!operator')) {
-        return true; // consumed, no-op — supervisor handles it
+        return true; // consumed, no-op — relay handles it
     }
 
     // !allow <bot> <path> [minutes] — authorized only

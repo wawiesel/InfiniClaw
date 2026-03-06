@@ -85,4 +85,4 @@ Every `kill` of the launchd-managed process caused an immediate respawn. The ope
 - When migrating process managers, **always remove the old one's config**. A `KeepAlive: true` launchd agent will fight any replacement forever.
 - `launchctl list | grep infiniclaw` immediately reveals launchd-managed processes. Check this when debugging mystery respawns.
 - Two process managers for the same binary = guaranteed duplicate processing, doubled Matrix messages, and container thrashing.
-- The `npm run cli start` command starts ALL bots in `machine.json`, not just the one you name. Use `npm run cli start <bot>` only when you want exactly that bot plus the supervisor. To start only Cid without Johnny5/Albert, you'd need to edit `machine.json` first or stop the extras after.
+- The `npm run cli start` command starts ALL bots in fleet.json assigned to this machine, not just the one you name. Use `npm run cli start <bot>` only when you want exactly that bot plus the relay. To start only Cid without others, edit fleet.json first or stop the extras after.

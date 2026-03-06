@@ -1,11 +1,11 @@
 /**
- * Lightweight Matrix supervisor for bot lifecycle management.
+ * Supervisor relay — lightweight Matrix watcher for fleet lifecycle.
  *
  * Connects to each room via its intercom account (from intercom.json),
  * watches for operator commands (!join, !dismiss, !restart), and manages
  * bots via pm2 — no CLI needed.
  *
- * Run: node dist/supervisor.js
+ * Run: node dist/relay.js
  */
 import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
@@ -112,7 +112,7 @@ async function matrixLogin(homeserver: string, username: string, password: strin
       type: 'm.login.password',
       user: username,
       password,
-      device_id: `supervisor-${HOSTNAME}`,
+      device_id: `relay-${HOSTNAME}`,
     }),
   });
   if (!resp.ok) {
@@ -412,15 +412,26 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` },
           });
           log('git sync: rebuild succeeded');
-          // Copy supervisor.js to all active bot instances so the running
-          // supervisor picks up new code on next pm2 restart
-          const builtSupervisor = path.join(root, 'dist', 'supervisor.js');
-          if (fs.existsSync(builtSupervisor)) {
+          // Deploy all dist/*.js to active bot instances and restart relay
+          const distDir = path.join(root, 'dist');
+          if (fs.existsSync(distDir)) {
+            const jsFiles = fs.readdirSync(distDir).filter(f => f.endsWith('.js'));
             for (const bot of getActiveBots()) {
-              const dst = path.join(root, '_runtime', 'instances', bot, 'dist', 'supervisor.js');
-              try { fs.copyFileSync(builtSupervisor, dst); } catch { /* instance may not exist yet */ }
+              const dstDir = path.join(root, '_runtime', 'instances', bot, 'dist');
+              for (const f of jsFiles) {
+                try { fs.copyFileSync(path.join(distDir, f), path.join(dstDir, f)); } catch { /* instance may not exist yet */ }
+              }
             }
-            log('git sync: deployed supervisor.js to instances');
+            log(`git sync: deployed ${jsFiles.length} dist files to instances`);
+            // Restart all bots so they pick up new code
+            for (const bot of getActiveBots()) {
+              try {
+                bootstrapBot(root, bot);
+                log(`git sync: restarted ${bot}`);
+              } catch (err) {
+                log(`git sync: failed to restart ${bot}: ${errStr(err)}`);
+              }
+            }
           }
         } catch (err) {
           log(`git sync: rebuild FAILED: ${errStr(err)}`);
@@ -1169,7 +1180,7 @@ async function dialtone(conn: RoomConn, captainUserId: string): Promise<void> {
 
 function log(msg: string): void {
   const ts = new Date().toISOString();
-  console.error(`[${ts}] supervisor: ${msg}`);
+  console.error(`[${ts}] relay: ${msg}`);
 }
 
 function errStr(err: unknown): string {

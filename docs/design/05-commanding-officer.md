@@ -4,7 +4,7 @@ Each room has a **commanding officer (CO)** — the lowest-rank active bot on th
 - Gets a star badge in their Matrix display name (e.g. "BotName ⭐")
 - All bots require @callout — CO designation is for rank/authority and display badge only
 
-CO is determined from `crew-status.json` at startup and updated at runtime via supervisor lifecycle messages. Display name badges: ⭐ = CO, 🟢 = active, 🔴 = dismissed/offline.
+CO is determined from `crew-status.json` at startup and updated at runtime via relay lifecycle messages. Display name badges: ⭐ = CO, 🟢 = active, 🔴 = dismissed/offline.
 
 ## Startup
 
@@ -12,7 +12,7 @@ Each bot reads `crew-status.json` (generated at deploy from fleet-wide presence)
 
 ## Runtime Updates
 
-When the supervisor dismisses/joins a bot, it posts a lifecycle message to the room via intercom (e.g. `HERACLES: Cid stopped`). All bots in the room parse these messages to update their in-memory roster and re-evaluate CO. The supervisor also updates the local presence file so future deploys generate correct `crew-status.json`.
+When the relay dismisses/joins a bot, it posts a lifecycle message to the room via intercom (e.g. `HERACLES: Cid stopped`). All bots in the room parse these messages to update their in-memory roster and re-evaluate CO. The relay also updates the local presence file so future deploys generate correct `crew-status.json`.
 
 ## Querying
 

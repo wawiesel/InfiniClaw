@@ -770,6 +770,57 @@ async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext
   }
 }
 
+// ── Health & Fleet handlers ──────────────────────────────────────────
+
+async function handleHealthCheck(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'health_check')) return;
+  const chatJid = parseChatJid(data);
+  if (!chatJid) return;
+  try {
+    const root = resolveRoot();
+    const script = path.join(root, 'scripts', 'health-check.sh');
+    if (!fs.existsSync(script)) {
+      await ctx.sendMessage(chatJid, 'No health-check.sh script found.');
+      return;
+    }
+    const output = execSync(`MACHINE_NAME="${os.hostname()}" bash "${script}"`, {
+      encoding: 'utf-8', timeout: 30_000, cwd: root,
+      env: { ...process.env, MACHINE_NAME: os.hostname() },
+    }).trim();
+    await ctx.sendMessage(chatJid, `**${os.hostname()} health:**\n\`\`\`\n${truncateOutput(output)}\n\`\`\``);
+  } catch (err) {
+    await safeSend(ctx, chatJid, `health_check failed: ${errStr(err)}`);
+  }
+}
+
+async function handleFleetStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'fleet_status')) return;
+  const chatJid = parseChatJid(data);
+  if (!chatJid) return;
+  try {
+    const config = loadMachineConfig();
+    const fleetPath = path.join(config.secretsPath, 'bots', 'fleet.json');
+    const fleet = JSON.parse(fs.readFileSync(fleetPath, 'utf-8'));
+    const bots = fleet.bots || {};
+    const lines: string[] = [`**Fleet status** (${os.hostname()}):\n`];
+    const byRole: Record<string, Array<[string, { rank: number; machine: string | null; active: boolean }]>> = {};
+    for (const [name, entry] of Object.entries(bots) as Array<[string, { role: string; rank: number; machine: string | null; active: boolean }]>) {
+      if (!byRole[entry.role]) byRole[entry.role] = [];
+      byRole[entry.role].push([name, entry]);
+    }
+    for (const [role, entries] of Object.entries(byRole)) {
+      lines.push(`**${role}:**`);
+      for (const [name, entry] of entries.sort((a, b) => a[1].rank - b[1].rank)) {
+        const status = entry.active ? 'ON ' : 'OFF';
+        lines.push(`  ${status} #${entry.rank} ${name} → ${entry.machine || 'unassigned'}`);
+      }
+    }
+    await ctx.sendMessage(chatJid, lines.join('\n'));
+  } catch (err) {
+    await safeSend(ctx, chatJid, `fleet_status failed: ${errStr(err)}`);
+  }
+}
+
 // ── Main dispatcher ─────────────────────────────────────────────────────
 
 /**
@@ -937,6 +988,8 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   request_verification: handleRequestVerification,
   submit_verification: handleSubmitVerification,
 
+  health_check: handleHealthCheck,
+  fleet_status: handleFleetStatus,
   git_push: handleGitPush,
   holodeck_create: handleHolodeckCreate,
   holodeck_teardown: handleHolodeckTeardown,
