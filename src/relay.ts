@@ -77,6 +77,10 @@ interface RoomConn {
 
 const HOSTNAME = os.hostname();
 const SYNC_TIMEOUT = 30_000;
+
+function shellQuote(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
 const RETRY_DELAY_BASE = 10_000;
 const RETRY_DELAY_MAX = 5 * 60_000; // cap at 5 minutes
 const STARTUP_SYNC_DELAY = 3_000;
@@ -362,7 +366,7 @@ function runHealthCheck(): string | null {
   const script = path.join(root, 'scripts', 'health-check.sh');
   if (!fs.existsSync(script)) return null;
   try {
-    return execSync(`MACHINE_NAME="${HOSTNAME}" bash "${script}" --json`, {
+    return execSync(`bash ${shellQuote(script)} --json`, {
       encoding: 'utf-8',
       timeout: 30_000,
       env: { ...process.env, MACHINE_NAME: HOSTNAME },
@@ -652,8 +656,8 @@ function secretsGitCommit(files: string[], message: string): { ok: boolean; erro
       }
     }
     try {
-      for (const f of files) execSync(`git add ${f}`, opts);
-      execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, opts);
+      for (const f of files) execFileSync('git', ['add', f], opts);
+      execFileSync('git', ['commit', '-m', message], opts);
       execSync('git push', { ...opts, timeout: 30_000 });
       return { ok: true };
     } finally {
