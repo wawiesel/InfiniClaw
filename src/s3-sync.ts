@@ -28,6 +28,7 @@ const SYNC_PATHS = [
 const RECURSIVE_SYNC_PATHS = new Set(['data/sessions']);
 const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SAFE_BUCKET_NAME = /^(?!\d+\.\d+\.\d+\.\d+$)[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$/;
+const SAFE_S3_KEY = /^[A-Za-z0-9][A-Za-z0-9_./-]{0,1023}$/;
 
 function isValidBotName(bot: string): boolean {
   return SAFE_BOT_NAME.test(bot) && bot !== '.' && bot !== '..';
@@ -35,6 +36,11 @@ function isValidBotName(bot: string): boolean {
 
 function isValidBucketName(bucket: string): boolean {
   return SAFE_BUCKET_NAME.test(bucket) && !bucket.includes('..');
+}
+
+function assertSafeS3Key(key: string): void {
+  if (!SAFE_S3_KEY.test(key) || key.includes('//') || key.startsWith('/'))
+    throw new Error(`Unsafe S3 key: ${key}`);
 }
 
 function assertNoSymlinkOnPath(baseDir: string, targetPath: string): void {
@@ -78,6 +84,7 @@ async function uploadFile(client: S3Client, bucket: string, key: string, filePat
 
 /** Upload arbitrary text content to S3 under the given key. No-op if S3 not configured. */
 export async function uploadContent(key: string, content: string): Promise<void> {
+  assertSafeS3Key(key);
   const s3 = getClient();
   if (!s3) return;
   await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: content, ACL: 'public-read' }));
@@ -85,6 +92,7 @@ export async function uploadContent(key: string, content: string): Promise<void>
 
 /** Returns the public HTTP URL for an S3 key, or null if S3 not configured. */
 export function getPublicS3Url(key: string): string | null {
+  assertSafeS3Key(key);
   const config = loadMachineConfig();
   if (!config.s3) return null;
   const { endpoint, bucket } = config.s3;
@@ -94,6 +102,7 @@ export function getPublicS3Url(key: string): string | null {
 
 /** Upload HTML content with text/html content-type. */
 export async function uploadHtml(key: string, html: string): Promise<void> {
+  assertSafeS3Key(key);
   const s3 = getClient();
   if (!s3) return;
   await s3.client.send(new PutObjectCommand({
