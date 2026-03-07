@@ -128,7 +128,8 @@ import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
 import { loadFleet } from './machine-config.js';
-import { handleOperatorCommand, buildTodoMessage, readTodoItems } from './operator-commands.js';
+import { handleOperatorCommand } from './operator-commands.js';
+import { buildTodoMessage, readTodoItems } from './todo.js';
 import { getSystemStatus } from './status.js';
 
 // ── Display name helper ────────────────────────────────────────────────

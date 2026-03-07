@@ -1,0 +1,101 @@
+/** Command registry — single source of truth for all ! commands.
+ *  Help text and dispatch are auto-generated from this registry. */
+
+export interface RoomConn {
+  name: string;
+  roomId: string;
+  homeserver: string;
+  username: string;
+  password: string;
+  accessToken: string | null;
+  syncToken: string | null;
+  filterId: string | null;
+  userId: string | null;
+}
+
+export type RelayHandler = (cmd: string, conn: RoomConn, allConns: RoomConn[]) => Promise<void>;
+
+export interface CommandDef {
+  /** The command name without '!' prefix, e.g. 'fleet' */
+  name: string;
+  /** Usage string shown in help, e.g. '!fleet [room]' */
+  usage: string;
+  /** Short description shown in help */
+  description: string;
+  /** Match function — returns true if cmd matches this command */
+  match: (cmd: string) => boolean;
+  /** Handler function — registered at runtime by relay.ts */
+  handler?: RelayHandler;
+}
+
+/** Exact match: cmd === '!name' */
+function exact(name: string): (cmd: string) => boolean {
+  const full = `!${name}`;
+  return (cmd) => cmd === full;
+}
+
+/** Prefix match: cmd === '!name' or cmd starts with '!name ' */
+function prefix(name: string): (cmd: string) => boolean {
+  const full = `!${name}`;
+  const withSpace = `${full} `;
+  return (cmd) => cmd === full || cmd.startsWith(withSpace);
+}
+
+/** Starts-with match: cmd starts with '!name ' (requires args) */
+function startsWith(name: string): (cmd: string) => boolean {
+  const withSpace = `!${name} `;
+  return (cmd) => cmd.startsWith(withSpace);
+}
+
+export const COMMANDS: CommandDef[] = [
+  { name: 'todo',          usage: '!todo [bot]',               description: "show bot's active tasks",              match: prefix('todo') },
+  { name: 'fleet',         usage: '!fleet [room]',             description: 'fleet + ship status',                  match: prefix('fleet') },
+  { name: 'health',        usage: '!health',                   description: 'fleet health summary',                 match: exact('health') },
+  { name: 'dismiss',       usage: '!dismiss [bot]',            description: 'stop a bot',                           match: prefix('dismiss') },
+  { name: 'join',          usage: '!join <bot>',               description: 'start a bot',                          match: prefix('join') },
+  { name: 'restart',       usage: '!restart [bot]',            description: 'restart a bot',                        match: prefix('restart') },
+  { name: 'transport',     usage: '!transport <bot> <ship>',   description: 'beam bot to another ship',             match: startsWith('transport') },
+  { name: 'promote',       usage: '!promote <target>',         description: 'raise rank (bot or ship)',             match: startsWith('promote') },
+  { name: 'demote',        usage: '!demote <target>',          description: 'lower rank (bot or ship)',             match: startsWith('demote') },
+  { name: 'commission',    usage: '!commission [ship]',        description: 'commission ship, start bots',          match: prefix('commission') },
+  { name: 'decommission',  usage: '!decommission [ship]',     description: 'stop all bots, keep helm',             match: prefix('decommission') },
+  { name: 'provision',     usage: '!provision [target]',       description: 'sync repos',                           match: prefix('provision') },
+  { name: 'refit',         usage: '!refit [ship]',             description: 'full overhaul: sync, rebuild, restart', match: prefix('refit') },
+  { name: 'allow',         usage: '!allow <bot> <path> [min]', description: 'grant rw mount (authorized)',          match: startsWith('allow') },
+  { name: 'deny',          usage: '!deny <bot> <path>',        description: 'revoke rw mount (authorized)',         match: startsWith('deny') },
+  { name: 'helm',          usage: '!helm <text>',              description: 'send to operator tmux',                match: prefix('helm') },
+];
+
+/** Register a handler for a command by name. */
+export function registerHandler(name: string, handler: RelayHandler): void {
+  const cmd = COMMANDS.find(c => c.name === name);
+  if (!cmd) throw new Error(`Unknown command: ${name}`);
+  cmd.handler = handler;
+}
+
+/** Register handlers in bulk. */
+export function registerHandlers(handlers: Record<string, RelayHandler>): void {
+  for (const [name, handler] of Object.entries(handlers)) {
+    registerHandler(name, handler);
+  }
+}
+
+/** Find and execute the matching command handler. Returns true if matched. */
+export async function dispatch(cmd: string, conn: RoomConn, allConns: RoomConn[]): Promise<boolean> {
+  for (const def of COMMANDS) {
+    if (def.match(cmd)) {
+      if (def.handler) {
+        await def.handler(cmd, conn, allConns);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Generate help text for the ! command. */
+export function buildHelpText(): string {
+  const maxUsage = Math.max(...COMMANDS.map(c => c.usage.length));
+  const lines = COMMANDS.map(c => `  ${c.usage.padEnd(maxUsage)} — ${c.description}`);
+  return ['📟 Operator commands:', ...lines, `  ${'!'.padEnd(maxUsage)} — this help`].join('\n');
+}
