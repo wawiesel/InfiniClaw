@@ -1033,8 +1033,9 @@ function secretsGitCommit(files: string[], message: string): { ok: boolean; erro
       const out = execSync('git stash --include-untracked', opts).trim();
       didStash = !out.includes('No local changes');
     } catch (err) {
-      if (!execErrOutput(err).includes('No local changes')) {
-        didStash = false;
+      const detail = execErrOutput(err);
+      if (!detail.includes('No local changes')) {
+        throw new Error(`git stash failed${detail ? `: ${detail}` : ''}`);
       }
     }
     try {
@@ -1353,7 +1354,7 @@ async function dreamLoop(conns: RoomConn[]): Promise<void> {
         const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
         const name = env?.ASSISTANT_NAME || bot;
         await matrixSend(conn.homeserver, conn.accessToken, conn.roomId,
-          `${name}, begin your dream period. Review recent conversation history, consolidate your memory files, and optimize your standing orders for a fresh session. You have ${Math.floor(DREAM_DURATION_MS / 60_000)} minutes. Reply when done.`);
+          `${name}, begin your dream period. Review recent conversation history, consolidate your memory files, and prepare for a fresh session. You have ${Math.floor(DREAM_DURATION_MS / 60_000)} minutes. Reply when done.`);
         botDreamPhase.set(bot, 'dreaming');
         botDreamStartedAt.set(bot, now);
         dreamingBot = bot;

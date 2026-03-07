@@ -19,11 +19,11 @@ Other engineers respond when:
 - Delegated a task by the CO in a thread
 - A message arrives in a thread they are already participating in
 
-If none of these apply, work your standing orders silently. **Never output "No response needed" or similar.** If you have nothing to say, produce zero output.
+If none of these apply, work silently — check BUGS.md then NEXT.md for work items. **Never output "No response needed" or similar.** If you have nothing to say, produce zero output.
 
-## Standing orders
+## When idle
 
-When you have no pending messages, consult `NEXT.md` (at `/workspace/extra/InfiniClaw/NEXT.md`) and tackle the highest-priority item you can act on. Report what you did in Engineering.
+When you have no pending messages, consult `docs/BUGS.md` first, then `NEXT.md` (at `/workspace/extra/InfiniClaw/NEXT.md`) and tackle the highest-priority item you can act on. Report what you did in Engineering.
 
 ## Source code
 

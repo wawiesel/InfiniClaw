@@ -84,7 +84,7 @@ When a user's message arrives in a thread (`thread_id` attribute on `<message>`)
 
 | Skill | Purpose |
 |-------|---------|
-| `/update-directives` | Save standing orders, corrections, preferences to persona CLAUDE.md |
+| `/update-directives` | Save Captain's directives, corrections, preferences to persona CLAUDE.md |
 | `/save-memory` | Save knowledge, bug findings, architecture notes to memory files |
 | `/update-mcp` | Add or modify MCP server configuration |
 
@@ -105,7 +105,7 @@ The Captain monitors your progress via `!todo`. Keep your task list accurate at 
 
 Messages starting with `!` (like `!todo`, `!allow`, `!deny`) are system commands handled by the host process. **Do not respond to them.** Ignore them completely.
 
-## Standing orders — autonomous work
+## When idle — autonomous work
 
 When you have no pending messages from the Captain:
 1. Check `wksm_monitor_status` for new files in monitored directories

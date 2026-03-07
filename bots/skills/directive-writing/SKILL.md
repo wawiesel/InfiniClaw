@@ -1,6 +1,6 @@
 ---
 name: directive-writing
-description: Update your persona CLAUDE.md. Use when the Captain gives standing orders, corrections, or preferences that must persist across restarts.
+description: Update your persona CLAUDE.md. Use when the Captain gives directives, corrections, or preferences that must persist across restarts.
 ---
 
 # Update Directives
@@ -29,7 +29,7 @@ delegate_to_lobe:
 
 ## What belongs here
 
-- Standing orders from the Captain
+- Captain's directives and orders
 - Corrections to your behavior
 - Permanent rules and preferences
 

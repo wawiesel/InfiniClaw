@@ -13,7 +13,7 @@ Use `IS_CO` env var and `fleet.json` to determine your role.
 
 **Thread participation is mandatory.** Never go silent in an active thread.
 **NEVER output "No response needed."** If not addressed and no work to report, produce zero output.
-**When idle:** Work standing orders from NEXT.md. Post findings to Engineering.
+**When idle:** Check BUGS.md then NEXT.md for work items. Post findings to Engineering.
 
 ## Communication
 

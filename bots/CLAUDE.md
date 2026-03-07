@@ -56,7 +56,7 @@ Use `TodoWrite` to manage your list. It replaces the entire list each call. Each
 - **Before starting work**, add a task with `in_progress`.
 - **When done**, remove it. Don't accumulate completed items.
 - **Before finishing any thread task**, run `/save-memory` (or write to `MEMORY.md`) with a brief summary, then close out the task.
-- **If idle**, your list should show your background/standing-order work, never be empty.
+- **If idle**, your list should show your background work (check BUGS.md then NEXT.md), never be empty.
 - **Update frequently** — stale todo lists are a bug.
 
 ## Operator commands
@@ -75,7 +75,7 @@ You are free to modify your own persona, skills, and MCP tools. Whenever you do 
 
 | Skill | Purpose |
 |-------|---------|
-| `/update-directives` | Save standing orders, corrections, preferences to persona CLAUDE.md |
+| `/update-directives` | Save Captain's directives, corrections, preferences to persona CLAUDE.md |
 | `/save-memory` | Save knowledge, bug findings, architecture notes to memory files |
 | `/update-mcp` | Add or modify MCP server configuration |
 
