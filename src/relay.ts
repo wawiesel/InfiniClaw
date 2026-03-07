@@ -294,10 +294,9 @@ function gitVersionStr(root: string, distFile?: string): string {
     let ageMs: number;
 
     if (distFile && fs.existsSync(distFile)) {
-      const mtime = fs.statSync(distFile).mtimeMs;
-      ageMs = Date.now() - mtime;
-      sha = execSync(`git log -1 --format=%h --before="${new Date(mtime).toISOString()}"`, { cwd: root, ...execOpts }).trim() ||
-        execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+      // Use HEAD sha (what was deployed) and dist file age (when it was built)
+      sha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+      ageMs = Date.now() - fs.statSync(distFile).mtimeMs;
     } else {
       sha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
       const epoch = parseInt(execSync('git log -1 --format=%ct', { cwd: root, ...execOpts }).trim(), 10) * 1000;
@@ -328,9 +327,21 @@ function relayVersion(root: string): string {
   return gitVersionStr(root, path.join(root, 'dist', 'relay.js'));
 }
 
-/** Version string for a bot's deployed instance. */
+/** Version string for a bot's deployed instance — reads GIT_VERSION stamp. */
 function botVersion(root: string, bot: string): string {
-  return gitVersionStr(root, path.join(root, '_runtime', 'instances', bot, 'dist', 'main.js'));
+  const instanceDir = path.join(root, '_runtime', 'instances', bot);
+  const versionFile = path.join(instanceDir, 'GIT_VERSION');
+  try {
+    const stamp = fs.readFileSync(versionFile, 'utf-8').trim(); // "sha (date) subject"
+    const sha = stamp.split(' ')[0];
+    if (!sha) return '';
+    const distFile = path.join(instanceDir, 'dist', 'main.js');
+    const ageMs = fs.existsSync(distFile) ? Date.now() - fs.statSync(distFile).mtimeMs : 0;
+    const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: root };
+    const behind = parseInt(execSync(`git rev-list ${sha}..HEAD --count`, execOpts).trim(), 10) || 0;
+    const ud = behind === 0 ? '↑0' : `↓${behind}`;
+    return ` · ${sha} ${ud} (${formatDuration(ageMs)})`;
+  } catch { return ''; }
 }
 
 /** Version string for a repo (uses HEAD, no dist file). */
