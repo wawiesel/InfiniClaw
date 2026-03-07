@@ -105,9 +105,17 @@ function formatDuration(ms: number): string {
   return `${hrs}h`;
 }
 
+function formatTimestamp(): string {
+  const d = new Date();
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
+
 /** Standard status line: `<emoji> <what> (<ship>) <status> (<time>)` */
 function statusLine(emoji: string, what: string, status: string, elapsedMs: number): string {
-  return `${emoji} ${what} (${HOSTNAME}) ${status} (${formatDuration(elapsedMs)})`;
+  const time = elapsedMs > 0
+    ? `${formatTimestamp()} · ${formatDuration(elapsedMs)}`
+    : formatTimestamp();
+  return `${emoji} ${what} (${HOSTNAME}) ${status} (${time})`;
 }
 
 async function reportFailure(system: string, detail: string, conns: RoomConn[]): Promise<void> {
