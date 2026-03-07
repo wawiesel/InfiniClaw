@@ -1613,8 +1613,10 @@ async function dialtone(conn: RoomConn, captainUserId: string, conns: RoomConn[]
               const rawBody = event.content.body?.trim() || '';
               if (!verifyIntercomSig(rawBody, event.content.formatted_body)) {
                 log(`${conn.name}: rejected unsigned/invalid intercom command from ${event.sender}: ${body.slice(0, 50)}`);
+                await reply(conn, `🚫 ${HOSTNAME}: rejected command — invalid or missing signature`);
                 continue;
               }
+              log(`${conn.name}: ✅ verified intercom signature for: ${body.slice(0, 50)}`);
             }
 
             log(`${conn.name}: command from ${event.sender}: ${body}`);
