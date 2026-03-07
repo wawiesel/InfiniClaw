@@ -126,6 +126,10 @@ function statusLine(emoji: string, what: string, status: string, elapsedMs: numb
 function stageOk(what: string, suffix = ''): string { return `✅ ${what}${suffix}`; }
 function stageFail(what: string, suffix = ''): string { return `⛔ ${what}${suffix}`; }
 function stageWarn(what: string, suffix = ''): string { return `⚠️ ${what}${suffix}`; }
+function resultEmoji(warnings: number, errors: number): string { return errors > 0 ? '⛔' : warnings > 0 ? '⚠️' : '✅'; }
+function refitResult(outcome: string, warnings: number, errors: number, elapsedMs: number): string {
+  return statusLine(resultEmoji(warnings, errors), 'refit', `${outcome} (${warnings}W ${errors}E)`, elapsedMs);
+}
 
 async function reportFailure(system: string, detail: string, conns: RoomConn[]): Promise<void> {
   const now = Date.now();
@@ -1650,7 +1654,7 @@ function registerRelayCommands(): void {
           errors++;
           const link = await uploadErrorLog('build', new Error(buildResult));
           await s(stageFail('relay + dist rebuild', link));
-          const msg = statusLine('⛔', 'refit', `failed with ${warnings} warning(s) and ${errors} error(s)`, elapsed());
+          const msg = refitResult('failed', warnings, errors, elapsed());
           await s(msg);
           await reply(conn, msg);
           return;
@@ -1685,9 +1689,7 @@ function registerRelayCommands(): void {
 
         persistFleet();
         await publishFleetReport().catch(() => {});
-        const summary = warnings + errors > 0 ? ` with ${warnings} warning(s) and ${errors} error(s)` : '';
-        const emoji = errors > 0 ? '⚠️' : '✅';
-        const msg = statusLine(emoji, 'refit', `complete${summary}`, elapsed());
+        const msg = refitResult('complete', warnings, errors, elapsed());
         await s(msg);
         await reply(conn, msg);
         await sleep(1_000);
@@ -1696,7 +1698,7 @@ function registerRelayCommands(): void {
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
         errors++;
-        const msg = statusLine('⛔', 'refit', `failed with ${warnings} warning(s) and ${errors} error(s)`, elapsed());
+        const msg = refitResult('failed', warnings, errors, elapsed());
         await threadReply(conn, threadRoot, msg);
         await reply(conn, msg);
       }
