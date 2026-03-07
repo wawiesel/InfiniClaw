@@ -30,7 +30,7 @@ Updated 2026-03-07 1:17 PM EST.
 
 ## LOW — Security
 
-- **Security review: relay.ts + main.ts new code** — Parker pushed 60+ commits since last security sweep (machine→ship rename, HMAC→operator-trust auth, operator-commands inlined into main.ts). New code not yet reviewed. Priority: LOW.
+- ~~Security review: relay.ts + main.ts new code~~ — reviewed 2026-03-07, all 82 commits clean. No injection vectors. Full rotation pointer reset to `allow-list`.
 
 ## LOW — Infrastructure
 
