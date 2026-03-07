@@ -105,6 +105,11 @@ function formatDuration(ms: number): string {
   return `${hrs}h`;
 }
 
+/** Standard status line: `<emoji> <what> (<ship>) <status> (<time>)` */
+function statusLine(emoji: string, what: string, status: string, elapsedMs: number): string {
+  return `${emoji} ${what} (${HOSTNAME}) ${status} (${formatDuration(elapsedMs)})`;
+}
+
 async function reportFailure(system: string, detail: string, conns: RoomConn[]): Promise<void> {
   const now = Date.now();
   const conn = findEngConn(conns);
@@ -113,7 +118,7 @@ async function reportFailure(system: string, detail: string, conns: RoomConn[]):
   const existing = failureStates[system];
   if (!existing) {
     // First failure — create thread
-    const rootId = await reply(conn, `⚠️ ${system} (${HOSTNAME}) is down`);
+    const rootId = await reply(conn, statusLine('⚠️', system, 'down', 0));
     if (!rootId) return;
     await threadReply(conn, rootId, detail.slice(0, 500));
     failureStates[system] = {
@@ -127,8 +132,7 @@ async function reportFailure(system: string, detail: string, conns: RoomConn[]):
 
   // Subsequent failure — only post if past nextAlertAt
   if (now < existing.nextAlertAt) return;
-  const downtime = formatDuration(now - existing.startedAt);
-  await threadReply(conn, existing.threadRootId, `${system} (${HOSTNAME}) has been down ${downtime}`);
+  await threadReply(conn, existing.threadRootId, statusLine('⚠️', system, 'down', now - existing.startedAt));
   existing.intervalMs = Math.min(existing.intervalMs * 2, FAILURE_MAX_INTERVAL);
   existing.nextAlertAt = now + existing.intervalMs;
 }
@@ -140,8 +144,7 @@ async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> 
 
   const conn = findEngConn(conns);
   if (!conn?.accessToken) return;
-  const downtime = formatDuration(Date.now() - state.startedAt);
-  const recoveryMsg = `✅ ${system} (${HOSTNAME}) is now operational after ${downtime}`;
+  const recoveryMsg = statusLine('✅', system, 'operational', Date.now() - state.startedAt);
   await threadReply(conn, state.threadRootId, recoveryMsg);
   await reply(conn, recoveryMsg);
 }
@@ -1391,10 +1394,12 @@ function registerRelayCommands(): void {
     refit: async (cmd, conn) => {
       const targetShip = cmd.slice('!refit'.length).trim() || null;
       if (targetShip && targetShip !== HOSTNAME) return;
+      const startedAt = Date.now();
 
-      const threadRoot = await reply(conn, `⚓ refit ${HOSTNAME}`);
+      const threadRoot = await reply(conn, statusLine('⚓', 'refit', 'starting', 0));
       if (!threadRoot) return;
       const t = (text: string) => threadReply(conn, threadRoot, text);
+      const elapsed = () => Date.now() - startedAt;
 
       try {
         const secretsResult = secretsGitSync();
@@ -1405,7 +1410,9 @@ function registerRelayCommands(): void {
 
         const buildResult = rebuildInfiniClaw();
         if (buildResult.includes('FAILED')) {
-          await t('build failed ⛔');
+          const msg = statusLine('⛔', 'refit', 'failed', elapsed());
+          await t(msg);
+          await reply(conn, msg);
           return;
         }
         await t('rebuilt ✓');
@@ -1420,13 +1427,17 @@ function registerRelayCommands(): void {
         }
 
         persistFleet();
-        await t('restarting relay');
+        const msg = statusLine('✅', 'refit', 'complete', elapsed());
+        await t(msg);
+        await reply(conn, msg);
         await sleep(1_000);
         try {
           execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
-        await t(`refit failed — ${errStr(err)}`);
+        const msg = statusLine('⛔', 'refit', 'failed', elapsed());
+        await t(msg);
+        await reply(conn, msg);
       }
     },
 
