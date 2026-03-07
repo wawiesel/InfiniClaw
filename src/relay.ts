@@ -1371,12 +1371,11 @@ function registerRelayCommands(): void {
       if (!await electSpeaker()) return; // only speaker responds
 
       try {
-        const fleet = liveFleet;
-        const machines = (() => { try { return loadMachines(); } catch { return {}; } })();
         const root = resolveRoot();
+        const machines = (() => { try { return loadMachines(); } catch { return {}; } })();
         const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
 
-        // Local process status (only available for this ship)
+        // Local process status
         const localRunning = new Set<string>();
         try {
           for (const line of execSync('podman ps --format "{{.Names}}"', execOpts).trim().split('\n')) {
@@ -1394,25 +1393,33 @@ function registerRelayCommands(): void {
           }
         } catch { /* empty */ }
 
-        // Group bots by machine
+        // Group bots by machine — use liveFleet as source of truth
         const byMachine: Record<string, Array<[string, FleetEntry]>> = {};
-        for (const [bot, entry] of Object.entries(fleet)) {
-          const m = entry.machine || 'unassigned';
+        for (const [bot, entry] of Object.entries(liveFleet)) {
+          const m = entry.machine || 'drydock';
           (byMachine[m] ??= []).push([bot, entry]);
         }
+        // Ensure all known ships appear even if they have no bots
+        for (const ship of Object.keys(machines)) {
+          byMachine[ship] ??= [];
+        }
 
-        // Sort machines by rank
-        const machineOrder = Object.keys(byMachine).sort((a, b) =>
-          (machines[a]?.rank ?? 99) - (machines[b]?.rank ?? 99)
-        );
+        // Sort: known ships by rank, drydock last
+        const machineOrder = Object.keys(byMachine).sort((a, b) => {
+          if (a === 'drydock') return 1;
+          if (b === 'drydock') return -1;
+          return (machines[a]?.rank ?? 99) - (machines[b]?.rank ?? 99);
+        });
 
         const lines: string[] = [];
 
         for (const machine of machineOrder) {
           const mConfig = machines[machine];
           const isLocal = machine === HOSTNAME;
-          if (machine === 'unassigned') {
-            lines.push('⚓ drydock');
+
+          // Ship header
+          if (machine === 'drydock') {
+            lines.push('🔧 drydock');
           } else {
             const rank = mConfig?.rank ?? '?';
             const shipIcon = mConfig?.active ? '⚓' : '🚫';
@@ -1420,10 +1427,10 @@ function registerRelayCommands(): void {
             lines.push(`${shipIcon} ${machine}[${rank}]${helmVersion}`);
           }
 
+          // Bots under this ship
           const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
-            // CO = lowest rank active bot in this role
-            const isCO = entry.status === 'active' && !Object.entries(fleet).some(
+            const isCO = entry.status === 'active' && !Object.entries(liveFleet).some(
               ([id, e]) => id !== botId && e.role === entry.role && e.status === 'active' && e.rank < entry.rank
             );
 
@@ -1433,7 +1440,7 @@ function registerRelayCommands(): void {
             else if (isCO) badge = '⭐';
             else if (isLocal && localRunning.has(botId)) badge = '🟢';
             else if (isLocal) badge = '⚠️';
-            else badge = '🟢'; // remote active — trust fleet state
+            else badge = '🟢';
 
             const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
             const name = env?.ASSISTANT_NAME || botId;
@@ -1443,7 +1450,6 @@ function registerRelayCommands(): void {
             lines.push(`      ${name} ${badge} · ${entry.role}[${entry.rank}]${gitSuffix}`);
           }
         }
-
 
         await reply(conn, lines.join('\n'));
       } catch (err) {
