@@ -121,6 +121,11 @@ function statusLine(emoji: string, what: string, status: string, elapsedMs: numb
   return `${emoji} ${what} (${HOSTNAME}) ${status} (${time})`;
 }
 
+/** Stage result: `✅ <what><suffix>` or `⛔ <what><suffix>` or `⚠️ <what><suffix>` */
+function stageOk(what: string, suffix = ''): string { return `✅ ${what}${suffix}`; }
+function stageFail(what: string, suffix = ''): string { return `⛔ ${what}${suffix}`; }
+function stageWarn(what: string, suffix = ''): string { return `⚠️ ${what}${suffix}`; }
+
 async function reportFailure(system: string, detail: string, conns: RoomConn[]): Promise<void> {
   const now = Date.now();
   const conn = findEngConn(conns);
@@ -299,8 +304,20 @@ function gitVersionStr(root: string, distFile?: string): string {
     }
 
     if (!sha) return '';
-    const behind = parseInt(execSync(`git rev-list ${sha}..HEAD --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
-    const ud = behind === 0 ? '↑0' : `↓${behind}`;
+    let ud: string;
+    if (distFile) {
+      // Dist file mode: how far behind HEAD is the deployed artifact?
+      const behind = parseInt(execSync(`git rev-list ${sha}..HEAD --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
+      ud = behind === 0 ? '↑0' : `↓${behind}`;
+    } else {
+      // Repo mode: show relationship to origin
+      const ahead = parseInt(execSync('git rev-list origin/main..HEAD --count', { cwd: root, ...execOpts }).trim(), 10) || 0;
+      const behind = parseInt(execSync('git rev-list HEAD..origin/main --count', { cwd: root, ...execOpts }).trim(), 10) || 0;
+      if (ahead > 0 && behind > 0) ud = `↑${ahead}↓${behind}`;
+      else if (ahead > 0) ud = `↑${ahead}`;
+      else if (behind > 0) ud = `↓${behind}`;
+      else ud = '↑0';
+    }
     return ` · ${sha} ${ud} (${formatDuration(ageMs)})`;
   } catch { return ''; }
 }
@@ -595,6 +612,28 @@ function getS3Client(): { client: S3Client; bucket: string } | null {
       bucket,
     };
   } catch { return null; }
+}
+
+/** Upload an error log to S3 and return a markdown link, or empty string on failure. */
+/** Upload an error log to S3 and return a markdown link, or empty string on failure. */
+async function uploadErrorLog(label: string, error: unknown): Promise<string> {
+  const s3 = getS3Client();
+  if (!s3) return '';
+  try {
+    const { endpoint } = loadShipConfig().s3!;
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const key = `logs/${HOSTNAME}/${label}-${ts}.log`;
+    const body = error instanceof Error
+      ? `${error.message}\n\n${error.stack ?? ''}\n\n${(error as { stderr?: string }).stderr ?? ''}`
+      : String(error);
+    await s3.client.send(new PutObjectCommand({
+      Bucket: s3.bucket,
+      Key: key,
+      Body: Buffer.from(body),
+      ContentType: 'text/plain',
+    }));
+    return ` ([log](${endpoint}/${s3.bucket}/${key}))`;
+  } catch { return ''; }
 }
 
 function runHealthCheck(): string | null {
@@ -909,7 +948,20 @@ function secretsGitSync(): { ok: boolean; newCommits: number; output: string } {
     execSync('git fetch origin', opts);
     const countStr = execSync('git rev-list HEAD..origin/main --count', { ...opts, timeout: 5_000 }).trim();
     const newCommits = parseInt(countStr, 10) || 0;
-    if (newCommits === 0) return { ok: true, output: 'up to date', newCommits: 0 };
+    if (newCommits === 0) {
+      // Try to push any unpushed local commits
+      const aheadStr = execSync('git rev-list origin/main..HEAD --count', { ...opts, timeout: 5_000 }).trim();
+      const ahead = parseInt(aheadStr, 10) || 0;
+      if (ahead > 0) {
+        try {
+          execSync('git push', { ...opts, timeout: 30_000 });
+          log(`secrets sync: pushed ${ahead} local commit(s)`);
+        } catch (pushErr) {
+          return { ok: false, output: `${ahead} unpushed commit(s), push failed: ${errStr(pushErr)}`, newCommits: 0 };
+        }
+      }
+      return { ok: true, output: 'up to date', newCommits: 0 };
+    }
     let didStash = false;
     try {
       const out = execSync('git stash --include-untracked', opts).trim();
@@ -1460,30 +1512,30 @@ function registerRelayCommands(): void {
         const secretsResult = secretsGitSync();
         const secretsVer = repoVersion(secretsRepoPath());
         if (!secretsResult.ok) {
-          await s(`⚠️ secrets sync failed${secretsVer}`);
+          await s(stageWarn('secrets sync failed', secretsVer));
         } else if (secretsResult.newCommits > 0) {
-          await s(`✅ secrets pulled ${secretsResult.newCommits} commit(s)${secretsVer}`);
+          await s(stageOk(`secrets pulled ${secretsResult.newCommits} commit(s)`, secretsVer));
         } else {
-          await s(`✅ secrets up to date${secretsVer}`);
+          await s(stageOk('secrets up to date', secretsVer));
         }
 
         const icResult = gitSync();
         const codeVer = repoVersion(root);
         if (!icResult.ok) {
-          await s(`⚠️ code sync failed${codeVer}`);
+          await s(stageWarn('code sync failed', codeVer));
         } else if (icResult.newCommits > 0) {
-          await s(`✅ code pulled ${icResult.newCommits} commit(s)${codeVer}`);
+          await s(stageOk(`code pulled ${icResult.newCommits} commit(s)`, codeVer));
         } else {
-          await s(`✅ code up to date${codeVer}`);
+          await s(stageOk('code up to date', codeVer));
         }
 
         const buildResult = rebuildInfiniClaw();
         if (buildResult.includes('FAILED')) {
-          await s(statusLine('⛔', 'build', 'failed', elapsed()));
+          await s(stageFail('relay + dist rebuild'));
           await reply(conn, statusLine('⛔', 'refit', 'failed', elapsed()));
           return;
         }
-        await s(`✅ build${relayVersion(root)}`);
+        await s(stageOk('relay + dist rebuilt', relayVersion(root)));
 
         ensurePodmanReady();
 
@@ -1491,9 +1543,10 @@ function registerRelayCommands(): void {
         for (const bot of inactiveBots) {
           try {
             deployBot(root, bot);
-            await s(`✅ ${bot} deployed${botVersion(root, bot)}`);
-          } catch {
-            await s(`⛔ ${bot} deploy failed`);
+            await s(stageOk(`${bot} deployed`, botVersion(root, bot)));
+          } catch (err) {
+            const link = await uploadErrorLog(`deploy-${bot}`, err);
+            await s(stageFail(`${bot} deploy failed`, link));
           }
         }
 
@@ -1501,9 +1554,10 @@ function registerRelayCommands(): void {
         for (const bot of activeBots) {
           try {
             bootstrapBot(root, bot);
-            await s(`✅ ${bot} restarted${botVersion(root, bot)}`);
-          } catch {
-            await s(`⛔ ${bot} restart failed`);
+            await s(stageOk(`${bot} restarted`, botVersion(root, bot)));
+          } catch (err) {
+            const link = await uploadErrorLog(`restart-${bot}`, err);
+            await s(stageFail(`${bot} restart failed`, link));
           }
         }
 
