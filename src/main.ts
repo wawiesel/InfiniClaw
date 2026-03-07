@@ -964,8 +964,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const threadContext = buildThreadContextBlock(chatJid, contextMessages);
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
+  const triageInstruction = 'You are a Triage Agent. If a task takes more than 2 seconds, use the `branch_to_thread` tool. Never execute complex bash or file tasks directly — always delegate to a lobe.';
   const parts: string[] = [];
   if (missionContext) parts.push(missionContext);
+  if (isMainGroup) parts.push(triageInstruction);
   if (threadContext) parts.push(threadContext);
   parts.push(basePrompt);
   const prompt = parts.join('\n\n');
@@ -1185,30 +1187,23 @@ async function runAgent(
   }
 }
 
-// ── Interrupt IPC — kill running claude and resume with urgent message ──
-
-/**
- * Write an interrupt IPC file for a running container.
- * The agent-runner polls for interrupt-*.json files every 500ms and
- * sends SIGTERM to the running claude process, then resumes with the
- * interrupt message.
- */
-function sendInterruptMessage(chatJid: string, group: RegisteredGroup, text: string): boolean {
+// ── Active-container IPC follow-ups ───────────────────────────────────
+function writeMessageToActiveContainerIpc(chatJid: string, group: RegisteredGroup, text: string): boolean {
   const groupStatus = queue.getGroupStatus(chatJid);
   if (!groupStatus.active) return false;
 
   const inputDir = path.join(DATA_DIR, 'ipc', group.folder, 'input');
   try {
     fs.mkdirSync(inputDir, { recursive: true });
-    const filename = `interrupt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
+    const filename = `message-${Date.now()}.json`;
     const filepath = path.join(inputDir, filename);
     const tempPath = `${filepath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify({ type: 'interrupt', text }));
+    fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
     fs.renameSync(tempPath, filepath);
-    logger.info({ chatJid, group: group.name }, 'Sent interrupt message to active container');
+    logger.info({ chatJid, group: group.name }, 'Queued message for active container via IPC');
     return true;
   } catch (err) {
-    logger.error({ chatJid, err }, 'Failed to write interrupt IPC file');
+    logger.error({ chatJid, err }, 'Failed to write active-container IPC message');
     return false;
   }
 }
@@ -1287,35 +1282,24 @@ async function handleGroupMessagesInLoop(
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
   threadMapLastSeen[`r:${chatJid}`] = Date.now();
 
-  // Interrupt: if container is busy and message is from captain/operator, interrupt.
-  // Bot-to-bot callouts do NOT interrupt — they queue normally to avoid interrupt loops.
-  const groupStatus = queue.getGroupStatus(chatJid);
-  if (groupStatus.active) {
-    const interruptMessages = messagesToSend.filter((m) =>
-      !botMatrixUserIds.has(m.sender) && (TRIGGER_PATTERN.test(m.content.trim()) || (CAPTAIN_USER_ID && m.sender === CAPTAIN_USER_ID)),
-    );
-    if (interruptMessages.length > 0) {
-      startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
-      const ch = findChannel(channels, chatJid);
-      if (ch?.setTyping) ch.setTyping(chatJid, true).catch((err) => { logger.debug({ chatJid, err }, 'Set typing failed'); });
-      sendInterruptMessage(chatJid, group, formatted);
-      lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
-      saveState();
-      return;
-    }
-  }
-
-  if (queue.sendMessage(chatJid, formatted)) {
-    await handlePipedToActiveContainer(chatJid, messagesToSend);
+  if (queue.getGroupStatus(chatJid).active) {
+    handlePipedToActiveContainer(chatJid, group, messagesToSend, formatted);
   } else {
     handleQueuedForProcessing(chatJid);
   }
 }
 
-async function handlePipedToActiveContainer(
+function handlePipedToActiveContainer(
   chatJid: string,
+  group: RegisteredGroup,
   messagesToSend: NewMessage[],
-): Promise<void> {
+  formatted: string,
+): void {
+  if (!writeMessageToActiveContainerIpc(chatJid, group, formatted)) {
+    handleQueuedForProcessing(chatJid);
+    return;
+  }
+
   logger.debug(
     { chatJid, count: messagesToSend.length },
     'Piped messages to active container',
@@ -1327,8 +1311,8 @@ async function handlePipedToActiveContainer(
   saveState();
 
   const ch = findChannel(channels, chatJid);
-  if (ch?.setTyping) await ch.setTyping(chatJid, true);
-  if (ch?.setPresenceStatus) await ch.setPresenceStatus('online', 'processing...');
+  if (ch?.setTyping) void ch.setTyping(chatJid, true).catch((err) => { logger.debug({ chatJid, err }, 'Set typing failed'); });
+  if (ch?.setPresenceStatus) void ch.setPresenceStatus('online', 'processing...').catch((err) => { logger.debug({ chatJid, err }, 'Set presence failed'); });
 }
 
 function handleQueuedForProcessing(chatJid: string): void {
