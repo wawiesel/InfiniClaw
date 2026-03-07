@@ -1,7 +1,7 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-06 9:43 PM EST.
+Updated 2026-03-07 1:17 PM EST.
 
 ## HIGH PRIORITY — Captain Directives
 
@@ -13,8 +13,6 @@ Updated 2026-03-06 9:43 PM EST.
 
 ## HIGH — Needs Captain Action
 
-- **Stop old `infiniclaw-supervisor` pm2 process** — relay is now running (`infiniclaw-relay` started 2026-03-06T14:29), but old supervisor pm2 (id 5, 14h uptime) is still alive alongside it. Captain must: `pm2 stop infiniclaw-supervisor && pm2 delete infiniclaw-supervisor`. Then `pm2 save`.
-- **Restart relay on HERACLES** — `pm2 restart infiniclaw-relay`. Needed to activate: `restart_relay` IPC type (`3b7c9d5`), relay self-restart after git sync (`9797f04`), and push capability. One-time manual restart, then fully automatic going forward.
 - **Decommission or silence mac139160** — relay on mac139160 is sending repeated SSH timeout alerts (code.ornl.gov port 22 unreachable) every ~20 min into Engineering. Machine appears orphaned. Captain must stop its relay: `pm2 stop infiniclaw-relay` on mac139160, or decommission entirely.
 
 ## MEDIUM — Next Up
@@ -30,17 +28,26 @@ Updated 2026-03-06 9:43 PM EST.
 
 - **Help account for relay output** — Commands like `!` (help), `!fleet`, `!health` produce output that bots should ignore. Create a dedicated "help" Matrix account for relay responses. Add it to every bot's `IGNORE_SENDERS` so relay output never triggers bot processing. Currently relay sends via intercom accounts, which bots already watch — separating help output from intercom commands would be cleaner.
 
+## LOW — Security
+
+- **Security review: relay.ts + main.ts new code** — Parker pushed 60+ commits since last security sweep (machine→ship rename, HMAC→operator-trust auth, operator-commands inlined into main.ts). New code not yet reviewed. Priority: LOW.
+
 ## LOW — Infrastructure
 
 - **Poseidon: update S3 endpoint to remove containerNetwork dependency** — currently uses `containerNetwork: "host"` to reach S3. Update S3 endpoint on Poseidon so it's reachable without host networking, then remove the `machines` section from fleet.json entirely.
 - **Podman SSH connection drops on macOS** — SSH socket dies silently after sleep/wake. Fix: `podman machine stop && podman machine start`. Root cause unknown.
-- ~~Rename supervisor to "relay"~~ — done (`93ea3ca`), relay running. Old pm2 process cleanup needed (see HIGH).
+- ~~Rename supervisor to "relay"~~ — done (`93ea3ca`), relay running.
 - **Matrix sluggish on Poseidon** — conduwuit 500 errors on federated rooms. Status indicator spam throttled (5min cap).
 
 ## LOW — Reliability
 
 - ~~Pre-commit hook for dist/~~ — installed on both HERACLES and Poseidon.
+- **Brain model change refactor** — Changing brain model requires editing secrets env file directly (`/Users/ww5/.config/infiniclaw/secrets/bots/<bot>/env`, `BRAIN_MODEL=`). Should be streamlined: either a CLI command or IPC task that edits the env and restarts. Priority: LOW.
 - **Session OOM still possible** — V8 heap OOM (exit 137) from large JSONL sessions. Cleanup: DB sessions table, JSONL file, .claude/backups/.
+
+## VERY LOW — Deferred
+
+- **Branch & Merge — phases 2-4** — Phase 1 complete (`083bc0b`). Phases 2-4 require `delegate-runner.ts` (branch_to_thread tool, async lobe callbacks, merge signal). In progress.
 
 ## Recently Completed
 

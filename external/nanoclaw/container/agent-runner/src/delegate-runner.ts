@@ -151,6 +151,10 @@ function spawnNpxDelegate(
   });
 }
 
+function sanitizeThreadIdForFilename(threadId: string): string {
+  return threadId.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
 export function registerDelegateTools(
   server: McpServer,
   ctx: {
@@ -270,6 +274,91 @@ export function registerDelegateTools(
           isError: true,
         };
       }
+    },
+  );
+
+  // ── branch_to_thread ─────────────────────────────────────────────────
+
+  server.tool(
+    'branch_to_thread',
+    `Spawn a new Claude thread brain in the background and return immediately.`,
+    {
+      objective: z.string().min(1).describe('Objective for the spawned thread brain'),
+      thread_id: z.string().min(1).describe('Target thread ID to resume/anchor'),
+    },
+    async (args) => {
+      const cwdResult = resolveDelegateCwd('/workspace');
+      if (!cwdResult.ok) {
+        return {
+          content: [{ type: 'text' as const, text: `branch_to_thread unavailable: ${cwdResult.error}` }],
+          isError: true,
+        };
+      }
+
+      const delegateEnv = buildDelegateEnv();
+      const safeThreadId = sanitizeThreadIdForFilename(args.thread_id);
+      const logPath = `/tmp/thread-${safeThreadId}.log`;
+      const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+      const startedAt = Date.now();
+
+      // TODO(phase2): Hydrate immutable thread context via host-side ContainerInput injection in src/main.ts.
+      // This runner only launches the child process; full history injection is handled by the host.
+      const launchClaude = (useResumeFlags: boolean) => {
+        const baseArgs = [
+          '--print',
+          '--verbose',
+          '--output-format', 'stream-json',
+          '--dangerously-skip-permissions',
+          '--add-dir', cwdResult.cwd,
+        ];
+        const claudeArgs = useResumeFlags
+          ? ['--resume', '--thread-id', args.thread_id, ...baseArgs]
+          : baseArgs;
+
+        const child = spawn('claude', claudeArgs, {
+          cwd: cwdResult.cwd,
+          env: delegateEnv,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          detached: true,
+        });
+
+        logStream.write(`\n[${new Date().toISOString()}] started pid=${child.pid ?? 'unknown'} mode=${useResumeFlags ? 'resume' : 'fallback'}\n`);
+        child.stdout?.pipe(logStream, { end: false });
+        child.stderr?.pipe(logStream, { end: false });
+
+        child.stdin?.write(args.objective);
+        child.stdin?.end();
+        child.unref();
+        return child;
+      };
+
+      const primary = launchClaude(true);
+      let fallbackLaunched = false;
+
+      primary.on('error', (err) => {
+        logStream.write(`[${new Date().toISOString()}] primary error: ${err.message}\n`);
+        if (!fallbackLaunched) {
+          fallbackLaunched = true;
+          launchClaude(false);
+        }
+      });
+
+      primary.on('close', (code, signal) => {
+        logStream.write(`[${new Date().toISOString()}] primary closed code=${String(code)} signal=${String(signal)}\n`);
+        const endedQuickly = Date.now() - startedAt < 5000;
+        if (!fallbackLaunched && endedQuickly && code !== 0) {
+          fallbackLaunched = true;
+          logStream.write(`[${new Date().toISOString()}] launching fallback without --resume/--thread-id\n`);
+          launchClaude(false);
+        }
+      });
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ status: 'Branch created', thread_id: args.thread_id }),
+        }],
+      };
     },
   );
 
