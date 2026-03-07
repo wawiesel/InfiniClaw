@@ -1,8 +1,8 @@
 /**
- * Machine configuration.
+ * Ship configuration.
  * Reads fleet.json from the secrets repo (~/.config/infiniclaw/secrets/bots/fleet.json)
- * to determine which bots run on this machine, S3 settings, and per-machine options.
- * No machine.json needed — secretsPath is by convention ~/.config/infiniclaw/secrets.
+ * to determine which bots run on this ship, S3 settings, and per-ship options.
+ * secretsPath is by convention ~/.config/infiniclaw/secrets.
  */
 import fs from 'fs';
 import os from 'os';
@@ -20,12 +20,12 @@ export type BotStatus = 'active' | 'dismissed' | 'transit';
 export interface BotEntry {
   role: string;
   rank: number;
-  machine: string | null;
+  ship: string | null;
   status: BotStatus;
   title?: string;
 }
 
-export interface MachineConfig {
+export interface ShipConfig {
   bots: string[];
   secretsPath: string;
   s3?: S3Config;
@@ -33,10 +33,10 @@ export interface MachineConfig {
 
 const SECRETS_PATH = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets');
 const FLEET_PATH = path.join(SECRETS_PATH, 'bots', 'fleet.json');
-const MACHINES_PATH = path.join(SECRETS_PATH, 'operator', 'machines.json');
+const SHIPS_PATH = path.join(SECRETS_PATH, 'operator', 'ships.json');
 const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-let cached: MachineConfig | null = null;
+let cached: ShipConfig | null = null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -50,7 +50,7 @@ function isValidBotName(name: string): boolean {
   return SAFE_BOT_NAME.test(name) && name !== '.' && name !== '..';
 }
 
-export function loadMachineConfig(): MachineConfig {
+export function loadShipConfig(): ShipConfig {
   if (cached) return cached;
 
   if (!fs.existsSync(FLEET_PATH)) {
@@ -71,7 +71,7 @@ export function loadMachineConfig(): MachineConfig {
   }
   const raw = parsed;
 
-  // Resolve bots assigned to this machine
+  // Resolve bots assigned to this ship
   const hostname = os.hostname();
   if (!isRecord(raw.bots)) {
     throw new Error('fleet.json: "bots" must be an object');
@@ -82,12 +82,12 @@ export function loadMachineConfig(): MachineConfig {
     if (!isValidBotName(name)) {
       throw new Error(`fleet.json: invalid bot name "${name}"`);
     }
-    if (entry.machine === hostname && entry.status === 'active') {
+    if (entry.ship === hostname && entry.status === 'active') {
       bots.push(name);
     }
   }
 
-  const config: MachineConfig = {
+  const config: ShipConfig = {
     bots,
     secretsPath: SECRETS_PATH,
   };
@@ -116,10 +116,10 @@ export function loadMachineConfig(): MachineConfig {
 
 /** Path to the bots subdirectory inside secretsPath. */
 export function botsPath(): string {
-  return path.join(loadMachineConfig().secretsPath, 'bots');
+  return path.join(loadShipConfig().secretsPath, 'bots');
 }
 
-/** Load the full fleet config (all bots, not just this machine's). */
+/** Load the full fleet config (all bots, not just this ship's). */
 export function loadFleet(): Record<string, BotEntry> {
   const raw = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
   const bots: Record<string, BotEntry> = raw.bots || {};
@@ -140,7 +140,7 @@ export function writeFleet(fleet: Record<string, BotEntry>): void {
   fs.writeFileSync(FLEET_PATH, JSON.stringify(raw, null, 2) + '\n');
 }
 
-export interface MachineEntry {
+export interface ShipEntry {
   ip: string | null;
   os: string;
   user: string | null;
@@ -148,28 +148,28 @@ export interface MachineEntry {
   rank: number;
 }
 
-/** Load all machines from operator/machines.json. */
-export function loadMachines(): Record<string, MachineEntry> {
-  return JSON.parse(fs.readFileSync(MACHINES_PATH, 'utf-8'));
+/** Load all ships from operator/ships.json. */
+export function loadShips(): Record<string, ShipEntry> {
+  return JSON.parse(fs.readFileSync(SHIPS_PATH, 'utf-8'));
 }
 
-/** Write updated machines config back to disk. */
-export function writeMachines(machines: Record<string, MachineEntry>): void {
-  fs.writeFileSync(MACHINES_PATH, JSON.stringify(machines, null, 2) + '\n');
+/** Write updated ships config back to disk. */
+export function writeShips(ships: Record<string, ShipEntry>): void {
+  fs.writeFileSync(SHIPS_PATH, JSON.stringify(ships, null, 2) + '\n');
 }
 
-/** Check if this machine is active. */
-export function isMachineActive(): boolean {
+/** Check if this ship is active. */
+export function isShipActive(): boolean {
   try {
-    const machines = loadMachines();
+    const ships = loadShips();
     const hostname = os.hostname();
-    return machines[hostname]?.active !== false;
+    return ships[hostname]?.active !== false;
   } catch {
-    return true; // default to active if machines.json missing
+    return true; // default to active if ships.json missing
   }
 }
 
 /** Clear cached config (for testing or reload). */
-export function clearMachineConfigCache(): void {
+export function clearShipConfigCache(): void {
   cached = null;
 }

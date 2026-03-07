@@ -19,7 +19,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 
-import { loadMachineConfig, loadFleet, writeFleet, loadMachines, writeMachines, isMachineActive, clearMachineConfigCache } from './machine-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadShips, writeShips, isShipActive, clearShipConfigCache } from './machine-config.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
 import type { RoomConn } from './command-registry.js';
@@ -84,7 +84,7 @@ const HEALTH_INTERVAL = parseInt(process.env.HEALTH_INTERVAL || '', 10) || 30 * 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
 type BotStatus = 'active' | 'dismissed' | 'transit';
-type FleetEntry = { role: string; rank: number; machine: string | null; status: BotStatus; title?: string };
+type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatus; title?: string };
 let liveFleet: Record<string, FleetEntry> = {};
 let fleetDirty = false;
 
@@ -161,7 +161,7 @@ function rebuildInfiniClaw(): string {
 }
 
 function loadIntercomConfig(): IntercomConfig {
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   const configPath = path.join(config.secretsPath, 'operator', 'intercom.json');
   return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 }
@@ -191,7 +191,7 @@ function isAuthorized(sender: string, captainUserId: string, operatorUserId: str
   return sender === captainUserId || sender === operatorUserId;
 }
 
-/** Is this machine the "speaker" — lowest-rank active machine? Used to avoid duplicate replies. */
+/** Is this ship the "speaker" — lowest-rank active ship? Used to avoid duplicate replies. */
 // ── Git version helper ────────────────────────────────────────────
 
 /** Get git version string for a bot's deployed instance: " · sha ↑N↓N (age)" */
@@ -277,8 +277,8 @@ let cachedIsSpeaker = true;
 
 async function electSpeaker(): Promise<boolean> {
   try {
-    const machines = loadMachines();
-    const active = Object.entries(machines).filter(([_, m]) => m.active);
+    const ships = loadShips();
+    const active = Object.entries(ships).filter(([_, m]) => m.active);
     if (active.length === 0) return true;
     if (!active.some(([name]) => name === HOSTNAME)) return false;
 
@@ -417,8 +417,8 @@ function parseTarget(cmd: string, prefix: string): { matched: boolean; target?: 
  * Resolve which local bots a command applies to.
  *
  * - Targeted (`!restart parker`): returns [parker] ONLY if parker is in
- *   this machine's machine.json. Returns [] if not local (silent ignore —
- *   another machine's supervisor handles it).
+ *   this ship. Returns. Returns [] if not local (silent ignore —
+ *   another ship.s relay handles it).
  *
  * - Untargeted (`!restart` in Engineering): returns local bots whose
  *   MAIN_GROUP_NAME matches the room the command arrived in.
@@ -428,7 +428,7 @@ function resolveBots(target: string | undefined, roomName: string, action?: stri
   if (target) {
     if (local.includes(target)) return [target];
     // For !join, also match inactive bots assigned to this machine
-    if (action === 'join' && liveFleet[target]?.machine === HOSTNAME) return [target];
+    if (action === 'join' && liveFleet[target]?.ship === HOSTNAME) return [target];
     return [];
   }
   // No target — scope to bots in this room on this machine
@@ -442,7 +442,7 @@ const HEALTH_S3_PREFIX = 'health';
 
 function getS3Client(): { client: S3Client; bucket: string } | null {
   try {
-    const config = loadMachineConfig();
+    const config = loadShipConfig();
     if (!config.s3) return null;
     const { endpoint, bucket, accessKey, secretKey } = config.s3;
     return {
@@ -491,10 +491,10 @@ async function uploadHealthToS3(report: string): Promise<boolean> {
   }
 }
 
-async function fetchAllHealthReports(): Promise<Array<{ machine: string; data: Record<string, unknown> }>> {
+async function fetchAllHealthReports(): Promise<Array<{ ship: string; data: Record<string, unknown> }>> {
   const s3 = getS3Client();
   if (!s3) return [];
-  const results: Array<{ machine: string; data: Record<string, unknown> }> = [];
+  const results: Array<{ ship: string; data: Record<string, unknown> }> = [];
   try {
     const listed = await s3.client.send(new ListObjectsV2Command({
       Bucket: s3.bucket,
@@ -507,8 +507,8 @@ async function fetchAllHealthReports(): Promise<Array<{ machine: string; data: R
         const chunks: Uint8Array[] = [];
         for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
         const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-        const machine = obj.Key.replace(`${HEALTH_S3_PREFIX}/`, '').replace('.json', '');
-        results.push({ machine, data });
+        const ship = obj.Key.replace(`${HEALTH_S3_PREFIX}/`, '').replace('.json', '');
+        results.push({ ship, data });
       } catch { /* skip corrupt reports */ }
     }
   } catch (err) {
@@ -517,17 +517,17 @@ async function fetchAllHealthReports(): Promise<Array<{ machine: string; data: R
   return results;
 }
 
-function formatHealthSummary(reports: Array<{ machine: string; data: Record<string, unknown> }>): string {
+function formatHealthSummary(reports: Array<{ ship: string; data: Record<string, unknown> }>): string {
   if (reports.length === 0) return '⚠️ No health reports available.';
   const lines: string[] = [`🏥 Fleet Health — ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n`];
   let totalOom = 0;
   let totalSessions = 0;
 
-  for (const { machine, data } of reports) {
+  for (const { ship, data } of reports) {
     const bots = (data.bots || {}) as Record<string, Record<string, unknown>>;
     const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => n);
     const ts = String(data.ts || '?').slice(0, 19);
-    lines.push(`**${machine}** (${ts})`);
+    lines.push(`**${ship}** (${ts})`);
     lines.push(`  Active: ${active.length > 0 ? active.join(', ') : 'none'}`);
 
     for (const [name, b] of Object.entries(bots)) {
@@ -543,7 +543,7 @@ function formatHealthSummary(reports: Array<{ machine: string; data: Record<stri
     lines.push(`  Sessions: ${sess}MB\n`);
   }
 
-  lines.push(`**Totals:** ${reports.length} machines, ${totalOom} OOM kills, ${totalSessions}MB sessions`);
+  lines.push(`**Totals:** ${reports.length} ships, ${totalOom} OOM kills, ${totalSessions}MB sessions`);
   return lines.join('\n');
 }
 
@@ -733,7 +733,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
 // ── Secrets repo sync ──────────────────────────────────────────
 
 function secretsRepoPath(): string {
-  return loadMachineConfig().secretsPath;
+  return loadShipConfig().secretsPath;
 }
 
 /** Commit a change to the secrets repo: stash → add → commit → push → pop. */
@@ -838,22 +838,22 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
           for (const [bot, entry] of Object.entries(diskFleet)) {
             if (!liveFleet[bot]) { liveFleet[bot] = entry; continue; }
             // Transport pickup: bot assigned to us but inactive (phase 1 by another machine)
-            if (entry.machine === HOSTNAME && entry.status === 'transit' && liveFleet[bot].machine !== HOSTNAME) {
-              liveFleet[bot].machine = HOSTNAME;
+            if (entry.ship === HOSTNAME && entry.status === 'transit' && liveFleet[bot].ship !== HOSTNAME) {
+              liveFleet[bot].ship = HOSTNAME;
               liveFleet[bot].status = 'transit'; // will be materialized below
             }
           }
         } catch { /* no fleet on disk */ }
 
         // Materialize — bots assigned here but not active (dematerialized on source ship)
-        if (!isMachineActive()) { /* decommissioned — skip materialize */ }
+        if (!isShipActive()) { /* decommissioned — skip materialize */ }
         else try {
           for (const [bot, entry] of Object.entries(liveFleet)) {
-            if (entry.machine === HOSTNAME && entry.status === 'transit') {
+            if (entry.ship === HOSTNAME && entry.status === 'transit') {
               log(`transport: materializing ${bot}`);
               fleetUpdate(bot, { status: 'active' });
               writeFleet(liveFleet);
-              clearMachineConfigCache(); // so bootstrapBot sees updated active state
+              clearShipConfigCache(); // so bootstrapBot sees updated active state
               secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${HOSTNAME}`);
               fleetDirty = false;
               const root = resolveRoot();
@@ -1114,7 +1114,7 @@ async function handleLifecycleCommand(
   if (bots.length === 0) return;
 
   if (action !== 'dismiss') {
-    if (!isMachineActive()) {
+    if (!isShipActive()) {
       await reply(conn, `ship is decommissioned — use !commission first`);
       return;
     }
@@ -1136,9 +1136,9 @@ async function handleLifecycleCommand(
         fleetUpdate(bot, { status: 'dismissed' });
         await reply(conn, `${name} dismissed`);
       } else if (action === 'join') {
-        fleetUpdate(bot, { status: 'active', machine: HOSTNAME });
+        fleetUpdate(bot, { status: 'active', ship: HOSTNAME });
         writeFleet(liveFleet); // persist to disk BEFORE bootstrapBot reads it
-        clearMachineConfigCache(); // so bootstrapBot sees updated active state
+        clearShipConfigCache(); // so bootstrapBot sees updated active state
         bootstrapBot(root, bot);
         await reply(conn, `${name} started (rank ${rank})`);
       } else {
@@ -1179,7 +1179,7 @@ function registerRelayCommands(): void {
         let existed = true;
         try { execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' }); } catch { existed = false; }
         if (!existed) {
-          execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(loadMachineConfig().secretsPath), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
+          execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(loadShipConfig().secretsPath), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
           await sleep(3000);
         }
         if (text) {
@@ -1209,16 +1209,16 @@ function registerRelayCommands(): void {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;
       if (targetShip && targetShip !== HOSTNAME) return;
       try {
-        const machines = loadMachines();
-        if (!machines[HOSTNAME]) { await reply(conn, `not in machines.json`); return; }
+        const ships = loadShips();
+        if (!ships[HOSTNAME]) { await reply(conn, `not in ships.json`); return; }
         for (const bot of getActiveBots()) {
           stopBot(bot);
           killStaleContainers(bot);
           fleetUpdate(bot, { status: 'dismissed' });
         }
-        machines[HOSTNAME].active = false;
-        writeMachines(machines);
-        secretsGitCommit(['operator/machines.json'], `decommission ${HOSTNAME}: bots stopped, relay only`);
+        ships[HOSTNAME].active = false;
+        writeShips(ships);
+        secretsGitCommit(['operator/ships.json'], `decommission ${HOSTNAME}: bots stopped, relay only`);
         await reply(conn, `decommissioned — all bots stopped, relay still running`);
       } catch (err) {
         await reply(conn, `decommission failed — ${errStr(err)}`);
@@ -1229,17 +1229,17 @@ function registerRelayCommands(): void {
       const targetShip = cmd.slice('!commission'.length).trim() || null;
       if (targetShip && targetShip !== HOSTNAME) return;
       try {
-        const machines = loadMachines();
-        if (!machines[HOSTNAME]) { await reply(conn, `not in machines.json`); return; }
-        machines[HOSTNAME].active = true;
-        writeMachines(machines);
-        secretsGitCommit(['operator/machines.json'], `commission ${HOSTNAME}`);
+        const ships = loadShips();
+        if (!ships[HOSTNAME]) { await reply(conn, `not in ships.json`); return; }
+        ships[HOSTNAME].active = true;
+        writeShips(ships);
+        secretsGitCommit(['operator/ships.json'], `commission ${HOSTNAME}`);
         const fleet = loadFleet();
         const root = resolveRoot();
         ensurePodmanReady();
         const started: string[] = [];
         for (const [name, entry] of Object.entries(fleet)) {
-          if (entry.machine === HOSTNAME && entry.status === 'active') {
+          if (entry.ship === HOSTNAME && entry.status === 'active') {
             bootstrapBot(root, name);
             started.push(name);
           }
@@ -1340,16 +1340,16 @@ function registerRelayCommands(): void {
       const [bot, targetShip] = parts;
       if (!liveFleet[bot]) { await reply(conn, `Unknown bot: ${bot}`); return; }
       try {
-        const machines = loadMachines();
-        if (!machines[targetShip]) { await reply(conn, `Unknown ship: ${targetShip}`); return; }
-        if (!machines[targetShip].active) { await reply(conn, `${targetShip} is decommissioned`); return; }
-      } catch { /* machines.json missing — skip validation */ }
-      if (liveFleet[bot].machine !== HOSTNAME) return;
+        const ships = loadShips();
+        if (!ships[targetShip]) { await reply(conn, `Unknown ship: ${targetShip}`); return; }
+        if (!ships[targetShip].active) { await reply(conn, `${targetShip} is decommissioned`); return; }
+      } catch { /* ships.json missing — skip validation */ }
+      if (liveFleet[bot].ship !== HOSTNAME) return;
       try {
         stopBot(bot);
         killStaleContainers(bot);
         removeBotMounts(bot);
-        fleetUpdate(bot, { status: 'transit', machine: targetShip });
+        fleetUpdate(bot, { status: 'transit', ship: targetShip });
         writeFleet(liveFleet);
         const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetShip}`);
         fleetDirty = false;
@@ -1372,7 +1372,7 @@ function registerRelayCommands(): void {
 
       try {
         const root = resolveRoot();
-        const machines = (() => { try { return loadMachines(); } catch { return {}; } })();
+        const ships = (() => { try { return loadShips(); } catch { return {}; } })();
         const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
 
         // Local process status
@@ -1396,11 +1396,11 @@ function registerRelayCommands(): void {
         // Group bots by machine — use liveFleet as source of truth
         const byMachine: Record<string, Array<[string, FleetEntry]>> = {};
         for (const [bot, entry] of Object.entries(liveFleet)) {
-          const m = entry.machine || 'drydock';
+          const m = entry.ship || 'drydock';
           (byMachine[m] ??= []).push([bot, entry]);
         }
         // Ensure all known ships appear even if they have no bots
-        for (const ship of Object.keys(machines)) {
+        for (const ship of Object.keys(ships)) {
           byMachine[ship] ??= [];
         }
 
@@ -1408,13 +1408,13 @@ function registerRelayCommands(): void {
         const machineOrder = Object.keys(byMachine).sort((a, b) => {
           if (a === 'drydock') return 1;
           if (b === 'drydock') return -1;
-          return (machines[a]?.rank ?? 99) - (machines[b]?.rank ?? 99);
+          return (ships[a]?.rank ?? 99) - (ships[b]?.rank ?? 99);
         });
 
         const lines: string[] = [];
 
         for (const machine of machineOrder) {
-          const mConfig = machines[machine];
+          const mConfig = ships[machine];
           const isLocal = machine === HOSTNAME;
 
           // Ship header
@@ -1521,16 +1521,16 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const direction = isPromote ? 'up' : 'down';
   const target = cmd.slice(isPromote ? '!promote '.length : '!demote '.length).trim();
 
-  const machines = (() => { try { return loadMachines(); } catch { return null; } })();
-  if (machines && machines[target]) {
+  const ships = (() => { try { return loadShips(); } catch { return null; } })();
+  if (ships && ships[target]) {
     if (!isSpeaker()) return;
-    const result = rankSwap(Object.entries(machines), target, direction);
+    const result = rankSwap(Object.entries(ships), target, direction);
     if (!result) {
-      await reply(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank machine`);
+      await reply(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank ship`);
       return;
     }
-    writeMachines(machines);
-    secretsGitCommit(['operator/machines.json'], `rerank machines: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
+    writeShips(ships);
+    secretsGitCommit(['operator/ships.json'], `rerank ships: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
     await reply(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank}`);
     return;
   }
@@ -1749,14 +1749,14 @@ async function main(): Promise<void> {
   await sleep(30_000);
 
   // Bootstrap all bots assigned to this machine
-  if (isMachineActive()) {
+  if (isShipActive()) {
     try {
       ensurePodmanReady();
       const root = resolveRoot();
       removeStaleProcesses();
       killStaleContainers();
       for (const [bot, entry] of Object.entries(liveFleet)) {
-        if (entry.machine === HOSTNAME && entry.status === 'active') {
+        if (entry.ship === HOSTNAME && entry.status === 'active') {
           try {
             bootstrapBot(root, bot);
             log(`bootstrap: ${bot} started`);

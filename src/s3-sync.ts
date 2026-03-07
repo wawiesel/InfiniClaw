@@ -16,7 +16,7 @@ import {
 } from '@aws-sdk/client-s3';
 
 import { logger } from 'nanoclaw/logger.js';
-import { loadMachineConfig } from './machine-config.js';
+import { loadShipConfig } from './machine-config.js';
 import { instanceDir } from './service.js';
 
 // Files/dirs to sync per bot, relative to instance dir
@@ -61,7 +61,7 @@ function assertNoSymlinkOnPath(baseDir: string, targetPath: string): void {
 }
 
 function getClient(): { client: S3Client; bucket: string } | null {
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   if (!config.s3) return null;
   const { endpoint, bucket, accessKey, secretKey } = config.s3;
   if (!isValidBucketName(bucket)) {
@@ -93,7 +93,7 @@ export async function uploadContent(key: string, content: string): Promise<void>
 /** Returns the public HTTP URL for an S3 key, or null if S3 not configured. */
 export function getPublicS3Url(key: string): string | null {
   assertSafeS3Key(key);
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   if (!config.s3) return null;
   const { endpoint, bucket } = config.s3;
   const base = endpoint.replace(/\/$/, '');
@@ -260,7 +260,7 @@ export async function pullBot(root: string, bot: string): Promise<void> {
 }
 
 export async function pushAll(root: string): Promise<void> {
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   if (!config.s3) return;
 
   for (const bot of config.bots) {
@@ -273,7 +273,7 @@ export async function pushAll(root: string): Promise<void> {
 }
 
 export async function pullAll(root: string): Promise<void> {
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   if (!config.s3) return;
 
   for (const bot of config.bots) {

@@ -60,7 +60,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 
 ### Speaker election
 
-Ships are ranked in `machines.json`. The lowest-rank **active** ship is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay. Per-ship commands (`!fleet`, `!provision`) reply from each ship with its local state.
+Ships are ranked in `ships.json`. The lowest-rank **active** ship is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay. Per-ship commands (`!fleet`, `!provision`) reply from each ship with its local state.
 
 ## IPC Commands (bot → host)
 

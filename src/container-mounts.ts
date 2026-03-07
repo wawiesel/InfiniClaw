@@ -10,7 +10,7 @@ import { parseEnvLine } from 'nanoclaw/env-utils.js';
 import { logger } from 'nanoclaw/logger.js';
 import { loadSkillsToSession } from './skill-sync.js';
 import { mountsForBot } from './allow-list.js';
-import { loadMachineConfig } from './machine-config.js';
+import { loadShipConfig } from './machine-config.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 
 interface VolumeMount {
@@ -35,7 +35,7 @@ const SAFE_GROUP_FOLDER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 export function buildBotDirectory(): Record<string, string> {
   let profilesDir: string;
   try {
-    profilesDir = path.join(loadMachineConfig().secretsPath, 'bots');
+    profilesDir = path.join(loadShipConfig().secretsPath, 'bots');
   } catch {
     return {};
   }
@@ -157,7 +157,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
     // Mount memory from secrets repo
     try {
-      const config = loadMachineConfig();
+      const config = loadShipConfig();
       const secretsBase = normalizeBasePath(path.join(config.secretsPath, 'bots'));
       const memoryDir = resolveWithinBase(secretsBase, personaName, 'memory');
       fs.mkdirSync(memoryDir, { recursive: true });

@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseEnvFile, isOllamaBaseUrl } from 'nanoclaw/env-utils.js';
 import { getActiveBots } from './service.js';
-import { loadMachineConfig } from './machine-config.js';
+import { loadShipConfig } from './machine-config.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -325,7 +325,7 @@ function getTokenUsage(instanceDir: string, mainGroupFolder: string): TokenUsage
 function getBrainConfig(_rootDir: string, bot: string): { model?: string; provider?: string } {
   let envPath: string;
   try {
-    envPath = path.join(loadMachineConfig().secretsPath, 'bots', bot, 'env');
+    envPath = path.join(loadShipConfig().secretsPath, 'bots', bot, 'env');
   } catch {
     return {};
   }

@@ -14,7 +14,7 @@ import Database from 'better-sqlite3';
 import { parseEnvFile } from 'nanoclaw/env-utils.js';
 import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
 
-import { loadMachineConfig, loadFleet } from './machine-config.js';
+import { loadShipConfig, loadFleet } from './machine-config.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -22,7 +22,7 @@ import { loadMachineConfig, loadFleet } from './machine-config.js';
 const PM2_BIN = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'node_modules', '.bin', 'pm2');
 
 export function getActiveBots(): string[] {
-  return loadMachineConfig().bots;
+  return loadShipConfig().bots;
 }
 
 const RSYNC_EXCLUDES = [
@@ -96,7 +96,7 @@ function personaDir(root: string, bot: string): string {
 
 function profileEnvPath(_root: string, bot: string): string {
   assertValidBotName(bot);
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   return path.join(config.secretsPath, 'bots', bot, 'env');
 }
 
@@ -132,7 +132,7 @@ export function loadProfileEnv(root: string, bot: string): Record<string, string
 
 /** Collect MATRIX_USER_ID from all bot env files in the secrets directory. */
 export function collectBotMatrixUserIds(): Set<string> {
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   const ids = new Set<string>();
   try {
     for (const bot of fs.readdirSync(path.join(config.secretsPath, 'bots'))) {
@@ -488,7 +488,7 @@ function rsyncInstance(root: string, dst: string, stdio: 'inherit' | 'pipe' = 'i
 
 /** Generate a shell wrapper that sources the env file at launch time. */
 function generateStartScript(root: string, bot: string, nodeBin: string, instance: string): string {
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
   const pathVal = `${path.dirname(process.execPath)}:${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`;
   return `#!/bin/bash
@@ -773,7 +773,7 @@ export function holodeckCreate(bot: string, branch: string): void {
   execSync('npm run build', { cwd: instance, stdio: 'inherit' });
 
   // 5. Create holodeck profile (clone live bot, force terminal-only)
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   const hdProfileDir = path.join(config.secretsPath, 'bots', hdBot);
   fs.mkdirSync(hdProfileDir, { recursive: true });
   fs.copyFileSync(profileEnvPath(root, bot), profileEnvPath(root, hdBot));
@@ -832,7 +832,7 @@ export function holodeckTeardown(bot: string): void {
   const hdBot = holodeckBotName(bot);
   const worktree = path.join(root, '_holodeck', bot);
   const instance = instanceDir(root, hdBot);
-  const hdProfile = path.join(loadMachineConfig().secretsPath, 'bots', hdBot);
+  const hdProfile = path.join(loadShipConfig().secretsPath, 'bots', hdBot);
 
   // Stop service
   pm2Stop(pm2Name(hdBot));

@@ -8,9 +8,9 @@ Messages go to **rooms**, not to bots directly. Each room is a Matrix room mappe
 
 Bots are distributed across ships (machines). Each ship runs a subset of the fleet, configured in fleet.json (`bots.<name>.machine`). Secrets are shared via a private git repo (`~/.config/infiniclaw/secrets/`).
 
-**Every ship runs a relay at all times**, even when decommissioned. A decommissioned ship (`active: false` in machines.json) keeps its relay running and listening for commands but does not start bots. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
+**Every ship runs a relay at all times**, even when decommissioned. A decommissioned ship (`active: false` in ships.json) keeps its relay running and listening for commands but does not start bots. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
 
-Ships are ranked in `machines.json` (`rank` field). The lowest-rank **active** ship is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay. Per-ship commands (`!fleet`, `!provision`) reply from each ship with its local state.
+Ships are ranked in `ships.json` (`rank` field). The lowest-rank **active** ship is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay. Per-ship commands (`!fleet`, `!provision`) reply from each ship with its local state.
 
 Fleet-wide bot availability is tracked in `fleet.json` and synced via git. The relay on each ship maintains an in-memory copy (`liveFleet`) as the runtime source of truth.
 

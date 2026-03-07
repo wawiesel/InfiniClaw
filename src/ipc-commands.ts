@@ -13,7 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from 'nanoclaw/env-utils
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
-import { loadMachineConfig } from './machine-config.js';
+import { loadShipConfig } from './machine-config.js';
 import { logger } from 'nanoclaw/logger.js';
 
 const GIT_VERSION = (() => {
@@ -169,7 +169,7 @@ function applyBrainMode(
   mode: 'anthropic' | 'ollama',
   model?: string,
 ): string {
-  const config = loadMachineConfig();
+  const config = loadShipConfig();
   const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
   if (!fs.existsSync(envFile)) {
     throw new Error(`Missing profile env: ${envFile}`);
@@ -198,7 +198,7 @@ function applyBrainMode(
 }
 
 export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'unknown'; model: string } {
-  const envFile = path.join(loadMachineConfig().secretsPath, 'bots', bot, 'env');
+  const envFile = path.join(loadShipConfig().secretsPath, 'bots', bot, 'env');
   if (!fs.existsSync(envFile)) return { mode: 'unknown', model: '' };
   try {
     const vars = parseEnvFile(envFile);
@@ -880,13 +880,13 @@ async function handleFleetStatus(data: CommandData, ctx: InfiniClawIpcContext): 
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
   try {
-    const config = loadMachineConfig();
+    const config = loadShipConfig();
     const fleetPath = path.join(config.secretsPath, 'bots', 'fleet.json');
     const fleet = JSON.parse(fs.readFileSync(fleetPath, 'utf-8'));
     const bots = fleet.bots || {};
     const lines: string[] = [`**Fleet status** (${os.hostname()}):\n`];
-    const byRole: Record<string, Array<[string, { rank: number; machine: string | null; status: string }]>> = {};
-    for (const [name, entry] of Object.entries(bots) as Array<[string, { role: string; rank: number; machine: string | null; status: string }]>) {
+    const byRole: Record<string, Array<[string, { rank: number; ship: string | null; status: string }]>> = {};
+    for (const [name, entry] of Object.entries(bots) as Array<[string, { role: string; rank: number; ship: string | null; status: string }]>) {
       if (!byRole[entry.role]) byRole[entry.role] = [];
       byRole[entry.role].push([name, entry]);
     }
@@ -894,7 +894,7 @@ async function handleFleetStatus(data: CommandData, ctx: InfiniClawIpcContext): 
       lines.push(`**${role}:**`);
       for (const [name, entry] of entries.sort((a, b) => a[1].rank - b[1].rank)) {
         const status = entry.status === 'active' ? 'ON ' : entry.status === 'transit' ? 'TRN' : 'OFF';
-        lines.push(`  ${status} #${entry.rank} ${name} → ${entry.machine || 'unassigned'}`);
+        lines.push(`  ${status} #${entry.rank} ${name} → ${entry.ship || 'unassigned'}`);
       }
     }
     await ctx.sendMessage(chatJid, lines.join('\n'));

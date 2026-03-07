@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { logger } from 'nanoclaw/logger.js';
-import { loadMachineConfig } from './machine-config.js';
+import { loadShipConfig } from './machine-config.js';
 
 interface IntercomRoom {
   roomId: string;
@@ -24,7 +24,7 @@ let cachedConfig: IntercomConfig | null = null;
 function loadIntercomConfig(): IntercomConfig | null {
   if (cachedConfig) return cachedConfig;
   try {
-    const secretsPath = loadMachineConfig().secretsPath;
+    const secretsPath = loadShipConfig().secretsPath;
     const configPath = path.join(secretsPath, 'operator', 'intercom.json');
     if (!fs.existsSync(configPath)) return null;
     cachedConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));

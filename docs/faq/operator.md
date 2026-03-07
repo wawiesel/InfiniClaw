@@ -52,7 +52,7 @@ Every `!` command is broadcast to all ships. When you say `!restart cid` in Engi
 
 ### Speaker election
 
-Ships are ranked in `machines.json`. The lowest-rank active ship is the "speaker" for aggregate commands like `!health`. This avoids duplicate replies.
+Ships are ranked in `ships.json`. The lowest-rank active ship is the "speaker" for aggregate commands like `!health`. This avoids duplicate replies.
 
 ### Authorization
 
