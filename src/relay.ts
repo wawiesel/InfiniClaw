@@ -636,6 +636,75 @@ async function uploadErrorLog(label: string, error: unknown): Promise<string> {
   } catch { return ''; }
 }
 
+// ── Fleet report ──────────────────────────────────────────────
+
+type FleetReport = {
+  ship: string;
+  ts: number;
+  relayVersion: string;
+  bots: Record<string, { name: string; badge: string; role: string; rank: number; status: string; gitVersion: string }>;
+};
+
+/** Build and publish this ship's fleet report to S3. Returns the report. */
+async function publishFleetReport(): Promise<FleetReport> {
+  const root = resolveRoot();
+  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
+
+  // Gather local process status
+  const localRunning = new Set<string>();
+  try {
+    for (const line of execSync('podman ps --format "{{.Names}}"', execOpts).trim().split('\n')) {
+      const match = line.match(/^nanoclaw-([^-]+)-/);
+      if (match) localRunning.add(match[1]);
+    }
+  } catch { /* empty */ }
+  try {
+    const pm2 = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', { ...execOpts, cwd: root })) as Array<{ name: string; pm2_env?: { status?: string } }>;
+    for (const p of pm2) {
+      if (p.pm2_env?.status === 'online') {
+        const match = p.name.match(/^infiniclaw-(.+)$/);
+        if (match) localRunning.add(match[1]);
+      }
+    }
+  } catch { /* empty */ }
+
+  const relayVer = relayVersion(root);
+  const botReports: FleetReport['bots'] = {};
+  for (const [botId, entry] of Object.entries(liveFleet)) {
+    if (entry.ship !== HOSTNAME) continue;
+    const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
+    const name = env?.ASSISTANT_NAME || botId;
+    const running = localRunning.has(botId);
+    botReports[botId] = {
+      name,
+      badge: '',
+      role: entry.role,
+      rank: entry.rank,
+      status: entry.status,
+      gitVersion: botVersion(root, botId),
+    };
+    if (entry.status === 'active' && !running) {
+      botReports[botId].status = 'warn';
+    }
+  }
+
+  const report: FleetReport = { ship: HOSTNAME, ts: Date.now(), relayVersion: relayVer, bots: botReports };
+
+  const s3 = getS3Client();
+  if (s3) {
+    try {
+      await s3.client.send(new PutObjectCommand({
+        Bucket: s3.bucket,
+        Key: `${FLEET_S3_PREFIX}/${HOSTNAME}.json`,
+        Body: Buffer.from(JSON.stringify(report)),
+        ContentType: 'application/json',
+      }));
+    } catch (err) { log(`fleet S3 publish failed: ${errStr(err)}`); }
+  }
+
+  return report;
+}
+
 function runHealthCheck(): string | null {
   const root = resolveRoot();
   const script = path.join(root, 'scripts', 'health-check.sh');
@@ -1138,6 +1207,7 @@ async function healthLoop(): Promise<void> {
     }
     try { runSessionCleanup(); } catch { /* non-critical */ }
     try { removeStaleProcesses(); } catch { /* non-critical */ }
+    try { await publishFleetReport(); } catch { /* non-critical */ }
     await sleep(HEALTH_INTERVAL);
   }
 }
@@ -1331,6 +1401,7 @@ async function handleLifecycleCommand(
         bootstrapBot(root, bot);
         await reply(conn, `${name} restarted (rank ${rank})`);
       }
+      publishFleetReport().catch(() => {}); // update S3 after state change
     } catch (err) {
       log(`!${action} ${name} failed: ${errStr(err)}`);
       await reply(conn, `failed to ${action} ${name} — ${errStr(err)}`);
@@ -1562,6 +1633,7 @@ function registerRelayCommands(): void {
         }
 
         persistFleet();
+        await publishFleetReport().catch(() => {});
         const msg = statusLine('✅', 'refit', 'complete', elapsed());
         await s(msg);
         await reply(conn, msg);
@@ -1613,109 +1685,53 @@ function registerRelayCommands(): void {
     },
 
     fleet: async (cmd, conn) => {
-      // Every ship publishes its local fleet data to S3, then the speaker assembles.
       try {
-        const root = resolveRoot();
-        const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
+        // Every ship publishes its report, then the speaker assembles
+        const report = await publishFleetReport();
 
-        // Gather local process status
-        const localRunning = new Set<string>();
-        try {
-          for (const line of execSync('podman ps --format "{{.Names}}"', execOpts).trim().split('\n')) {
-            const match = line.match(/^nanoclaw-([^-]+)-/);
-            if (match) localRunning.add(match[1]);
-          }
-        } catch { /* empty */ }
-        try {
-          const pm2 = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', { ...execOpts, cwd: root })) as Array<{ name: string; pm2_env?: { status?: string } }>;
-          for (const p of pm2) {
-            if (p.pm2_env?.status === 'online') {
-              const match = p.name.match(/^infiniclaw-(.+)$/);
-              if (match) localRunning.add(match[1]);
-            }
-          }
-        } catch { /* empty */ }
-
-        // Build this ship's report: relay version + per-bot status
-        const relayVer = relayVersion(root);
-        const botReports: Record<string, { name: string; badge: string; role: string; rank: number; status: string; gitVersion: string }> = {};
-        for (const [botId, entry] of Object.entries(liveFleet)) {
-          if (entry.ship !== HOSTNAME) continue;
-          const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
-          const name = env?.ASSISTANT_NAME || botId;
-          const running = localRunning.has(botId);
-          botReports[botId] = {
-            name,
-            badge: '', // speaker computes badges (needs global CO election)
-            role: entry.role,
-            rank: entry.rank,
-            status: entry.status,
-            gitVersion: botVersion(root, botId),
-          };
-          // Local running check — override status if active but not running
-          if (entry.status === 'active' && !running) {
-            botReports[botId].status = 'warn';
-          }
-        }
-
-        const report = { ship: HOSTNAME, ts: Date.now(), relayVersion: relayVer, bots: botReports };
-
-        // Publish to S3
-        const s3 = getS3Client();
-        if (s3) {
-          try {
-            await s3.client.send(new PutObjectCommand({
-              Bucket: s3.bucket,
-              Key: `${FLEET_S3_PREFIX}/${HOSTNAME}.json`,
-              Body: Buffer.from(JSON.stringify(report)),
-              ContentType: 'application/json',
-            }));
-          } catch (err) { log(`fleet S3 publish failed: ${errStr(err)}`); }
-        }
-
-        // Only speaker assembles and replies
         if (!await electSpeaker()) return;
 
         const ships = (() => { try { return loadShips(); } catch { return {}; } })();
         const allShipNames = Object.keys(ships);
+        const s3 = getS3Client();
 
-        // Poll S3 for all ships' reports (up to 5s) — including decommissioned
-        type ShipReport = typeof report;
-        const reports: Record<string, ShipReport> = { [HOSTNAME]: report };
+        // Poll S3 for fresh reports (up to 5s), then read stale as fallback
+        const freshReports: Record<string, FleetReport> = { [HOSTNAME]: report };
+        const staleReports: Record<string, FleetReport> = {};
         if (s3 && allShipNames.length > 1) {
           const deadline = Date.now() + 5_000;
           while (Date.now() < deadline) {
-            const missing = allShipNames.filter(s => !reports[s]);
+            const missing = allShipNames.filter(s => !freshReports[s]);
             if (missing.length === 0) break;
             await sleep(500);
-            try {
-              for (const shipName of missing) {
-                try {
-                  const resp = await s3.client.send(new GetObjectCommand({
-                    Bucket: s3.bucket,
-                    Key: `${FLEET_S3_PREFIX}/${shipName}.json`,
-                  }));
-                  const chunks: Uint8Array[] = [];
-                  for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
-                  const data = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as ShipReport;
-                  // Only accept reports from this fleet command (within last 10s)
-                  if (data.ts && Date.now() - data.ts < 10_000) {
-                    reports[data.ship] = data;
-                  }
-                } catch { /* not yet available */ }
-              }
-            } catch { /* S3 error — continue with what we have */ }
+            for (const shipName of missing) {
+              try {
+                const resp = await s3.client.send(new GetObjectCommand({
+                  Bucket: s3.bucket,
+                  Key: `${FLEET_S3_PREFIX}/${shipName}.json`,
+                }));
+                const chunks: Uint8Array[] = [];
+                for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+                const data = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as FleetReport;
+                if (data.ts && Date.now() - data.ts < 10_000) {
+                  freshReports[data.ship] = data;
+                } else if (data.ts) {
+                  staleReports[data.ship] = data;
+                }
+              } catch { /* not available */ }
+            }
           }
         }
 
-        // Assemble output — merge all ship reports with liveFleet fallback
+        // Merge: fresh reports win, then stale, then liveFleet fallback
+        const allReports: Record<string, FleetReport> = { ...staleReports, ...freshReports };
+
+        // Assemble output
         const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; localStatus: string }> = {};
-        // Start with liveFleet as base
         for (const [botId, entry] of Object.entries(liveFleet)) {
           allBots[botId] = { ...entry, name: botId, gitVersion: '', localStatus: entry.status };
         }
-        // Overlay ship reports (they have live process status + names + git versions)
-        for (const [, shipReport] of Object.entries(reports)) {
+        for (const [, shipReport] of Object.entries(allReports)) {
           for (const [botId, botData] of Object.entries(shipReport.bots)) {
             if (allBots[botId]) {
               allBots[botId].name = botData.name;
@@ -1742,20 +1758,26 @@ function registerRelayCommands(): void {
         const lines: string[] = [];
         for (const shipName of shipOrder) {
           const sConfig = ships[shipName];
-          const shipReport = reports[shipName];
+          const shipReport = allReports[shipName];
 
           if (shipName === 'drydock') {
             lines.push('🔧 drydock');
           } else {
             const rank = sConfig?.rank ?? '?';
             const shipIcon = sConfig?.active ? '⚓' : '🚫';
-            const rv = shipReport?.relayVersion ?? '';
-            lines.push(`${shipIcon} ${shipName}[${rank}]${rv}`);
+            let shipStatus: string;
+            if (shipReport) {
+              const isFresh = freshReports[shipName] != null;
+              const rv = shipReport.relayVersion ?? '';
+              shipStatus = isFresh ? rv : ` · last seen ${formatDuration(Date.now() - shipReport.ts)} ago${rv}`;
+            } else {
+              shipStatus = ' · unknown';
+            }
+            lines.push(`${shipIcon} ${shipName}[${rank}]${shipStatus}`);
           }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
-          for (const [botId, entry] of bots) {
-            // CO = lowest rank active bot per role (global across all ships)
+          for (const [, entry] of bots) {
             const isCO = entry.status === 'active' && !Object.values(allBots).some(
               e => e.role === entry.role && e.status === 'active' && e.rank < entry.rank && e !== entry
             );
