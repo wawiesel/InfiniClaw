@@ -1428,6 +1428,7 @@ async function handleLifecycleCommand(
     const name = env?.ASSISTANT_NAME || bot;
     const rank = liveFleet[bot]?.rank ?? 99;
     log(`!${action} ${name}`);
+    await reply(conn, `${action === 'join' ? '🟢' : action === 'dismiss' ? '🔴' : '🔄'} !${action} ${name} — accepted`);
     try {
       if (action === 'dismiss') {
         stopBot(bot);
