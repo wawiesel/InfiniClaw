@@ -1,7 +1,7 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-06 9:20 PM EST.
+Updated 2026-03-06 9:43 PM EST.
 
 ## HIGH PRIORITY — Captain Directives
 
@@ -52,3 +52,4 @@ Updated 2026-03-06 9:20 PM EST.
 - Exit-137 cooldown backoff in main.ts — `KILL_137_COOLDOWN_MS=60s`, `MAX_CONSECUTIVE=3`.
 - Parker transport to Poseidon — fixed `!join` fleet flush bug (`5ec2e27`/`8a9c0f6`), bot rerank persistence (`9e333c3`), rebase conflict auto-resolve (`2c1df84`), relay self-restart after git sync (`9797f04`), `restart_relay` IPC type (`3b7c9d5`).
 - Cid SIGKILL spike 2026-03-06T21:12 (+233) — caused by git rebase conflict loop, resolved by `2c1df84`. Fleet stable for 5h after.
+- Security 2nd cycle (Cid, 2026-03-07) — relay.ts shell injection in `runHealthCheck`/`secretsGitCommit` fixed (`84418e3`); s3-sync key guard (`a3b3465`); service.ts shellQuote/role validation (`3f7e01d`). All other files clean. 4 new files added to rotation (history-export, infini-config, intercom-relay, run-container).
