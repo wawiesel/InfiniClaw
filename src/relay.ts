@@ -289,6 +289,14 @@ function gitVersionStr(root: string, distFile: string): string {
   } catch { return ''; }
 }
 
+function relayVersion(root: string): string {
+  return gitVersionStr(root, path.join(root, 'dist', 'relay.js'));
+}
+
+function botVersion(root: string, bot: string): string {
+  return botVersion(root, bot);
+}
+
 // ── Speaker election via S3 commit timestamps ────────────────────
 
 const RELAY_S3_PREFIX = 'relay';
@@ -1438,14 +1446,14 @@ function registerRelayCommands(): void {
           await reply(conn, msg);
           return;
         }
-        const relayVer = gitVersionStr(root, path.join(root, 'dist', 'relay.js'));
+        const relayVer = relayVersion(root);
         await s(`rebuilt ✓${relayVer}`);
 
         ensurePodmanReady();
 
         // Deploy inactive bots (container image rebuild + instance sync, no start)
         for (const bot of inactiveBots) {
-          const ver = gitVersionStr(root, path.join(root, '_runtime', 'instances', bot, 'dist', 'main.js'));
+          const ver = botVersion(root, bot);
           try { deployBot(root, bot); await s(`${bot} deployed ✓${ver}`); }
           catch { await s(`${bot} deploy failed ⛔`); }
         }
@@ -1454,7 +1462,7 @@ function registerRelayCommands(): void {
         for (const bot of activeBots) {
           try {
             bootstrapBot(root, bot);
-            const ver = gitVersionStr(root, path.join(root, '_runtime', 'instances', bot, 'dist', 'main.js'));
+            const ver = botVersion(root, bot);
             await s(`${bot} restarted ✓${ver}`);
           } catch { await s(`${bot} restart failed ⛔`); }
         }
@@ -1535,21 +1543,20 @@ function registerRelayCommands(): void {
         } catch { /* empty */ }
 
         // Build this ship's report: relay version + per-bot status
-        const relayVersion = gitVersionStr(root, path.join(root, 'dist', 'relay.js'));
+        const relayVer = relayVersion(root);
         const botReports: Record<string, { name: string; badge: string; role: string; rank: number; status: string; gitVersion: string }> = {};
         for (const [botId, entry] of Object.entries(liveFleet)) {
           if (entry.ship !== HOSTNAME) continue;
           const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
           const name = env?.ASSISTANT_NAME || botId;
           const running = localRunning.has(botId);
-          const distFile = path.join(root, '_runtime', 'instances', botId, 'dist', 'main.js');
           botReports[botId] = {
             name,
             badge: '', // speaker computes badges (needs global CO election)
             role: entry.role,
             rank: entry.rank,
             status: entry.status,
-            gitVersion: gitVersionStr(root, distFile),
+            gitVersion: botVersion(root, botId),
           };
           // Local running check — override status if active but not running
           if (entry.status === 'active' && !running) {
@@ -1557,7 +1564,7 @@ function registerRelayCommands(): void {
           }
         }
 
-        const report = { ship: HOSTNAME, ts: Date.now(), relayVersion, bots: botReports };
+        const report = { ship: HOSTNAME, ts: Date.now(), relayVersion: relayVer, bots: botReports };
 
         // Publish to S3
         const s3 = getS3Client();
