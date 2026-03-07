@@ -192,6 +192,28 @@ function isAuthorized(sender: string, captainUserId: string, operatorUserId: str
 }
 
 /** Is this machine the "speaker" — lowest-rank active machine? Used to avoid duplicate replies. */
+// ── Git version helper ────────────────────────────────────────────
+
+/** Get git version string for a bot's deployed instance: " · sha ↑N↓N (age)" */
+function gitVersionStr(root: string, botId: string): string {
+  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
+  try {
+    const distMain = path.join(root, '_runtime', 'instances', botId, 'dist', 'main.js');
+    if (!fs.existsSync(distMain)) return '';
+    const mtime = fs.statSync(distMain).mtimeMs;
+    const agoMin = Math.round((Date.now() - mtime) / 60_000);
+    const agoStr = agoMin >= 60 ? `${Math.round(agoMin / 60)}h` : `${agoMin}m`;
+    const sha = execSync(`git log -1 --format=%h --before="${new Date(mtime).toISOString()}"`, { cwd: root, ...execOpts }).trim() ||
+      execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+    const ahead = parseInt(execSync(`git rev-list origin/main..${sha} --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
+    const behind = parseInt(execSync(`git rev-list ${sha}..origin/main --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
+    let ud = '';
+    if (ahead > 0) ud += `↑${ahead}`;
+    if (behind > 0) ud += `↓${behind}`;
+    return ` · ${sha}${ud ? ' ' + ud : ''} (${agoStr})`;
+  } catch { return ''; }
+}
+
 // ── Speaker election via S3 commit timestamps ────────────────────
 
 const RELAY_S3_PREFIX = 'relay';
@@ -1420,29 +1442,7 @@ function registerRelayCommands(): void {
             const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
             const name = env?.ASSISTANT_NAME || botId;
 
-            // Git version of deployed code in this bot's instance
-            let gitSuffix = '';
-            if (isLocal) {
-              try {
-                const distMain = path.join(root, '_runtime', 'instances', botId, 'dist', 'main.js');
-                if (fs.existsSync(distMain)) {
-                  const mtime = fs.statSync(distMain).mtimeMs;
-                  const agoMin = Math.round((Date.now() - mtime) / 60_000);
-                  const agoStr = agoMin >= 60 ? `${Math.round(agoMin / 60)}h` : `${agoMin}m`;
-                  // Find what commit this dist was built from
-                  const sha = execSync(`git log -1 --format=%h --before="${new Date(mtime).toISOString()}"`, { cwd: root, ...execOpts }).trim() ||
-                    execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
-                  const botHead = execSync(`git rev-parse ${sha}`, { cwd: root, ...execOpts }).trim();
-                  const ahead = parseInt(execSync(`git rev-list origin/main..${sha} --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
-                  const behind = parseInt(execSync(`git rev-list ${sha}..origin/main --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
-                  let ud = '';
-                  if (ahead > 0) ud += `↑${ahead}`;
-                  if (behind > 0) ud += `↓${behind}`;
-                  gitSuffix = ` · ${sha}${ud ? ' ' + ud : ''} (${agoStr})`;
-                }
-              } catch { /* best effort */ }
-            }
-
+            const gitSuffix = isLocal ? gitVersionStr(root, botId) : '';
             lines.push(`      ${name} ${badge} · ${entry.role}[${entry.rank}]${gitSuffix}`);
           }
         }
