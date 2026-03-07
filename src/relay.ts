@@ -1308,9 +1308,9 @@ function registerRelayCommands(): void {
       const parts: string[] = [];
       try {
         const secretsResult = secretsGitSync();
-        if (secretsResult.newCommits > 0) parts.push(`secrets ↓${secretsResult.newCommits}`);
+        parts.push(secretsResult.newCommits > 0 ? `secrets ↓${secretsResult.newCommits}` : 'secrets ↑0');
         const icResult = gitSync();
-        if (icResult.newCommits > 0) parts.push(`code ↓${icResult.newCommits}`);
+        parts.push(icResult.newCommits > 0 ? `code ↓${icResult.newCommits}` : 'code ↑0');
         const buildResult = rebuildInfiniClaw();
         if (buildResult.includes('FAILED')) parts.push('build ⛔');
         const root = resolveRoot();
@@ -1322,7 +1322,7 @@ function registerRelayCommands(): void {
         if (ok > 0) parts.push(`${ok} bot${ok > 1 ? 's' : ''} ✓`);
         if (fail > 0) parts.push(`${fail} bot${fail > 1 ? 's' : ''} ⛔`);
         persistFleet();
-        const summary = parts.length > 0 ? parts.join(' · ') : 'no changes';
+        const summary = parts.join(' · ');
         await reply(conn, `⚓ ${HOSTNAME}: ${summary} · restarting relay`);
         await sleep(1_000);
         try {
