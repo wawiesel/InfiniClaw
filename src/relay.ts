@@ -1399,15 +1399,21 @@ function registerRelayCommands(): void {
           const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
             const isLocal = machine === HOSTNAME;
-            let icon: string;
-            if (entry.status === 'transit') icon = '🚀';
-            else if (entry.status !== 'active') icon = '🔴';
-            else if (isLocal) icon = localRunning.has(botId) ? '🟢' : '⚠️';
-            else icon = '⏳'; // remote — can't verify
+            let pip: string;
+            if (entry.status === 'transit') pip = '🚀';
+            else if (entry.status !== 'active') pip = '·';
+            else if (isLocal) pip = localRunning.has(botId) ? '●' : '⚠️';
+            else pip = '○'; // remote — can't verify
+
+            // CO = lowest rank active bot in this role
+            const isCO = entry.status === 'active' && !Object.entries(fleet).some(
+              ([id, e]) => id !== botId && e.role === entry.role && e.status === 'active' && e.rank < entry.rank
+            );
+            const coTag = isCO ? ' ⭐' : '';
 
             const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
             const name = env?.ASSISTANT_NAME || botId;
-            lines.push(`  ${icon} ${name} · ${entry.role}[${entry.rank}]`);
+            lines.push(`      ${name} ${pip}${coTag} ${entry.role}[${entry.rank}]`);
           }
         }
 
