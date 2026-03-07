@@ -195,12 +195,11 @@ function isAuthorized(sender: string, captainUserId: string, operatorUserId: str
 // ── Git version helper ────────────────────────────────────────────
 
 /** Get git version string for a bot's deployed instance: " · sha ↑N↓N (age)" */
-function gitVersionStr(root: string, botId: string): string {
+function gitVersionStr(root: string, distFile: string): string {
   const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
   try {
-    const distMain = path.join(root, '_runtime', 'instances', botId, 'dist', 'main.js');
-    if (!fs.existsSync(distMain)) return '';
-    const mtime = fs.statSync(distMain).mtimeMs;
+    if (!fs.existsSync(distFile)) return '';
+    const mtime = fs.statSync(distFile).mtimeMs;
     const agoMin = Math.round((Date.now() - mtime) / 60_000);
     const agoStr = agoMin >= 60 ? `${Math.round(agoMin / 60)}h` : `${agoMin}m`;
     const sha = execSync(`git log -1 --format=%h --before="${new Date(mtime).toISOString()}"`, { cwd: root, ...execOpts }).trim() ||
@@ -1413,12 +1412,12 @@ function registerRelayCommands(): void {
           const mConfig = machines[machine];
           const rank = mConfig?.rank ?? '?';
           const shipIcon = mConfig?.active ? '⚓' : '🚫';
-          lines.push(`${shipIcon} ${machine}[${rank}]`);
+          const isLocal = machine === HOSTNAME;
+          const helmVersion = isLocal ? gitVersionStr(root, path.join(root, 'dist', 'relay.js')) : '';
+          lines.push(`${shipIcon} ${machine}[${rank}]${helmVersion}`);
 
           const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
-            const isLocal = machine === HOSTNAME;
-
             // CO = lowest rank active bot in this role
             const isCO = entry.status === 'active' && !Object.entries(fleet).some(
               ([id, e]) => id !== botId && e.role === entry.role && e.status === 'active' && e.rank < entry.rank
@@ -1435,7 +1434,8 @@ function registerRelayCommands(): void {
             const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
             const name = env?.ASSISTANT_NAME || botId;
 
-            const gitSuffix = isLocal ? gitVersionStr(root, botId) : '';
+            const distFile = path.join(root, '_runtime', 'instances', botId, 'dist', 'main.js');
+            const gitSuffix = isLocal ? gitVersionStr(root, distFile) : '';
             lines.push(`      ${name} ${badge} · ${entry.role}[${entry.rank}]${gitSuffix}`);
           }
         }
