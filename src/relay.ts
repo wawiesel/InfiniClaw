@@ -1532,15 +1532,15 @@ function registerRelayCommands(): void {
         if (!await electSpeaker()) return;
 
         const ships = (() => { try { return loadShips(); } catch { return {}; } })();
-        const activeShips = Object.entries(ships).filter(([_, s]) => s.active).map(([name]) => name);
+        const allShipNames = Object.keys(ships);
 
-        // Poll S3 for all active ships' reports (up to 5s)
+        // Poll S3 for all ships' reports (up to 5s) — including decommissioned
         type ShipReport = typeof report;
         const reports: Record<string, ShipReport> = { [HOSTNAME]: report };
-        if (s3 && activeShips.length > 1) {
+        if (s3 && allShipNames.length > 1) {
           const deadline = Date.now() + 5_000;
           while (Date.now() < deadline) {
-            const missing = activeShips.filter(s => !reports[s]);
+            const missing = allShipNames.filter(s => !reports[s]);
             if (missing.length === 0) break;
             await sleep(500);
             try {
