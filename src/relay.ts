@@ -1588,7 +1588,8 @@ function registerRelayCommands(): void {
         const secretsResult = secretsGitSync();
         const secretsVer = repoVersion(secretsRepoPath());
         if (!secretsResult.ok) {
-          await s(stageWarn('secrets sync failed', secretsVer));
+          const link = await uploadErrorLog('secrets-sync', new Error(secretsResult.output));
+          await s(stageWarn('secrets sync failed', link || secretsVer));
         } else if (secretsResult.newCommits > 0) {
           await s(stageOk(`secrets pulled ${secretsResult.newCommits} commit(s)`, secretsVer));
         } else {
@@ -1598,7 +1599,8 @@ function registerRelayCommands(): void {
         const icResult = gitSync();
         const codeVer = repoVersion(root);
         if (!icResult.ok) {
-          await s(stageWarn('code sync failed', codeVer));
+          const link = await uploadErrorLog('code-sync', new Error(icResult.output));
+          await s(stageWarn('code sync failed', link || codeVer));
         } else if (icResult.newCommits > 0) {
           await s(stageOk(`code pulled ${icResult.newCommits} commit(s)`, codeVer));
         } else {
@@ -1607,7 +1609,8 @@ function registerRelayCommands(): void {
 
         const buildResult = rebuildInfiniClaw();
         if (buildResult.includes('FAILED')) {
-          await s(stageFail('relay + dist rebuild'));
+          const link = await uploadErrorLog('build', new Error(buildResult));
+          await s(stageFail('relay + dist rebuild', link));
           await reply(conn, statusLine('⛔', 'refit', 'failed', elapsed()));
           return;
         }
