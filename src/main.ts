@@ -440,140 +440,6 @@ function updateEventIdFile(groupFolder: string, key: 'lastSent' | 'lastReceived'
   } catch (err) { logger.debug({ groupFolder, key, err }, 'Failed to update event ID file'); }
 }
 
-interface StatusIndicator {
-  eventId: string;
-  startedAt: number;
-  timer: ReturnType<typeof setInterval>;
-  chatJid: string;
-}
-
-// ── Shared indicator timing ────────────────────────────────────────────
-
-const INDICATOR_DELAY_MS = 5_000;
-const INDICATOR_FAST_INTERVAL_MS = 5_000;
-const INDICATOR_SLOW_INTERVAL_MS = 15_000;
-const INDICATOR_SLOW_THRESHOLD_MS = 55_000; // switch at ~1 minute
-const INDICATOR_STOP_THRESHOLD_MS = 300_000; // stop editing after 5 minutes
-
-function formatElapsed(startedAt: number): string {
-  const secs = Math.round((Date.now() - startedAt) / 1000);
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
-/** Create an adaptive timer: fast (5s) for the first minute, slow (15s) until 5min, then stop. */
-function createAdaptiveTimer(
-  startedAt: number,
-  onTick: () => void,
-  registry: Record<string, StatusIndicator>,
-  chatJid: string,
-): ReturnType<typeof setInterval> {
-  const fastTimer = setInterval(() => {
-    const elapsed = Date.now() - startedAt;
-    if (elapsed >= INDICATOR_STOP_THRESHOLD_MS) {
-      // Stop editing after 5 minutes — status is clear by now
-      const indicator = registry[chatJid];
-      if (indicator?.timer) clearInterval(indicator.timer);
-      return;
-    }
-    onTick();
-    if (elapsed >= INDICATOR_SLOW_THRESHOLD_MS && registry[chatJid]?.timer === fastTimer) {
-      clearInterval(fastTimer);
-      const slowTimer = setInterval(() => {
-        if (Date.now() - startedAt >= INDICATOR_STOP_THRESHOLD_MS) {
-          const indicator = registry[chatJid];
-          if (indicator?.timer) clearInterval(indicator.timer);
-          return;
-        }
-        onTick();
-      }, INDICATOR_SLOW_INTERVAL_MS);
-      registry[chatJid].timer = slowTimer;
-    }
-  }, INDICATOR_FAST_INTERVAL_MS);
-  return fastTimer;
-}
-
-// ── Generic status indicator ───────────────────────────────────────────
-
-/** Reusable status indicator that posts, edits, and auto-escalates timing. */
-function createIndicatorSet(emoji: string, activeVerb: string, doneVerb: string, delayMs?: number) {
-  const indicators: Record<string, StatusIndicator> = {};
-  const delays: Record<string, ReturnType<typeof setTimeout>> = {};
-
-  function start(chatJid: string, threadId?: string): void {
-    if (indicators[chatJid] || delays[chatJid]) return;
-    const startedAt = Date.now();
-    const send = () => {
-      if (indicators[chatJid]) return;
-      const ch = findChannel(channels, chatJid);
-      if (!ch?.sendMessageReturningId || !ch?.editMessage) return;
-      const sendFn = ch.sendMessageReturningId.bind(ch);
-      const sendWithRetry = async (): Promise<string | undefined> => {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            return await sendFn(chatJid, statusMessage(emoji, `${activeVerb}...`), threadId);
-          } catch {
-            if (attempt < 2) await new Promise(r => setTimeout(r, 5000));
-          }
-        }
-        logger.warn({ chatJid }, `${activeVerb} indicator failed after 3 attempts`);
-        return undefined;
-      };
-      sendWithRetry().then((eventId) => {
-        if (!eventId) return;
-        if (indicators[chatJid]) {
-          ch.editMessage!(chatJid, eventId, statusMessage(emoji, `${doneVerb} (${formatElapsed(startedAt)})`)).catch((err) => { logger.debug({ chatJid, err }, 'Indicator edit failed (already done)'); });
-          return;
-        }
-        const doEdit = () => ch.editMessage!(chatJid, eventId, statusMessage(emoji, `${activeVerb} (${formatElapsed(startedAt)})`)).catch((err) => { logger.debug({ chatJid, err }, 'Indicator edit failed'); });
-        const timer = createAdaptiveTimer(startedAt, doEdit, indicators, chatJid);
-        indicators[chatJid] = { eventId, startedAt, timer, chatJid };
-      }).catch((err) => { logger.warn({ chatJid, err }, 'Indicator send failed'); });
-    };
-    if (delayMs) {
-      delays[chatJid] = setTimeout(() => { delete delays[chatJid]; send(); }, delayMs);
-    } else {
-      send();
-    }
-  }
-
-  function clear(chatJid: string): void {
-    if (delays[chatJid]) { clearTimeout(delays[chatJid]); delete delays[chatJid]; return; }
-    const indicator = indicators[chatJid];
-    if (!indicator) return;
-    if (indicator.timer) clearInterval(indicator.timer);
-    delete indicators[chatJid];
-    if (!indicator.eventId) return;
-    const ch = findChannel(channels, chatJid);
-    if (ch?.editMessage) {
-      ch.editMessage(chatJid, indicator.eventId, statusMessage(emoji, `${doneVerb} (${formatElapsed(indicator.startedAt)})`)).catch((err) => { logger.debug({ chatJid, err }, 'Indicator clear edit failed'); });
-    }
-  }
-
-  function bump(chatJid: string, threadId?: string): void {
-    if (delays[chatJid]) { clearTimeout(delays[chatJid]); delete delays[chatJid]; start(chatJid, threadId); return; }
-    const indicator = indicators[chatJid];
-    if (!indicator) { start(chatJid, threadId); return; }
-    const ch = findChannel(channels, chatJid);
-    if (ch?.editMessage) {
-      ch.editMessage(chatJid, indicator.eventId, statusMessage(emoji, `${activeVerb} (${formatElapsed(indicator.startedAt)})`)).catch((err) => { logger.debug({ chatJid, err }, 'Indicator bump edit failed'); });
-    }
-  }
-
-  return { indicators, start, clear, bump };
-}
-
-// ── Working & idle indicators ──────────────────────────────────────────
-
-const working = createIndicatorSet('⏳', 'working', 'worked', INDICATOR_DELAY_MS);
-const idle = createIndicatorSet('💤', 'idling', 'idled');
-const { start: startWorkingIndicator, clear: clearWorkingIndicator, bump: bumpWorkingIndicator } = working;
-const { start: startIdleIndicator, clear: clearIdleIndicator } = idle;
-const resumingIndicator = createIndicatorSet('⏳', 'resuming', 'resumed');
-const { start: startResumingIndicator, clear: clearResumingIndicator } = resumingIndicator;
-
-
 // ── Utility functions ──────────────────────────────────────────────────
 
 function getMainChatJid(): string | undefined {
@@ -759,7 +625,6 @@ function createOutputHandler(ctx: OutputHandlerContext): (result: ContainerOutpu
 }
 
 function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
-  clearIdleIndicator(ctx.chatJid);
   markProgress(ctx.chatJid, text);
   const isToolCall = text.includes('<details>');
   let toolCallHtml = '';
@@ -787,15 +652,13 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
         if (activeThread) {
           // Already in a thread — send <details> collapsible in-thread (desktop renders it; mobile shows inline but off main timeline)
           void ch.sendMessage(ctx.chatJid, toolCallHtml, activeThread).then(() => {
-            bumpWorkingIndicator(ctx.chatJid, activeThread);
-          }).catch((err) => {
+                      }).catch((err) => {
             logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call progress to thread');
           });
         } else {
           // Main timeline — route tool calls to a dedicated per-turn thread
           const sendToToolThread = (threadId: string) => {
             void ch.sendMessage(ctx.chatJid, toolCallHtml, threadId).then(() => {
-              bumpWorkingIndicator(ctx.chatJid, threadId);
             }).catch((err) => {
               logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call to dedicated thread');
             });
@@ -827,7 +690,6 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
         threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
         void ch.sendMessage(ctx.chatJid, formatted, activeReplyThreadIds[ctx.chatJid]).then(() => {
           threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
-          bumpWorkingIndicator(ctx.chatJid, activeReplyThreadIds[ctx.chatJid]);
         }).catch((err) => {
           logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send progress to chat');
         });
@@ -837,7 +699,6 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
 }
 
 async function handleResultOutput(ctx: OutputHandlerContext, text: string): Promise<void> {
-  clearIdleIndicator(ctx.chatJid);
   markProgress(ctx.chatJid, text);
   // Set state before channel send to preserve original behavior if send throws
   ctx.onOutputSent(text);
@@ -982,7 +843,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'processing...');
-  if (!isResuming) startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
   const inboundMessageIds = contextMessages.map((m) => m.id).filter(Boolean) as string[];
   let hadError = false;
   let outputSentToUser = false;
@@ -1011,11 +871,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const runResult = await runAgent(group, prompt, chatJid, outputHandler);
 
-  clearWorkingIndicator(chatJid);
-  clearIdleIndicator(chatJid);
-  if (outputSentToUser) {
-    startIdleIndicator(chatJid, activeReplyThreadIds[chatJid]);
-  }
   // Clear work thread after each response — thread context is per-turn, derived from
   // the incoming message's thread_id. set_thread() only overrides for a single response.
   delete workThreadIds[chatJid];
@@ -1273,9 +1128,6 @@ function handlePipedToActiveContainer(
     { chatJid, count: messagesToSend.length },
     'Piped messages to active container',
   );
-  clearIdleIndicator(chatJid);
-  if (!isResuming) startWorkingIndicator(chatJid, activeReplyThreadIds[chatJid]);
-
   lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
   saveState();
 
@@ -1409,19 +1261,9 @@ async function injectResumeMessage(): Promise<void> {
     logger.info({ chatJid, group: group.name, recentCount: recent.length }, 'Injected resume message with context');
   }
 
-  // Start resuming indicator on main room
-  if (mainJid) {
-    startResumingIndicator(mainJid);
-  }
-
   // Process main group resume synchronously (container runs, reviews session)
   if (mainJid) {
     await processGroupMessages(mainJid);
-  }
-
-  // Clear resuming indicator
-  if (mainJid) {
-    clearResumingIndicator(mainJid);
   }
 
   // Send updated todo list to main room
