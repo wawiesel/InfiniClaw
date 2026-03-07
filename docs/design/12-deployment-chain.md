@@ -40,21 +40,22 @@ This is the core gate. A fully self-contained InfiniClaw instance runs inside a 
   - Matrix rooms (or a mock Matrix layer)
   - S3 bucket (or mock)
 - The ship runs three bots:
-  - **Fake engineer** — acts as Captain and Operator, runs the crew through exercises
-  - **Fake navigator** — tests navigation/research workflows
-  - **Fake architect** — tests holodeck/testing workflows
+  - **Simulated engineer** — tests engineering workflows
+  - **Simulated navigator** — tests navigation/research workflows
+  - **Simulated architect** — tests holodeck/testing workflows
 - All three use the feature branch code, not main
+- The **real bot** (the engineer or architect who developed the feature) acts as Captain and Operator of the holodeck ship
 
 #### Exercises
 
-The fake engineer (acting as Captain and Operator) runs the crew through scenarios that exercise the changed code paths. At minimum:
+The real bot who developed the changes acts as Captain and Operator of the simulated ship. They run the crew through scenarios that exercise the changed code paths. At minimum:
 
 - Bot startup and Matrix connection
 - Message routing (direct mention, thread participation, CO duty)
 - IPC commands (restart, health check, fleet status)
 - Any feature-specific scenarios relevant to the branch
 
-The fake engineer declares the simulation passed or failed based on observed behavior. The simulation is not a scripted test — the fake engineer uses judgment, just like a real Captain would.
+The developing bot declares the simulation passed or failed based on observed behavior. The simulation is not a scripted test — the bot uses judgment, just like a real Captain would.
 
 #### Isolation
 
