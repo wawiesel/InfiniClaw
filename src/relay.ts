@@ -113,7 +113,7 @@ async function reportFailure(system: string, detail: string, conns: RoomConn[]):
   const existing = failureStates[system];
   if (!existing) {
     // First failure — create thread
-    const rootId = await reply(conn, `⚠️ ${system} down on ${HOSTNAME}`);
+    const rootId = await reply(conn, `⚠️ ${system} (${HOSTNAME}) is down`);
     if (!rootId) return;
     await threadReply(conn, rootId, detail.slice(0, 500));
     failureStates[system] = {
@@ -128,7 +128,7 @@ async function reportFailure(system: string, detail: string, conns: RoomConn[]):
   // Subsequent failure — only post if past nextAlertAt
   if (now < existing.nextAlertAt) return;
   const downtime = formatDuration(now - existing.startedAt);
-  await threadReply(conn, existing.threadRootId, `${system} has been down ${downtime} on ${HOSTNAME}`);
+  await threadReply(conn, existing.threadRootId, `${system} (${HOSTNAME}) has been down ${downtime}`);
   existing.intervalMs = Math.min(existing.intervalMs * 2, FAILURE_MAX_INTERVAL);
   existing.nextAlertAt = now + existing.intervalMs;
 }
@@ -141,8 +141,9 @@ async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> 
   const conn = findEngConn(conns);
   if (!conn?.accessToken) return;
   const downtime = formatDuration(Date.now() - state.startedAt);
-  // Recovery message goes to main timeline (not the thread)
-  await reply(conn, `✅ ${system} is now operational after ${downtime} on ${HOSTNAME}`);
+  const recoveryMsg = `✅ ${system} (${HOSTNAME}) is now operational after ${downtime}`;
+  await threadReply(conn, state.threadRootId, recoveryMsg);
+  await reply(conn, recoveryMsg);
 }
 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
