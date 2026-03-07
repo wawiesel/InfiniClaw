@@ -70,6 +70,7 @@ beforeEach(() => {
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
     writeLastEventId: () => {},
+    onMergeRequest: () => {},
   };
 });
 
