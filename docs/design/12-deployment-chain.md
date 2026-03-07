@@ -1,12 +1,19 @@
 # 12 — Deployment Chain
 
-Engineers work on git worktrees, never on main. Code does not merge to main until it passes a full deployment chain that proves it works end-to-end in a self-contained simulation.
+Engineers and architects work on git worktrees, never on main. Code does not merge to main until it passes a full deployment chain that proves it works end-to-end in a self-contained simulation.
+
+## Who Uses This
+
+- **Engineers** use the simulation platform to develop and test changes to InfiniClaw and Nanoclaw (the bot framework itself).
+- **Architects** use the simulation platform to develop and test changes to AEGIS and InfiniClaw, including the design refactor of MCP tools and skill scripts into AEGIS.
+
+Both roles follow the same deployment chain. The only difference is what they're changing.
 
 ## Worktree Workflow
 
-1. Engineer creates a feature branch and worktree (`git worktree add`)
+1. Create a feature branch and worktree (`git worktree add`)
 2. All development happens in the worktree — main stays clean
-3. When the engineer believes the work is ready, they submit it to the deployment chain
+3. When the work is ready, submit it to the deployment chain
 4. Only after the chain passes does the branch merge to main
 
 ## Deployment Chain
@@ -40,14 +47,14 @@ This is the core gate. A fully self-contained InfiniClaw instance runs inside a 
 
 #### Exercises
 
-The fake engineer (acting as Captain) runs the crew through scenarios that exercise the changed code paths. At minimum:
+The fake engineer (acting as Captain and Operator) runs the crew through scenarios that exercise the changed code paths. At minimum:
 
 - Bot startup and Matrix connection
 - Message routing (direct mention, thread participation, CO duty)
 - IPC commands (restart, health check, fleet status)
 - Any feature-specific scenarios relevant to the branch
 
-The fake engineer declares the simulation passed or failed based on observed behavior.
+The fake engineer declares the simulation passed or failed based on observed behavior. The simulation is not a scripted test — the fake engineer uses judgment, just like a real Captain would.
 
 #### Isolation
 
@@ -67,4 +74,6 @@ If the holodeck simulation passes:
 
 ## Why
 
-Engineers currently push directly to main. A bad commit breaks all ships simultaneously — there is no staging environment. The deployment chain creates a gate where code proves itself before it can affect production. The holodeck simulation catches integration bugs that unit tests miss: message routing, IPC flow, container lifecycle, multi-bot interactions.
+Engineers and architects currently push directly to main. A bad commit breaks all ships simultaneously — there is no staging environment. The deployment chain creates a gate where code proves itself before it can affect production. The holodeck simulation catches integration bugs that unit tests miss: message routing, IPC flow, container lifecycle, multi-bot interactions.
+
+This was motivated by a real incident: an engineer's Phase 1 branch/merge commit added `onMergeRequest` to `IpcDeps` without updating test mocks or all call sites, breaking the build on main for every ship.
