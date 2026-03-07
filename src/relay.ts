@@ -1305,7 +1305,7 @@ function registerRelayCommands(): void {
     refit: async (cmd, conn) => {
       const targetShip = cmd.slice('!refit'.length).trim() || null;
       if (targetShip && targetShip !== HOSTNAME) return;
-      if (!targetShip && !isShipActive()) return; // decommissioned ships only refit when explicitly targeted
+      const shouldReply = targetShip ? true : await electSpeaker(); // only speaker replies for untargeted
       const results: string[] = [];
       try {
         const secretsResult = secretsGitSync();
@@ -1323,13 +1323,14 @@ function registerRelayCommands(): void {
           }
         }
         persistFleet();
-        await reply(conn, `refit complete\n${results.join('\n')}\nrestarting relay...`);
+        if (shouldReply) await reply(conn, `refit complete\n${results.join('\n')}\nrestarting relay...`);
         await sleep(1_000);
         try {
           execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
-        await reply(conn, `!refit failed — ${errStr(err)}`);
+        if (shouldReply) await reply(conn, `!refit failed — ${errStr(err)}`);
+        else log(`!refit failed silently: ${errStr(err)}`);
       }
     },
 
