@@ -146,6 +146,9 @@ export interface ShipEntry {
   user: string | null;
   active: boolean;
   rank: number;
+  spaceId?: string;
+  loungeId?: string;
+  quartersSpaceId?: string;
 }
 
 /** Load all ships from operator/ships.json. */

@@ -566,6 +566,48 @@ async function matrixSendThread(homeserver: string, token: string, roomId: strin
   return data.event_id;
 }
 
+// ── Bot Matrix room management ──────────────────────────────────
+
+/** Login as a bot using its env file credentials. */
+async function botMatrixLogin(root: string, bot: string): Promise<{ token: string; homeserver: string }> {
+  const env = loadProfileEnv(root, bot);
+  const homeserver = env.MATRIX_HOMESERVER;
+  const username = env.MATRIX_USERNAME;
+  const password = env.MATRIX_PASSWORD;
+  if (!homeserver || !username || !password) throw new Error(`${bot}: missing Matrix credentials in env`);
+  const { accessToken } = await matrixLogin(homeserver, username, password);
+  return { token: accessToken, homeserver };
+}
+
+/** Make a bot join a Matrix room. */
+async function botJoinRoom(token: string, homeserver: string, roomId: string): Promise<void> {
+  const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`join room failed: ${resp.status} ${body}`);
+  }
+}
+
+/** Make a bot leave a Matrix room. */
+async function botLeaveRoom(token: string, homeserver: string, roomId: string): Promise<void> {
+  const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    // Already left is fine
+    if (!body.includes('not in room') && !body.includes('not a member')) {
+      throw new Error(`leave room failed: ${resp.status} ${body}`);
+    }
+  }
+}
+
 // ── Bot resolution (multi-ship aware) ───────────────────────────
 
 /** Map local bot name → room name (lowercased) from MAIN_GROUP_NAME in env. */
@@ -1431,11 +1473,25 @@ async function handleLifecycleCommand(
     const rank = liveFleet[bot]?.rank ?? 99;
     log(`!${action} ${name}`);
 
+    // Resolve ship room IDs for room management
+    const ships = (() => { try { return loadShips(); } catch { return {}; } })();
+    const loungeId = ships[HOSTNAME]?.loungeId as string | undefined;
+    const dutyRoomId = conn.roomId;
+
     if (action === 'dismiss') {
       // Dismiss is fast — no thread needed
       try {
         stopBot(bot);
         killStaleContainers(bot);
+        // Move bot: leave duty room → join lounge
+        try {
+          const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
+          await botLeaveRoom(botToken, homeserver, dutyRoomId);
+          if (loungeId) await botJoinRoom(botToken, homeserver, loungeId);
+          log(`${name}: moved to lounge`);
+        } catch (roomErr) {
+          log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
+        }
         fleetUpdate(bot, { status: 'dismissed' });
         await reply(conn, `🔴 ${name} dismissed`);
         publishFleetReport().catch(() => {});
@@ -1462,6 +1518,16 @@ async function handleLifecycleCommand(
           fleetUpdate(bot, { status: 'active', ship: HOSTNAME });
           writeFleet(liveFleet);
           clearShipConfigCache();
+        }
+        // Move bot: leave lounge → join duty room
+        try {
+          const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
+          if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
+          await botJoinRoom(botToken, homeserver, dutyRoomId);
+          await step('room joined');
+        } catch (roomErr) {
+          log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
+          await step(`room move failed: ${errStr(roomErr)}`);
         }
         await step('building...');
         bootstrapBot(root, bot);

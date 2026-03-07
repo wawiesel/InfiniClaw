@@ -1,41 +1,105 @@
-# 14 — Quarters
+# 14 — Ship Spaces, Quarters & Memory
 
-Dismissed bots leave their duty room and move to a private quarters room. This replaces `IGNORE_SENDERS` filtering and room-level ignore logic with a simple physical separation: in the room = on duty, in quarters = standing by.
+## Ship Spaces
 
-## How It Works
-
-Each bot has a private quarters room — a 1:1 room with the Captain. When a bot is dismissed, it leaves the duty room and joins its quarters. When joined back, it leaves quarters and joins the duty room.
-
-### Lifecycle
+Each ship is a Matrix space containing its local rooms. Structure:
 
 ```
-!join cid     → cid leaves quarters, joins Engineering room
-!dismiss cid  → cid leaves Engineering room, joins quarters
+HERACLES (space) — "The ship"
+  Lounge          — all ship bots + captain + operator (always)
+  Quarters (space)
+    Cid's Room    — cid + captain + operator (always)
+    Johnny5's Room
+    Albert's Room
 ```
 
-The relay handles room join/leave as part of the `!join`/`!dismiss` command processing. The bot's `active` state in `fleet.json` continues to track whether the bot is on duty.
+Duty rooms (Engineering, Bridge, Astrometrics) are fleet-wide — they are NOT children of ship spaces. A bot is either in its duty room or in the Lounge, never both.
 
-### Quarters Rooms
+### Permissions
 
-- One quarters room per bot, created once during bot provisioning
-- Room name: `{bot}-quarters` (e.g. `cid-quarters`)
-- Members: the bot + the Captain
-- The bot can still receive direct orders from the Captain while in quarters
-- No other bots are in the quarters room — no filtering needed
+- **Captain** (`@wawiesel`) and **Operator** (`@operator`) are admin (power 100) in all ship rooms.
+- **Bots** are regular members (power 0).
+- **Intercom accounts** are never in ship rooms — they only operate in duty rooms.
 
-### What This Replaces
+## Lifecycle
 
-Currently, dismissed bots stay in their duty room and rely on:
-- `IGNORE_SENDERS` lists to avoid reacting to each other
-- Filtering logic to skip messages from inactive bots
-- The bot's host process deciding not to process messages
+```
+!join cid     → cid joins duty room, leaves Lounge
+!dismiss cid  → cid leaves duty room, joins Lounge
+```
 
-All of this goes away. A dismissed bot doesn't see duty room messages because it's not in the room.
+The relay handles room join/leave using the bot's Matrix credentials (from `bots/{name}/env`). The bot's status in `fleet.json` tracks whether it's on duty.
 
-## Rejoin Latency
+Bots are **always** members of:
+- Their private Room (Cid's Room, etc.)
+- The ship's Quarters space
 
-On a private homeserver with small rooms, Matrix room joins take 2-5 seconds. This is fast enough for `!join` to feel responsive. No need for a "mute but stay" optimization.
+They move between:
+- **Duty room** (Engineering, etc.) — when active/joined
+- **Lounge** — when dismissed
 
-## Why
+## Bot Rooms as Memory
 
-Simpler than ignore rules. A bot that isn't in a room can't react to messages in that room — no filtering code, no edge cases, no `IGNORE_SENDERS` maintenance. The Captain can still reach any bot privately in its quarters for direct orders.
+Each bot's Room is a permanent memory log. Instead of writing directly to `MEMORY.md`, bots post observations, learnings, and decisions as messages in their Room. The Room history is the raw experiential memory — permanent, searchable, visible to the Captain.
+
+`MEMORY.md` becomes a curated summary. The bot periodically reads back its Room history and distills key patterns into `MEMORY.md`. This replaces the planned memex (SQLite FTS5) with something simpler — Matrix *is* the memory store.
+
+### Memory flow
+
+```
+Bot learns something during work
+  → Posts to its Room: "Learned: rollup corruption happens when containers run npm ci on shared node_modules"
+  → Room history accumulates over days/weeks
+  → Periodically: bot reads Room history, rewrites MEMORY.md with distilled patterns
+```
+
+The Captain can see what bots are remembering and correct them directly in the Room.
+
+## What This Replaces
+
+- `IGNORE_SENDERS` lists and filtering logic — bot not in room = can't see messages
+- Memex (SQLite FTS5) backlog item — Matrix rooms are the memory store
+- Direct `MEMORY.md` writes during work — post to Room instead, curate later
+
+## Implementation
+
+### Room IDs
+
+Quarters room IDs are stored in `fleet.json` per bot:
+
+```json
+{
+  "bots": {
+    "cid": {
+      "role": "engineer",
+      "rank": 2,
+      "ship": "HERACLES",
+      "status": "active",
+      "quartersRoom": "!wEA7CKIizG4Ez6o1Vn:a-gis.org"
+    }
+  },
+  "ships": {
+    "HERACLES": {
+      "spaceId": "!07deyffURvB77fTyOM:a-gis.org",
+      "loungeId": "!k7z5JU3UnKfWWlyWln:a-gis.org",
+      "quartersSpaceId": "!nSg57aPMuHam4bhXTs:a-gis.org"
+    }
+  }
+}
+```
+
+### Relay Changes
+
+On `!dismiss`:
+1. Stop the bot process
+2. Login as bot via Matrix credentials from env file
+3. Leave the duty room
+4. Join the Lounge
+5. Update fleet.json status
+
+On `!join`:
+1. Login as bot via Matrix credentials
+2. Leave the Lounge
+3. Join the duty room
+4. Update fleet.json status
+5. Start the bot process

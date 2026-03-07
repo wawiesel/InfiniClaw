@@ -8,9 +8,9 @@ These are real problems. Simplify, don't add complexity.
 
 Gitea and MinIO are single points of failure. Run a second instance of each on another ship. Gitea: multi-remote push (active-active) — every ship pushes to both origins. MinIO: built-in site replication — bidirectional sync, automatic reconciliation. Update `fleet.json` with fallback endpoints and add try/catch failover to relay and bot S3/git operations. Also: ships should be VMs, not bare metal — a physical machine can host multiple ships, enabling isolation, portability, and ephemeral holodeck ships. See `13-infrastructure-redundancy.md` for full spec.
 
-### Bot quarters (room-based dismiss/join)
+### Ship spaces & quarters (room-based dismiss/join + memory)
 
-Replace `IGNORE_SENDERS` and room-level filtering with physical room separation. Each bot gets a private quarters room (1:1 with Captain). `!dismiss` moves the bot to quarters, `!join` moves it back to the duty room. Dismissed bots don't see duty room messages because they're not in the room — no filtering needed. Remove `IGNORE_SENDERS` logic after implementing. See `14-quarters.md`.
+Ship spaces are set up in Matrix (HERACLES, Poseidon). Each has a Lounge and per-bot Rooms. Bots move between duty room and Lounge on `!join`/`!dismiss`. Bot Rooms are permanent memory logs — replaces memex. Relay needs: login as bot, join/leave rooms on lifecycle commands, store room IDs in fleet.json. Remove `IGNORE_SENDERS` after implementing. See `14-quarters.md`.
 
 ### No streaming to Matrix
 
@@ -27,10 +27,6 @@ With direct bind mounts, bot edits already persist to the repo. The sync-back st
 ### Navigator thread-to-topic mapping
 
 Auto-threading is implemented (1c30fdd) but navigators still need to manage thread-to-topic mapping in their memory so they return to the right thread for ongoing work.
-
-### Memex (experiential memory)
-
-SQLite FTS5-based experiential memory for bots. Bots record experiences (problems solved, patterns discovered, decisions made) and recall them via semantic search. Design discussed but never implemented — needs to be built from scratch. Core components: SQLite FTS5 store, `save_experience` / `recall_experience` MCP tools, auto-archival of thread outcomes.
 
 ### Scheduled task mount error
 
