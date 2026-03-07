@@ -40,12 +40,16 @@ If the Captain asks a follow-up question in a "Merged" thread days later:
 2.  The Main Brain instantly spawns a *new* Thread Brain.
 3.  InfiniClaw automatically queries the local SQLite database, hydrates the new Thread Brain with the historical context of that specific thread, and the bot answers the question seamlessly before terminating again.
 
-## Status Indicators
+## Presence
 
-Three indicator types, all following the no-redaction principle (edit in place, never delete):
+Bots should feel like humans. Silence means idle. Messages mean working. No status indicator messages are posted to the timeline.
 
-| Indicator | Meaning | Live state | Finished state |
-|-----------|---------|------------|----------------|
-| `⏳` | Thread Brain / Lobe is processing | `⏳ working (3m)` | `⏳ worked (3m)` |
-| `💤` | Main Brain is waiting for input | `💤 idling (5m)` | `💤 idled (5m)` |
-| `⏳` | Bot is resuming session | `⏳ resuming...` | `⏳ resumed (Xs)` |
+The only presence signal is the **pip** on the bot's display name — a single emoji that changes based on state:
+
+| Pip | Meaning |
+|-----|---------|
+| 🟢 | Alive — bot is running and responsive |
+| 💤 | Idle — no activity for `IDLE_PIP_THRESHOLD_MS` (default 5 min) |
+| 🔴 | Offline — bot is stopped or dismissed |
+
+The pip resets to 🟢 on any message processing. No other status messages, working indicators, or idle indicators are posted.

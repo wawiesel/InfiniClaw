@@ -27,9 +27,9 @@ Bot detects problem (MCP down, health check fails, OOM)
 
 **Operator (escape hatch only):** Cross-machine coordination when Matrix is down, OS-level fixes (pm2, podman, network), secret rotation requiring human auth, emergency intervention for restart loops.
 
-## Activity Heartbeat
+## Presence
 
-Bots must show visible activity in Matrix at a configurable interval (`HEARTBEAT_INTERVAL`, default 30s). If no user-visible output (message, reaction, edit) occurs within the interval, the host emits a heartbeat — an edited status message showing what the bot is doing (thinking, running tool, waiting for input). This is a hard requirement: the Captain must be able to tell a bot is alive from Matrix alone, without access to logs or operator tools.
+Bots do not post status messages (working, idle, resuming). Silence means idle — like a human. The only presence signal is the pip on the display name: 🟢 alive, 💤 idle (after `IDLE_PIP_THRESHOLD_MS`, default 5 min), 🔴 offline. The pip resets to 🟢 on any message processing.
 
 ## Holodeck
 
