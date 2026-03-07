@@ -575,6 +575,17 @@ function parseTarget(cmd: string, prefix: string): { matched: boolean; target?: 
   return { matched: true, target };
 }
 
+/** Case-insensitive check: does the input match this ship? */
+function isThisShip(input: string): boolean {
+  return input.toLowerCase() === HOSTNAME.toLowerCase();
+}
+
+/** Case-insensitive ship name lookup — returns canonical name from ships.json or null. */
+function resolveShipName(input: string, ships: Record<string, unknown>): string | null {
+  const lower = input.toLowerCase();
+  return Object.keys(ships).find(s => s.toLowerCase() === lower) ?? null;
+}
+
 /**
  * Resolve which local bots a command applies to.
  *
@@ -1141,7 +1152,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
                 const targetMatch = line.match(/\(target:\s*([^,)]+)/i);
                 if (!targetMatch) return false;
                 const target = targetMatch[1].trim();
-                return target === HOSTNAME || target.toLowerCase() === 'all';
+                return isThisShip(target) || target.toLowerCase() === 'all';
               });
             if (pending.length > 0) {
               log(`inbox: ${pending.length} pending item(s) for ${HOSTNAME}`);
@@ -1467,7 +1478,7 @@ function registerRelayCommands(): void {
 
     decommission: async (cmd, conn) => {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;
-      if (targetShip && targetShip !== HOSTNAME) return;
+      if (targetShip && !isThisShip(targetShip)) return;
       try {
         const ships = loadShips();
         if (!ships[HOSTNAME]) { await reply(conn, `not in ships.json`); return; }
@@ -1487,7 +1498,7 @@ function registerRelayCommands(): void {
 
     commission: async (cmd, conn) => {
       const targetShip = cmd.slice('!commission'.length).trim() || null;
-      if (targetShip && targetShip !== HOSTNAME) return;
+      if (targetShip && !isThisShip(targetShip)) return;
       try {
         const ships = loadShips();
         if (!ships[HOSTNAME]) { await reply(conn, `not in ships.json`); return; }
@@ -1563,7 +1574,7 @@ function registerRelayCommands(): void {
 
     refit: async (cmd, conn) => {
       const targetShip = cmd.slice('!refit'.length).trim() || null;
-      if (targetShip && targetShip !== HOSTNAME) return;
+      if (targetShip && !isThisShip(targetShip)) return;
       const startedAt = Date.now();
 
       const threadRoot = await reply(conn, statusLine('⚓', 'refit', 'starting', 0));
@@ -1662,13 +1673,17 @@ function registerRelayCommands(): void {
         await reply(conn, `Usage: !transport <bot> <ship>`);
         return;
       }
-      const [bot, targetShip] = parts;
-      if (!liveFleet[bot]) { await reply(conn, `Unknown bot: ${bot}`); return; }
+      const [botInput, shipInput] = parts;
+      const bot = botInput.toLowerCase();
+      if (!liveFleet[bot]) { await reply(conn, `Unknown bot: ${botInput}`); return; }
+      let targetShip: string;
       try {
         const ships = loadShips();
-        if (!ships[targetShip]) { await reply(conn, `Unknown ship: ${targetShip}`); return; }
+        const resolved = resolveShipName(shipInput, ships);
+        if (!resolved) { await reply(conn, `Unknown ship: ${shipInput}`); return; }
+        targetShip = resolved;
         if (!ships[targetShip].active) { await reply(conn, `${targetShip} is decommissioned`); return; }
-      } catch { /* ships.json missing — skip validation */ }
+      } catch { targetShip = shipInput; /* ships.json missing — skip validation */ }
       if (liveFleet[bot].ship !== HOSTNAME) return;
       try {
         stopBot(bot);
@@ -1869,10 +1884,13 @@ function registerRelayCommands(): void {
 /** Shared promote/demote handler */
 async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isPromote: boolean): Promise<void> {
   const direction = isPromote ? 'up' : 'down';
-  const target = cmd.slice(isPromote ? '!promote '.length : '!demote '.length).trim();
+  const rawTarget = cmd.slice(isPromote ? '!promote '.length : '!demote '.length).trim();
 
+  // Try ship name first (case-insensitive)
   const ships = (() => { try { return loadShips(); } catch { return null; } })();
-  if (ships && ships[target]) {
+  const shipName = ships ? resolveShipName(rawTarget, ships) : null;
+  if (ships && shipName) {
+    const target = shipName;
     if (!isSpeaker()) return;
     const result = rankSwap(Object.entries(ships), target, direction);
     if (!result) {
@@ -1885,9 +1903,10 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
     return;
   }
 
+  const target = rawTarget.toLowerCase();
   const local = getActiveBots();
   if (!local.includes(target)) return;
-  if (!liveFleet[target]) { await reply(conn, `Unknown: ${target}`); return; }
+  if (!liveFleet[target]) { await reply(conn, `Unknown: ${rawTarget}`); return; }
   const role = liveFleet[target].role;
   const sameRole = Object.entries(liveFleet).filter(([_, b]) => b.role === role);
   const result = rankSwap(sameRole, target, direction);
