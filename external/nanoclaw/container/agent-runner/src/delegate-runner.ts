@@ -64,6 +64,27 @@ function resolveDelegateCwd(cwd?: string): { ok: true; cwd: string } | { ok: fal
   return { ok: true, cwd: resolved };
 }
 
+function isProviderUnavailableError(stderr: string): boolean {
+  const s = stderr.toLowerCase();
+  return [
+    'insufficient_quota',
+    'insufficient quota',
+    'rate limit',
+    '429',
+    'unauthorized',
+    'forbidden',
+    'authentication',
+    'invalid api key',
+    'api key',
+    'not logged in',
+    'login required',
+    'token is not active',
+    'credits',
+    'billing',
+    'usage limit',
+  ].some((needle) => s.includes(needle));
+}
+
 function isIgnorableDelegateStderr(line: string): boolean {
   const s = line.toLowerCase();
   return (
@@ -174,6 +195,7 @@ function spawnOllamaDelegate(
   ollamaApiHost: string,
   model: string,
   prompt: string,
+  timeoutMs: number,
   system?: string,
 ): ReturnType<typeof spawn> {
   const runner = `
@@ -181,16 +203,20 @@ const host = process.env.OLLAMA_HOST_URL;
 const model = process.env.OLLAMA_MODEL;
 const prompt = process.env.OLLAMA_PROMPT;
 const system = process.env.OLLAMA_SYSTEM;
+const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || '900000');
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), timeoutMs);
 const body = { model, prompt, stream: false };
 if (system) body.system = system;
 fetch(\`\${host}/api/generate\`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body),
+  signal: controller.signal,
 }).then(async (res) => {
   if (!res.ok) {
     const text = await res.text();
-    console.error(\`Ollama error (\${res.status}): \${text}\`);
+    console.error(\`unavailable: Ollama error (\${res.status}): \${text}\`);
     process.exit(1);
     return;
   }
@@ -198,8 +224,15 @@ fetch(\`\${host}/api/generate\`, {
   process.stdout.write(String(data?.response || ''));
   process.exit(0);
 }).catch((err) => {
-  console.error(String(err));
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.toLowerCase().includes('abort')) {
+    console.error(\`unavailable: timed out after \${timeoutMs}ms\`);
+  } else {
+    console.error(\`unavailable: \${msg}\`);
+  }
   process.exit(1);
+}).finally(() => {
+  clearTimeout(timer);
 });
 `.trim();
 
@@ -210,6 +243,7 @@ fetch(\`\${host}/api/generate\`, {
       OLLAMA_HOST_URL: ollamaApiHost,
       OLLAMA_MODEL: model,
       OLLAMA_PROMPT: prompt,
+      OLLAMA_TIMEOUT_MS: String(timeoutMs),
       OLLAMA_SYSTEM: system,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -527,7 +561,95 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
       ].join('\n');
 
       const lobeId = buildLobeId();
-      let proc: ReturnType<typeof spawn>;
+      const inputDir = resolveLobeResultInputDir(ctx.ipcDir, ctx.groupFolder);
+      const prefixedMessages: string[] = [];
+      const stderrLines: string[] = [];
+      let stdoutBuffer = '';
+      let stderrBuffer = '';
+      let unavailableTriggered = false;
+      let ipcWritten = false;
+
+      const writeLobeResultOnce = (output: string, exitCode: number | null): void => {
+        if (ipcWritten) return;
+        ipcWritten = true;
+        writeLobeResultFile(inputDir, lobeId, output, exitCode);
+      };
+
+      const pushMessage = (text: string, isStatus = false): void => {
+        const normalized = text.replace(/\r/g, '').trim();
+        if (!normalized) return;
+        prefixedMessages.push(`${lobe}: ${normalized}`);
+        const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
+        emitDelegateMessage(formatted, threadId ?? undefined);
+      };
+
+      let proc: ReturnType<typeof spawn> | null = null;
+      const failUnavailable = (reason: string): void => {
+        if (unavailableTriggered) return;
+        unavailableTriggered = true;
+        pushMessage(`unavailable: ${reason}`, true);
+        writeLobeResultOnce(
+          prefixedMessages.join('\n\n') || `${lobe}: unavailable: ${reason}`,
+          null,
+        );
+        if (proc && proc.exitCode === null) proc.kill('SIGTERM');
+      };
+
+      const handleStdoutLine = (line: string): void => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (lobe === 'codex') {
+          try {
+            const event = JSON.parse(trimmed) as { type?: string; message?: string; item?: { type?: string; text?: string } };
+            if (event.type === 'item.completed' && event.item?.type === 'agent_message' && typeof event.item.text === 'string') {
+              pushMessage(event.item.text);
+              return;
+            }
+            if (event.type === 'error' && typeof event.message === 'string') {
+              failUnavailable(event.message);
+              return;
+            }
+          } catch {
+            pushMessage(trimmed);
+            return;
+          }
+        } else if (lobe === 'claude') {
+          try {
+            const event = JSON.parse(trimmed) as { type?: string; message?: string; content?: string; result?: string };
+            if (event.type === 'assistant' && typeof event.content === 'string') {
+              pushMessage(event.content);
+              return;
+            }
+            if (event.type === 'result' && typeof event.result === 'string') {
+              pushMessage(event.result);
+              return;
+            }
+            if (event.type === 'error' && typeof event.message === 'string') {
+              failUnavailable(event.message);
+              return;
+            }
+            // Skip partial streaming deltas — they accumulate into final result
+            if (event.type === 'content_block_delta') return;
+          } catch {
+            pushMessage(trimmed);
+            return;
+          }
+        } else {
+          pushMessage(trimmed);
+        }
+      };
+
+      const handleStderrLine = (line: string): void => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (isIgnorableDelegateStderr(trimmed)) return;
+        stderrLines.push(trimmed);
+        if (stderrLines.length > 100) stderrLines.shift();
+        if (!unavailableTriggered && (isProviderUnavailableError(trimmed) || trimmed.toLowerCase().startsWith('unavailable:'))) {
+          failUnavailable(trimmed.replace(/^unavailable:\s*/i, ''));
+        }
+      };
+
       try {
         const delegateEnv = buildDelegateEnv();
         if (lobe === 'codex') {
@@ -566,6 +688,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
             ollamaHost,
             effectiveModel,
             args.objective,
+            timeoutMs,
             args.system,
           );
         }
@@ -579,46 +702,52 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         };
       }
 
-      let stdout = '';
-      let stderr = '';
-      let timedOut = false;
       const timer = setTimeout(() => {
-        timedOut = true;
-        if (proc.exitCode === null) proc.kill('SIGTERM');
+        failUnavailable(`timed out after ${timeoutMs}ms`);
       }, timeoutMs);
 
-      proc.stdout?.on('data', (chunk: Buffer | string) => {
-        stdout += chunk.toString();
+      proc?.stdout?.on('data', (chunk: Buffer | string) => {
+        stdoutBuffer += chunk.toString();
+        while (true) {
+          const idx = stdoutBuffer.indexOf('\n');
+          if (idx === -1) break;
+          handleStdoutLine(stdoutBuffer.slice(0, idx));
+          stdoutBuffer = stdoutBuffer.slice(idx + 1);
+        }
       });
-      proc.stderr?.on('data', (chunk: Buffer | string) => {
-        stderr += chunk.toString();
+      proc?.stderr?.on('data', (chunk: Buffer | string) => {
+        stderrBuffer += chunk.toString();
+        while (true) {
+          const idx = stderrBuffer.indexOf('\n');
+          if (idx === -1) break;
+          handleStderrLine(stderrBuffer.slice(0, idx));
+          stderrBuffer = stderrBuffer.slice(idx + 1);
+        }
       });
-      proc.on('error', (err) => {
+      proc?.on('error', (err) => {
         clearTimeout(timer);
-        const inputDir = resolveLobeResultInputDir(ctx.ipcDir, ctx.groupFolder);
-        const output = `spawn error: ${err.message}`;
-        writeLobeResultFile(inputDir, lobeId, output, null);
+        failUnavailable(err.message);
       });
-      proc.on('close', (code, signal) => {
+      proc?.on('close', (code, signal) => {
         clearTimeout(timer);
-        const inputDir = resolveLobeResultInputDir(ctx.ipcDir, ctx.groupFolder);
-        const parts: string[] = [];
-        const cleanedStdout = stdout.trim();
-        const cleanedStderr = stderr
-          .split('\n')
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0 && !isIgnorableDelegateStderr(line))
-          .join('\n');
-        if (cleanedStdout) parts.push(cleanedStdout);
-        if (cleanedStderr) parts.push(`[stderr]\n${cleanedStderr}`);
-        if (timedOut) parts.push(`[timeout] terminated after ${timeoutMs}ms`);
-        if (signal) parts.push(`[signal] ${signal}`);
-        const output = parts.join('\n\n');
-        writeLobeResultFile(inputDir, lobeId, output, code);
+        if (stdoutBuffer.trim()) handleStdoutLine(stdoutBuffer);
+        if (stderrBuffer.trim()) handleStderrLine(stderrBuffer);
+        if (ipcWritten) return;
+
+        if (code !== 0) {
+          const reason = stderrLines[stderrLines.length - 1] || `${lobe} exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`;
+          failUnavailable(reason);
+          return;
+        }
+
+        if (prefixedMessages.length === 0) {
+          pushMessage('completed with no textual output.', true);
+        }
+        writeLobeResultOnce(prefixedMessages.join('\n\n'), code);
         // TODO: The relay/agent-runner injects a [System] message into the next turn when it sees a lobe_result IPC file.
       });
 
-      proc.unref();
+      proc?.unref();
 
       // Step 6: Restore previous work thread (or clear if none was active).
       if (threadId) setThread(previousWorkThread);
