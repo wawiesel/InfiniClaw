@@ -1399,21 +1399,23 @@ function registerRelayCommands(): void {
           const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
             const isLocal = machine === HOSTNAME;
-            let pip: string;
-            if (entry.status === 'transit') pip = '🚀';
-            else if (entry.status !== 'active') pip = '·';
-            else if (isLocal) pip = localRunning.has(botId) ? '●' : '⚠️';
-            else pip = '○'; // remote — can't verify
 
             // CO = lowest rank active bot in this role
             const isCO = entry.status === 'active' && !Object.entries(fleet).some(
               ([id, e]) => id !== botId && e.role === entry.role && e.status === 'active' && e.rank < entry.rank
             );
-            const coTag = isCO ? ' ⭐' : '';
+
+            let badge: string;
+            if (entry.status === 'transit') badge = '🚀';
+            else if (entry.status !== 'active') badge = '💤';
+            else if (isCO) badge = '⭐';
+            else if (isLocal && localRunning.has(botId)) badge = '🟢';
+            else if (isLocal) badge = '⚠️';
+            else badge = '🟢'; // remote active — trust fleet state
 
             const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
             const name = env?.ASSISTANT_NAME || botId;
-            lines.push(`      ${name} ${pip}${coTag} ${entry.role}[${entry.rank}]`);
+            lines.push(`      ${name} ${badge} ${entry.role}[${entry.rank}]`);
           }
         }
 
