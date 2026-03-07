@@ -153,6 +153,8 @@ function rebuildInfiniClaw(): string {
         }
       }
     }
+    refreshLocalCommitEpoch();
+    publishCommitEpoch().catch(() => {});
     return 'infiniclaw: rebuild succeeded';
   } catch (err) {
     return `infiniclaw: rebuild FAILED — ${errStr(err).slice(0, 200)}`;
@@ -243,42 +245,107 @@ function verifyIntercomSig(body: string, formattedBody: string | undefined): boo
 }
 
 /** Is this machine the "speaker" — lowest-rank active machine? Used to avoid duplicate replies. */
-/** How many commits is this ship's InfiniClaw behind origin/main? 0 = current. */
-function commitsBehind(): number {
+// ── Speaker election via S3 commit timestamps ────────────────────
+
+const RELAY_S3_PREFIX = 'relay';
+let localCommitEpoch = 0; // epoch seconds of HEAD commit the relay is running
+
+/** Read the commit timestamp of the code this relay is actually running. Called once at startup and after rebuilds. */
+function refreshLocalCommitEpoch(): void {
   try {
     const root = resolveRoot();
-    execSync('git fetch --quiet', { cwd: root, timeout: 10_000, stdio: 'pipe' });
-    const behind = execSync('git rev-list HEAD..origin/main --count', {
+    const epoch = execSync('git log -1 --format=%ct HEAD', {
       cwd: root, encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
     }).trim();
-    return parseInt(behind, 10) || 0;
+    localCommitEpoch = parseInt(epoch, 10) || 0;
   } catch {
-    return 0; // can't check — assume current
+    localCommitEpoch = 0;
+  }
+}
+
+/** Upload this ship's commit epoch to S3 so other ships can compare. */
+async function publishCommitEpoch(): Promise<void> {
+  const s3 = getS3Client();
+  if (!s3 || !localCommitEpoch) return;
+  try {
+    await s3.client.send(new PutObjectCommand({
+      Bucket: s3.bucket,
+      Key: `${RELAY_S3_PREFIX}/${HOSTNAME}.json`,
+      Body: Buffer.from(JSON.stringify({ hostname: HOSTNAME, commitEpoch: localCommitEpoch, updatedAt: new Date().toISOString() })),
+      ContentType: 'application/json',
+    }));
+  } catch (err) {
+    log(`S3 commit epoch publish failed: ${errStr(err)}`);
+  }
+}
+
+/** Fetch all ships' commit epochs from S3. */
+async function fetchCommitEpochs(): Promise<Record<string, number>> {
+  const s3 = getS3Client();
+  if (!s3) return {};
+  const result: Record<string, number> = {};
+  try {
+    const listed = await s3.client.send(new ListObjectsV2Command({
+      Bucket: s3.bucket,
+      Prefix: `${RELAY_S3_PREFIX}/`,
+    }));
+    for (const obj of listed.Contents || []) {
+      if (!obj.Key?.endsWith('.json')) continue;
+      try {
+        const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: obj.Key }));
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+        const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+        if (data.hostname && typeof data.commitEpoch === 'number') {
+          result[data.hostname] = data.commitEpoch;
+        }
+      } catch { /* skip corrupt */ }
+    }
+  } catch (err) {
+    log(`S3 commit epoch fetch failed: ${errStr(err)}`);
+  }
+  return result;
+}
+
+/** Cached speaker result — refreshed by async election. */
+let cachedIsSpeaker = true;
+
+async function electSpeaker(): Promise<boolean> {
+  try {
+    const machines = loadMachines();
+    const active = Object.entries(machines).filter(([_, m]) => m.active);
+    if (active.length === 0) return true;
+    if (!active.some(([name]) => name === HOSTNAME)) return false;
+
+    const epochs = await fetchCommitEpochs();
+    // Find the newest commit epoch among active machines
+    let maxEpoch = 0;
+    for (const [name] of active) {
+      const e = epochs[name] ?? 0;
+      if (e > maxEpoch) maxEpoch = e;
+    }
+
+    const myEpoch = epochs[HOSTNAME] ?? localCommitEpoch;
+
+    if (myEpoch < maxEpoch) {
+      log(`speaker: deferring — local commit ${myEpoch} < newest ${maxEpoch}`);
+      return false;
+    }
+
+    // Tiebreak: among ships at maxEpoch, lowest rank wins
+    const atMax = active
+      .filter(([name]) => (epochs[name] ?? 0) >= maxEpoch)
+      .sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
+    return atMax.length > 0 && atMax[0][0] === HOSTNAME;
+  } catch {
+    return true;
   }
 }
 
 function isSpeaker(): boolean {
-  try {
-    const machines = loadMachines();
-    const active = Object.entries(machines)
-      .filter(([_, m]) => m.active)
-      .sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
-    if (active.length === 0) return true;
-
-    const myRank = active.findIndex(([name]) => name === HOSTNAME);
-    if (myRank < 0) return false; // not in active list
-
-    // If we're behind origin/main, defer to other ships (they may be current)
-    const behind = commitsBehind();
-    if (behind > 0 && active.length > 1) {
-      log(`speaker: deferring — ${behind} commit(s) behind origin/main`);
-      return false;
-    }
-
-    return myRank === 0;
-  } catch {
-    return true; // can't load machines — assume we should reply
-  }
+  // Trigger async re-election in background, return cached result
+  electSpeaker().then(v => { cachedIsSpeaker = v; }).catch(() => {});
+  return cachedIsSpeaker;
 }
 
 // ── Matrix API helpers ─────────────────────────────────────────────
@@ -1686,6 +1753,9 @@ function sleep(ms: number): Promise<void> {
 
 async function main(): Promise<void> {
   log(`starting on ${HOSTNAME}`);
+  refreshLocalCommitEpoch();
+  log(`relay commit epoch: ${localCommitEpoch}`);
+  publishCommitEpoch().catch(() => {});
   registerRelayCommands();
 
   const intercom = loadIntercomConfig();
