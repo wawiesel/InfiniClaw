@@ -1388,13 +1388,30 @@ function registerRelayCommands(): void {
           (machines[a]?.rank ?? 99) - (machines[b]?.rank ?? 99)
         );
 
+        // Git status for local ship
+        let gitInfo = '';
+        try {
+          execSync('git fetch --quiet', { cwd: root, timeout: 10_000, stdio: 'pipe' });
+          const sha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+          const ahead = parseInt(execSync('git rev-list origin/main..HEAD --count', { cwd: root, ...execOpts }).trim(), 10) || 0;
+          const behind = parseInt(execSync('git rev-list HEAD..origin/main --count', { cwd: root, ...execOpts }).trim(), 10) || 0;
+          const lastCommitEpoch = parseInt(execSync('git log -1 --format=%ct HEAD', { cwd: root, ...execOpts }).trim(), 10) || 0;
+          const agoMin = lastCommitEpoch ? Math.round((Date.now() / 1000 - lastCommitEpoch) / 60) : 0;
+          const agoStr = agoMin >= 60 ? `${Math.round(agoMin / 60)}h` : `${agoMin}m`;
+          let ud = '';
+          if (ahead > 0) ud += `↑${ahead}`;
+          if (behind > 0) ud += `↓${behind}`;
+          gitInfo = ` · ${sha}${ud ? ' ' + ud : ''} (${agoStr})`;
+        } catch { /* best effort */ }
+
         const lines: string[] = [];
 
         for (const machine of machineOrder) {
           const mConfig = machines[machine];
           const rank = mConfig?.rank ?? '?';
           const shipIcon = mConfig?.active ? '⚓' : '🚫';
-          lines.push(`${shipIcon} ${machine}[${rank}]`);
+          const git = machine === HOSTNAME ? gitInfo : '';
+          lines.push(`${shipIcon} ${machine}[${rank}]${git}`);
 
           const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
@@ -1415,7 +1432,7 @@ function registerRelayCommands(): void {
 
             const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
             const name = env?.ASSISTANT_NAME || botId;
-            lines.push(`      ${name} ${badge} (${machine}) · ${entry.role}[${entry.rank}]`);
+            lines.push(`      ${name} ${badge} · ${entry.role}[${entry.rank}]`);
           }
         }
 
