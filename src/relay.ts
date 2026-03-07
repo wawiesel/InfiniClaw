@@ -1394,7 +1394,7 @@ function registerRelayCommands(): void {
           const mConfig = machines[machine];
           const rank = mConfig?.rank ?? '?';
           const shipIcon = mConfig?.active ? '⚓' : '🚫';
-          lines.push(`${shipIcon} ${machine} #${rank}`);
+          lines.push(`${shipIcon} ${machine}[${rank}]`);
 
           const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
@@ -1407,7 +1407,7 @@ function registerRelayCommands(): void {
 
             const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
             const name = env?.ASSISTANT_NAME || botId;
-            lines.push(`  ${icon} ${name} · ${entry.role} #${entry.rank} · ${entry.status}`);
+            lines.push(`  ${icon} ${name} · ${entry.role}[${entry.rank}] · ${entry.status}`);
           }
         }
 
