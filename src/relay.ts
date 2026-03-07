@@ -1305,6 +1305,7 @@ function registerRelayCommands(): void {
     refit: async (cmd, conn) => {
       const targetShip = cmd.slice('!refit'.length).trim() || null;
       if (targetShip && targetShip !== HOSTNAME) return;
+      if (!targetShip && !isShipActive()) return; // decommissioned ships only refit when explicitly targeted
       const results: string[] = [];
       try {
         const secretsResult = secretsGitSync();
