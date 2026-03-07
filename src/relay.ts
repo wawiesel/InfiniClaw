@@ -1350,99 +1350,67 @@ function registerRelayCommands(): void {
     },
 
     fleet: async (cmd, conn) => {
-      const roomOnly = cmd === '!fleet room';
+      if (!await electSpeaker()) return; // only speaker responds
+
       try {
         const fleet = liveFleet;
+        const machines = (() => { try { return loadMachines(); } catch { return {}; } })();
         const root = resolveRoot();
         const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
 
-        let pm2Procs: Array<{ name: string; pm2_env?: { status?: string } }> = [];
-        try {
-          pm2Procs = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', { ...execOpts, cwd: root }));
-        } catch { /* empty */ }
-
-        const runningContainers = new Set<string>();
+        // Local process status (only available for this ship)
+        const localRunning = new Set<string>();
         try {
           for (const line of execSync('podman ps --format "{{.Names}}"', execOpts).trim().split('\n')) {
             const match = line.match(/^nanoclaw-([^-]+)-/);
-            if (match) runningContainers.add(match[1]);
+            if (match) localRunning.add(match[1]);
+          }
+        } catch { /* empty */ }
+        try {
+          const pm2 = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', { ...execOpts, cwd: root })) as Array<{ name: string; pm2_env?: { status?: string } }>;
+          for (const p of pm2) {
+            if (p.pm2_env?.status === 'online') {
+              const match = p.name.match(/^infiniclaw-(.+)$/);
+              if (match) localRunning.add(match[1]);
+            }
           }
         } catch { /* empty */ }
 
-        const botRooms = buildBotRoomMap();
-        const botEntries = Object.entries(fleet).filter(([name, entry]) => {
-          if (entry.machine !== HOSTNAME) return false;
-          if (roomOnly) return botRooms[name] === conn.name;
-          return true;
-        });
-
-        const warnings: string[] = [];
-
-        function botLine(botId: string, entry: FleetEntry): string {
-          const pm2 = pm2Procs.find((p) => p.name === `infiniclaw-${botId}`);
-          const pm2Online = pm2?.pm2_env?.status === 'online';
-          const hasContainer = runningContainers.has(botId);
-          const running = pm2Online || hasContainer;
-
-          if (entry.status === 'active' && !running) {
-            warnings.push(`⚠️ ${botId}: active but not running — restarting`);
-            try { bootstrapBot(root, botId); } catch { /* best effort */ }
-          } else if (entry.status !== 'active' && running) {
-            warnings.push(`⚠️ ${botId}: ${entry.status} but running — stopping`);
-            try { stopBot(botId); killStaleContainers(botId); } catch { /* best effort */ }
-          }
-
-          let activity = '🔴';
-          if (entry.status === 'transit') activity = '🚀';
-          else if (hasContainer) activity = '🟢';
-          else if (pm2Online) activity = '🟡';
-
-          const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
-          const name = env?.ASSISTANT_NAME || botId;
-
-          let sha = '';
-          try {
-            const distMain = path.join(root, '_runtime', 'instances', botId, 'dist', 'main.js');
-            if (fs.existsSync(distMain)) {
-              const stat = fs.statSync(distMain);
-              const age = Math.round((Date.now() - stat.mtimeMs) / 60_000);
-              const commitSha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
-              const behind = execSync('git rev-list HEAD..origin/main --count 2>/dev/null || echo ?', { cwd: root, ...execOpts }).trim();
-              const behindStr = behind !== '0' && behind !== '?' ? ` ↓${behind}` : '';
-              sha = `${commitSha}${behindStr} (${age}m ago)`;
-            }
-          } catch { /* best effort */ }
-
-          return `  ${activity} ${name} — ${entry.role} #${entry.rank} ${entry.status}${sha ? ` · ${sha}` : ''}`;
+        // Group bots by machine
+        const byMachine: Record<string, Array<[string, FleetEntry]>> = {};
+        for (const [bot, entry] of Object.entries(fleet)) {
+          const m = entry.machine || 'unassigned';
+          (byMachine[m] ??= []).push([bot, entry]);
         }
 
-        const machineRank = (() => { try { return loadMachines()[HOSTNAME]?.rank ?? '?'; } catch { return '?'; } })();
-        const machineActive = isMachineActive();
-        const lines: string[] = [`**${HOSTNAME}** #${machineRank} (${machineActive ? 'commissioned' : 'decommissioned'})`];
+        // Sort machines by rank
+        const machineOrder = Object.keys(byMachine).sort((a, b) =>
+          (machines[a]?.rank ?? 99) - (machines[b]?.rank ?? 99)
+        );
 
-        if (botEntries.length > 0) {
-          for (const [botId, entry] of botEntries.sort((a, b) => a[1].rank - b[1].rank)) {
-            lines.push(botLine(botId, entry));
+        const lines: string[] = [];
+
+        for (const machine of machineOrder) {
+          const mConfig = machines[machine];
+          const rank = mConfig?.rank ?? '?';
+          const status = mConfig?.active ? 'commissioned' : 'decommissioned';
+          lines.push(`${machine} #${rank} (${status})`);
+
+          const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
+          for (const [botId, entry] of bots) {
+            const isLocal = machine === HOSTNAME;
+            let icon: string;
+            if (entry.status === 'transit') icon = '🚀';
+            else if (entry.status !== 'active') icon = '🔴';
+            else if (isLocal) icon = localRunning.has(botId) ? '🟢' : '⚠️';
+            else icon = '⏳'; // remote — can't verify
+
+            const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
+            const name = env?.ASSISTANT_NAME || botId;
+            lines.push(`  ${icon} ${name} · ${entry.role} #${entry.rank} · ${entry.status}`);
           }
-        } else {
-          lines.push('  (no bots assigned)');
         }
 
-        const relayPm2 = pm2Procs.find(p => p.name === 'infiniclaw-relay');
-        const helmIcon = relayPm2?.pm2_env?.status === 'online' ? '🟢' : '🔴';
-
-        const repoStatus = (cwd: string): string => {
-          try {
-            const sha = execSync('git rev-parse --short HEAD', { cwd, ...execOpts }).trim();
-            const dirty = execSync('git status --porcelain', { cwd, ...execOpts }).trim();
-            const behind = execSync('git rev-list HEAD..origin/main --count 2>/dev/null || echo ?', { cwd, ...execOpts }).trim();
-            return `${sha}${dirty ? '*' : ''}${behind !== '0' && behind !== '?' ? ` ↓${behind}` : ''}`;
-          } catch { return '?'; }
-        };
-
-        lines.push(`${helmIcon} helm · ic:${repoStatus(root)} · secrets:${repoStatus(secretsRepoPath())}`);
-
-        if (warnings.length) lines.push('', ...warnings);
         await reply(conn, lines.join('\n'));
       } catch (err) {
         await reply(conn, `!fleet failed: ${errStr(err)}`);
