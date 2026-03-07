@@ -56,7 +56,7 @@ Ships are ranked in `machines.json`. The lowest-rank active ship is the "speaker
 
 ### Authorization
 
-Only the Captain (`CAPTAIN_USER_ID` from bot env) and intercom accounts (`/-intercom:/` sender pattern) can issue commands. Operators send commands via `intercom-send.sh`, which uses the same intercom accounts the relays poll — so operator commands are inherently authorized.
+Only the Captain (`CAPTAIN_USER_ID` from bot env) and intercom accounts (`/-intercom:/` sender pattern) can issue commands. Operators send commands via `send`, which uses the same intercom accounts the relays poll — so operator commands are inherently authorized.
 
 ### Replies
 
@@ -69,7 +69,7 @@ Intercom accounts are **write-only broadcast channels** — not user identities.
 ### a) Operator → Bots and Relays
 
 ```bash
-bash operator/intercom-send.sh <room> "<message>"
+bash operator/send <room> "<message>"
 ```
 
 This is how operators on each ship communicate with bots and issue `!` commands across the fleet. Operators do not have their own Matrix accounts — they operate exclusively through intercom.
@@ -101,4 +101,4 @@ Claude Code in a tmux session. The escape hatch for when bots can't handle somet
 | `src/ipc-commands.ts` | IPC command handlers (restart, health, fleet, etc.) |
 | `src/service.ts` | Bot lifecycle — deploy, start, stop, pm2 management |
 | `operator/intercom.json` | Intercom account credentials (in secrets repo) |
-| `operator/intercom-send.sh` | Shell script for operator→bot messaging |
+| `operator/send` | Shell script for operator→bot messaging |

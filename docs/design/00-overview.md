@@ -21,7 +21,7 @@ Feature docs, ordered from foundational to high-level:
 | [01](01-messaging.md) | Messaging | Message flow, routing, filtering, queue |
 | [02](02-threading.md) | Threading | Thread Brains, lobes, branch and merge, status indicators |
 | [03](03-ipc.md) | IPC | Container ↔ host communication, namespaces, cooldowns |
-| [04](04-fleet.md) | Fleet | Rooms, machines, presence, roles, rank |
+| [04](04-fleet.md) | Fleet | Rooms, machines, roles, rank |
 | [05](05-commanding-officer.md) | Commanding Officer | CO election, badges, fleet.json |
 | [06](06-commands.md) | Commands | Operator `!` commands, relay process, IPC |
 | [07](07-intercom.md) | Intercom | Cross-room relay accounts, operator messaging |

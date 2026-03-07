@@ -12,7 +12,7 @@ Bots are distributed across ships (machines). Each ship runs a subset of the fle
 
 Ships are ranked in `machines.json` (`rank` field). The lowest-rank **active** ship is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay. Per-ship commands (`!fleet`, `!provision`) reply from each ship with its local state.
 
-Each ship writes its own presence file to `operator/presence/<hostname>.json` in the secrets repo at deploy time. All ships read all presence files to determine fleet-wide bot availability.
+Fleet-wide bot availability is tracked in `fleet.json` and synced via git. The relay on each ship maintains an in-memory copy (`liveFleet`) as the runtime source of truth.
 
 ## Transport
 

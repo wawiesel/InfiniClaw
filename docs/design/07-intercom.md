@@ -17,7 +17,7 @@ Intercom credentials are stored in `operator/intercom.json` in the secrets repo.
 ### Operators → Bots and Relays
 
 ```bash
-bash operator/intercom-send.sh <room> "<message>"
+bash operator/send <room> "<message>"
 ```
 
 Operators on each ship use intercom to communicate with bots and to issue `!` commands that all relays receive. Messages appear as the intercom account in the room. This is the primary way operators coordinate across ships — they do not have their own Matrix accounts.
@@ -32,9 +32,9 @@ Relays reply to commands via the same intercom account they poll on. All replies
 
 ## How relays receive commands
 
-The relay on each ship connects to Matrix as the intercom accounts (same credentials as `intercom-send.sh`). Messages starting with `!` are always processed, even from self. This is how operator-sent `!` commands reach all relays:
+The relay on each ship connects to Matrix as the intercom accounts (same credentials as `send`). Messages starting with `!` are always processed, even from self. This is how operator-sent `!` commands reach all relays:
 
-1. Operator sends `!restart cid` via `intercom-send.sh bridge`
+1. Operator sends `!restart cid` via `send bridge`
 2. Message arrives in Bridge room from `bridge-intercom`
 3. Every ship's relay polls Bridge as `bridge-intercom` (different device IDs)
 4. All relays see the `!` message and process it
