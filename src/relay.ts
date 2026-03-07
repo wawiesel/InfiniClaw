@@ -569,21 +569,37 @@ async function matrixSendThread(homeserver: string, token: string, roomId: strin
 // ── Bot Matrix room management ──────────────────────────────────
 
 /** Login as a bot using its env file credentials. */
-async function botMatrixLogin(root: string, bot: string): Promise<{ token: string; homeserver: string }> {
+async function botMatrixLogin(root: string, bot: string): Promise<{ token: string; homeserver: string; userId: string }> {
   const env = loadProfileEnv(root, bot);
   const homeserver = env.MATRIX_HOMESERVER;
   const username = env.MATRIX_USERNAME;
   const password = env.MATRIX_PASSWORD;
   if (!homeserver || !username || !password) throw new Error(`${bot}: missing Matrix credentials in env`);
-  const { accessToken } = await matrixLogin(homeserver, username, password);
-  return { token: accessToken, homeserver };
+  const { accessToken, userId } = await matrixLogin(homeserver, username, password);
+  return { token: accessToken, homeserver, userId };
 }
 
-/** Make a bot join a Matrix room. */
-async function botJoinRoom(token: string, homeserver: string, roomId: string): Promise<void> {
+/** Invite a bot to a room using the intercom account, then join as the bot. */
+async function botJoinRoom(botToken: string, homeserver: string, roomId: string, conn: RoomConn, botUserId: string): Promise<void> {
+  // Invite via intercom (bot can't self-join after leaving)
+  if (conn.accessToken) {
+    const invResp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${conn.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: botUserId }),
+    });
+    if (!invResp.ok) {
+      const body = await invResp.text();
+      // Already in room is fine
+      if (!body.includes('already in the room') && !body.includes('already joined')) {
+        log(`invite failed: ${invResp.status} ${body}`);
+      }
+    }
+  }
+  // Now join as the bot
   const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
     body: '{}',
   });
   if (!resp.ok) {
@@ -1485,9 +1501,9 @@ async function handleLifecycleCommand(
         killStaleContainers(bot);
         // Move bot: leave duty room → join lounge
         try {
-          const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
+          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
           await botLeaveRoom(botToken, homeserver, dutyRoomId);
-          if (loungeId) await botJoinRoom(botToken, homeserver, loungeId);
+          if (loungeId) await botJoinRoom(botToken, homeserver, loungeId, conn, botUserId);
           log(`${name}: moved to lounge`);
         } catch (roomErr) {
           log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
@@ -1521,9 +1537,9 @@ async function handleLifecycleCommand(
         }
         // Move bot: leave lounge → join duty room
         try {
-          const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
+          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
           if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
-          await botJoinRoom(botToken, homeserver, dutyRoomId);
+          await botJoinRoom(botToken, homeserver, dutyRoomId, conn, botUserId);
           await step('room joined');
         } catch (roomErr) {
           log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
