@@ -8,7 +8,6 @@
  * Run: node dist/relay.js
  */
 import { execFileSync, execSync } from 'child_process';
-import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -54,7 +53,7 @@ interface SyncResponse {
         events?: Array<{
           type: string;
           sender: string;
-          content?: { msgtype?: string; body?: string; formatted_body?: string };
+          content?: { msgtype?: string; body?: string };
           event_id: string;
           origin_server_ts: number;
         }>;
@@ -179,69 +178,17 @@ function resolveCaptainUserId(): string {
   return '';
 }
 
-let intercomSenders: Set<string> | null = null;
-
-function resolveIntercomSenders(): Set<string> {
-  if (intercomSenders) return intercomSenders;
-  intercomSenders = new Set();
+function resolveOperatorUserId(): string {
   try {
-    const config = loadIntercomConfig();
-    const domain = new URL(config.homeserver).host;
-    for (const room of Object.values(config.rooms)) {
-      intercomSenders.add(`@${room.username}:${domain}`);
-    }
-  } catch { /* best effort */ }
-  return intercomSenders;
+    const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
+    const config = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+    return config.userId || '';
+  } catch { return ''; }
 }
 
-function isAuthorized(sender: string, captainUserId: string): boolean {
-  return sender === captainUserId || resolveIntercomSenders().has(sender);
-}
-
-const INTERCOM_SIG_MAX_AGE = 5 * 60; // 5 minutes
-
-function loadIntercomKey(): string | null {
-  try {
-    const keyPath = path.join(secretsRepoPath(), 'operator', 'intercom-key');
-    return fs.readFileSync(keyPath, 'utf-8').trim();
-  } catch { return null; }
-}
-
-/** Verify HMAC signature embedded in formatted_body as <!--sig:HEX:TIMESTAMP--> */
-function verifyIntercomSig(body: string, formattedBody: string | undefined): boolean {
-  if (!formattedBody) return false;
-  const sigMatch = formattedBody.match(/<!--sig:([a-f0-9]+):(\d+)-->/);
-  if (!sigMatch) return false;
-
-  const [, sig, tsStr] = sigMatch;
-  const timestamp = parseInt(tsStr, 10);
-
-  // Reject stale signatures
-  const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - timestamp) > INTERCOM_SIG_MAX_AGE) {
-    log(`intercom sig: rejected stale timestamp (age ${now - timestamp}s)`);
-    return false;
-  }
-
-  const key = loadIntercomKey();
-  if (!key) {
-    log('intercom sig: no intercom-key file found');
-    return false;
-  }
-
-  // The plain body in the intercom message (after the 📞 header line)
-  // intercom-send.sh signs "timestamp:message" where message is the user's input
-  // The body field contains "📞 hostname\nmessage", so extract message after first newline
-  const msgPart = body.includes('\n') ? body.slice(body.indexOf('\n') + 1) : body;
-  const expected = crypto.createHmac('sha256', key)
-    .update(`${tsStr}:${msgPart}`)
-    .digest('hex');
-
-  if (sig !== expected) {
-    log(`intercom sig: HMAC mismatch`);
-    return false;
-  }
-  return true;
+/** Captain and operator are both fully trusted. */
+function isAuthorized(sender: string, captainUserId: string, operatorUserId: string): boolean {
+  return sender === captainUserId || sender === operatorUserId;
 }
 
 /** Is this machine the "speaker" — lowest-rank active machine? Used to avoid duplicate replies. */
@@ -1650,7 +1597,7 @@ async function connectRoom(conn: RoomConn): Promise<void> {
   log(`connected to ${conn.name} as ${userId}`);
 }
 
-async function dialtone(conn: RoomConn, captainUserId: string, conns: RoomConn[]): Promise<void> {
+async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: string, conns: RoomConn[]): Promise<void> {
   let retryDelay = RETRY_DELAY_BASE;
 
   // Initial sync to get the since token (discard old events)
@@ -1689,26 +1636,15 @@ async function dialtone(conn: RoomConn, captainUserId: string, conns: RoomConn[]
           for (const event of events.timeline?.events || []) {
             if (event.type !== 'm.room.message') continue;
             if (event.content?.msgtype !== 'm.text') continue;
-            // Strip operator prefix (e.g. "📞 HERACLES: !fleet" → "!fleet")
+            // Strip operator prefix — "📞 SHIP\n!cmd" or "📞 SHIP: !cmd"
             let body = event.content.body?.trim() || '';
-            const prefixMatch = body.match(/^📞\s*\S+:\s*/);
-            if (prefixMatch) body = body.slice(prefixMatch[0].length);
+            const prefixMatch = body.match(/^📞\s*\S+[\s:]+/);
+            if (prefixMatch) body = body.slice(prefixMatch[0].length).trim();
             if (!body.startsWith('!')) continue;
 
-            if (!isAuthorized(event.sender, captainUserId)) {
+            if (!isAuthorized(event.sender, captainUserId, operatorUserId)) {
               log(`${conn.name}: unauthorized command from ${event.sender}: ${body.slice(0, 50)}`);
               continue;
-            }
-
-            // Intercom senders must have valid HMAC signature
-            if (event.sender !== captainUserId && resolveIntercomSenders().has(event.sender)) {
-              const rawBody = event.content.body?.trim() || '';
-              if (!verifyIntercomSig(rawBody, event.content.formatted_body)) {
-                log(`${conn.name}: rejected unsigned/invalid intercom command from ${event.sender}: ${body.slice(0, 50)}`);
-                await reply(conn, `🚫rejected command — invalid or missing signature`);
-                continue;
-              }
-              log(`${conn.name}: ✅ verified intercom signature for: ${body.slice(0, 50)}`);
             }
 
             log(`${conn.name}: command from ${event.sender}: ${body}`);
@@ -1764,11 +1700,12 @@ async function main(): Promise<void> {
 
   const intercom = loadIntercomConfig();
   const captainUserId = resolveCaptainUserId();
-  if (!captainUserId) {
-    log('WARNING: no CAPTAIN_USER_ID found in secrets/captain — only intercom senders will be authorized');
-  } else {
-    log(`captain: ${captainUserId}`);
+  const operatorUserId = resolveOperatorUserId();
+  if (!captainUserId && !operatorUserId) {
+    log('WARNING: no captain or operator user ID found — no commands will be authorized');
   }
+  if (captainUserId) log(`captain: ${captainUserId}`);
+  if (operatorUserId) log(`operator: ${operatorUserId}`);
 
   const conns: RoomConn[] = [];
   for (const [name, room] of Object.entries(intercom.rooms)) {
@@ -1814,7 +1751,7 @@ async function main(): Promise<void> {
 
   // Start Matrix sync loops immediately so we catch up on lifecycle messages
   const loops = conns.map((conn, i) =>
-    sleep(i * STARTUP_SYNC_DELAY).then(() => dialtone(conn, captainUserId, conns)),
+    sleep(i * STARTUP_SYNC_DELAY).then(() => dialtone(conn, captainUserId, operatorUserId, conns)),
   );
 
   // Wait 30s for Matrix sync to catch up before bootstrapping bots
