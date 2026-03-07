@@ -266,7 +266,12 @@ const KILL_137_MAX_CONSECUTIVE = parseInt(process.env.KILL_137_MAX_CONSECUTIVE |
 const kill137Consecutive: Record<string, number> = {};
 const kill137CooldownUntil: Record<string, number> = {};
 
-// Standing order work cycle — re-trigger bot after completing work
+// Idle pip — change display name pip after prolonged inactivity
+const IDLE_PIP_THRESHOLD_MS = parseInt(process.env.IDLE_PIP_THRESHOLD_MS || '300000', 10); // 5 minutes default
+const IDLE_PIP_CHECK_MS = 60_000;
+let lastActivityAt = Date.now();
+let idlePipActive = false;
+
 const METRICS_HISTORY_FILE = path.join(DATA_DIR, 'metrics-history.jsonl');
 const METRICS_HISTORY_MAX_LINES = 10_000;
 
@@ -843,6 +848,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'processing...');
+  lastActivityAt = Date.now();
+  idlePipActive = false;
   const inboundMessageIds = contextMessages.map((m) => m.id).filter(Boolean) as string[];
   let hadError = false;
   let outputSentToUser = false;
@@ -1838,6 +1845,20 @@ async function main(): Promise<void> {
       logger.debug({ chatJid, group: group.name }, 'Sent periodic memory-save reminder');
     }
   }, MEMORY_SAVE_INTERVAL_MS));
+
+  // Idle pip — change display name pip after prolonged inactivity
+  persistentTimers.push(setInterval(() => {
+    if (idlePipActive) return;
+    if (Date.now() - lastActivityAt < IDLE_PIP_THRESHOLD_MS) return;
+    idlePipActive = true;
+    for (const [jid] of Object.entries(registeredGroups)) {
+      const ch = findChannel(channels, jid);
+      if (ch?.setStatusPip) {
+        void ch.setStatusPip(jid, '💤').catch((err) => { logger.debug({ jid, err }, 'Idle pip set failed'); });
+      }
+    }
+    logger.info({ thresholdMs: IDLE_PIP_THRESHOLD_MS }, 'Bot idle — pip set to 💤');
+  }, IDLE_PIP_CHECK_MS));
 
   // ── Startup checklist ──────────────────────────────────────────────
   function buildStartupChecklist(): string {
