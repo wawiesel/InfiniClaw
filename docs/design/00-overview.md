@@ -10,6 +10,7 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 - **Matrix as State Engine.** Matrix threads provide the permanent, immutable history of every task. While the AI processes (Thread Brains) are ephemeral, the conversation context is immortal and can be hydrated into new processes on-demand.
 - **No redactions.** Status messages are never deleted. They have a live state and a finished state: `⏳ working (3m)` → `⏳ worked (3m)`.
 - **System actions get an emoji prefix.** Any message that isn't a direct conversation response (restarts, working indicator, brain reload, startup) must start with an emoji.
+- **Git SHAs use a standard format.** Every git SHA displayed in Matrix must use: `📦 [\`sha\`](https://github.com/wawiesel/InfiniClaw/commit/sha) (Xh) ↑N` — SHA in a backtick code box (for visibility), hyperlinked to the GitHub commit, with 2-character age and up/down relation. Always include the 📦 box so version strings are noticeable everywhere.
 - **Fix code and process, not behavior.** When a bot behaves incorrectly, fix the underlying system — the code, the IPC flow, the routing logic — not the bot's in-context behavior. Workarounds that patch behavior without addressing root cause accumulate debt and mask real problems.
 
 ## Design Documents
