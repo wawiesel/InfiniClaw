@@ -79,6 +79,7 @@ const RETRY_DELAY_MAX = 5 * 60_000; // cap at 5 minutes
 const STARTUP_SYNC_DELAY = 3_000;
 
 // Configurable intervals (env vars in milliseconds, or use defaults)
+const GITHUB_REPO_URL = 'https://github.com/wawiesel/InfiniClaw';
 const GIT_SYNC_INTERVAL = parseInt(process.env.GIT_SYNC_INTERVAL || '', 10) || 10 * 60_000;    // default 10 min
 const SECRETS_SYNC_INTERVAL = parseInt(process.env.SECRETS_SYNC_INTERVAL || '', 10) || 30_000;  // default 30s
 const HEALTH_INTERVAL = parseInt(process.env.HEALTH_INTERVAL || '', 10) || 30 * 60_000;         // default 30 min
@@ -288,9 +289,10 @@ function isAuthorized(sender: string, captainUserId: string, operatorUserId: str
 /** Is this ship the "speaker" — lowest-rank active ship? Used to avoid duplicate replies. */
 // ── Git version helper ────────────────────────────────────────────
 
-/** Format version string: ` · sha (age) ↑N|↓N` */
+/** Format version string: ` · 📦 [sha](github) (age) ↑N|↓N` */
 function fmtVersion(sha: string, ageMs: number, ud: string): string {
-  return ` · ${sha} (${formatDuration(ageMs)}) ${ud}`;
+  const url = `${GITHUB_REPO_URL}/commit/${sha}`;
+  return ` · 📦 [\`${sha}\`](${url}) (${formatDuration(ageMs)}) ${ud}`;
 }
 
 /** Compute ↑N/↓N relation between two refs. */
