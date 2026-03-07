@@ -1,7 +1,7 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-06 10:15 AM EST.
+Updated 2026-03-06 11:10 PM EST.
 
 ## HIGH PRIORITY — Captain Directives
 
@@ -14,6 +14,7 @@ Updated 2026-03-06 10:15 AM EST.
 ## HIGH — Needs Captain Action
 
 - **Stop old `infiniclaw-supervisor` pm2 process** — relay is now running (`infiniclaw-relay` started 2026-03-06T14:29), but old supervisor pm2 (id 5, 14h uptime) is still alive alongside it. Captain must: `pm2 stop infiniclaw-supervisor && pm2 delete infiniclaw-supervisor`. Then `pm2 save`.
+- **Restart relay on HERACLES** — `pm2 restart infiniclaw-relay`. Needed to activate: `restart_relay` IPC type (`3b7c9d5`), relay self-restart after git sync (`9797f04`), and push capability. One-time manual restart, then fully automatic going forward.
 
 ## MEDIUM — Next Up
 
@@ -48,3 +49,5 @@ Updated 2026-03-06 10:15 AM EST.
 - Skip heartbeat/dream nudges for dismissed bots (`5f86566`) — relay deployed 2026-03-06T14:29.
 - Relay rename (`93ea3ca`) — `supervisor.ts → relay.ts`, IPC health/fleet commands, dist deploy fix.
 - Exit-137 cooldown backoff in main.ts — `KILL_137_COOLDOWN_MS=60s`, `MAX_CONSECUTIVE=3`.
+- Parker transport to Poseidon — fixed `!join` fleet flush bug (`5ec2e27`/`8a9c0f6`), bot rerank persistence (`9e333c3`), rebase conflict auto-resolve (`2c1df84`), relay self-restart after git sync (`9797f04`), `restart_relay` IPC type (`3b7c9d5`).
+- Cid SIGKILL today: multiple kills (exit 137) observed 2026-03-06 — still under investigation.
