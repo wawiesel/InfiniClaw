@@ -221,10 +221,21 @@ function rebuildInfiniClaw(): string {
   const root = resolveRoot();
   try {
     const nodeBinDir = path.dirname(process.execPath);
-    execSync('npm run build', {
-      cwd: root, encoding: 'utf-8', timeout: 120_000, stdio: 'pipe',
-      env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` },
-    });
+    const execOpts = { cwd: root, encoding: 'utf-8' as const, stdio: 'pipe' as const, env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` } };
+    // Install deps if lockfile changed
+    const lockHash = path.join(root, 'node_modules', '.package-lock-hash');
+    const lockFile = path.join(root, 'package-lock.json');
+    let needInstall = !fs.existsSync(path.join(root, 'node_modules'));
+    if (!needInstall && fs.existsSync(lockFile)) {
+      const current = execSync(`md5sum ${lockFile} 2>/dev/null || md5 -q ${lockFile}`, execOpts).trim().split(/\s+/)[0];
+      const stored = (() => { try { return fs.readFileSync(lockHash, 'utf-8').trim(); } catch { return ''; } })();
+      needInstall = current !== stored;
+      if (!needInstall) { /* up to date */ } else {
+        execSync('npm install', { ...execOpts, timeout: 300_000 });
+        fs.writeFileSync(lockHash, current);
+      }
+    }
+    execSync('npm run build', { ...execOpts, timeout: 120_000 });
     try { installGitHooks(); } catch { /* best effort */ }
     // Deploy dist files to active bot instances
     const distDir = path.join(root, 'dist');
