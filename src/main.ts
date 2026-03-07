@@ -134,7 +134,7 @@ import { getSystemStatus } from './status.js';
 // ── Display name helper ────────────────────────────────────────────────
 const BOT_LOCATION = os.hostname().toUpperCase();
 function botDisplayName(badge: string): string {
-  return `${ASSISTANT_NAME} (${BOT_LOCATION}) ${badge}`;
+  return `${ASSISTANT_NAME} ${badge} (${BOT_LOCATION})`;
 }
 
 // ── Module-level state ─────────────────────────────────────────────────
