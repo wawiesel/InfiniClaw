@@ -5,7 +5,7 @@
 Each ship is a Matrix space containing its local rooms. Structure:
 
 ```
-HERACLES (space) — "The ship"
+HERACLES (space)
   Lounge          — all ship bots + captain + operator (always)
   Quarters (space)
     Cid's Room    — cid + captain + operator (always)
@@ -21,24 +21,59 @@ Duty rooms (Engineering, Bridge, Astrometrics) are fleet-wide — they are NOT c
 - **Bots** are regular members (power 0).
 - **Intercom accounts** are never in ship rooms — they only operate in duty rooms.
 
-## Lifecycle
+## Bot Status
+
+| Status | Icon | Location | Brain | Lobes/Threads | Container |
+|--------|------|----------|-------|---------------|-----------|
+| `onduty` | `🟢` | Duty room | Full model | Yes | Running |
+| `lounge` | `🍸` | Lounge | Sonnet | No | Stopped |
+| `quarters` | `🏠` | Quarters room | Sonnet | No | Running |
+| `sleep` | `💤` | Quarters room | — | — | Stopped |
+| `transit` | `🚀` | — | — | — | Stopped |
+
+Bots only have access to lobes and threading capability when `onduty`.
+
+A bot cannot be `onduty` on a decommissioned ship, but can be awake in `lounge` or `quarters`.
+
+## Lifecycle Commands
 
 ```
-!join cid     → cid joins duty room, leaves Lounge
-!dismiss cid  → cid leaves duty room, joins Lounge
+!join cid      → lounge/quarters → onduty (restore brain, enable lobes, join duty room)
+!dismiss cid   → onduty → lounge (downgrade to sonnet, disable lobes, join lounge)
+!sleep cid     → any → sleep (stop container, leave all rooms except quarters)
+!wake cid      → sleep → quarters (start container in quarters, sonnet brain)
+!restart cid   → onduty → onduty (rebuild + restart)
 ```
 
-The relay handles room join/leave using the bot's Matrix credentials (from `bots/{name}/env`). The bot's status in `fleet.json` tracks whether it's on duty.
+### !dismiss
 
-Bots are **always** members of:
-- Their private Room (Cid's Room, etc.)
-- The ship's Quarters space
+1. Stop the bot process
+2. Save current `BRAIN_MODEL` to `activeBrainModel` in fleet.json
+3. Set `BRAIN_MODEL=claude-sonnet-4-6`, set `LOBES_DISABLED=1`
+4. Login as bot, leave duty room, join Lounge
+5. Update fleet.json status to `lounge`
 
-They move between:
-- **Duty room** (Engineering, etc.) — when active/joined
-- **Lounge** — when dismissed
+### !join
+
+1. Restore `BRAIN_MODEL` from `activeBrainModel`, clear `LOBES_DISABLED`
+2. Update fleet.json status to `onduty`
+3. Login as bot, leave Lounge, join duty room
+4. Build and start the bot process
+
+### !sleep
+
+1. Stop the bot process, kill containers
+2. Login as bot, leave duty room and Lounge (stays in quarters only)
+3. Update fleet.json status to `sleep`
+
+### !wake
+
+1. Update fleet.json status to `quarters`
+2. Build and start the bot process (in quarters, sonnet brain)
 
 ## Bot Rooms as Memory
+
+Bots are **always** members of their private Room (Cid's Room, etc.) and the ship's Quarters space.
 
 Each bot's Room is a permanent memory log. Instead of writing directly to `MEMORY.md`, bots post observations, learnings, and decisions as messages in their Room. The Room history is the raw experiential memory — permanent, searchable, visible to the Captain.
 
@@ -48,18 +83,12 @@ Each bot's Room is a permanent memory log. Instead of writing directly to `MEMOR
 
 ```
 Bot learns something during work
-  → Posts to its Room: "Learned: rollup corruption happens when containers run npm ci on shared node_modules"
-  → Room history accumulates over days/weeks
-  → Periodically: bot reads Room history, rewrites MEMORY.md with distilled patterns
+  -> Posts to its Room: "Learned: rollup corruption happens when containers run npm ci on shared node_modules"
+  -> Room history accumulates over days/weeks
+  -> Periodically: bot reads Room history, rewrites MEMORY.md with distilled patterns
 ```
 
 The Captain can see what bots are remembering and correct them directly in the Room.
-
-## What This Replaces
-
-- `IGNORE_SENDERS` lists and filtering logic — bot not in room = can't see messages
-- Memex (SQLite FTS5) backlog item — Matrix rooms are the memory store
-- Direct `MEMORY.md` writes during work — post to Room instead, curate later
 
 ## Implementation
 
@@ -74,32 +103,22 @@ Quarters room IDs are stored in `fleet.json` per bot:
       "role": "engineer",
       "rank": 2,
       "ship": "HERACLES",
-      "status": "active",
-      "quartersRoom": "!wEA7CKIizG4Ez6o1Vn:a-gis.org"
-    }
-  },
-  "ships": {
-    "HERACLES": {
-      "spaceId": "!07deyffURvB77fTyOM:a-gis.org",
-      "loungeId": "!k7z5JU3UnKfWWlyWln:a-gis.org",
-      "quartersSpaceId": "!nSg57aPMuHam4bhXTs:a-gis.org"
+      "status": "onduty",
+      "quartersRoom": "!wEA7CKIizG4Ez6o1Vn:a-gis.org",
+      "activeBrainModel": "claude-opus-4-6"
     }
   }
 }
 ```
 
-### Relay Changes
+Ship space IDs in `ships.json`:
 
-On `!dismiss`:
-1. Stop the bot process
-2. Login as bot via Matrix credentials from env file
-3. Leave the duty room
-4. Join the Lounge
-5. Update fleet.json status
-
-On `!join`:
-1. Login as bot via Matrix credentials
-2. Leave the Lounge
-3. Join the duty room
-4. Update fleet.json status
-5. Start the bot process
+```json
+{
+  "HERACLES": {
+    "spaceId": "!07deyffURvB77fTyOM:a-gis.org",
+    "loungeId": "!k7z5JU3UnKfWWlyWln:a-gis.org",
+    "quartersSpaceId": "!nSg57aPMuHam4bhXTs:a-gis.org"
+  }
+}
+```

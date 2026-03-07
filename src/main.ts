@@ -1367,7 +1367,7 @@ async function main(): Promise<void> {
     }
     // Build roster from active bots in fleet.json
     for (const [botId, entry] of Object.entries(fleet)) {
-      if (entry.status !== 'active') continue;
+      if (entry.status !== 'onduty') continue;
       const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
       const room = (env?.MAIN_GROUP_NAME || '').toLowerCase();
       const jid = roomNameToJid[room];

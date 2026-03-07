@@ -15,7 +15,7 @@ export interface S3Config {
   secretKey: string;
 }
 
-export type BotStatus = 'active' | 'dismissed' | 'transit';
+export type BotStatus = 'onduty' | 'lounge' | 'quarters' | 'sleep' | 'transit';
 
 export interface BotEntry {
   role: string;
@@ -82,7 +82,7 @@ export function loadShipConfig(): ShipConfig {
     if (!isValidBotName(name)) {
       throw new Error(`fleet.json: invalid bot name "${name}"`);
     }
-    if (entry.ship === hostname && entry.status === 'active') {
+    if (entry.ship === hostname && (entry.status === 'onduty' || (entry.status as string) === 'active')) {
       bots.push(name);
     }
   }
@@ -123,12 +123,17 @@ export function botsPath(): string {
 export function loadFleet(): Record<string, BotEntry> {
   const raw = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
   const bots: Record<string, BotEntry> = raw.bots || {};
-  // Migrate legacy active:boolean → status enum
+  // Migrate legacy statuses
   for (const entry of Object.values(bots)) {
     if (!entry.status && 'active' in entry) {
-      entry.status = (entry as any).active ? 'active' : 'dismissed';
+      entry.status = (entry as any).active ? 'onduty' : 'lounge';
       delete (entry as any).active;
     }
+    // Migrate old status names
+    const s = entry.status as string;
+    if (s === 'active') entry.status = 'onduty';
+    else if (s === 'dismissed') entry.status = 'lounge';
+    else if (s === 'sleeping') entry.status = 'sleep';
   }
   return bots;
 }
