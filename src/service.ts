@@ -96,16 +96,19 @@ function seedMainRoomRegistration(instanceBase: string, mainJid: string, mainGro
   const storeDir = path.join(instanceBase, 'store');
   fs.mkdirSync(storeDir, { recursive: true });
   const seedDb = new Database(path.join(storeDir, 'messages.db'));
-  seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-    jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
-    trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
-    container_config TEXT, requires_trigger INTEGER DEFAULT 1
-  )`);
-  seedDb.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), requiresTrigger ? 1 : 0);
-  seedDb.close();
+  try {
+    seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
+      jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
+      trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
+      container_config TEXT, requires_trigger INTEGER DEFAULT 1
+    )`);
+    seedDb.prepare(
+      `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), requiresTrigger ? 1 : 0);
+  } finally {
+    seedDb.close();
+  }
 }
 
 // ── Env loading ────────────────────────────────────────────────────────
@@ -321,13 +324,13 @@ export function deployBot(root: string, bot: string): void {
   const lockDst = path.join(instance, 'node_modules', '.package-lock.json');
   if (!fs.existsSync(path.join(instance, 'node_modules')) || !filesEqual(lockSrc, lockDst)) {
     console.log(`${bot}: installing dependencies...`);
-    execSync('npm ci', { cwd: instance, stdio: 'inherit' });
+    execSync('npm ci', { cwd: instance, stdio: 'inherit', timeout: 300_000 });
     try { fs.copyFileSync(path.join(instance, 'package-lock.json'), lockDst); } catch { /* ok */ }
   }
 
   // Build TypeScript
   console.log(`${bot}: building...`);
-  execSync('npm run build', { cwd: instance, stdio: 'inherit' });
+  execSync('npm run build', { cwd: instance, stdio: 'inherit', timeout: 120_000 });
 
   // Pre-register main room from profile env
   const profileEnv = loadProfileEnv(root, bot);
