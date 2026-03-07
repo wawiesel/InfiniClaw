@@ -37,6 +37,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   writeLastEventId: (sourceGroup: string, eventId: string) => void;
+  onMergeRequest: (payload: { sourceGroup: string; threadId: string; bot: string; summary?: string }) => void;
 }
 
 let ipcWatcherRunning = false;
@@ -246,6 +247,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 throw new Error('IPC task missing string type');
               }
               const taskData = data as Parameters<typeof processTaskIpc>[0];
+
+              if (taskData.type === 'merge_request') {
+                const threadId = typeof data.thread_id === 'string' ? data.thread_id.trim() : '';
+                const bot = typeof data.bot === 'string' ? data.bot.trim() : '';
+                const summary = typeof data.summary === 'string' ? data.summary.trim() : undefined;
+                if (!threadId || !bot) {
+                  logger.warn({ sourceGroup, data }, 'Invalid merge_request payload');
+                } else {
+                  deps.onMergeRequest({ sourceGroup, threadId, bot, summary });
+                  logger.info({ sourceGroup, threadId, bot }, 'IPC merge_request handled');
+                }
+                fs.unlinkSync(processingPath);
+                continue;
+              }
 
               // Try base task types first (schedule, pause, resume, cancel, refresh, register)
               const baseTypes = ['schedule_task', 'pause_task', 'resume_task', 'cancel_task', 'refresh_groups', 'register_group'];
