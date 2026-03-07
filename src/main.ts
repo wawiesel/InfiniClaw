@@ -128,7 +128,6 @@ import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
 import { loadFleet } from './machine-config.js';
-import { handleOperatorCommand } from './operator-commands.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
 import { getSystemStatus } from './status.js';
 
@@ -1625,7 +1624,7 @@ async function main(): Promise<void> {
           logger.warn({ chatJid: msg.chat_jid, sender: msg.sender, id: msg.id }, 'Dropped invalid inbound Matrix message');
           return;
         }
-        if (handleOperatorCommand(safeMsg, matrix, injectSystemNotice)) return;
+        if (safeMsg.content.trim().startsWith('!')) return; // operator commands — relay handles via intercom
         handleLifecycleMessage(safeMsg);
         storeMessage(safeMsg);
         if (safeMsg.id && safeMsg.id.startsWith('$')) {
@@ -1650,7 +1649,7 @@ async function main(): Promise<void> {
           logger.warn({ chatJid: msg.chat_jid, sender: msg.sender, id: msg.id }, 'Dropped invalid inbound local message');
           return;
         }
-        if (handleOperatorCommand(safeMsg, matrix, injectSystemNotice)) return;
+        if (safeMsg.content.trim().startsWith('!')) return; // operator commands — relay handles via intercom
         storeMessage(safeMsg);
       },
       onChatMetadata: (chatJid, timestamp, name) =>
