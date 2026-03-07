@@ -146,7 +146,6 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 const PROGRESS_CHAT_COOLDOWN_MS = 10_000;
 const lastProgressChatAt: Record<string, number> = {};
-const PIP_PULSE = ['🔵', '🔷', '🔹', '🔷'] as const;
 const workThreadIds: Record<string, string> = {};
 const activeReplyThreadIds: Record<string, string | undefined> = {};
 // Per-turn thread for tool call <details> blocks when on main timeline
@@ -857,9 +856,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let lastResponseBody: string | undefined;
   markRunStarted(chatJid);
 
-  if (channel?.setStatusPip) {
-    void channel.setStatusPip(chatJid, PIP_PULSE[0]).catch((err) => { logger.debug({ chatJid, err }, 'Status pip pulse failed'); });
-  }
 
   const outputHandler = createOutputHandler({
     chatJid,
