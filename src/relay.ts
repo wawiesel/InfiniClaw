@@ -1172,8 +1172,8 @@ function registerRelayCommands(): void {
       if (parsed.matched) await handleLifecycleCommand('restart', parsed.target, conn);
     },
 
-    helm: async (cmd, conn) => {
-      const text = cmd.slice('!helm'.length).trim();
+    relay: async (cmd, conn) => {
+      const text = cmd.slice('!relay'.length).trim();
       const SESSION = 'operator';
       try {
         let existed = true;
@@ -1189,8 +1189,8 @@ function registerRelayCommands(): void {
         const status = existed ? 'sent to running operator' : 'started new operator session';
         await reply(conn, `${status}`);
       } catch (err) {
-        log(`!helm failed: ${errStr(err)}`);
-        await reply(conn, `!helm failed — ${errStr(err)}`);
+        log(`!relay failed: ${errStr(err)}`);
+        await reply(conn, `!relay failed — ${errStr(err)}`);
       }
     },
 
@@ -1218,8 +1218,8 @@ function registerRelayCommands(): void {
         }
         machines[HOSTNAME].active = false;
         writeMachines(machines);
-        secretsGitCommit(['operator/machines.json'], `decommission ${HOSTNAME}: bots stopped, helm only`);
-        await reply(conn, `decommissioned — all bots stopped, helm still running`);
+        secretsGitCommit(['operator/machines.json'], `decommission ${HOSTNAME}: bots stopped, relay only`);
+        await reply(conn, `decommissioned — all bots stopped, relay still running`);
       } catch (err) {
         await reply(conn, `decommission failed — ${errStr(err)}`);
       }
@@ -1321,7 +1321,7 @@ function registerRelayCommands(): void {
           }
         }
         persistFleet();
-        await reply(conn, `refit complete\n${results.join('\n')}\nrestarting helm...`);
+        await reply(conn, `refit complete\n${results.join('\n')}\nrestarting relay...`);
         await sleep(1_000);
         try {
           execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
@@ -1423,8 +1423,8 @@ function registerRelayCommands(): void {
           } else {
             const rank = mConfig?.rank ?? '?';
             const shipIcon = mConfig?.active ? '⚓' : '🚫';
-            const helmVersion = isLocal ? gitVersionStr(root, path.join(root, 'dist', 'relay.js')) : '';
-            lines.push(`${shipIcon} ${machine}[${rank}]${helmVersion}`);
+            const relayVersion = isLocal ? gitVersionStr(root, path.join(root, 'dist', 'relay.js')) : '';
+            lines.push(`${shipIcon} ${machine}[${rank}]${relayVersion}`);
           }
 
           // Bots under this ship

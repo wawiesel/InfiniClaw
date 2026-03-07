@@ -58,12 +58,12 @@ export const COMMANDS: CommandDef[] = [
   { name: 'promote',       usage: '!promote <target>',         description: 'raise rank (bot or ship)',             match: startsWith('promote') },
   { name: 'demote',        usage: '!demote <target>',          description: 'lower rank (bot or ship)',             match: startsWith('demote') },
   { name: 'commission',    usage: '!commission [ship]',        description: 'commission ship, start bots',          match: prefix('commission') },
-  { name: 'decommission',  usage: '!decommission [ship]',     description: 'stop all bots, keep helm',             match: prefix('decommission') },
+  { name: 'decommission',  usage: '!decommission [ship]',     description: 'stop all bots, keep relay',            match: prefix('decommission') },
   { name: 'provision',     usage: '!provision [target]',       description: 'sync repos',                           match: prefix('provision') },
   { name: 'refit',         usage: '!refit [ship]',             description: 'full overhaul: sync, rebuild, restart', match: prefix('refit') },
   { name: 'allow',         usage: '!allow <bot> <path> [min]', description: 'grant rw mount (authorized)',          match: startsWith('allow') },
   { name: 'deny',          usage: '!deny <bot> <path>',        description: 'revoke rw mount (authorized)',         match: startsWith('deny') },
-  { name: 'helm',          usage: '!helm <text>',              description: 'send to operator tmux',                match: prefix('helm') },
+  { name: 'relay',         usage: '!relay <text>',             description: 'send to operator tmux',                match: prefix('relay') },
 ];
 
 /** Register a handler for a command by name. */

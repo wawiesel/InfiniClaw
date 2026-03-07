@@ -24,9 +24,9 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 | Command | Effect |
 |---------|--------|
 | `!commission [ship]` | Commission ship(s), start assigned bots. No arg = all. |
-| `!decommission [ship]` | Stop all bots on ship(s), keep helm running. No arg = all. |
+| `!decommission [ship]` | Stop all bots on ship(s), keep relay running. No arg = all. |
 | `!provision [target]` | Sync repos. No arg = secrets + infiniclaw. Named targets from paths.json. |
-| `!refit [ship]` | Full overhaul: sync, rebuild, restart bots + helm. No arg = all. |
+| `!refit [ship]` | Full overhaul: sync, rebuild, restart bots + relay. No arg = all. |
 
 ### Fleet Commands
 
@@ -40,13 +40,13 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 
 | Command | Effect |
 |---------|--------|
-| `!helm <text>` | Send text to operator tmux session on each ship. |
+| `!relay <text>` | Send text to operator tmux session on each ship. |
 
-## Relay (Helm)
+## Relay
 
 A lightweight always-on process, one per ship (`src/relay.ts`). The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or intercom senders. It manages bot lifecycle by calling service functions directly.
 
-**The relay runs on every ship, always.** Even decommissioned ships keep their helm running — they just don't start bots. This ensures every ship stays reachable for commands like `!commission`, `!fleet`, and `!health`. Decommissioning (`!decommission`) stops all bots but leaves the helm listening.
+**The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't start bots. This ensures every ship stays reachable for commands like `!commission`, `!fleet`, and `!health`. Decommissioning (`!decommission`) stops all bots but leaves the relay listening.
 
 When a command arrives (e.g. `!restart cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
 

@@ -4,13 +4,13 @@
 
 There are **3 layers** of communication, each serving a different purpose:
 
-1. **Helm** (relay) — Matrix lifecycle commands (`!join`, `!dismiss`, `!restart`, `!fleet`, `!transport`, etc.)
+1. **Relay** — Matrix lifecycle commands (`!join`, `!dismiss`, `!restart`, `!fleet`, `!transport`, etc.)
 2. **Intercom** — cross-room messaging (operator→bot and bot→bot)
 3. **Operator** — Claude Code in a tmux session, the human-in-the-loop escape hatch
 
-## 1. Helm (Relay)
+## 1. Relay
 
-A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infiniclaw-relay`. It long-polls Matrix `/sync` on all three room intercom accounts simultaneously. The helm runs at all times, even on decommissioned ships — decommissioning stops bots but keeps the helm listening.
+A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infiniclaw-relay`. It long-polls Matrix `/sync` on all three room intercom accounts simultaneously. The relay runs at all times, even on decommissioned ships — decommissioning stops bots but keeps the relay listening.
 
 ### How it works
 
@@ -36,7 +36,7 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 |---------|--------|
 | `!commission [ship]` / `!decommission [ship]` | Ship lifecycle (no arg = all) |
 | `!provision [target]` | Sync repos (secrets, infiniclaw, or any paths.json name) |
-| `!refit [ship]` | Full overhaul: sync, rebuild, restart bots + helm |
+| `!refit [ship]` | Full overhaul: sync, rebuild, restart bots + relay |
 
 ### Fleet Commands
 
@@ -44,11 +44,11 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 |---------|--------|
 | `!fleet` / `!fleet room` | Fleet status — each ship reports local bots |
 | `!health` | Fleet health summary via S3 (speaker replies) |
-| `!helm <text>` | Send text to operator tmux session |
+| `!relay <text>` | Send text to operator tmux session |
 
 ### Multi-ship fan-out
 
-Every `!` command is broadcast to all ships. When you say `!restart cid` in Engineering, every ship's helm sees it. Each checks if `cid` is local (via fleet.json). Only the owning ship acts — the rest silently ignore. This works because all helms connect to the same intercom accounts.
+Every `!` command is broadcast to all ships. When you say `!restart cid` in Engineering, every ship's relay sees it. Each checks if `cid` is local (via fleet.json). Only the owning ship acts — the rest silently ignore. This works because all relays connect to the same intercom accounts.
 
 ### Speaker election
 
@@ -56,17 +56,17 @@ Ships are ranked in `machines.json`. The lowest-rank active ship is the "speaker
 
 ### Authorization
 
-Only the Captain (`CAPTAIN_USER_ID` from bot env) and intercom accounts (`/-intercom:/` sender pattern) can issue commands. Operators send commands via `intercom-send.sh`, which uses the same intercom accounts the helms poll — so operator commands are inherently authorized.
+Only the Captain (`CAPTAIN_USER_ID` from bot env) and intercom accounts (`/-intercom:/` sender pattern) can issue commands. Operators send commands via `intercom-send.sh`, which uses the same intercom accounts the relays poll — so operator commands are inherently authorized.
 
 ### Replies
 
-Helm replies via the same intercom account. All replies are prefixed with `HOSTNAME:`.
+Relay replies via the same intercom account. All replies are prefixed with `HOSTNAME:`.
 
 ## 2. Intercom
 
 Intercom accounts are **write-only broadcast channels** — not user identities. Three uses:
 
-### a) Operator → Bots and Helms
+### a) Operator → Bots and Relays
 
 ```bash
 bash operator/intercom-send.sh <room> "<message>"
@@ -78,9 +78,9 @@ This is how operators on each ship communicate with bots and issue `!` commands 
 
 Bots can `send_message()` with a recipient in another room. The host routes it through the intercom relay.
 
-### c) Helm → Room (replies)
+### c) Relay → Room (replies)
 
-Helms respond to commands via the same intercom account, prefixed with `HOSTNAME:`.
+Relays respond to commands via the same intercom account, prefixed with `HOSTNAME:`.
 
 ## 3. Operator (tmux session)
 
@@ -88,14 +88,14 @@ Claude Code in a tmux session. The escape hatch for when bots can't handle somet
 
 ### How it's reached
 
-- `!helm <text>` in any Matrix room → helm sends keystrokes to tmux session named `operator`
-- If no session exists, helm creates one
+- `!relay <text>` in any Matrix room → relay sends keystrokes to tmux session named `operator`
+- If no session exists, relay creates one
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `src/relay.ts` | Helm process — Matrix sync + command handling |
+| `src/relay.ts` | Relay process — Matrix sync + command handling |
 | `src/intercom-relay.ts` | Host-side intercom HTTP relay for cross-room messages |
 | `src/ipc-watcher.ts` | IPC file watcher — routes messages, detects cross-room |
 | `src/ipc-commands.ts` | IPC command handlers (restart, health, fleet, etc.) |
