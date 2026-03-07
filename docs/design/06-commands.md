@@ -111,7 +111,7 @@ Version info follows a standard form:
   - `↑N` — N commits ahead of upstream (unpushed)
   - `↓N` — N commits behind upstream (outdated)
   - `↑N↓M` — diverged (ahead and behind)
-- **age** — how long ago the artifact was built (dist files) or the commit was made (repos)
+- **age** — how long ago the commit was made
 
 "Upstream" means different things depending on context:
 - **Repos** (secrets, code): compared to `origin/main`
@@ -120,9 +120,9 @@ Version info follows a standard form:
 Examples:
 
 ```
-· 2a9cc64 ↑0 (0s)      ← just built, matches HEAD
-· f25432f ↓3 (45m)      ← deployed 45m ago, 3 commits behind HEAD
-· f814482 ↑1 (2m)       ← repo has 1 unpushed commit
+· 2a9cc64 ↑0 (5m)      ← committed 5m ago, matches HEAD
+· f25432f ↓3 (2h)       ← commit is 2h old, 3 commits behind HEAD
+· f814482 ↑1 (10m)      ← commit is 10m old, 1 unpushed commit
 ```
 
 Implemented by `gitVersionStr()`, `repoVersion()`, `relayVersion()`, `botVersion()` in `src/relay.ts`.

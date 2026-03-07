@@ -279,13 +279,10 @@ function isAuthorized(sender: string, captainUserId: string, operatorUserId: str
 /** Is this ship the "speaker" — lowest-rank active ship? Used to avoid duplicate replies. */
 // ── Git version helper ────────────────────────────────────────────
 
-/** Get git version string for a bot's deployed instance: " · sha ↑N↓N (age)" */
 /**
- * Git version string: ` · sha ↑0|↓N (age)`
- *
- * When distFile is provided, the sha is the commit at or before the file's
- * mtime and the age is relative to that mtime. When distFile is omitted or
- * doesn't exist, uses HEAD with HEAD commit time for age.
+ * Git version string: ` · sha ↑N|↓N (age)`.
+ * sha = HEAD, age = time since commit.
+ * With distFile: ↑0/↓N vs HEAD. Without: ↑N/↓N vs origin/main.
  */
 function gitVersionStr(root: string, distFile?: string): string {
   const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
@@ -293,15 +290,9 @@ function gitVersionStr(root: string, distFile?: string): string {
     let sha: string;
     let ageMs: number;
 
-    if (distFile && fs.existsSync(distFile)) {
-      // Use HEAD sha (what was deployed) and dist file age (when it was built)
-      sha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
-      ageMs = Date.now() - fs.statSync(distFile).mtimeMs;
-    } else {
-      sha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
-      const epoch = parseInt(execSync('git log -1 --format=%ct', { cwd: root, ...execOpts }).trim(), 10) * 1000;
-      ageMs = Date.now() - epoch;
-    }
+    sha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+    const epoch = parseInt(execSync('git log -1 --format=%ct', { cwd: root, ...execOpts }).trim(), 10) * 1000;
+    ageMs = Date.now() - epoch;
 
     if (!sha) return '';
     let ud: string;
@@ -335,9 +326,9 @@ function botVersion(root: string, bot: string): string {
     const stamp = fs.readFileSync(versionFile, 'utf-8').trim(); // "sha (date) subject"
     const sha = stamp.split(' ')[0];
     if (!sha) return '';
-    const distFile = path.join(instanceDir, 'dist', 'main.js');
-    const ageMs = fs.existsSync(distFile) ? Date.now() - fs.statSync(distFile).mtimeMs : 0;
     const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: root };
+    const epoch = parseInt(execSync(`git log -1 --format=%ct ${sha}`, execOpts).trim(), 10) * 1000;
+    const ageMs = Date.now() - epoch;
     const behind = parseInt(execSync(`git rev-list ${sha}..HEAD --count`, execOpts).trim(), 10) || 0;
     const ud = behind === 0 ? '↑0' : `↓${behind}`;
     return ` · ${sha} ${ud} (${formatDuration(ageMs)})`;
