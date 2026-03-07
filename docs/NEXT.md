@@ -8,6 +8,10 @@ These are real problems. Simplify, don't add complexity.
 
 Bots MUST show visible activity in Matrix every N seconds (configurable via `HEARTBEAT_INTERVAL`, default 30s). If there is no user-visible output (message, reaction, edit) within the interval, the host emits a heartbeat status update. This guarantees the Captain can always tell a bot is alive from Matrix alone — no log access required. The heartbeat should show what the bot is doing (thinking, tool call, waiting) not just that it exists.
 
+### Infrastructure redundancy (S3 + Gitea)
+
+Gitea and MinIO are single points of failure. Run a second instance of each on another ship. Gitea: multi-remote push (active-active) — every ship pushes to both origins. MinIO: built-in site replication — bidirectional sync, automatic reconciliation. Update `fleet.json` with fallback endpoints and add try/catch failover to relay and bot S3/git operations. Also: ships should be VMs, not bare metal — a physical machine can host multiple ships, enabling isolation, portability, and ephemeral holodeck ships. See `13-infrastructure-redundancy.md` for full spec.
+
 ### Status indicator simplification
 
 The `⏳ working...` indicator system (`createIndicatorSet` in `main.ts`) is overbuilt with retry logic, adaptive timers, and bump functions. It should be one simple message that gets edited per Thread Brain. Strip it down. Merge with the heartbeat requirement above.
