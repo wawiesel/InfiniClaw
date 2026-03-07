@@ -243,11 +243,11 @@ function verifyIntercomSig(body: string, formattedBody: string | undefined): boo
 }
 
 /** Is this machine the "speaker" — lowest-rank active machine? Used to avoid duplicate replies. */
-/** How many commits is this ship's InfiniClaw behind origin/main? 0 = current. Uses cached refs (no fetch). */
+/** How many commits is this ship's InfiniClaw behind origin/main? 0 = current. */
 function commitsBehind(): number {
   try {
     const root = resolveRoot();
-    // Use already-fetched refs (git sync loop fetches periodically)
+    execSync('git fetch --quiet', { cwd: root, timeout: 10_000, stdio: 'pipe' });
     const behind = execSync('git rev-list HEAD..origin/main --count', {
       cwd: root, encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
     }).trim();
