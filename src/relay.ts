@@ -1407,7 +1407,7 @@ function registerRelayCommands(): void {
 
             const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
             const name = env?.ASSISTANT_NAME || botId;
-            lines.push(`  ${icon} ${name} · ${entry.role}[${entry.rank}] · ${entry.status}`);
+            lines.push(`  ${icon} ${name} · ${entry.role}[${entry.rank}]`);
           }
         }
 
