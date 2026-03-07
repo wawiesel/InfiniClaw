@@ -107,17 +107,19 @@ Multi-step operations and failure alerts use Matrix threads to keep the main tim
 
 ```
 Main:   ⚓ refit (Poseidon) starting (10:07)
-Thread: [1/7] ✅ secrets up to date · a1b2c3d
-        [2/7] ✅ code pulled 3 commit(s) · 0ed7d17
-        [3/7] ✅ build · 0ed7d17 ↑0 (2s)
-        [4/7] ✅ max deployed · 0ed7d17 ↑0 (15s)
-        [5/7] ✅ parker restarted · 0ed7d17 ↑0 (35s)
-        [6/7] ✅ nora restarted · 0ed7d17 ↑0 (48s)
-        [7/7] ✅ refit (Poseidon) complete (10:09 · 55s)
-Main:   ✅ refit (Poseidon) complete (10:09 · 55s)
+Thread: [1/7 2s]  ✅ secrets up to date · a1b2c3d ↑0 (5m)
+        [2/7 5s]  ✅ code pulled 3 commit(s) · 0ed7d17 ↑0 (2s)
+        [3/7 12s] ✅ build · 0ed7d17 ↑0 (2s)
+        [4/7 25s] ✅ max deployed · 0ed7d17 ↑0 (15s)
+        [5/7 38s] ✅ parker restarted · 0ed7d17 ↑0 (35s)
+        [6/7 48s] ✅ nora restarted · 0ed7d17 ↑0 (48s)
+        [7/7 55s] ✅ refit (Poseidon) complete (10:08 · 55s)
+Main:   ✅ refit (Poseidon) complete (10:08 · 55s)
 ```
 
-Every step uses ✅ on success, ⛔ on failure, ⚠️ on partial (e.g. sync failed but refit continues). All steps show git version info. All bots on the ship get deployed (container image rebuild + instance sync). Active bots are also restarted. The final status line posts to both the thread and the main timeline.
+The stage prefix `[N/total elapsed]` shows step number and time since refit started. The version suffix `· sha ↑0|↓N (age)` shows the git commit age (how old the deployed code is). These are distinct: elapsed tracks refit progress, age tracks code freshness.
+
+Every step uses ✅ on success, ⛔ on failure, ⚠️ on partial (e.g. sync failed but refit continues). All bots on the ship get deployed (container image rebuild + instance sync). Active bots are also restarted. The final status line posts to both the thread and the main timeline.
 
 ### Failure alert threads
 

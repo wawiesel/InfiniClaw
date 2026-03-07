@@ -1452,7 +1452,7 @@ function registerRelayCommands(): void {
       // Stages: sync secrets, sync code, build, deploy inactive, bootstrap active, done
       const totalStages = 3 + inactiveBots.length + activeBots.length + 1;
       let stage = 0;
-      const s = (text: string) => threadReply(conn, threadRoot, `[${++stage}/${totalStages}] ${text}`);
+      const s = (text: string) => threadReply(conn, threadRoot, `[${++stage}/${totalStages} ${formatDuration(elapsed())}] ${text}`);
 
       try {
         const root = resolveRoot();
