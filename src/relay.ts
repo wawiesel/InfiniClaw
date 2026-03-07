@@ -1398,37 +1398,39 @@ function registerRelayCommands(): void {
 
       const threadRoot = await reply(conn, statusLine('⚓', 'refit', 'starting', 0));
       if (!threadRoot) return;
-      const t = (text: string) => threadReply(conn, threadRoot, text);
       const elapsed = () => Date.now() - startedAt;
+      const bots = getActiveBots();
+      const totalStages = 3 + bots.length + 1; // sync secrets, sync code, build, per-bot restart, relay restart
+      let stage = 0;
+      const s = (text: string) => threadReply(conn, threadRoot, `[${++stage}/${totalStages}] ${text}`);
 
       try {
         const secretsResult = secretsGitSync();
-        await t(secretsResult.newCommits > 0 ? `pulled ${secretsResult.newCommits} secrets commit(s)` : 'secrets up to date');
+        await s(secretsResult.newCommits > 0 ? `pulled ${secretsResult.newCommits} secrets commit(s)` : 'secrets up to date');
 
         const icResult = gitSync();
-        await t(icResult.newCommits > 0 ? `pulled ${icResult.newCommits} code commit(s)` : 'code up to date');
+        await s(icResult.newCommits > 0 ? `pulled ${icResult.newCommits} code commit(s)` : 'code up to date');
 
         const buildResult = rebuildInfiniClaw();
         if (buildResult.includes('FAILED')) {
           const msg = statusLine('⛔', 'refit', 'failed', elapsed());
-          await t(msg);
+          await s(msg);
           await reply(conn, msg);
           return;
         }
-        await t('rebuilt ✓');
+        await s('rebuilt ✓');
 
         const root = resolveRoot();
-        const bots = getActiveBots();
         if (bots.length > 0) {
           for (const bot of bots) {
-            try { bootstrapBot(root, bot); await t(`${bot} restarted ✓`); }
-            catch { await t(`${bot} restart failed ⛔`); }
+            try { bootstrapBot(root, bot); await s(`${bot} restarted ✓`); }
+            catch { await s(`${bot} restart failed ⛔`); }
           }
         }
 
         persistFleet();
+        await s('relay restarting');
         const msg = statusLine('✅', 'refit', 'complete', elapsed());
-        await t(msg);
         await reply(conn, msg);
         await sleep(1_000);
         try {
@@ -1436,7 +1438,7 @@ function registerRelayCommands(): void {
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
         const msg = statusLine('⛔', 'refit', 'failed', elapsed());
-        await t(msg);
+        await threadReply(conn, threadRoot, msg);
         await reply(conn, msg);
       }
     },
