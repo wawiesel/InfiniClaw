@@ -360,27 +360,12 @@ async function matrixSync(
 
 async function matrixSend(homeserver: string, token: string, roomId: string, text: string): Promise<void> {
   const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  // Wrap in 📞 SHIP blockquote (same style as intercom-send.sh)
-  const plainBody = `📞 ${HOSTNAME}\n${text}`;
-  const htmlContent = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>');
-  const htmlBody = `<blockquote style="border-left:3px solid #888;padding:4px 8px;margin:4px 0"><b>📞 ${HOSTNAME}</b><br/>${htmlContent}</blockquote>`;
   const resp = await fetch(
     `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
     {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        msgtype: 'm.text',
-        body: plainBody,
-        format: 'org.matrix.custom.html',
-        formatted_body: htmlBody,
-      }),
+      body: JSON.stringify({ msgtype: 'm.text', body: text }),
     },
   );
   if (!resp.ok) {
@@ -1636,10 +1621,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
           for (const event of events.timeline?.events || []) {
             if (event.type !== 'm.room.message') continue;
             if (event.content?.msgtype !== 'm.text') continue;
-            // Strip operator prefix — "📞 SHIP\n!cmd" or "📞 SHIP: !cmd"
-            let body = event.content.body?.trim() || '';
-            const prefixMatch = body.match(/^📞\s*\S+[\s:]+/);
-            if (prefixMatch) body = body.slice(prefixMatch[0].length).trim();
+            const body = event.content.body?.trim() || '';
             if (!body.startsWith('!')) continue;
 
             if (!isAuthorized(event.sender, captainUserId, operatorUserId)) {
