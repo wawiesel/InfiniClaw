@@ -47,7 +47,7 @@ Updated 2026-03-07 1:17 PM EST.
 
 ## VERY LOW — Deferred
 
-- **Branch & Merge — phases 2-4** — Phase 1 complete (`083bc0b`). Phases 2-4 require `delegate-runner.ts` (branch_to_thread tool, async lobe callbacks, merge signal). In progress.
+- ~~Branch & Merge — all 4 phases~~ — complete (`083bc0b`→`bc04660`). SIGTERM removed, IPC queueing, branch_to_thread, async lobes, merge_request handling.
 
 ## Recently Completed
 
