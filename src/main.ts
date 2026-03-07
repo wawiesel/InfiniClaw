@@ -964,7 +964,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const threadContext = buildThreadContextBlock(chatJid, contextMessages);
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
-  const triageInstruction = 'You are a Triage Agent. If a task takes more than 2 seconds, use the `branch_to_thread` tool. Never execute complex bash or file tasks directly — always delegate to a lobe.';
+  const triageInstruction = 'The `branch_to_thread` tool is available for long-running tasks (>30s). Use it when a task needs to run in parallel without blocking new messages.';
   const parts: string[] = [];
   if (missionContext) parts.push(missionContext);
   if (isMainGroup) parts.push(triageInstruction);
@@ -1282,11 +1282,26 @@ async function handleGroupMessagesInLoop(
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
   threadMapLastSeen[`r:${chatJid}`] = Date.now();
 
-  if (queue.getGroupStatus(chatJid).active) {
-    handlePipedToActiveContainer(chatJid, group, messagesToSend, formatted);
-  } else {
-    handleQueuedForProcessing(chatJid);
+  const groupStatus = queue.getGroupStatus(chatJid);
+  if (groupStatus.active) {
+    // Keep active-container IPC as a high-priority lane for captain/operator messages.
+    // Bot-to-bot traffic should queue normally to avoid starvation/loop churn.
+    const shouldPrioritizeToActiveContainer = messagesToSend.some((m) => {
+      if (botMatrixUserIds.has(m.sender)) return false;
+      const isCaptain = Boolean(CAPTAIN_USER_ID) && m.sender === CAPTAIN_USER_ID;
+      const isOperatorTrigger = TRIGGER_PATTERN.test(m.content.trim());
+      return isCaptain || isOperatorTrigger;
+    });
+
+    if (shouldPrioritizeToActiveContainer) {
+      handlePipedToActiveContainer(chatJid, group, messagesToSend, formatted);
+    } else {
+      handleQueuedForProcessing(chatJid);
+    }
+    return;
   }
+
+  handleQueuedForProcessing(chatJid);
 }
 
 function handlePipedToActiveContainer(
