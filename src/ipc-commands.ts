@@ -865,7 +865,7 @@ async function handleHealthCheck(data: CommandData, ctx: InfiniClawIpcContext): 
       await ctx.sendMessage(chatJid, 'No health-check.sh script found.');
       return;
     }
-    const output = execSync(`MACHINE_NAME="${os.hostname()}" bash "${script}"`, {
+    const output = execSync(`bash "${script}"`, {
       encoding: 'utf-8', timeout: 30_000, cwd: root,
       env: { ...process.env, MACHINE_NAME: os.hostname() },
     }).trim();
