@@ -31,7 +31,7 @@ Updated 2026-03-07 1:17 PM EST.
 ## LOW — Security
 
 - ~~Security review: relay.ts + main.ts new code~~ — reviewed 2026-03-07, all 82 commits clean. No injection vectors. Full rotation pointer reset to `allow-list`.
-- ~~Security rotation cycles 3–5~~ — completed 2026-03-07. Fixes: `8edc180` (ipc-commands handleHealthCheck shell injection), `a153075` (relay hasRunningContainer/getContainerStartTime shell injection). All other files clean.
+- ~~Security rotation cycles 3–6~~ — completed 2026-03-07. Fixes: `8edc180` (ipc-commands handleHealthCheck shell injection), `a153075` (relay hasRunningContainer/getContainerStartTime shell injection), `10a762e` (relay botVersion SHA validation). All other files clean.
 
 ## LOW — Infrastructure
 
