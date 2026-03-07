@@ -267,12 +267,6 @@ const kill137Consecutive: Record<string, number> = {};
 const kill137CooldownUntil: Record<string, number> = {};
 
 // Standing order work cycle — re-trigger bot after completing work
-const STANDING_ORDER_COOLDOWN_MS = parseInt(process.env.STANDING_ORDER_COOLDOWN_MS || '60000', 10);
-const STANDING_ORDER_MAX_CONSECUTIVE = parseInt(process.env.STANDING_ORDER_MAX_CONSECUTIVE || '10', 10);
-const STANDING_ORDER_REST_MS = parseInt(process.env.STANDING_ORDER_REST_MS || '1800000', 10);
-const standingOrderCycles: Record<string, number> = {};
-const standingOrderRestUntil: Record<string, number> = {};
-const standingOrderTimers: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
 const METRICS_HISTORY_FILE = path.join(DATA_DIR, 'metrics-history.jsonl');
 const METRICS_HISTORY_MAX_LINES = 10_000;
 
@@ -579,9 +573,6 @@ const { start: startIdleIndicator, clear: clearIdleIndicator } = idle;
 const resumingIndicator = createIndicatorSet('⏳', 'resuming', 'resumed');
 const { start: startResumingIndicator, clear: clearResumingIndicator } = resumingIndicator;
 
-const RUN_PROGRESS_NUDGE_STALE_MS = 90_000;
-const RUN_PROGRESS_NUDGE_COOLDOWN_MS = 120_000;
-const RUN_PROGRESS_NUDGE_CHECK_MS = 15_000;
 
 // ── Utility functions ──────────────────────────────────────────────────
 
@@ -718,7 +709,6 @@ interface OutputHandlerContext {
   onOutputSent: (text: string) => void;
   onError: () => void;
   onProgress: (text: string) => void;
-  stopNudgeTimer: () => void;
   resetIdleTimer: () => void;
 }
 
@@ -851,7 +841,6 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   markProgress(ctx.chatJid, text);
   // Set state before channel send to preserve original behavior if send throws
   ctx.onOutputSent(text);
-  ctx.stopNudgeTimer();
   const ch = findChannel(channels, ctx.chatJid);
   if (ch) {
     if (ch.setTyping) await ch.setTyping(ctx.chatJid, true);
@@ -999,32 +988,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
   const agentResponses: string[] = [];
   let lastResponseBody: string | undefined;
-  let lastRunOutputAt = Date.now();
-  let lastRunProgressNudgeAt = 0;
-  let runProgressNudgeTimer: ReturnType<typeof setInterval> | null = null;
-
   markRunStarted(chatJid);
 
   if (channel?.setStatusPip) {
     void channel.setStatusPip(chatJid, PIP_PULSE[0]).catch((err) => { logger.debug({ chatJid, err }, 'Status pip pulse failed'); });
-  }
-
-  if (isMainGroup) {
-    runProgressNudgeTimer = setInterval(() => {
-      const now = Date.now();
-      if (now - lastRunOutputAt < RUN_PROGRESS_NUDGE_STALE_MS) return;
-      if (now - lastRunProgressNudgeAt < RUN_PROGRESS_NUDGE_COOLDOWN_MS) return;
-      const activity = ensureChatActivity(chatJid);
-      if (activity.lastCompletion && /\b(idle|done)\b/i.test(activity.lastCompletion)) return;
-      const nudged = queue.sendMessage(
-        chatJid,
-        'If you are still running, send a concise progress update now: done, in-progress, next.',
-      );
-      if (nudged) {
-        lastRunProgressNudgeAt = now;
-        logger.info({ chatJid }, 'Sent automatic run-progress nudge');
-      }
-    }, RUN_PROGRESS_NUDGE_CHECK_MS);
   }
 
   const outputHandler = createOutputHandler({
@@ -1038,13 +1005,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       agentResponses.push(text);
     },
     onError: () => { hadError = true; },
-    onProgress: () => { lastRunOutputAt = Date.now(); },
-    stopNudgeTimer: () => {
-      if (runProgressNudgeTimer) {
-        clearInterval(runProgressNudgeTimer);
-        runProgressNudgeTimer = null;
-      }
-    },
+    onProgress: () => { },
     resetIdleTimer,
   });
 
@@ -1066,7 +1027,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     void channel.setStatusPip(chatJid, '🟢').catch((err) => { logger.debug({ chatJid, err }, 'Status pip green failed'); });
   }
   if (idleTimer) clearTimeout(idleTimer);
-  if (runProgressNudgeTimer) clearInterval(runProgressNudgeTimer);
 
   if (runResult.status === 'error' || hadError) {
     const rawError =
@@ -1133,7 +1093,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
   delete activeReplyThreadIds[chatJid];
   markRunEnded(chatJid);
-  if (isMainGroup) scheduleStandingOrderCycle(chatJid);
 
   appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
   return true;
@@ -1220,11 +1179,6 @@ async function handleGroupMessagesInLoop(
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
   const filtered = groupMessages.filter((msg) => !shouldIgnoreMessage(msg));
   if (filtered.length === 0) return;
-
-  // Reset standing order cycle counter on real (non-system) messages
-  if (filtered.some(m => m.sender !== 'system')) {
-    standingOrderCycles[chatJid] = 0;
-  }
 
   // Separate actionable messages from noise.
   // A message triggers a response if it's from a human OR from a bot that calls out this bot.
@@ -1375,33 +1329,6 @@ async function startMessageLoop(): Promise<void> {
 }
 
 // ── System notifications ───────────────────────────────────────────────
-
-function scheduleStandingOrderCycle(chatJid: string): void {
-  if ((standingOrderRestUntil[chatJid] || 0) > Date.now()) return;
-
-  const activity = ensureChatActivity(chatJid);
-  if (activity.lastCompletion && /\b(idle|nothing to do|waiting|no tasks|no pending)\b/i.test(activity.lastCompletion)) {
-    standingOrderCycles[chatJid] = 0;
-    return;
-  }
-
-  const cycles = standingOrderCycles[chatJid] || 0;
-  if (cycles >= STANDING_ORDER_MAX_CONSECUTIVE) {
-    standingOrderRestUntil[chatJid] = Date.now() + STANDING_ORDER_REST_MS;
-    standingOrderCycles[chatJid] = 0;
-    logger.info({ chatJid, cycles }, 'Standing order max cycles reached, resting');
-    return;
-  }
-
-  if (standingOrderTimers[chatJid]) clearTimeout(standingOrderTimers[chatJid]);
-  standingOrderTimers[chatJid] = setTimeout(() => {
-    standingOrderTimers[chatJid] = undefined;
-    const state = queue.getGroupStatus(chatJid);
-    if (state.active || state.pendingMessages || state.pendingTasks > 0) return;
-    standingOrderCycles[chatJid] = cycles + 1;
-    injectSystemNotice(chatJid, '[Standing orders] No pending messages. Continue your standing orders.');
-  }, STANDING_ORDER_COOLDOWN_MS);
-}
 
 function buildThreadContextBlock(chatJid: string, messages: NewMessage[]): string {
   const threadIds = new Set(messages.map(m => m.thread_id).filter(Boolean) as string[]);
