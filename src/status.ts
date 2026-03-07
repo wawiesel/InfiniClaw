@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseEnvFile, isOllamaBaseUrl } from 'nanoclaw/env-utils.js';
 import { getActiveBots } from './service.js';
-import { loadShipConfig } from './machine-config.js';
+import { loadShipConfig } from './ship-config.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 

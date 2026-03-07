@@ -13,7 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from 'nanoclaw/env-utils
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
-import { loadShipConfig } from './machine-config.js';
+import { loadShipConfig } from './ship-config.js';
 import { logger } from 'nanoclaw/logger.js';
 
 const GIT_VERSION = (() => {

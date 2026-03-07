@@ -10,7 +10,7 @@ import { parseEnvLine } from 'nanoclaw/env-utils.js';
 import { logger } from 'nanoclaw/logger.js';
 import { loadSkillsToSession } from './skill-sync.js';
 import { mountsForBot } from './allow-list.js';
-import { loadShipConfig } from './machine-config.js';
+import { loadShipConfig } from './ship-config.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 
 interface VolumeMount {

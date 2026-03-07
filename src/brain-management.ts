@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from 'nanoclaw/env-utils.js';
-import { loadShipConfig } from './machine-config.js';
+import { loadShipConfig } from './ship-config.js';
 import { ASSISTANT_NAME, DATA_DIR } from 'nanoclaw/config.js';
 import { MAIN_GROUP_FOLDER } from './infini-config.js';
 import { logger } from 'nanoclaw/logger.js';

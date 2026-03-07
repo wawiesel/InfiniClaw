@@ -19,7 +19,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 
-import { loadShipConfig, loadFleet, writeFleet, loadShips, writeShips, isShipActive, clearShipConfigCache } from './machine-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadShips, writeShips, isShipActive, clearShipConfigCache } from './ship-config.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
 import type { RoomConn } from './command-registry.js';
@@ -106,7 +106,7 @@ function persistFleet(): void {
   }
 }
 
-// ── Rank swap (shared by bots and machines) ──────────────────────
+// ── Rank swap (shared by bots and ships) ──────────────────────
 
 /** Swap rank of target with its neighbor. Mutates entries in place. Returns null if at boundary. */
 function rankSwap<T extends { rank: number }>(
@@ -283,7 +283,7 @@ async function electSpeaker(): Promise<boolean> {
     if (!active.some(([name]) => name === HOSTNAME)) return false;
 
     const epochs = await fetchCommitEpochs();
-    // Find the newest commit epoch among active machines
+    // Find the newest commit epoch among active ships
     let maxEpoch = 0;
     for (const [name] of active) {
       const e = epochs[name] ?? 0;
@@ -392,7 +392,7 @@ async function matrixSend(homeserver: string, token: string, roomId: string, tex
   }
 }
 
-// ── Bot resolution (multi-machine aware) ───────────────────────────
+// ── Bot resolution (multi-ship aware) ───────────────────────────
 
 /** Map local bot name → room name (lowercased) from MAIN_GROUP_NAME in env. */
 function buildBotRoomMap(): Record<string, string> {
@@ -427,11 +427,11 @@ function resolveBots(target: string | undefined, roomName: string, action?: stri
   const local = getActiveBots();
   if (target) {
     if (local.includes(target)) return [target];
-    // For !join, also match inactive bots assigned to this machine
+    // For !join, also match inactive bots assigned to this ship
     if (action === 'join' && liveFleet[target]?.ship === HOSTNAME) return [target];
     return [];
   }
-  // No target — scope to bots in this room on this machine
+  // No target — scope to bots in this room on this ship
   const botRooms = buildBotRoomMap();
   return local.filter((bot) => botRooms[bot] === roomName);
 }
@@ -683,7 +683,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
       const result = gitSync();
       if (!result.ok) {
         log(`git sync FAILED: ${result.output}`);
-        // Notify all rooms so the engineer on this machine sees it
+        // Notify all rooms so the engineer on this ship sees it
         const msg = `⚠️git sync failed — engineer please fix immediately.\n\`\`\`\n${result.output.slice(0, 500)}\n\`\`\``;
         for (const conn of conns) {
           if (conn.accessToken) {
@@ -831,13 +831,13 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
         }
       } else if (result.newCommits > 0) {
         log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
-        // Reload fleet.json from disk (may have transport assignments from other machines)
+        // Reload fleet.json from disk (may have transport assignments from other ships)
         try {
           const diskFleet = loadFleet();
           // Merge disk state into liveFleet — transport assignments come via git
           for (const [bot, entry] of Object.entries(diskFleet)) {
             if (!liveFleet[bot]) { liveFleet[bot] = entry; continue; }
-            // Transport pickup: bot assigned to us but inactive (phase 1 by another machine)
+            // Transport pickup: bot assigned to us but inactive (phase 1 by another ship)
             if (entry.ship === HOSTNAME && entry.status === 'transit' && liveFleet[bot].ship !== HOSTNAME) {
               liveFleet[bot].ship = HOSTNAME;
               liveFleet[bot].status = 'transit'; // will be materialized below
@@ -1109,8 +1109,8 @@ async function handleLifecycleCommand(
   const root = resolveRoot();
   const bots = resolveBots(target, conn.name, action);
 
-  // No local bots matched — silently ignore. Another machine handles it,
-  // or the room simply has no bots from this machine.
+  // No local bots matched — silently ignore. Another ship handles it,
+  // or the room simply has no bots from this ship.
   if (bots.length === 0) return;
 
   if (action !== 'dismiss') {
@@ -1393,19 +1393,19 @@ function registerRelayCommands(): void {
           }
         } catch { /* empty */ }
 
-        // Group bots by machine — use liveFleet as source of truth
-        const byMachine: Record<string, Array<[string, FleetEntry]>> = {};
+        // Group bots by ship — use liveFleet as source of truth
+        const byShip: Record<string, Array<[string, FleetEntry]>> = {};
         for (const [bot, entry] of Object.entries(liveFleet)) {
           const m = entry.ship || 'drydock';
-          (byMachine[m] ??= []).push([bot, entry]);
+          (byShip[m] ??= []).push([bot, entry]);
         }
         // Ensure all known ships appear even if they have no bots
         for (const ship of Object.keys(ships)) {
-          byMachine[ship] ??= [];
+          byShip[ship] ??= [];
         }
 
         // Sort: known ships by rank, drydock last
-        const machineOrder = Object.keys(byMachine).sort((a, b) => {
+        const shipOrder = Object.keys(byShip).sort((a, b) => {
           if (a === 'drydock') return 1;
           if (b === 'drydock') return -1;
           return (ships[a]?.rank ?? 99) - (ships[b]?.rank ?? 99);
@@ -1413,22 +1413,22 @@ function registerRelayCommands(): void {
 
         const lines: string[] = [];
 
-        for (const machine of machineOrder) {
-          const mConfig = ships[machine];
-          const isLocal = machine === HOSTNAME;
+        for (const ship of shipOrder) {
+          const mConfig = ships[ship];
+          const isLocal = ship === HOSTNAME;
 
           // Ship header
-          if (machine === 'drydock') {
+          if (ship === 'drydock') {
             lines.push('🔧 drydock');
           } else {
             const rank = mConfig?.rank ?? '?';
             const shipIcon = mConfig?.active ? '⚓' : '🚫';
             const relayVersion = isLocal ? gitVersionStr(root, path.join(root, 'dist', 'relay.js')) : '';
-            lines.push(`${shipIcon} ${machine}[${rank}]${relayVersion}`);
+            lines.push(`${shipIcon} ${ship}[${rank}]${relayVersion}`);
           }
 
           // Bots under this ship
-          const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
+          const bots = byShip[ship].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
             const isCO = entry.status === 'active' && !Object.entries(liveFleet).some(
               ([id, e]) => id !== botId && e.role === entry.role && e.status === 'active' && e.rank < entry.rank
@@ -1462,7 +1462,7 @@ function registerRelayCommands(): void {
       const root = resolveRoot();
       const local = getActiveBots();
       const bots = target ? local.filter(b => b === target) : local;
-      if (bots.length === 0) return; // not on this machine
+      if (bots.length === 0) return; // not on this ship
       const lines: string[] = [];
       for (const bot of bots) {
         const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
@@ -1486,7 +1486,7 @@ function registerRelayCommands(): void {
       if (!match) { await reply(conn, 'Usage: !allow <bot> <path> [minutes]'); return; }
       const [, botName, hostPath, mins] = match;
       const local = getActiveBots();
-      if (!local.includes(botName.toLowerCase())) return; // not on this machine
+      if (!local.includes(botName.toLowerCase())) return; // not on this ship
       const defaultDuration = 30;
       const parsedDuration = parseInt(mins ?? String(defaultDuration), 10);
       let duration = parsedDuration <= 0 ? defaultDuration : parsedDuration;
@@ -1505,7 +1505,7 @@ function registerRelayCommands(): void {
       if (!match) { await reply(conn, 'Usage: !deny <bot> <path>'); return; }
       const [, botName, hostPath] = match;
       const local = getActiveBots();
-      if (!local.includes(botName.toLowerCase())) return; // not on this machine
+      if (!local.includes(botName.toLowerCase())) return; // not on this ship
       try {
         const removed = revokeMount(botName.toLowerCase(), hostPath);
         await reply(conn, `${removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`}`);
@@ -1748,7 +1748,7 @@ async function main(): Promise<void> {
   log('warming up — syncing Matrix for 30s before bootstrap...');
   await sleep(30_000);
 
-  // Bootstrap all bots assigned to this machine
+  // Bootstrap all bots assigned to this ship
   if (isShipActive()) {
     try {
       ensurePodmanReady();
@@ -1769,7 +1769,7 @@ async function main(): Promise<void> {
       log(`bootstrap failed: ${errStr(err)}`);
     }
   } else {
-    log('machine is deactivated — skipping bot startup');
+    log('ship is decommissioned — skipping bot startup');
   }
 
   // Start background loops (non-blocking alongside room sync loops)

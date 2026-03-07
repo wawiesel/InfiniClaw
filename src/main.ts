@@ -127,7 +127,7 @@ import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
-import { loadFleet } from './machine-config.js';
+import { loadFleet } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
 import { getSystemStatus } from './status.js';
 

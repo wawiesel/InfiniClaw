@@ -51,14 +51,14 @@ Sent automatically to each bot's main room on every boot, wrapped in a collapsib
 | Skills | ✅ | ✅ | ✅ |
 | MCP Servers | ✅ | ✅ | ✅ |
 | Active Todos | ✅ | ✅ | ✅ |
-| Machine Health | — | ✅ (named machine) | — |
+| Ship Health | — | ✅ (named ship) | — |
 | Weekly Goals | — | — | ✅ |
 | Knowledge Search (latest entry) | — | — | ✅ |
 
 ### Rules
 
 - **All bots** show: Skills table, MCP Servers table, Active Todos table.
-- **Engineers** additionally show a Machine Health table. The table header must name the machine explicitly (e.g. `🏥 Machine Health — HERACLES`). Engineers are always in Engineering rooms.
+- **Engineers** additionally show a Ship Health table. The table header must name the ship explicitly (e.g. `🏥 Ship Health — HERACLES`). Engineers are always in Engineering rooms.
 - **Navigators** additionally show:
   1. The Captain's global weekly goal list.
   2. The latest entry from a knowledge search (most recently updated knowledge base item).

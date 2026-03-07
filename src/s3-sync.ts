@@ -16,7 +16,7 @@ import {
 } from '@aws-sdk/client-s3';
 
 import { logger } from 'nanoclaw/logger.js';
-import { loadShipConfig } from './machine-config.js';
+import { loadShipConfig } from './ship-config.js';
 import { instanceDir } from './service.js';
 
 // Files/dirs to sync per bot, relative to instance dir
