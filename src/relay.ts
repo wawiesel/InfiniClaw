@@ -27,6 +27,7 @@ import {
   resolveRoot,
   getActiveBots,
   bootstrapBot,
+  deployBot,
   stopBot,
   ensurePodmanReady,
   killStaleContainers,
@@ -99,6 +100,8 @@ function findEngConn(conns: RoomConn[]): RoomConn | undefined {
 }
 
 function formatDuration(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
   const min = Math.round(ms / 60_000);
   if (min < 60) return `${min}m`;
   const hrs = (ms / 3_600_000).toFixed(1).replace(/\.0$/, '');
@@ -1407,8 +1410,16 @@ function registerRelayCommands(): void {
       const threadRoot = await reply(conn, statusLine('⚓', 'refit', 'starting', 0));
       if (!threadRoot) return;
       const elapsed = () => Date.now() - startedAt;
-      const bots = getActiveBots();
-      const totalStages = 3 + bots.length + 1; // sync secrets, sync code, build, per-bot restarts, done
+
+      // All bots on this ship get deployed; only active get started
+      const localBots = Object.entries(liveFleet)
+        .filter(([, e]) => e.ship === HOSTNAME)
+        .map(([name]) => name);
+      const activeBots = getActiveBots();
+      const inactiveBots = localBots.filter(b => !activeBots.includes(b));
+
+      // Stages: sync secrets, sync code, build, deploy inactive, bootstrap active, done
+      const totalStages = 3 + inactiveBots.length + activeBots.length + 1;
       let stage = 0;
       const s = (text: string) => threadReply(conn, threadRoot, `[${++stage}/${totalStages}] ${text}`);
 
@@ -1429,11 +1440,18 @@ function registerRelayCommands(): void {
         await s('rebuilt ✓');
 
         const root = resolveRoot();
-        if (bots.length > 0) {
-          for (const bot of bots) {
-            try { bootstrapBot(root, bot); await s(`${bot} restarted ✓`); }
-            catch { await s(`${bot} restart failed ⛔`); }
-          }
+        ensurePodmanReady();
+
+        // Deploy inactive bots (container image rebuild + instance sync, no start)
+        for (const bot of inactiveBots) {
+          try { deployBot(root, bot); await s(`${bot} deployed ✓`); }
+          catch { await s(`${bot} deploy failed ⛔`); }
+        }
+
+        // Bootstrap active bots (deploy + start)
+        for (const bot of activeBots) {
+          try { bootstrapBot(root, bot); await s(`${bot} restarted ✓`); }
+          catch { await s(`${bot} restart failed ⛔`); }
         }
 
         persistFleet();

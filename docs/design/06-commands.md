@@ -107,15 +107,17 @@ Multi-step operations and failure alerts use Matrix threads to keep the main tim
 
 ```
 Main:   ⚓ refit (Poseidon) starting (10:07)
-Thread: [1/5] secrets up to date
-        [2/5] pulled 3 code commit(s)
-        [3/5] rebuilt ✓
-        [4/5] parker restarted ✓
-        [5/5] ✅ refit (Poseidon) complete (10:08 · 1m)
-Main:   ✅ refit (Poseidon) complete (10:08 · 1m)
+Thread: [1/7] secrets up to date
+        [2/7] pulled 3 code commit(s)
+        [3/7] rebuilt ✓
+        [4/7] max deployed ✓           ← inactive bot, deploy only
+        [5/7] parker restarted ✓       ← active bot, deploy + start
+        [6/7] nora restarted ✓
+        [7/7] ✅ refit (Poseidon) complete (10:09 · 2m)
+Main:   ✅ refit (Poseidon) complete (10:09 · 2m)
 ```
 
-The final status line (✅ or ⛔) always posts to both the thread and the main timeline.
+All bots on the ship get deployed (container image rebuild + instance sync). Active bots are also restarted. The final status line (✅ or ⛔) always posts to both the thread and the main timeline.
 
 ### Failure alert threads
 
