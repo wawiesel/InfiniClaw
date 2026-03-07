@@ -50,6 +50,10 @@ const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
+// Rotate session to a fresh one if the JSONL file exceeds this size (default 2MB).
+// Prevents V8 heap spikes on --resume of large sessions (deserialization is 2-5x file size).
+const SESSION_MAX_BYTES = parseInt(process.env.SESSION_MAX_BYTES || String(2 * 1024 * 1024), 10);
+
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
@@ -171,6 +175,19 @@ function waitForIpcMessage(): Promise<string | null> {
     };
     poll();
   });
+}
+
+// Locate a Claude Code session JSONL file by session ID.
+function findSessionFile(sessionId: string): string | null {
+  const projectsDir = path.join(process.env.HOME || '/home/node', '.claude', 'projects');
+  try {
+    if (!fs.existsSync(projectsDir)) return null;
+    for (const dir of fs.readdirSync(projectsDir)) {
+      const filePath = path.join(projectsDir, dir, `${sessionId}.jsonl`);
+      if (fs.existsSync(filePath)) return filePath;
+    }
+  } catch { /* ignore */ }
+  return null;
 }
 
 // --- Claude CLI spawning ---
@@ -543,6 +560,21 @@ async function main(): Promise<void> {
   // Main loop: run claude -> check for messages -> resume
   try {
     while (true) {
+      // Rotate session if JSONL file exceeds size limit — prevents OOM on --resume
+      if (sessionId && SESSION_MAX_BYTES > 0) {
+        const sessionFile = findSessionFile(sessionId);
+        if (sessionFile) {
+          try {
+            const { size } = fs.statSync(sessionFile);
+            if (size > SESSION_MAX_BYTES) {
+              log(`Session file ${Math.round(size / 1024)}KB > ${Math.round(SESSION_MAX_BYTES / 1024)}KB limit — rotating to fresh session`);
+              prompt = `[System: Previous session (${Math.round(size / 1024)}KB) exceeded the ${Math.round(SESSION_MAX_BYTES / 1024)}KB size limit and was rotated to prevent OOM. Check MEMORY.md for context.]\n\n${prompt}`;
+              sessionId = undefined;
+            }
+          } catch { /* stat failed — proceed as-is */ }
+        }
+      }
+
       log(`Starting claude (session: ${sessionId || 'new'})...`);
 
       let runResult = await runClaude(

@@ -55,7 +55,7 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Cap Node.js heap so processes GC instead of growing until VM OOM.
 # Applies to main brain, MCP server, and lobe spawns.
-ENV NODE_OPTIONS="--max-old-space-size=8192"
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 
 # Update npm to suppress version notices
 RUN npm install -g npm@latest
