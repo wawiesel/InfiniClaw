@@ -7,7 +7,7 @@
  *
  * Run: node dist/relay.js
  */
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync, execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -608,7 +608,7 @@ async function botJoinRoom(botToken: string, homeserver: string, roomId: string,
   }
 }
 
-/** Make a bot leave a Matrix room. */
+/** Make a bot leave a Matrix room. Silently succeeds if bot isn't in the room. */
 async function botLeaveRoom(token: string, homeserver: string, roomId: string): Promise<void> {
   const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`, {
     method: 'POST',
@@ -617,10 +617,9 @@ async function botLeaveRoom(token: string, homeserver: string, roomId: string): 
   });
   if (!resp.ok) {
     const body = await resp.text();
-    // Already left is fine
-    if (!body.includes('not in room') && !body.includes('not a member')) {
-      throw new Error(`leave room failed: ${resp.status} ${body}`);
-    }
+    // Not in room / forbidden (already left) is fine
+    if (resp.status === 403 || body.includes('not in room') || body.includes('not a member')) return;
+    throw new Error(`leave room failed: ${resp.status} ${body}`);
   }
 }
 
@@ -1336,21 +1335,25 @@ let dreamingBot: string | null = null; // only one at a time
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {
   try {
-    const out = execSync(`podman ps --filter "name=nanoclaw-${bot}" --format "{{.Names}}"`, {
+    const result = spawnSync('podman', ['ps', '--filter', `name=nanoclaw-${bot}`, '--format', '{{.Names}}'], {
       encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
-    }).trim();
-    return out.length > 0;
+    });
+    return result.status === 0 && (result.stdout || '').trim().length > 0;
   } catch { return false; }
 }
 
 /** Get container start time in ms for the bot's main container, or null if missing. */
 function getContainerStartTime(bot: string): number | null {
   try {
-    const out = execSync(`podman inspect nanoclaw-${bot}-main-* --format '{{.State.StartedAt}}'`, {
+    const result = spawnSync('podman', ['ps', '--filter', `name=nanoclaw-${bot}-main`, '--format', 'json'], {
       encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
-    }).trim();
-    if (!out) return null;
-    const ts = Date.parse(out.split('\n')[0].trim());
+    });
+    if (result.status !== 0) return null;
+    const parsed: unknown = JSON.parse((result.stdout || '').trim() || '[]');
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const started = (parsed[0] as Record<string, unknown>)?.StartedAt;
+    if (typeof started !== 'string') return null;
+    const ts = Date.parse(started);
     return Number.isFinite(ts) ? ts : null;
   } catch { return null; }
 }
@@ -1504,6 +1507,7 @@ async function handleLifecycleCommand(
           const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
           await botLeaveRoom(botToken, homeserver, dutyRoomId);
           if (loungeId) await botJoinRoom(botToken, homeserver, loungeId, conn, botUserId);
+          log(`${name}: moved to lounge`);
           log(`${name}: moved to lounge`);
         } catch (roomErr) {
           log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
