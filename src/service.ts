@@ -289,17 +289,6 @@ export function syncPersona(root: string, bot: string): void {
   // Current architecture is one-way (repo/persona -> instance), so this is intentionally a no-op.
 }
 
-/** Update the local presence file to reflect currently running bots. */
-export function updatePresence(root: string): void {
-  const config = loadMachineConfig();
-  const hostname = os.hostname();
-  const safeHostname = hostname.replace(/[^A-Za-z0-9._-]/g, '_');
-  const presenceDir = path.join(config.secretsPath, 'operator', 'presence');
-  fs.mkdirSync(presenceDir, { recursive: true });
-  const localPresence = { hostname, bots: getActiveBots(), updatedAt: new Date().toISOString() };
-  fs.writeFileSync(path.join(presenceDir, `${safeHostname}.json`), JSON.stringify(localPresence, null, 2));
-}
-
 
 
 export function restorePersona(root: string, bot: string): void {

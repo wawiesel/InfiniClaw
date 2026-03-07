@@ -32,7 +32,6 @@ import {
   ensurePodmanReady,
   killStaleContainers,
   loadProfileEnv,
-  updatePresence,
   removeStaleProcesses,
 } from './service.js';
 
@@ -840,7 +839,6 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
               try {
                 ensurePodmanReady();
                 bootstrapBot(root, bot);
-                updatePresence(root);
                 for (const c of conns) {
                   if (c.accessToken) {
                     await reply(c, `${HOSTNAME}: ${bot} materialized and started`).catch(() => {});
@@ -1134,7 +1132,6 @@ async function handleLifecycleCommand(
     }
   }
 
-  try { updatePresence(root); } catch { /* best effort */ }
 }
 
 // ── Register command handlers with the registry ──────────────────
@@ -1226,7 +1223,6 @@ function registerRelayCommands(): void {
             started.push(name);
           }
         }
-        updatePresence(root);
         await reply(conn, `${HOSTNAME}: commissioned — started ${started.join(', ') || 'no bots assigned'}`);
       } catch (err) {
         await reply(conn, `${HOSTNAME}: commission failed — ${errStr(err)}`);
@@ -1303,7 +1299,6 @@ function registerRelayCommands(): void {
             results.push(`${bot}: restart failed — ${errStr(err).slice(0, 100)}`);
           }
         }
-        updatePresence(root);
         persistFleet();
         await reply(conn, `${HOSTNAME}: refit complete\n${results.join('\n')}\nrestarting helm...`);
         await sleep(1_000);
@@ -1769,7 +1764,6 @@ async function main(): Promise<void> {
           }
         }
       }
-      updatePresence(root);
     } catch (err) {
       log(`bootstrap failed: ${errStr(err)}`);
     }
