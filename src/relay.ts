@@ -1614,6 +1614,8 @@ function registerRelayCommands(): void {
       // Stages: sync secrets, sync code, build, deploy inactive, bootstrap active, done
       const totalStages = 3 + inactiveBots.length + activeBots.length + 1;
       let stage = 0;
+      let warnings = 0;
+      let errors = 0;
       const s = (text: string) => threadReply(conn, threadRoot, `[${++stage}/${totalStages} ${formatDuration(elapsed())}] ${text}`);
 
       try {
@@ -1622,6 +1624,7 @@ function registerRelayCommands(): void {
         const secretsResult = secretsGitSync();
         const secretsVer = repoVersion(secretsRepoPath());
         if (!secretsResult.ok) {
+          warnings++;
           const link = await uploadErrorLog('secrets-sync', new Error(secretsResult.output));
           await s(stageWarn('secrets sync failed', link || secretsVer));
         } else if (secretsResult.newCommits > 0) {
@@ -1633,6 +1636,7 @@ function registerRelayCommands(): void {
         const icResult = gitSync();
         const codeVer = repoVersion(root);
         if (!icResult.ok) {
+          warnings++;
           const link = await uploadErrorLog('code-sync', new Error(icResult.output));
           await s(stageWarn('code sync failed', link || codeVer));
         } else if (icResult.newCommits > 0) {
@@ -1643,9 +1647,12 @@ function registerRelayCommands(): void {
 
         const buildResult = rebuildInfiniClaw();
         if (buildResult.includes('FAILED')) {
+          errors++;
           const link = await uploadErrorLog('build', new Error(buildResult));
           await s(stageFail('relay + dist rebuild', link));
-          await reply(conn, statusLine('⛔', 'refit', 'failed', elapsed()));
+          const msg = statusLine('⛔', 'refit', `failed with ${warnings} warning(s) and ${errors} error(s)`, elapsed());
+          await s(msg);
+          await reply(conn, msg);
           return;
         }
         await s(stageOk('relay + dist rebuilt', relayVersion(root)));
@@ -1658,6 +1665,7 @@ function registerRelayCommands(): void {
             deployBot(root, bot);
             await s(stageOk(`${bot} deployed`, botVersion(root, bot)));
           } catch (err) {
+            errors++;
             const link = await uploadErrorLog(`deploy-${bot}`, err);
             await s(stageFail(`${bot} deploy failed`, link));
           }
@@ -1669,6 +1677,7 @@ function registerRelayCommands(): void {
             bootstrapBot(root, bot);
             await s(stageOk(`${bot} restarted`, botVersion(root, bot)));
           } catch (err) {
+            errors++;
             const link = await uploadErrorLog(`restart-${bot}`, err);
             await s(stageFail(`${bot} restart failed`, link));
           }
@@ -1676,7 +1685,9 @@ function registerRelayCommands(): void {
 
         persistFleet();
         await publishFleetReport().catch(() => {});
-        const msg = statusLine('✅', 'refit', 'complete', elapsed());
+        const summary = warnings + errors > 0 ? ` with ${warnings} warning(s) and ${errors} error(s)` : '';
+        const emoji = errors > 0 ? '⚠️' : '✅';
+        const msg = statusLine(emoji, 'refit', `complete${summary}`, elapsed());
         await s(msg);
         await reply(conn, msg);
         await sleep(1_000);
@@ -1684,7 +1695,8 @@ function registerRelayCommands(): void {
           execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
-        const msg = statusLine('⛔', 'refit', 'failed', elapsed());
+        errors++;
+        const msg = statusLine('⛔', 'refit', `failed with ${warnings} warning(s) and ${errors} error(s)`, elapsed());
         await threadReply(conn, threadRoot, msg);
         await reply(conn, msg);
       }
