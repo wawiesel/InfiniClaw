@@ -18,6 +18,7 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { loadShipConfig, loadFleet, writeFleet, loadShips, writeShips, isShipActive, clearShipConfigCache } from './ship-config.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
@@ -615,12 +616,11 @@ function getS3Client(): { client: S3Client; bucket: string } | null {
 }
 
 /** Upload an error log to S3 and return a markdown link, or empty string on failure. */
-/** Upload an error log to S3 and return a markdown link, or empty string on failure. */
+/** Upload an error log to S3 and return a markdown link (presigned, 7 days), or empty string on failure. */
 async function uploadErrorLog(label: string, error: unknown): Promise<string> {
   const s3 = getS3Client();
   if (!s3) return '';
   try {
-    const { endpoint } = loadShipConfig().s3!;
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const key = `logs/${HOSTNAME}/${label}-${ts}.log`;
     const body = error instanceof Error
@@ -632,7 +632,8 @@ async function uploadErrorLog(label: string, error: unknown): Promise<string> {
       Body: Buffer.from(body),
       ContentType: 'text/plain',
     }));
-    return ` ([log](${endpoint}/${s3.bucket}/${key}))`;
+    const url = await getSignedUrl(s3.client, new GetObjectCommand({ Bucket: s3.bucket, Key: key }), { expiresIn: 7 * 86_400 });
+    return ` ([log](${url}))`;
   } catch { return ''; }
 }
 
