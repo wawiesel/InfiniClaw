@@ -111,9 +111,11 @@ Thread: [1/5] secrets up to date
         [2/5] pulled 3 code commit(s)
         [3/5] rebuilt ✓
         [4/5] parker restarted ✓
-        [5/5] relay restarting
+        [5/5] ✅ refit (Poseidon) complete (10:08 · 1m)
 Main:   ✅ refit (Poseidon) complete (10:08 · 1m)
 ```
+
+The final status line (✅ or ⛔) always posts to both the thread and the main timeline.
 
 ### Failure alert threads
 

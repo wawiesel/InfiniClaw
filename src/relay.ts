@@ -1408,7 +1408,7 @@ function registerRelayCommands(): void {
       if (!threadRoot) return;
       const elapsed = () => Date.now() - startedAt;
       const bots = getActiveBots();
-      const totalStages = 3 + bots.length + 1; // sync secrets, sync code, build, per-bot restart, relay restart
+      const totalStages = 3 + bots.length + 1; // sync secrets, sync code, build, per-bot restarts, done
       let stage = 0;
       const s = (text: string) => threadReply(conn, threadRoot, `[${++stage}/${totalStages}] ${text}`);
 
@@ -1437,8 +1437,8 @@ function registerRelayCommands(): void {
         }
 
         persistFleet();
-        await s('relay restarting');
         const msg = statusLine('✅', 'refit', 'complete', elapsed());
+        await s(msg);
         await reply(conn, msg);
         await sleep(1_000);
         try {
