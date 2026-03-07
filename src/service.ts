@@ -504,6 +504,13 @@ export INFINICLAW_ROOT=${shellQuote(root)}
 export PATH=${shellQuote(pathVal)}
 export HOME=${shellQuote(os.homedir())}
 
+# Captain identity (fleet-wide, from secrets/captain)
+CAPTAIN_FILE=${shellQuote(path.join(config.secretsPath, 'captain'))}
+if [ -f "\$CAPTAIN_FILE" ]; then
+  source "\$CAPTAIN_FILE"
+  export CAPTAIN_USER_ID
+fi
+
 # Brain env → Anthropic/Claude SDK env (mirrors applyBrainEnv)
 export ANTHROPIC_MODEL="\${BRAIN_MODEL:-}"
 if [ -n "\${BRAIN_BASE_URL:-}" ]; then
