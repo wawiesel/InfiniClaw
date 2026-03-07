@@ -7,7 +7,7 @@
     "external/nanoclaw"
   ],
   "scripts": {
-    "build": "npm run build -w nanoclaw && tsc",
+    "build": "bash scripts/rebuild.sh",
     "dev": "npm run build -w nanoclaw && tsc --watch",
     "cli": "node dist/cli.js",
     "test": "vitest run --root .",

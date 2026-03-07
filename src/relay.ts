@@ -222,20 +222,14 @@ function rebuildInfiniClaw(): string {
   try {
     const nodeBinDir = path.dirname(process.execPath);
     const execOpts = { cwd: root, encoding: 'utf-8' as const, stdio: 'pipe' as const, env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` } };
-    // Install deps if lockfile changed
-    const lockHash = path.join(root, 'node_modules', '.package-lock-hash');
-    const lockFile = path.join(root, 'package-lock.json');
-    let needInstall = !fs.existsSync(path.join(root, 'node_modules'));
-    if (!needInstall && fs.existsSync(lockFile)) {
-      const current = execSync(`md5sum ${lockFile} 2>/dev/null || md5 -q ${lockFile}`, execOpts).trim().split(/\s+/)[0];
-      const stored = (() => { try { return fs.readFileSync(lockHash, 'utf-8').trim(); } catch { return ''; } })();
-      needInstall = current !== stored;
-      if (!needInstall) { /* up to date */ } else {
-        execSync('npm install', { ...execOpts, timeout: 300_000 });
-        fs.writeFileSync(lockHash, current);
-      }
+    // Use rebuild script (pulled via git, so it's always up to date)
+    const script = path.join(root, 'scripts', 'rebuild.sh');
+    if (fs.existsSync(script)) {
+      execSync(`bash ${shellQuote(script)}`, { ...execOpts, timeout: 300_000 });
+    } else {
+      // Fallback for repos without the script
+      execSync('npm run build', { ...execOpts, timeout: 120_000 });
     }
-    execSync('npm run build', { ...execOpts, timeout: 120_000 });
     try { installGitHooks(); } catch { /* best effort */ }
     // Deploy dist files to active bot instances
     const distDir = path.join(root, 'dist');
@@ -912,6 +906,12 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
       }
     }
     if (newCommits === 0) return { ok: true, output: 'up to date', newCommits: 0 };
+    // Check if package-lock.json will change (need npm install after pull)
+    let lockfileChanged = false;
+    try {
+      const diff = execSync('git diff HEAD..origin/main --name-only', { ...execOpts, timeout: 5_000 }).trim();
+      lockfileChanged = diff.split('\n').some(f => f === 'package-lock.json');
+    } catch { /* best effort */ }
     // Stash any uncommitted changes (bots may have WIP edits)
     let didStash = false;
     try {
@@ -929,22 +929,34 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
     if (workingTreeStatus) {
       throw new Error(`git working tree not clean after stash:\n${workingTreeStatus}`);
     }
+    let output: string;
     try {
       // Rebase
-      const output = execSync('git rebase origin/main', execOpts).trim();
-      return { ok: true, output, newCommits };
+      output = execSync('git rebase origin/main', execOpts).trim();
     } catch (rebaseErr) {
       // Origin is authoritative — abort and reset to origin/main
       log(`git sync: rebase conflict, resetting to origin/main`);
       try { execSync('git rebase --abort', execOpts); } catch { /* ignore */ }
       execSync('git reset --hard origin/main', execOpts);
-      return { ok: true, output: 'reset to origin/main (rebase conflict auto-resolved)', newCommits };
+      lockfileChanged = true; // force install after hard reset
+      output = 'reset to origin/main (rebase conflict auto-resolved)';
     } finally {
       // Restore stashed changes
       if (didStash) {
         try { execSync('git stash pop', execOpts); } catch { /* conflict — leave in stash */ }
       }
     }
+    // Install deps before build if lockfile changed — prevents chicken-and-egg
+    // where new code imports a dep that hasn't been installed yet
+    if (lockfileChanged) {
+      try {
+        log('git sync: package-lock.json changed, running npm install');
+        execSync('npm install', { ...execOpts, timeout: 300_000 });
+      } catch (err) {
+        log(`git sync: npm install failed: ${errStr(err)}`);
+      }
+    }
+    return { ok: true, output, newCommits };
   } catch (err) {
     return { ok: false, output: errStr(err), newCommits: -1 };
   }
