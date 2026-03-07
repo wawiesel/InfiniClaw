@@ -4,9 +4,9 @@
 
 These are real problems. Simplify, don't add complexity.
 
-### Duplicate working indicator
+### Status indicator simplification
 
-`⏳ working...` appears twice when the interrupt lobe handles a message and then the main container re-processes it. The indicator system (`createIndicatorSet` in `main.ts`) is overbuilt with retry logic, adaptive timers, and bump functions. It should be one message that gets edited. Strip it down.
+The `⏳ working...` indicator system (`createIndicatorSet` in `main.ts`) is overbuilt with retry logic, adaptive timers, and bump functions. It should be one simple message that gets edited per Thread Brain. Strip it down.
 
 ### No streaming to Matrix
 

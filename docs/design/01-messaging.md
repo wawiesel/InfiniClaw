@@ -4,38 +4,38 @@
 
 ```
 User message → Matrix → main.ts message loop → SQLite → processGroupMessages()
-  → container-spawn.ts → podman container runs agent-runner
-    → agent-runner calls Claude SDK → streams output markers to stdout
-  → main.ts parses stdout → forwards to Matrix (progress + results)
-  → working indicator: ⏳ working... → ⏳ working (Xm) → ⏳ worked (Xm)
-
-Scheduled task → task-scheduler.ts poll → group-queue.ts
-  → same container spawn path → output forwarded to Matrix
-
-IPC command → container writes JSON to /workspace/ipc/output/
-  → ipc-watcher.ts polls directory → processes command → writes response
+  → Main Brain (Trunk) triage Turn (2s)
+    → [IF COMPLEX] branch_to_thread() tool
+      → Thread Brain (Branch) process spawned in container
+        → Thread Brain performs work (with Async Lobes)
+        → Thread Brain reviews with CO
+        → Thread Brain merges to MEMORY.md
+    → [IF SIMPLE] Main Brain replies directly
 ```
+
+## Non-Blocking Architecture
+
+The fundamental design of InfiniClaw messaging is **responsiveness**. 
+
+1.  **The Trunk (Main Brain):** Every bot runs a primary `claude-code` process that is strictly for triage. It never performs long-running bash commands. If a turn takes more than 2 seconds, it is a design failure.
+2.  **The Branch (Thread Brain):** Real work is performed by parallel `claude-code` processes spawned inside the same container, locked to specific Matrix threads.
+3.  **No SIGTERM:** New messages from the Captain never trigger a `SIGTERM`. They are enqueued via IPC. The Main Brain (being non-blocking) fetches them within seconds natively.
 
 ## Message Routing
 
-Bots see all room messages as context but only **respond** when it's their job. The host collects all bot Matrix user IDs at startup (`collectBotMatrixUserIds`) and uses them to distinguish human from bot messages.
+Bots see all room messages as context but only **respond** when it's their job. 
 
 **Response triggers:**
-- **Callout** — a message (human or bot) contains `BotName` (case-insensitive word boundary match: `\bBotName\b`)
-- **Participating thread** — someone posts in a thread the bot previously sent a message in
-- **CO main timeline** — the commanding officer responds to any unaddressed human message on the main timeline
+- **Main Timeline (CO Only):** The Commanding Officer responds to any unaddressed human message on the main timeline.
+- **Callout:** Any message (human or bot) containing `BotName` triggers that bot's Main Brain.
+- **Participating thread:** Posting in a thread where a bot's Thread Brain is active (or previously participated) triggers a response in that thread.
 
-**Bot-to-bot communication:** Bots can trigger each other by including the target bot's name in the message. This enables natural collaboration — e.g. Cid says "Parker, what's the status?" and Parker's container spawns to respond. Bot messages without a callout are included as context but don't trigger a response.
-
-**Thread participation** — a bot "participates" in a thread if it has previously sent a message there (`is_from_me = 1`). Messages from threads the bot doesn't participate in are excluded from context.
+**Bot-to-bot communication:** The CO delegates tasks by tagging other bots in a thread. This triggers the other bot's Main Brain to spawn its own Thread Brain for the task.
 
 ## Message Filtering
 
 Before routing, messages pass through filtering (`message-filtering.ts`):
-- **Self-echo** — bots ignore their own messages (`is_from_me` flag + content prefix).
-- **Pattern filtering** — messages matching `IGNORE_PATTERNS` (system noise, status messages) are skipped.
-- **Sender filtering** — messages from `IGNORE_SENDERS` are hidden entirely (optional, for edge cases).
+- **Self-echo:** bots ignore their own messages.
+- **Pattern filtering:** messages matching `IGNORE_PATTERNS` (status messages) are skipped.
+- **Status indicators:** `⏳ working` indicators from other bots are used for anti-echo-chamber coordination.
 
-## Message Queue
-
-FIFO per room. One container at a time. `group-queue.ts` enforces this with overflow queueing and retry backoff.

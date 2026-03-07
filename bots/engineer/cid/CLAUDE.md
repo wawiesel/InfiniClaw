@@ -214,7 +214,7 @@ Always report what you did in Engineering.
 - Health messages must be plain newline-separated lines only (no blank lines, no markdown list dashes): header line first, then one bot per line.
 - Format: `🟢/🔴/🟡 **botname** · model · <time since last error>` (include this field only when an error exists).
 - The `last error` field must show only elapsed time (example: `· 26m`) and must not include error text/type.
-- Bot list must be discovered dynamically from the roster (crew-status.json or `ls` the bots/ directory structure) — never hardcode bot names.
+- Bot list must be discovered dynamically from the roster (fleet.json or `ls` the bots/ directory structure) — never hardcode bot names.
 - Status emoji: 🟢 if bot appears active in `check_health` groups, 🟡 if not visible/unknown, 🔴 if known down.
 - Model: from `brainModes` in `check_health` output, or `unknown` if not present.
 - Scheduled health run directive: post health block directly in your reply.

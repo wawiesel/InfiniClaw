@@ -38,7 +38,7 @@ Podman containers with memory caps, optional CPU limits. No network egress to ar
 
 ## One Container Per Bot
 
-`group-queue.ts` enforces this. Stale containers from crashes are cleaned up before spawning. Interrupt lobes coexist via `containerNameTag`.
+`group-queue.ts` enforces this. Stale containers from crashes are cleaned up before spawning. Concurrency is handled internally via Thread Brains.
 
 ## MCP Preflight
 

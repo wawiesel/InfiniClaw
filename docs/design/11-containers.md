@@ -1,8 +1,16 @@
-# 00 — Containers
+# 11 — Containers
 
-One bot = one Podman container. Each container runs the agent-runner (which spawns Claude Code CLI) with the bot's persona, tools, and mounts. The host injects secrets as env vars — nothing is baked into images.
+One bot = one Podman container. Each container runs the `agent-runner` host process which manages a hierarchy of AI processes.
 
-Containers run with memory caps (`CONTAINER_MEMORY_MB`, default 6GB) and optional CPU limits. There must never be multiple containers for the same bot, except interrupt lobes (which use `containerNameTag: 'interrupt'` to coexist).
+## Internal Concurrency
+
+Unlike standard container models where one container equals one process, an InfiniClaw container acts like a mini-OS:
+1.  **The Agent Runner:** The Node.js entry point that manages IPC and process lifecycle.
+2.  **The Main Brain (Trunk):** A persistent `claude-code` process for triage and management.
+3.  **Thread Brains (Branches):** Multiple concurrent `claude-code` processes spawned for specific tasks in Matrix threads.
+4.  **Async Lobes (Workers):** Stateless subprocesses for fast execution.
+
+This architecture ensures the bot is always reachable on the main timeline regardless of how many complex tasks are running in parallel.
 
 ## Mount System
 
