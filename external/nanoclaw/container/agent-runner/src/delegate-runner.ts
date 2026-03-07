@@ -64,27 +64,6 @@ function resolveDelegateCwd(cwd?: string): { ok: true; cwd: string } | { ok: fal
   return { ok: true, cwd: resolved };
 }
 
-function isProviderUnavailableError(line: string): boolean {
-  const s = line.toLowerCase();
-  return [
-    'insufficient_quota',
-    'insufficient quota',
-    'rate limit',
-    '429',
-    'unauthorized',
-    'forbidden',
-    'authentication',
-    'invalid api key',
-    'api key',
-    'not logged in',
-    'login required',
-    'token is not active',
-    'credits',
-    'billing',
-    'usage limit',
-  ].some((needle) => s.includes(needle));
-}
-
 function isIgnorableDelegateStderr(line: string): boolean {
   const s = line.toLowerCase();
   return (
@@ -153,6 +132,88 @@ function spawnNpxDelegate(
 
 function sanitizeThreadIdForFilename(threadId: string): string {
   return threadId.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function buildLobeId(): string {
+  return `lobe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function resolveLobeResultInputDir(ctxIpcDir: string, groupFolder: string): string {
+  const explicit = firstSet(process.env.NANOCLAW_THREAD_IPC_INPUT_DIR);
+  if (explicit) return explicit;
+
+  const dataDir = firstSet(process.env.NANOCLAW_DATA_DIR, process.env.DATA_DIR);
+  if (dataDir) return path.join(dataDir, 'ipc', groupFolder, 'input');
+
+  return path.join(ctxIpcDir, 'input');
+}
+
+function writeLobeResultFile(
+  inputDir: string,
+  lobeId: string,
+  output: string,
+  exitCode: number | null,
+): void {
+  fs.mkdirSync(inputDir, { recursive: true });
+  const filename = `result-${lobeId}.json`;
+  const filePath = path.join(inputDir, filename);
+  const tempPath = `${filePath}.tmp`;
+  const payload = {
+    type: 'lobe_result',
+    lobe_id: lobeId,
+    output,
+    exitCode,
+  };
+  fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2));
+  fs.renameSync(tempPath, filePath);
+}
+
+function spawnOllamaDelegate(
+  cwd: string,
+  env: DelegateEnv,
+  ollamaApiHost: string,
+  model: string,
+  prompt: string,
+  system?: string,
+): ReturnType<typeof spawn> {
+  const runner = `
+const host = process.env.OLLAMA_HOST_URL;
+const model = process.env.OLLAMA_MODEL;
+const prompt = process.env.OLLAMA_PROMPT;
+const system = process.env.OLLAMA_SYSTEM;
+const body = { model, prompt, stream: false };
+if (system) body.system = system;
+fetch(\`\${host}/api/generate\`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+}).then(async (res) => {
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(\`Ollama error (\${res.status}): \${text}\`);
+    process.exit(1);
+    return;
+  }
+  const data = await res.json();
+  process.stdout.write(String(data?.response || ''));
+  process.exit(0);
+}).catch((err) => {
+  console.error(String(err));
+  process.exit(1);
+});
+`.trim();
+
+  return spawn(process.execPath, ['-e', runner], {
+    cwd,
+    env: {
+      ...env,
+      OLLAMA_HOST_URL: ollamaApiHost,
+      OLLAMA_MODEL: model,
+      OLLAMA_PROMPT: prompt,
+      OLLAMA_SYSTEM: system,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 }
 
 export function registerDelegateTools(
@@ -378,10 +439,10 @@ The tool handles the entire flow:
 1. Posts summary in the active thread when one exists, otherwise on main timeline
 2. Captures the summary event ID for threading when no active thread exists
 3. Posts the objective in the delegate thread
-4. Runs the lobe subprocess with the objective
-5. Posts the lobe response in the same thread
-6. Restores the previous work thread (or clears if none was active)
-7. Returns the lobe output to the calling agent
+4. Starts the lobe subprocess in the background (fire-and-forget)
+5. Restores the previous work thread (or clears if none was active)
+6. Returns {"status":"Lobe started","lobe_id":"..."} immediately
+7. On lobe exit, writes result-<lobe_id>.json to IPC input for next-turn processing
 
 You never need to call send_message, set_thread, or get_last_event_id manually for delegations.`,
     {
@@ -442,7 +503,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
       // Step 3: Post the objective in the thread with markdown formatting
       emitDelegateMessage(args.objective, threadId ?? undefined);
 
-      // Step 4+5: Resolve cwd and run the lobe
+      // Step 4+5: Resolve cwd and start the lobe in background
       const cwdResult = resolveDelegateCwd(args.cwd);
       if (!cwdResult.ok) {
         const errText = `<font color="#cc0000">unavailable: ${cwdResult.error}</font>`;
@@ -465,205 +526,109 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         args.objective,
       ].join('\n');
 
-      // Ollama uses HTTP, not subprocess — handle before the subprocess promise
-      if (lobe === 'ollama') {
-        const prefixedMessages: string[] = [];
-        let unavailableTriggered = false;
-        const pushMsg = (text: string, isStatus = false) => {
-          const normalized = text.replace(/\r/g, '').trim();
-          if (!normalized) return;
-          prefixedMessages.push(`${lobe}: ${normalized}`);
-          const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
-          emitDelegateMessage(formatted, threadId ?? undefined);
-        };
-        const controller = new AbortController();
-        const ollamaTimer = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-          const body: Record<string, unknown> = {
-            model: effectiveModel,
-            prompt: args.objective,
-            stream: false,
-          };
-          if (args.system) body.system = args.system;
-          const res = await fetch(`${ollamaHost}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            signal: controller.signal,
+      const lobeId = buildLobeId();
+      let proc: ReturnType<typeof spawn>;
+      try {
+        const delegateEnv = buildDelegateEnv();
+        if (lobe === 'codex') {
+          const codexArgs = [
+            'exec', '--json', '--skip-git-repo-check',
+            '--dangerously-bypass-approvals-and-sandbox',
+            '--cd', cwdResult.cwd,
+            '--model', effectiveModel,
+            delegatedObjective,
+          ];
+          proc = spawnNpxDelegate('@openai/codex', codexArgs, cwdResult.cwd, delegateEnv);
+        } else if (lobe === 'claude') {
+          const claudeArgs = [
+            '--print',
+            '--verbose',
+            '--output-format', 'stream-json',
+            '--dangerously-skip-permissions',
+            '--model', effectiveModel,
+            '--add-dir', cwdResult.cwd,
+          ];
+          if (args.effort) claudeArgs.push('--effort', args.effort);
+          proc = spawn('claude', claudeArgs, {
+            cwd: cwdResult.cwd,
+            env: delegateEnv,
+            stdio: ['pipe', 'pipe', 'pipe'],
           });
-          if (!res.ok) {
-            const text = await res.text();
-            unavailableTriggered = true;
-            pushMsg(`unavailable: Ollama error (${res.status}): ${text}`, true);
-          } else {
-            const data = await res.json() as { response?: string };
-            const responseText = (data.response || '').trim();
-            if (responseText) {
-              pushMsg(responseText);
-            } else {
-              pushMsg('completed with no textual output.', true);
-            }
-          }
-        } catch (err) {
-          unavailableTriggered = true;
-          pushMsg(`unavailable: ${err instanceof Error ? err.message : String(err)}`, true);
-        } finally {
-          clearTimeout(ollamaTimer);
+          proc.stdin?.write(delegatedObjective);
+          proc.stdin?.end();
+        } else if (lobe === 'gemini') {
+          const geminiArgs = ['--prompt', delegatedObjective, '--yolo', '--output-format', 'text', '--model', effectiveModel];
+          proc = spawnNpxDelegate('@google/gemini-cli', geminiArgs, cwdResult.cwd, delegateEnv);
+        } else {
+          proc = spawnOllamaDelegate(
+            cwdResult.cwd,
+            delegateEnv,
+            ollamaHost,
+            effectiveModel,
+            args.objective,
+            args.system,
+          );
         }
-        const ollamaResult: { content: Array<{ type: 'text'; text: string }>; isError?: boolean } = {
-          content: [{ type: 'text' as const, text: prefixedMessages.join('\n\n') || `${lobe}: unavailable` }],
-        };
-        if (unavailableTriggered) ollamaResult.isError = true;
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        emitDelegateMessage(`<font color="#cc0000">unavailable: ${reason}</font>`, threadId ?? undefined);
         if (threadId) setThread(previousWorkThread);
-        return ollamaResult;
+        return {
+          content: [{ type: 'text' as const, text: `${lobe}: unavailable: ${reason}` }],
+          isError: true,
+        };
       }
 
-      const result = await new Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>((resolve) => {
-        const prefixedMessages: string[] = [];
-        const stderrLines: string[] = [];
-        let stdoutBuffer = '';
-        let stderrBuffer = '';
-        let finalized = false;
-        let unavailableTriggered = false;
-        let timedOut = false;
-        let proc: ReturnType<typeof spawn> | null = null;
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        if (proc.exitCode === null) proc.kill('SIGTERM');
+      }, timeoutMs);
 
-        const finalize = (payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean }) => {
-          if (finalized) return;
-          finalized = true;
-          resolve(payload);
-        };
-
-        const pushMessage = (text: string, isStatus = false) => {
-          const normalized = text.replace(/\r/g, '').trim();
-          if (!normalized) return;
-          prefixedMessages.push(`${lobe}: ${normalized}`);
-          const formatted = isStatus ? `<font color="#888888"><em>${normalized}</em></font>` : normalized;
-          emitDelegateMessage(formatted, threadId ?? undefined);
-        };
-
-        const failUnavailable = (reason: string) => {
-          if (unavailableTriggered) return;
-          unavailableTriggered = true;
-          pushMessage(`unavailable: ${reason}`, true);
-          if (proc && proc.exitCode === null) proc.kill('SIGTERM');
-        };
-
-        const handleStdoutLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          if (lobe === 'codex') {
-            try {
-              const event = JSON.parse(trimmed) as { type?: string; message?: string; item?: { type?: string; text?: string } };
-              if (event.type === 'item.completed' && event.item?.type === 'agent_message' && typeof event.item.text === 'string') {
-                pushMessage(event.item.text);
-                return;
-              }
-              if (event.type === 'error' && typeof event.message === 'string') {
-                failUnavailable(event.message);
-                return;
-              }
-            } catch { pushMessage(trimmed); return; }
-          } else if (lobe === 'claude') {
-            try {
-              const event = JSON.parse(trimmed) as { type?: string; message?: string; content?: string; result?: string };
-              if (event.type === 'assistant' && typeof event.content === 'string') {
-                pushMessage(event.content);
-                return;
-              }
-              if (event.type === 'result' && typeof event.result === 'string') {
-                pushMessage(event.result);
-                return;
-              }
-              if (event.type === 'error' && typeof event.message === 'string') {
-                failUnavailable(event.message);
-                return;
-              }
-              // Skip partial streaming deltas — they accumulate into final result
-              if (event.type === 'content_block_delta') return;
-            } catch { pushMessage(trimmed); return; }
-          } else {
-            pushMessage(trimmed);
-          }
-        };
-
-        const handleStderrLine = (line: string) => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          if (isIgnorableDelegateStderr(trimmed)) return;
-          stderrLines.push(trimmed);
-          if (stderrLines.length > 100) stderrLines.shift();
-          if (!unavailableTriggered && isProviderUnavailableError(trimmed)) failUnavailable(trimmed);
-        };
-
-        try {
-          const delegateEnv = buildDelegateEnv();
-          if (lobe === 'codex') {
-            const codexArgs = [
-              'exec', '--json', '--skip-git-repo-check',
-              '--dangerously-bypass-approvals-and-sandbox',
-              '--cd', cwdResult.cwd,
-              '--model', effectiveModel,
-              delegatedObjective,
-            ];
-            proc = spawnNpxDelegate('@openai/codex', codexArgs, cwdResult.cwd, delegateEnv);
-          } else if (lobe === 'claude') {
-            const claudeArgs = [
-              '--print',
-              '--verbose',
-              '--output-format', 'stream-json',
-              '--dangerously-skip-permissions',
-              '--model', effectiveModel,
-              '--add-dir', cwdResult.cwd,
-            ];
-            if (args.effort) claudeArgs.push('--effort', args.effort);
-            proc = spawn('claude', claudeArgs, {
-              cwd: cwdResult.cwd,
-              env: delegateEnv,
-              stdio: ['pipe', 'pipe', 'pipe'],
-            });
-            // Pipe objective to stdin (Claude CLI requires stdin input with --print)
-            proc.stdin!.write(delegatedObjective);
-            proc.stdin!.end();
-          } else {
-            const geminiArgs = ['--prompt', delegatedObjective, '--yolo', '--output-format', 'text', '--model', effectiveModel];
-            proc = spawnNpxDelegate('@google/gemini-cli', geminiArgs, cwdResult.cwd, delegateEnv);
-          }
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          emitDelegateMessage(`<font color="#cc0000">unavailable: ${reason}</font>`, threadId ?? undefined);
-          finalize({ content: [{ type: 'text', text: `${lobe}: unavailable: ${reason}` }], isError: true });
-          return;
-        }
-
-        const timer = setTimeout(() => { timedOut = true; failUnavailable(`timed out after ${timeoutMs}ms`); }, timeoutMs);
-
-        proc.stdout!.on('data', (chunk: Buffer | string) => {
-          stdoutBuffer += chunk.toString();
-          while (true) { const idx = stdoutBuffer.indexOf('\n'); if (idx === -1) break; handleStdoutLine(stdoutBuffer.slice(0, idx)); stdoutBuffer = stdoutBuffer.slice(idx + 1); }
-        });
-        proc.stderr!.on('data', (chunk: Buffer | string) => {
-          stderrBuffer += chunk.toString();
-          while (true) { const idx = stderrBuffer.indexOf('\n'); if (idx === -1) break; handleStderrLine(stderrBuffer.slice(0, idx)); stderrBuffer = stderrBuffer.slice(idx + 1); }
-        });
-        proc.on('error', (err) => { clearTimeout(timer); failUnavailable(err.message); finalize({ content: [{ type: 'text', text: prefixedMessages.join('\n\n') || `${lobe}: unavailable: ${err.message}` }], isError: true }); });
-        proc.on('close', (code, signal) => {
-          clearTimeout(timer);
-          if (stdoutBuffer.trim()) handleStdoutLine(stdoutBuffer);
-          if (stderrBuffer.trim()) handleStderrLine(stderrBuffer);
-          if (timedOut || unavailableTriggered) { finalize({ content: [{ type: 'text', text: prefixedMessages.join('\n\n') || `${lobe}: unavailable` }], isError: true }); return; }
-          if (code !== 0) { failUnavailable(stderrLines[stderrLines.length - 1] || `${lobe} exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`); finalize({ content: [{ type: 'text', text: prefixedMessages.join('\n\n') }], isError: true }); return; }
-          if (prefixedMessages.length === 0) prefixedMessages.push(`${lobe}: completed with no textual output.`);
-          finalize({ content: [{ type: 'text', text: prefixedMessages.join('\n\n') }] });
-        });
+      proc.stdout?.on('data', (chunk: Buffer | string) => {
+        stdout += chunk.toString();
+      });
+      proc.stderr?.on('data', (chunk: Buffer | string) => {
+        stderr += chunk.toString();
+      });
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        const inputDir = resolveLobeResultInputDir(ctx.ipcDir, ctx.groupFolder);
+        const output = `spawn error: ${err.message}`;
+        writeLobeResultFile(inputDir, lobeId, output, null);
+      });
+      proc.on('close', (code, signal) => {
+        clearTimeout(timer);
+        const inputDir = resolveLobeResultInputDir(ctx.ipcDir, ctx.groupFolder);
+        const parts: string[] = [];
+        const cleanedStdout = stdout.trim();
+        const cleanedStderr = stderr
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0 && !isIgnorableDelegateStderr(line))
+          .join('\n');
+        if (cleanedStdout) parts.push(cleanedStdout);
+        if (cleanedStderr) parts.push(`[stderr]\n${cleanedStderr}`);
+        if (timedOut) parts.push(`[timeout] terminated after ${timeoutMs}ms`);
+        if (signal) parts.push(`[signal] ${signal}`);
+        const output = parts.join('\n\n');
+        writeLobeResultFile(inputDir, lobeId, output, code);
+        // TODO: The relay/agent-runner injects a [System] message into the next turn when it sees a lobe_result IPC file.
       });
 
+      proc.unref();
+
       // Step 6: Restore previous work thread (or clear if none was active).
-      // This ensures the bot returns to its prior thread context after delegation,
-      // rather than always landing on the main timeline.
       if (threadId) setThread(previousWorkThread);
 
-      return result;
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ status: 'Lobe started', lobe_id: lobeId }),
+        }],
+      };
     },
   );
 }
