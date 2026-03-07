@@ -120,9 +120,9 @@ Version info follows a standard form:
 Examples:
 
 ```
-· 2a9cc64 ↑0 (5m)      ← committed 5m ago, matches HEAD
-· f25432f ↓3 (2h)       ← commit is 2h old, 3 commits behind HEAD
-· f814482 ↑1 (10m)      ← commit is 10m old, 1 unpushed commit
+· 2a9cc64 (5m) ↑0      ← committed 5m ago, matches HEAD
+· f25432f (2h) ↓3       ← commit is 2h old, 3 commits behind HEAD
+· f814482 (10m) ↑1      ← commit is 10m old, 1 unpushed commit
 ```
 
 Implemented by `gitVersionStr()`, `repoVersion()`, `relayVersion()`, `botVersion()` in `src/relay.ts`.
@@ -137,11 +137,11 @@ Multi-step operations and failure alerts use Matrix threads to keep the main tim
 
 ```
 Main:   ⚓ refit (Poseidon) starting (10:07)
-Thread: [1/7 2s]  ✅ secrets up to date · a1b2c3d ↑0 (3h)
-        [2/7 5s]  ✅ code pulled 3 commit(s) · 82bfd78 ↑0 (20m)
-        [3/7 12s] ✅ build · 82bfd78 ↑0 (12s)
-        [4/7 25s] ✅ max deployed · 82bfd78 ↑0 (25s)
-        [5/7 38s] ✅ parker restarted · 82bfd78 ↑0 (38s)
+Thread: [1/7 2s]  ✅ secrets up to date · a1b2c3d (3h) ↑0
+        [2/7 5s]  ✅ code pulled 3 commit(s) · 82bfd78 (20m) ↑0
+        [3/7 12s] ✅ relay + dist rebuilt · 82bfd78 (20m) ↑0
+        [4/7 25s] ✅ max deployed · 82bfd78 (20m) ↑0
+        [5/7 38s] ✅ parker restarted · 82bfd78 (20m) ↑0
         [6/7 48s] ⛔ nora restart failed
         [7/7 50s] ✅ refit (Poseidon) complete (10:08 · 50s)
 Main:   ✅ refit (Poseidon) complete (10:08 · 50s)

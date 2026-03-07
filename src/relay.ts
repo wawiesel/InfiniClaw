@@ -279,65 +279,52 @@ function isAuthorized(sender: string, captainUserId: string, operatorUserId: str
 /** Is this ship the "speaker" — lowest-rank active ship? Used to avoid duplicate replies. */
 // ── Git version helper ────────────────────────────────────────────
 
-/**
- * Git version string: ` · sha ↑N|↓N (age)`.
- * sha = HEAD, age = time since commit.
- * With distFile: ↑0/↓N vs HEAD. Without: ↑N/↓N vs origin/main.
- */
-function gitVersionStr(root: string, distFile?: string): string {
-  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
-  try {
-    let sha: string;
-    let ageMs: number;
-
-    sha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
-    const epoch = parseInt(execSync('git log -1 --format=%ct', { cwd: root, ...execOpts }).trim(), 10) * 1000;
-    ageMs = Date.now() - epoch;
-
-    if (!sha) return '';
-    let ud: string;
-    if (distFile) {
-      // Dist file mode: how far behind HEAD is the deployed artifact?
-      const behind = parseInt(execSync(`git rev-list ${sha}..HEAD --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
-      ud = behind === 0 ? '↑0' : `↓${behind}`;
-    } else {
-      // Repo mode: show relationship to origin
-      const ahead = parseInt(execSync('git rev-list origin/main..HEAD --count', { cwd: root, ...execOpts }).trim(), 10) || 0;
-      const behind = parseInt(execSync('git rev-list HEAD..origin/main --count', { cwd: root, ...execOpts }).trim(), 10) || 0;
-      if (ahead > 0 && behind > 0) ud = `↑${ahead}↓${behind}`;
-      else if (ahead > 0) ud = `↑${ahead}`;
-      else if (behind > 0) ud = `↓${behind}`;
-      else ud = '↑0';
-    }
-    return ` · ${sha} ${ud} (${formatDuration(ageMs)})`;
-  } catch { return ''; }
+/** Format version string: ` · sha (age) ↑N|↓N` */
+function fmtVersion(sha: string, ageMs: number, ud: string): string {
+  return ` · ${sha} (${formatDuration(ageMs)}) ${ud}`;
 }
 
-/** Version string for the relay dist. */
-function relayVersion(root: string): string {
-  return gitVersionStr(root, path.join(root, 'dist', 'relay.js'));
+/** Compute ↑N/↓N relation between two refs. */
+function gitRelation(root: string, local: string, upstream: string): string {
+  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: root };
+  const ahead = parseInt(execSync(`git rev-list ${upstream}..${local} --count`, execOpts).trim(), 10) || 0;
+  const behind = parseInt(execSync(`git rev-list ${local}..${upstream} --count`, execOpts).trim(), 10) || 0;
+  if (ahead > 0 && behind > 0) return `↑${ahead}↓${behind}`;
+  if (ahead > 0) return `↑${ahead}`;
+  if (behind > 0) return `↓${behind}`;
+  return '↑0';
 }
 
-/** Version string for a bot's deployed instance — reads GIT_VERSION stamp. */
-function botVersion(root: string, bot: string): string {
-  const instanceDir = path.join(root, '_runtime', 'instances', bot);
-  const versionFile = path.join(instanceDir, 'GIT_VERSION');
-  try {
-    const stamp = fs.readFileSync(versionFile, 'utf-8').trim(); // "sha (date) subject"
-    const sha = stamp.split(' ')[0];
-    if (!sha) return '';
-    const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: root };
-    const epoch = parseInt(execSync(`git log -1 --format=%ct ${sha}`, execOpts).trim(), 10) * 1000;
-    const ageMs = Date.now() - epoch;
-    const behind = parseInt(execSync(`git rev-list ${sha}..HEAD --count`, execOpts).trim(), 10) || 0;
-    const ud = behind === 0 ? '↑0' : `↓${behind}`;
-    return ` · ${sha} ${ud} (${formatDuration(ageMs)})`;
-  } catch { return ''; }
+/** Commit age in ms from a sha. */
+function commitAge(root: string, sha: string): number {
+  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: root };
+  const epoch = parseInt(execSync(`git log -1 --format=%ct ${sha}`, execOpts).trim(), 10) * 1000;
+  return Date.now() - epoch;
 }
 
-/** Version string for a repo (uses HEAD, no dist file). */
+/** Version string for a repo: HEAD vs origin/main. */
 function repoVersion(repoDir: string): string {
-  return gitVersionStr(repoDir);
+  try {
+    const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: repoDir };
+    const sha = execSync('git rev-parse --short HEAD', execOpts).trim();
+    if (!sha) return '';
+    return fmtVersion(sha, commitAge(repoDir, sha), gitRelation(repoDir, 'HEAD', 'origin/main'));
+  } catch { return ''; }
+}
+
+/** Version string for the relay dist: HEAD vs origin (relay is built from repo HEAD). */
+function relayVersion(root: string): string {
+  return repoVersion(root);
+}
+
+/** Version string for a bot's deployed instance: stamped sha vs HEAD. */
+function botVersion(root: string, bot: string): string {
+  try {
+    const versionFile = path.join(root, '_runtime', 'instances', bot, 'GIT_VERSION');
+    const sha = fs.readFileSync(versionFile, 'utf-8').trim().split(' ')[0];
+    if (!sha) return '';
+    return fmtVersion(sha, commitAge(root, sha), gitRelation(root, sha, 'HEAD'));
+  } catch { return ''; }
 }
 
 // ── Speaker election via S3 commit timestamps ────────────────────
