@@ -244,13 +244,39 @@ function verifyIntercomSig(body: string, formattedBody: string | undefined): boo
 }
 
 /** Is this machine the "speaker" — lowest-rank active machine? Used to avoid duplicate replies. */
+/** How many commits is this ship's InfiniClaw behind origin/main? 0 = current. Uses cached refs (no fetch). */
+function commitsBehind(): number {
+  try {
+    const root = resolveRoot();
+    // Use already-fetched refs (git sync loop fetches periodically)
+    const behind = execSync('git rev-list HEAD..origin/main --count', {
+      cwd: root, encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
+    }).trim();
+    return parseInt(behind, 10) || 0;
+  } catch {
+    return 0; // can't check — assume current
+  }
+}
+
 function isSpeaker(): boolean {
   try {
     const machines = loadMachines();
     const active = Object.entries(machines)
       .filter(([_, m]) => m.active)
       .sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
-    return active.length === 0 || active[0][0] === HOSTNAME;
+    if (active.length === 0) return true;
+
+    const myRank = active.findIndex(([name]) => name === HOSTNAME);
+    if (myRank < 0) return false; // not in active list
+
+    // If we're behind origin/main, defer to other ships (they may be current)
+    const behind = commitsBehind();
+    if (behind > 0 && active.length > 1) {
+      log(`speaker: deferring — ${behind} commit(s) behind origin/main`);
+      return false;
+    }
+
+    return myRank === 0;
   } catch {
     return true; // can't load machines — assume we should reply
   }
