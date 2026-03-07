@@ -505,14 +505,28 @@ async function matrixSync(
   return resp.json() as Promise<SyncResponse>;
 }
 
+/** Convert markdown links [text](url) to HTML. Returns HTML string if links found, null otherwise. */
+function markdownToHtml(text: string): string | null {
+  if (!/\[.*?\]\(https?:\/\//.test(text)) return null;
+  // Escape HTML entities first, then convert markdown links
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2">$1</a>');
+}
+
 async function matrixSend(homeserver: string, token: string, roomId: string, text: string): Promise<string | undefined> {
   const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const html = markdownToHtml(text);
+  const content: Record<string, unknown> = { msgtype: 'm.text', body: text };
+  if (html) {
+    content.format = 'org.matrix.custom.html';
+    content.formatted_body = html;
+  }
   const resp = await fetch(
     `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
     {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ msgtype: 'm.text', body: text }),
+      body: JSON.stringify(content),
     },
   );
   if (!resp.ok) {
@@ -534,6 +548,7 @@ async function matrixSendThread(homeserver: string, token: string, roomId: strin
       body: JSON.stringify({
         msgtype: 'm.text',
         body: text,
+        ...(markdownToHtml(text) ? { format: 'org.matrix.custom.html', formatted_body: markdownToHtml(text) } : {}),
         'm.relates_to': {
           rel_type: 'm.thread',
           event_id: threadRootId,
