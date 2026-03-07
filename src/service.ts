@@ -475,7 +475,15 @@ function rsyncInstance(root: string, dst: string, stdio: 'inherit' | 'pipe' = 'i
   fs.mkdirSync(srcDst, { recursive: true });
   execFileSync('rsync', ['-a', '--delete', `${path.join(root, 'src')}/`, `${srcDst}/`], { stdio });
 
-  // 3. Root config files
+  // 3. scripts/ → instance/scripts/
+  const scriptsSrc = path.join(root, 'scripts');
+  if (fs.existsSync(scriptsSrc)) {
+    const scriptsDst = path.join(dst, 'scripts');
+    fs.mkdirSync(scriptsDst, { recursive: true });
+    execFileSync('rsync', ['-a', '--delete', `${scriptsSrc}/`, `${scriptsDst}/`], { stdio });
+  }
+
+  // 4. Root config files
   for (const file of ['package.json', 'package-lock.json', 'tsconfig.json']) {
     const src = path.join(root, file);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dst, file));
