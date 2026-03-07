@@ -205,12 +205,9 @@ function gitVersionStr(root: string, botId: string): string {
     const agoStr = agoMin >= 60 ? `${Math.round(agoMin / 60)}h` : `${agoMin}m`;
     const sha = execSync(`git log -1 --format=%h --before="${new Date(mtime).toISOString()}"`, { cwd: root, ...execOpts }).trim() ||
       execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
-    const ahead = parseInt(execSync(`git rev-list origin/main..${sha} --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
-    const behind = parseInt(execSync(`git rev-list ${sha}..origin/main --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
-    let ud = '';
-    if (ahead > 0) ud += `↑${ahead}`;
-    if (behind > 0) ud += `↓${behind}`;
-    return ` · ${sha}${ud ? ' ' + ud : ''} (${agoStr})`;
+    const behind = parseInt(execSync(`git rev-list ${sha}..HEAD --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
+    const ud = behind === 0 ? '↑0' : `↓${behind}`;
+    return ` · ${sha} ${ud} (${agoStr})`;
   } catch { return ''; }
 }
 
@@ -1409,10 +1406,6 @@ function registerRelayCommands(): void {
         const machineOrder = Object.keys(byMachine).sort((a, b) =>
           (machines[a]?.rank ?? 99) - (machines[b]?.rank ?? 99)
         );
-
-        // Fetch once so rev-list is accurate
-        try { execSync('git fetch --quiet', { cwd: root, timeout: 10_000, stdio: 'pipe' }); } catch { /* best effort */ }
-        const originHead = (() => { try { return execSync('git rev-parse HEAD', { cwd: root, ...execOpts }).trim(); } catch { return ''; } })();
 
         const lines: string[] = [];
 
