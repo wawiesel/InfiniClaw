@@ -177,8 +177,23 @@ function resolveCaptainUserId(): string {
   return '';
 }
 
+let intercomSenders: Set<string> | null = null;
+
+function resolveIntercomSenders(): Set<string> {
+  if (intercomSenders) return intercomSenders;
+  intercomSenders = new Set();
+  try {
+    const config = loadIntercomConfig();
+    const domain = new URL(config.homeserver).host;
+    for (const room of Object.values(config.rooms)) {
+      intercomSenders.add(`@${room.username}:${domain}`);
+    }
+  } catch { /* best effort */ }
+  return intercomSenders;
+}
+
 function isAuthorized(sender: string, captainUserId: string): boolean {
-  return sender === captainUserId || /-intercom:/.test(sender);
+  return sender === captainUserId || resolveIntercomSenders().has(sender);
 }
 
 /** Is this machine the "speaker" — lowest-rank active machine? Used to avoid duplicate replies. */
