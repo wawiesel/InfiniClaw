@@ -413,6 +413,16 @@ async function matrixSync(
 
 async function matrixSend(homeserver: string, token: string, roomId: string, text: string): Promise<void> {
   const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // Wrap in 📞 SHIP blockquote (same style as intercom-send.sh)
+  const plainBody = `📞 ${HOSTNAME}\n${text}`;
+  const htmlContent = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>');
+  const htmlBody = `<blockquote style="border-left:3px solid #888;padding:4px 8px;margin:4px 0"><b>📞 ${HOSTNAME}</b><br/>${htmlContent}</blockquote>`;
   const resp = await fetch(
     `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
     {
@@ -420,15 +430,9 @@ async function matrixSend(homeserver: string, token: string, roomId: string, tex
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         msgtype: 'm.text',
-        body: text,
+        body: plainBody,
         format: 'org.matrix.custom.html',
-        formatted_body: text
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-          .replace(/`([^`]+)`/g, '<code>$1</code>')
-          .replace(/\n/g, '<br>'),
+        formatted_body: htmlBody,
       }),
     },
   );
@@ -730,7 +734,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
       if (!result.ok) {
         log(`git sync FAILED: ${result.output}`);
         // Notify all rooms so the engineer on this machine sees it
-        const msg = `⚠️ ${HOSTNAME}: git sync failed — engineer please fix immediately.\n\`\`\`\n${result.output.slice(0, 500)}\n\`\`\``;
+        const msg = `⚠️git sync failed — engineer please fix immediately.\n\`\`\`\n${result.output.slice(0, 500)}\n\`\`\``;
         for (const conn of conns) {
           if (conn.accessToken) {
             await reply(conn, msg).catch(() => {});
@@ -741,7 +745,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
         const buildResult = rebuildInfiniClaw();
         log(`git sync: ${buildResult}`);
         if (buildResult.includes('FAILED')) {
-          const msg = `⚠️ ${HOSTNAME}: git pull succeeded (${result.newCommits} commits) but build failed — engineer please fix.\n\`\`\`\n${buildResult}\n\`\`\``;
+          const msg = `⚠️git pull succeeded (${result.newCommits} commits) but build failed — engineer please fix.\n\`\`\`\n${buildResult}\n\`\`\``;
           for (const conn of conns) {
             if (conn.accessToken) {
               await reply(conn, msg).catch(() => {});
@@ -872,7 +876,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
         log(`secrets sync FAILED: ${result.output}`);
         for (const conn of conns) {
           if (conn.accessToken) {
-            await reply(conn, `⚠️ ${HOSTNAME}: secrets repo sync failed — operator please fix.\n\`\`\`\n${result.output.slice(0, 500)}\n\`\`\``).catch(() => {});
+            await reply(conn, `⚠️secrets repo sync failed — operator please fix.\n\`\`\`\n${result.output.slice(0, 500)}\n\`\`\``).catch(() => {});
           }
         }
       } else if (result.newCommits > 0) {
@@ -908,7 +912,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
                 bootstrapBot(root, bot);
                 for (const c of conns) {
                   if (c.accessToken) {
-                    await reply(c, `${HOSTNAME}: ${bot} materialized and started`).catch(() => {});
+                    await reply(c, `${bot} materialized and started`).catch(() => {});
                   }
                 }
               } catch (err) {
@@ -1161,11 +1165,11 @@ async function handleLifecycleCommand(
 
   if (action !== 'dismiss') {
     if (!isMachineActive()) {
-      await reply(conn, `${HOSTNAME}: ship is decommissioned — use !commission first`);
+      await reply(conn, `ship is decommissioned — use !commission first`);
       return;
     }
     try { ensurePodmanReady(); } catch (err) {
-      await reply(conn, `${HOSTNAME}: podman not ready — ${errStr(err)}`);
+      await reply(conn, `podman not ready — ${errStr(err)}`);
       return;
     }
   }
@@ -1180,22 +1184,22 @@ async function handleLifecycleCommand(
         stopBot(bot);
         killStaleContainers(bot);
         fleetUpdate(bot, { status: 'dismissed' });
-        await reply(conn, `${HOSTNAME}: ${name} dismissed`);
+        await reply(conn, `${name} dismissed`);
       } else if (action === 'join') {
         fleetUpdate(bot, { status: 'active', machine: HOSTNAME });
         writeFleet(liveFleet); // persist to disk BEFORE bootstrapBot reads it
         clearMachineConfigCache(); // so bootstrapBot sees updated active state
         bootstrapBot(root, bot);
-        await reply(conn, `${HOSTNAME}: ${name} started (rank ${rank})`);
+        await reply(conn, `${name} started (rank ${rank})`);
       } else {
         stopBot(bot);
         killStaleContainers(bot);
         bootstrapBot(root, bot);
-        await reply(conn, `${HOSTNAME}: ${name} restarted (rank ${rank})`);
+        await reply(conn, `${name} restarted (rank ${rank})`);
       }
     } catch (err) {
       log(`!${action} ${name} failed: ${errStr(err)}`);
-      await reply(conn, `${HOSTNAME}: failed to ${action} ${name} — ${errStr(err)}`);
+      await reply(conn, `failed to ${action} ${name} — ${errStr(err)}`);
     }
   }
 
@@ -1233,10 +1237,10 @@ function registerRelayCommands(): void {
           execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
         }
         const status = existed ? 'sent to running operator' : 'started new operator session';
-        await reply(conn, `${HOSTNAME}: ${status}`);
+        await reply(conn, `${status}`);
       } catch (err) {
         log(`!helm failed: ${errStr(err)}`);
-        await reply(conn, `${HOSTNAME}: !helm failed — ${errStr(err)}`);
+        await reply(conn, `!helm failed — ${errStr(err)}`);
       }
     },
 
@@ -1256,7 +1260,7 @@ function registerRelayCommands(): void {
       if (targetShip && targetShip !== HOSTNAME) return;
       try {
         const machines = loadMachines();
-        if (!machines[HOSTNAME]) { await reply(conn, `${HOSTNAME}: not in machines.json`); return; }
+        if (!machines[HOSTNAME]) { await reply(conn, `not in machines.json`); return; }
         for (const bot of getActiveBots()) {
           stopBot(bot);
           killStaleContainers(bot);
@@ -1265,9 +1269,9 @@ function registerRelayCommands(): void {
         machines[HOSTNAME].active = false;
         writeMachines(machines);
         secretsGitCommit(['operator/machines.json'], `decommission ${HOSTNAME}: bots stopped, helm only`);
-        await reply(conn, `${HOSTNAME}: decommissioned — all bots stopped, helm still running`);
+        await reply(conn, `decommissioned — all bots stopped, helm still running`);
       } catch (err) {
-        await reply(conn, `${HOSTNAME}: decommission failed — ${errStr(err)}`);
+        await reply(conn, `decommission failed — ${errStr(err)}`);
       }
     },
 
@@ -1276,7 +1280,7 @@ function registerRelayCommands(): void {
       if (targetShip && targetShip !== HOSTNAME) return;
       try {
         const machines = loadMachines();
-        if (!machines[HOSTNAME]) { await reply(conn, `${HOSTNAME}: not in machines.json`); return; }
+        if (!machines[HOSTNAME]) { await reply(conn, `not in machines.json`); return; }
         machines[HOSTNAME].active = true;
         writeMachines(machines);
         secretsGitCommit(['operator/machines.json'], `commission ${HOSTNAME}`);
@@ -1290,9 +1294,9 @@ function registerRelayCommands(): void {
             started.push(name);
           }
         }
-        await reply(conn, `${HOSTNAME}: commissioned — started ${started.join(', ') || 'no bots assigned'}`);
+        await reply(conn, `commissioned — started ${started.join(', ') || 'no bots assigned'}`);
       } catch (err) {
-        await reply(conn, `${HOSTNAME}: commission failed — ${errStr(err)}`);
+        await reply(conn, `commission failed — ${errStr(err)}`);
       }
     },
 
@@ -1337,13 +1341,13 @@ function registerRelayCommands(): void {
           if (paths[target]) {
             results.push(syncRepo(target, paths[target]));
           } else {
-            await reply(conn, `${HOSTNAME}: unknown target "${target}" — not in paths.json`);
+            await reply(conn, `unknown target "${target}" — not in paths.json`);
             return;
           }
         }
-        await reply(conn, `${HOSTNAME}:\n${results.join('\n')}`);
+        await reply(conn, `${results.join('\n')}`);
       } catch (err) {
-        await reply(conn, `${HOSTNAME}: !provision failed — ${errStr(err)}`);
+        await reply(conn, `!provision failed — ${errStr(err)}`);
       }
     },
 
@@ -1367,13 +1371,13 @@ function registerRelayCommands(): void {
           }
         }
         persistFleet();
-        await reply(conn, `${HOSTNAME}: refit complete\n${results.join('\n')}\nrestarting helm...`);
+        await reply(conn, `refit complete\n${results.join('\n')}\nrestarting helm...`);
         await sleep(1_000);
         try {
           execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
-        await reply(conn, `${HOSTNAME}: !refit failed — ${errStr(err)}`);
+        await reply(conn, `!refit failed — ${errStr(err)}`);
       }
     },
 
@@ -1400,9 +1404,9 @@ function registerRelayCommands(): void {
         const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetShip}`);
         fleetDirty = false;
         if (!result.ok) throw new Error(result.error);
-        await reply(conn, `${HOSTNAME}: ${bot} dematerialized — awaiting materialization on ${targetShip}`);
+        await reply(conn, `${bot} dematerialized — awaiting materialization on ${targetShip}`);
       } catch (err) {
-        await reply(conn, `${HOSTNAME}: transport failed — ${errStr(err)}`);
+        await reply(conn, `transport failed — ${errStr(err)}`);
       }
     },
 
@@ -1550,9 +1554,9 @@ function registerRelayCommands(): void {
       try {
         grantMount(botName.toLowerCase(), hostPath, duration);
         const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
-        await reply(conn, `${HOSTNAME}: ✅ Mount granted to ${botName}: ${hostPath} (rw, expires ~${expiry})\nRestart required to pick up new mount.`);
+        await reply(conn, `✅ Mount granted to ${botName}: ${hostPath} (rw, expires ~${expiry})\nRestart required to pick up new mount.`);
       } catch (err) {
-        await reply(conn, `${HOSTNAME}: ⛔ !allow failed: ${errStr(err)}`);
+        await reply(conn, `⛔ !allow failed: ${errStr(err)}`);
       }
     },
 
@@ -1564,9 +1568,9 @@ function registerRelayCommands(): void {
       if (!local.includes(botName.toLowerCase())) return; // not on this machine
       try {
         const removed = revokeMount(botName.toLowerCase(), hostPath);
-        await reply(conn, `${HOSTNAME}: ${removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`}`);
+        await reply(conn, `${removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`}`);
       } catch (err) {
-        await reply(conn, `${HOSTNAME}: ⛔ !deny failed: ${errStr(err)}`);
+        await reply(conn, `⛔ !deny failed: ${errStr(err)}`);
       }
     },
   });
@@ -1617,8 +1621,8 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 
   const targetConn = allConns.find(c => c.name === botRoom) || conn;
   if (targetConn.accessToken) {
-    await reply(targetConn, `${HOSTNAME}: ${botDisplayName} reranked (rank ${result.targetRank})`);
-    await reply(targetConn, `${HOSTNAME}: ${swapDisplayName} reranked (rank ${result.swapRank})`);
+    await reply(targetConn, `${botDisplayName} reranked (rank ${result.targetRank})`);
+    await reply(targetConn, `${swapDisplayName} reranked (rank ${result.swapRank})`);
   }
 }
 
@@ -1701,7 +1705,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, conns: RoomConn[]
               const rawBody = event.content.body?.trim() || '';
               if (!verifyIntercomSig(rawBody, event.content.formatted_body)) {
                 log(`${conn.name}: rejected unsigned/invalid intercom command from ${event.sender}: ${body.slice(0, 50)}`);
-                await reply(conn, `🚫 ${HOSTNAME}: rejected command — invalid or missing signature`);
+                await reply(conn, `🚫rejected command — invalid or missing signature`);
                 continue;
               }
               log(`${conn.name}: ✅ verified intercom signature for: ${body.slice(0, 50)}`);
