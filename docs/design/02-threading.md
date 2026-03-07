@@ -2,49 +2,56 @@
 
 ## The Branch and Merge Architecture
 
-InfiniClaw operates on a strict "Branch and Merge" threading model, designed to mirror how engineering teams use git. The goal is to provide **instant responsiveness** to the Captain on the main timeline while complex, multi-step work happens asynchronously in threads.
+InfiniClaw uses a "Branch and Merge" threading model. The main brain stays responsive on the main timeline. Complex work happens in visible Matrix threads.
 
-### Process Topology
+### 1. The Main Brain (The Trunk)
 
-Each bot container runs a hierarchy of processes, ensuring the bot is never blocked or forced into a destructive restart (`SIGTERM`).
+A persistent, long-lived `claude-code` process inside the container. It does NOT restart per message — it stays running and receives new messages via IPC as conversation turns.
 
-#### 1. The Main Brain (The Trunk)
-- The primary, always-on `claude-code` process.
-- **Responsibility:** Triage, delegation, and reporting. It listens *only* to the main timeline and direct high-priority system messages.
-- **Responsiveness:** It must process and return control within 2–5 seconds. It never performs heavy API calls or file parsing.
-- **Action:** When a complex request arrives, the Main Brain uses the `branch_to_thread` tool. This spawns a separate Thread Brain, allowing the Main Brain to immediately return to "minding the store" (listening for new main timeline messages).
+- **Responsibility:** Read new messages, reply to simple ones, branch complex ones.
+- **Responsiveness:** A triage decision is a normal conversation turn — sub-second. The main brain never does heavy work itself.
+- **Action:** For complex requests, calls `branch_to_thread(objective)`. This tells the host to create a visible thread and spawn a Thread Brain. The main brain immediately continues listening.
 
-#### 2. The Thread Brain (The Branch)
-- A secondary, ephemeral `claude-code` process spawned by the Main Brain, locked to a specific Matrix `thread_id`.
-- **Responsibility:** Executing the actual task, collaborating with other bots, and interacting with the Captain *inside* that specific thread.
-- **Collaboration:** A CO's Thread Brain will tag a non-CO bot in the thread (e.g., `@Cid`). The non-CO's Main Brain sees this and spawns its *own* Thread Brain to do the work. They collaborate entirely within the thread.
+### 2. The Thread Brain (The Branch)
 
-#### 3. Async Lobes (The Workers)
-- Fast, single-purpose worker processes (e.g., `codex` for file edits, `grep` for searching) spawned by a Thread Brain using `spawn_async_lobe`.
-- **Responsibility:** Heavy lifting. They run asynchronously, reporting their results back to the Thread Brain's input queue when finished. The Thread Brain is not blocked while waiting for them.
+A separate container process spawned by the host, wired to post into a specific Matrix thread.
 
-### The Merge (State Reconciliation)
+- **Visibility:** The host creates a thread on the main timeline BEFORE spawning the Thread Brain. The thread is visible to the Captain immediately.
+- **Output:** Every `send_message` from the Thread Brain posts into that thread. Tool calls, progress, questions, results — all visible in the thread.
+- **Interaction:** The Captain can reply in the thread. The Thread Brain sees replies and responds within the thread.
+- **Collaboration:** The CO's Thread Brain can tag other bots (e.g., `@Cid`). The tagged bot's main brain sees this and spawns its own Thread Brain in the same thread.
 
-When a task is complete, it must be "Merged" back to the Main Brain.
+### 3. Async Lobes (The Workers)
 
-1.  **Memory Update:** Both the CO and non-CO Thread Brains use the `save_memory` tool to write their learnings and state to their respective `MEMORY.md` files. This ensures persistence across container restarts.
-2.  **Termination:** The Thread Brains compile a final summary, send a "Task Complete" system signal to their Main Brains, and cleanly terminate to free up memory.
-3.  **Reporting:** The CO's Main Brain reads the updated `MEMORY.md` and posts a final, unified summary to the Captain on the main timeline.
+Single-purpose worker processes spawned by a Thread Brain for heavy lifting (e.g., Codex for edits, Gemini for review).
+
+- Run asynchronously — the Thread Brain is not blocked while waiting.
+- Results are written to a callback file. The Thread Brain picks them up and posts findings to the thread.
+- Lobes do NOT post to Matrix directly. The Thread Brain is responsible for reporting lobe results to the Captain.
+
+### The Merge
+
+When a Thread Brain completes its task:
+
+1. **Memory Update:** Write learnings to `MEMORY.md` via `save_memory`.
+2. **Thread Summary:** Post a completion message in the thread.
+3. **Main Timeline Summary:** Post a one-line summary to the main timeline so the Captain sees the outcome without clicking into the thread.
+4. **Termination:** Thread Brain exits. The thread remains in Matrix history permanently.
 
 ### Thread Reactivation (Immortal Context)
 
-Matrix thread history is permanent. While Thread Brains are ephemeral (they die after the Merge to save memory), the **Thread Context is immortal**.
+Matrix thread history is permanent. Thread Brains are ephemeral — they exit after completing their task. But the thread context is immortal.
 
-If the Captain asks a follow-up question in a "Merged" thread days later:
-1.  InfiniClaw's router detects the `thread_id` and the bots' previous participation.
-2.  The Main Brain instantly spawns a *new* Thread Brain.
-3.  InfiniClaw automatically queries the local SQLite database, hydrates the new Thread Brain with the historical context of that specific thread, and the bot answers the question seamlessly before terminating again.
+If the Captain asks a follow-up in a completed thread days later:
+1. The host detects the thread and the bot's previous participation.
+2. The host spawns a new Thread Brain, hydrated with the thread's history from SQLite.
+3. The Thread Brain answers the question in the thread and exits.
 
 ## Presence
 
-Bots should feel like humans. Silence means idle. Messages mean working. No status indicator messages are posted to the timeline.
+Bots feel like humans. Silence means idle. Messages mean working. No status indicator messages.
 
-The only presence signal is the **pip** on the bot's display name — a single emoji that changes based on state:
+The only presence signal is the **pip** on the display name:
 
 | Pip | Meaning |
 |-----|---------|
@@ -52,4 +59,4 @@ The only presence signal is the **pip** on the bot's display name — a single e
 | 💤 | Idle — no activity for `IDLE_PIP_THRESHOLD_MS` (default 5 min) |
 | 🔴 | Offline — bot is stopped or dismissed |
 
-The pip resets to 🟢 on any message processing. No other status messages, working indicators, or idle indicators are posted.
+The pip resets to 🟢 on any message processing.
