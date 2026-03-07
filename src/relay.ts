@@ -1430,6 +1430,7 @@ function registerRelayCommands(): void {
         const icResult = gitSync();
         await s(icResult.newCommits > 0 ? `pulled ${icResult.newCommits} code commit(s)` : 'code up to date');
 
+        const root = resolveRoot();
         const buildResult = rebuildInfiniClaw();
         if (buildResult.includes('FAILED')) {
           const msg = statusLine('⛔', 'refit', 'failed', elapsed());
@@ -1437,21 +1438,25 @@ function registerRelayCommands(): void {
           await reply(conn, msg);
           return;
         }
-        await s('rebuilt ✓');
+        const relayVer = gitVersionStr(root, path.join(root, 'dist', 'relay.js'));
+        await s(`rebuilt ✓${relayVer}`);
 
-        const root = resolveRoot();
         ensurePodmanReady();
 
         // Deploy inactive bots (container image rebuild + instance sync, no start)
         for (const bot of inactiveBots) {
-          try { deployBot(root, bot); await s(`${bot} deployed ✓`); }
+          const ver = gitVersionStr(root, path.join(root, '_runtime', 'instances', bot, 'dist', 'main.js'));
+          try { deployBot(root, bot); await s(`${bot} deployed ✓${ver}`); }
           catch { await s(`${bot} deploy failed ⛔`); }
         }
 
         // Bootstrap active bots (deploy + start)
         for (const bot of activeBots) {
-          try { bootstrapBot(root, bot); await s(`${bot} restarted ✓`); }
-          catch { await s(`${bot} restart failed ⛔`); }
+          try {
+            bootstrapBot(root, bot);
+            const ver = gitVersionStr(root, path.join(root, '_runtime', 'instances', bot, 'dist', 'main.js'));
+            await s(`${bot} restarted ✓${ver}`);
+          } catch { await s(`${bot} restart failed ⛔`); }
         }
 
         persistFleet();
