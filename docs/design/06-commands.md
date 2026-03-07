@@ -76,6 +76,60 @@ Speaker election runs before any aggregate command (`!fleet`, `!health`). Non-sp
 
 This guarantees exactly one reply per `!fleet` command, with live process data from every reachable ship.
 
+## Status Line Format
+
+All relay status output uses a standard form:
+
+```
+<emoji> <what> (<ship>) <status> (<timestamp> · <elapsed>)
+```
+
+When elapsed is zero (e.g. initial message), only the timestamp is shown.
+
+Examples:
+
+```
+⚓ refit (Poseidon) starting (10:07)
+✅ refit (Poseidon) complete (10:08 · 1m)
+⚠️ secrets sync (HERACLES) down (14:30)
+✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
+```
+
+Implemented by `statusLine()` in `src/relay.ts`.
+
+## Status Threads
+
+Multi-step operations and failure alerts use Matrix threads to keep the main timeline clean.
+
+### Refit threads
+
+`!refit` creates one thread per ship. The thread root appears on the main timeline. Each step posts as a numbered thread reply (`[1/N]`, `[2/N]`, ...). The final status (✅ complete or ⛔ failed) posts to both the thread and the main timeline.
+
+```
+Main:   ⚓ refit (Poseidon) starting (10:07)
+Thread: [1/5] secrets up to date
+        [2/5] pulled 3 code commit(s)
+        [3/5] rebuilt ✓
+        [4/5] parker restarted ✓
+        [5/5] relay restarting
+Main:   ✅ refit (Poseidon) complete (10:08 · 1m)
+```
+
+### Failure alert threads
+
+Sync failures (secrets, code, build) create a thread in engineering on first occurrence. Updates post in the thread on an exponential backoff schedule: 1m → 2m → 4m → ... → 8h max. Recovery posts to both the thread and the main timeline.
+
+```
+Main:   ⚠️ secrets sync (HERACLES) down (14:30)
+Thread: <error detail>
+        ⚠️ secrets sync (HERACLES) down (14:31 · 1m)
+        ⚠️ secrets sync (HERACLES) down (14:33 · 3m)
+        ⚠️ secrets sync (HERACLES) down (14:37 · 7m)
+        ...
+        ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
+Main:   ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
+```
+
 ## IPC Commands (bot → host)
 
 Engineers can trigger system operations from inside their containers via IPC:
