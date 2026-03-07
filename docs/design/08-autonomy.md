@@ -27,6 +27,10 @@ Bot detects problem (MCP down, health check fails, OOM)
 
 **Operator (escape hatch only):** Cross-machine coordination when Matrix is down, OS-level fixes (pm2, podman, network), secret rotation requiring human auth, emergency intervention for restart loops.
 
+## Activity Heartbeat
+
+Bots must show visible activity in Matrix at a configurable interval (`HEARTBEAT_INTERVAL`, default 30s). If no user-visible output (message, reaction, edit) occurs within the interval, the host emits a heartbeat — an edited status message showing what the bot is doing (thinking, running tool, waiting for input). This is a hard requirement: the Captain must be able to tell a bot is alive from Matrix alone, without access to logs or operator tools.
+
 ## Holodeck
 
 Architects can test changes in isolation before deploying to production. The holodeck creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), and runs as its own pm2 process in terminal-only mode (no Matrix). CLI commands: `holodeck create|chat|teardown|promote`. Promote merges the branch and redeploys the live bot.

@@ -4,9 +4,13 @@
 
 These are real problems. Simplify, don't add complexity.
 
+### Bot activity heartbeat
+
+Bots MUST show visible activity in Matrix every N seconds (configurable via `HEARTBEAT_INTERVAL`, default 30s). If there is no user-visible output (message, reaction, edit) within the interval, the host emits a heartbeat status update. This guarantees the Captain can always tell a bot is alive from Matrix alone — no log access required. The heartbeat should show what the bot is doing (thinking, tool call, waiting) not just that it exists.
+
 ### Status indicator simplification
 
-The `⏳ working...` indicator system (`createIndicatorSet` in `main.ts`) is overbuilt with retry logic, adaptive timers, and bump functions. It should be one simple message that gets edited per Thread Brain. Strip it down.
+The `⏳ working...` indicator system (`createIndicatorSet` in `main.ts`) is overbuilt with retry logic, adaptive timers, and bump functions. It should be one simple message that gets edited per Thread Brain. Strip it down. Merge with the heartbeat requirement above.
 
 ### No streaming to Matrix
 
