@@ -1305,32 +1305,31 @@ function registerRelayCommands(): void {
     refit: async (cmd, conn) => {
       const targetShip = cmd.slice('!refit'.length).trim() || null;
       if (targetShip && targetShip !== HOSTNAME) return;
-      const shouldReply = targetShip ? true : await electSpeaker(); // only speaker replies for untargeted
-      const results: string[] = [];
+      const parts: string[] = [];
       try {
         const secretsResult = secretsGitSync();
-        results.push(formatSyncResult('secrets', secretsResult));
+        if (secretsResult.newCommits > 0) parts.push(`secrets ↓${secretsResult.newCommits}`);
         const icResult = gitSync();
-        results.push(formatSyncResult('infiniclaw', icResult));
-        results.push(rebuildInfiniClaw());
+        if (icResult.newCommits > 0) parts.push(`code ↓${icResult.newCommits}`);
+        const buildResult = rebuildInfiniClaw();
+        if (buildResult.includes('FAILED')) parts.push('build ⛔');
         const root = resolveRoot();
-        for (const bot of getActiveBots()) {
-          try {
-            bootstrapBot(root, bot);
-            results.push(`${bot}: restarted`);
-          } catch (err) {
-            results.push(`${bot}: restart failed — ${errStr(err).slice(0, 100)}`);
-          }
+        const bots = getActiveBots();
+        let ok = 0; let fail = 0;
+        for (const bot of bots) {
+          try { bootstrapBot(root, bot); ok++; } catch { fail++; }
         }
+        if (ok > 0) parts.push(`${ok} bot${ok > 1 ? 's' : ''} ✓`);
+        if (fail > 0) parts.push(`${fail} bot${fail > 1 ? 's' : ''} ⛔`);
         persistFleet();
-        if (shouldReply) await reply(conn, `refit complete\n${results.join('\n')}\nrestarting relay...`);
+        const summary = parts.length > 0 ? parts.join(' · ') : 'no changes';
+        await reply(conn, `⚓ ${HOSTNAME}: ${summary} · restarting relay`);
         await sleep(1_000);
         try {
           execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
-        if (shouldReply) await reply(conn, `!refit failed — ${errStr(err)}`);
-        else log(`!refit failed silently: ${errStr(err)}`);
+        await reply(conn, `⚓ ${HOSTNAME}: refit failed — ${errStr(err)}`);
       }
     },
 
