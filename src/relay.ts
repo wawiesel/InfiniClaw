@@ -1397,8 +1397,8 @@ function registerRelayCommands(): void {
         // Group bots by machine
         const byMachine: Record<string, Array<[string, FleetEntry]>> = {};
         for (const [bot, entry] of Object.entries(fleet)) {
-          if (!entry.machine) continue;
-          (byMachine[entry.machine] ??= []).push([bot, entry]);
+          const m = entry.machine || 'unassigned';
+          (byMachine[m] ??= []).push([bot, entry]);
         }
 
         // Sort machines by rank
@@ -1410,11 +1410,15 @@ function registerRelayCommands(): void {
 
         for (const machine of machineOrder) {
           const mConfig = machines[machine];
-          const rank = mConfig?.rank ?? '?';
-          const shipIcon = mConfig?.active ? '⚓' : '🚫';
           const isLocal = machine === HOSTNAME;
-          const helmVersion = isLocal ? gitVersionStr(root, path.join(root, 'dist', 'relay.js')) : '';
-          lines.push(`${shipIcon} ${machine}[${rank}]${helmVersion}`);
+          if (machine === 'unassigned') {
+            lines.push('⚓ drydock');
+          } else {
+            const rank = mConfig?.rank ?? '?';
+            const shipIcon = mConfig?.active ? '⚓' : '🚫';
+            const helmVersion = isLocal ? gitVersionStr(root, path.join(root, 'dist', 'relay.js')) : '';
+            lines.push(`${shipIcon} ${machine}[${rank}]${helmVersion}`);
+          }
 
           const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
@@ -1439,6 +1443,7 @@ function registerRelayCommands(): void {
             lines.push(`      ${name} ${badge} · ${entry.role}[${entry.rank}]${gitSuffix}`);
           }
         }
+
 
         await reply(conn, lines.join('\n'));
       } catch (err) {
