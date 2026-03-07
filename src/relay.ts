@@ -8,6 +8,7 @@
  * Run: node dist/relay.js
  */
 import { execFileSync, execSync } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -54,7 +55,7 @@ interface SyncResponse {
         events?: Array<{
           type: string;
           sender: string;
-          content?: { msgtype?: string; body?: string };
+          content?: { msgtype?: string; body?: string; formatted_body?: string };
           event_id: string;
           origin_server_ts: number;
         }>;
@@ -194,6 +195,52 @@ function resolveIntercomSenders(): Set<string> {
 
 function isAuthorized(sender: string, captainUserId: string): boolean {
   return sender === captainUserId || resolveIntercomSenders().has(sender);
+}
+
+const INTERCOM_SIG_MAX_AGE = 5 * 60; // 5 minutes
+
+function loadIntercomKey(): string | null {
+  try {
+    const keyPath = path.join(secretsRepoPath(), 'operator', 'intercom-key');
+    return fs.readFileSync(keyPath, 'utf-8').trim();
+  } catch { return null; }
+}
+
+/** Verify HMAC signature embedded in formatted_body as <!--sig:HEX:TIMESTAMP--> */
+function verifyIntercomSig(body: string, formattedBody: string | undefined): boolean {
+  if (!formattedBody) return false;
+  const sigMatch = formattedBody.match(/<!--sig:([a-f0-9]+):(\d+)-->/);
+  if (!sigMatch) return false;
+
+  const [, sig, tsStr] = sigMatch;
+  const timestamp = parseInt(tsStr, 10);
+
+  // Reject stale signatures
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - timestamp) > INTERCOM_SIG_MAX_AGE) {
+    log(`intercom sig: rejected stale timestamp (age ${now - timestamp}s)`);
+    return false;
+  }
+
+  const key = loadIntercomKey();
+  if (!key) {
+    log('intercom sig: no intercom-key file found');
+    return false;
+  }
+
+  // The plain body in the intercom message (after the 📞 header line)
+  // intercom-send.sh signs "timestamp:message" where message is the user's input
+  // The body field contains "📞 hostname\nmessage", so extract message after first newline
+  const msgPart = body.includes('\n') ? body.slice(body.indexOf('\n') + 1) : body;
+  const expected = crypto.createHmac('sha256', key)
+    .update(`${tsStr}:${msgPart}`)
+    .digest('hex');
+
+  if (sig !== expected) {
+    log(`intercom sig: HMAC mismatch`);
+    return false;
+  }
+  return true;
 }
 
 /** Is this machine the "speaker" — lowest-rank active machine? Used to avoid duplicate replies. */
@@ -1559,6 +1606,15 @@ async function dialtone(conn: RoomConn, captainUserId: string, conns: RoomConn[]
             if (!isAuthorized(event.sender, captainUserId)) {
               log(`${conn.name}: unauthorized command from ${event.sender}: ${body.slice(0, 50)}`);
               continue;
+            }
+
+            // Intercom senders must have valid HMAC signature
+            if (event.sender !== captainUserId && resolveIntercomSenders().has(event.sender)) {
+              const rawBody = event.content.body?.trim() || '';
+              if (!verifyIntercomSig(rawBody, event.content.formatted_body)) {
+                log(`${conn.name}: rejected unsigned/invalid intercom command from ${event.sender}: ${body.slice(0, 50)}`);
+                continue;
+              }
             }
 
             log(`${conn.name}: command from ${event.sender}: ${body}`);
