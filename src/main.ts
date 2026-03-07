@@ -941,15 +941,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  // Fast acknowledgment as soon as we decide to respond.
-  sendTriggerAck(chatJid, actionableMessages);
-
   // Filter context by thread participation — exclude threads bot isn't part of
   const contextMessages = filteredMessages.filter(m => {
     if (!m.thread_id) return true;
     return botParticipatesInThread(chatJid, m.thread_id)
       || TRIGGER_PATTERN.test(m.content.trim());
   });
+
+  // Acknowledge only messages that actually enter the context window.
+  sendTriggerAck(chatJid, contextMessages);
 
   setObjectiveFromMessages(chatJid, contextMessages);
 
@@ -1260,9 +1260,6 @@ async function handleGroupMessagesInLoop(
     return;
   }
 
-  // Fast acknowledgment as soon as we decide to respond.
-  sendTriggerAck(chatJid, actionableMessages);
-
   // Collect all pending messages since last agent response, filtered by thread participation
   const allPending = getMessagesSince(
     chatJid,
@@ -1278,6 +1275,9 @@ async function handleGroupMessagesInLoop(
     return true;
   });
   const messagesToSend = allPending.length > 0 ? allPending : filtered;
+
+  // Acknowledge only messages that actually enter the context window.
+  sendTriggerAck(chatJid, messagesToSend);
 
   setObjectiveFromMessages(chatJid, messagesToSend);
   const threadCtx = buildThreadContextBlock(chatJid, messagesToSend);
