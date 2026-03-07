@@ -294,7 +294,16 @@ function relayVersion(root: string): string {
 }
 
 function botVersion(root: string, bot: string): string {
-  return botVersion(root, bot);
+  return gitVersionStr(root, path.join(root, '_runtime', 'instances', bot, 'dist', 'main.js'));
+}
+
+/** Git HEAD sha for any repo directory (no dist file needed). */
+function repoHeadStr(repoDir: string): string {
+  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
+  try {
+    const sha = execSync('git rev-parse --short HEAD', { cwd: repoDir, ...execOpts }).trim();
+    return sha ? ` · ${sha}` : '';
+  } catch { return ''; }
 }
 
 // ── Speaker election via S3 commit timestamps ────────────────────
@@ -1432,39 +1441,56 @@ function registerRelayCommands(): void {
       const s = (text: string) => threadReply(conn, threadRoot, `[${++stage}/${totalStages}] ${text}`);
 
       try {
+        const root = resolveRoot();
+
         const secretsResult = secretsGitSync();
-        await s(secretsResult.newCommits > 0 ? `pulled ${secretsResult.newCommits} secrets commit(s)` : 'secrets up to date');
+        const secretsVer = repoHeadStr(secretsRepoPath());
+        if (!secretsResult.ok) {
+          await s(`⚠️ secrets sync failed${secretsVer}`);
+        } else if (secretsResult.newCommits > 0) {
+          await s(`✅ secrets pulled ${secretsResult.newCommits} commit(s)${secretsVer}`);
+        } else {
+          await s(`✅ secrets up to date${secretsVer}`);
+        }
 
         const icResult = gitSync();
-        await s(icResult.newCommits > 0 ? `pulled ${icResult.newCommits} code commit(s)` : 'code up to date');
+        const codeVer = repoHeadStr(root);
+        if (!icResult.ok) {
+          await s(`⚠️ code sync failed${codeVer}`);
+        } else if (icResult.newCommits > 0) {
+          await s(`✅ code pulled ${icResult.newCommits} commit(s)${codeVer}`);
+        } else {
+          await s(`✅ code up to date${codeVer}`);
+        }
 
-        const root = resolveRoot();
         const buildResult = rebuildInfiniClaw();
         if (buildResult.includes('FAILED')) {
-          const msg = statusLine('⛔', 'refit', 'failed', elapsed());
-          await s(msg);
-          await reply(conn, msg);
+          await s(statusLine('⛔', 'build', 'failed', elapsed()));
+          await reply(conn, statusLine('⛔', 'refit', 'failed', elapsed()));
           return;
         }
-        const relayVer = relayVersion(root);
-        await s(`rebuilt ✓${relayVer}`);
+        await s(`✅ build${relayVersion(root)}`);
 
         ensurePodmanReady();
 
         // Deploy inactive bots (container image rebuild + instance sync, no start)
         for (const bot of inactiveBots) {
-          const ver = botVersion(root, bot);
-          try { deployBot(root, bot); await s(`${bot} deployed ✓${ver}`); }
-          catch { await s(`${bot} deploy failed ⛔`); }
+          try {
+            deployBot(root, bot);
+            await s(`✅ ${bot} deployed${botVersion(root, bot)}`);
+          } catch {
+            await s(`⛔ ${bot} deploy failed`);
+          }
         }
 
         // Bootstrap active bots (deploy + start)
         for (const bot of activeBots) {
           try {
             bootstrapBot(root, bot);
-            const ver = botVersion(root, bot);
-            await s(`${bot} restarted ✓${ver}`);
-          } catch { await s(`${bot} restart failed ⛔`); }
+            await s(`✅ ${bot} restarted${botVersion(root, bot)}`);
+          } catch {
+            await s(`⛔ ${bot} restart failed`);
+          }
         }
 
         persistFleet();
