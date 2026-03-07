@@ -6,7 +6,7 @@ Messages go to **rooms**, not to bots directly. Each room is a Matrix room mappe
 
 ## Ships and Presence
 
-Bots are distributed across ships (machines). Each ship runs a subset of the fleet, configured in fleet.json (`bots.<name>.machine`). Secrets are shared via a private git repo (`~/.config/infiniclaw/secrets/`).
+Bots are distributed across ships. Each ship runs a subset of the fleet, configured in fleet.json (`bots.<name>.ship`). Secrets are shared via a private git repo (`~/.config/infiniclaw/secrets/`).
 
 **Every ship runs a relay at all times**, even when decommissioned. A decommissioned ship (`active: false` in ships.json) keeps its relay running and listening for commands but does not start bots. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
 
@@ -18,14 +18,14 @@ Fleet-wide bot availability is tracked in `fleet.json` and synced via git. The r
 
 `!transport <bot> <ship>` moves a bot between ships via a two-phase git protocol:
 
-1. **Dematerialize** — source ship stops the bot, writes `machine: targetShip, active: false` to fleet.json, and pushes.
+1. **Dematerialize** — source ship stops the bot, writes `ship: targetShip, status: "transit"` to fleet.json, and pushes.
 2. **Materialize** — target ship's 30s secrets sync sees the inactive bot assigned to it, activates it, starts it, and pushes the updated state.
 
 Transport uses git (not Matrix) because it must survive relay restarts and network blips. If the target ship's relay missed a Matrix message, the bot would be lost. The git protocol guarantees delivery.
 
 ## Roles and Rank
 
-**Roles** are abstract capability sets: navigator, engineer, architect. **Personas** are concrete bot identities assigned to a role. The mapping lives in `roster.json` in the secrets repo. Bots are organized by role in `bots/{role}/{bot}/`.
+**Roles** are abstract capability sets: navigator, engineer, architect. **Personas** are concrete bot identities assigned to a role. The mapping lives in `fleet.json` under each bot's entry. Bots are organized by role in `bots/{role}/{bot}/`.
 
 Each role defines what a bot can do:
 

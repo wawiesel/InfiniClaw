@@ -71,7 +71,7 @@ Additionally, deploying a new bot on a fresh machine requires: (1) pm2 installed
 **Takeaways:**
 - Use `podman build --network host` on machines with inbound port 443 forwarding.
 - `service.ts` expects pm2 in `node_modules/.bin/`, not on `PATH`. Always install locally.
-- When adding a new bot persona, update `build.sh` case statement, `machine.json`, `roster.json`, and secrets env.
+- When adding a new bot persona, update `build.sh` case statement, `fleet.json`, `ships.json`, and secrets env.
 
 ## 2026-03-05 — launchd → PM2 migration left zombie launch agents
 
