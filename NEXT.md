@@ -1,7 +1,7 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-06 11:10 PM EST.
+Updated 2026-03-06 9:20 PM EST.
 
 ## HIGH PRIORITY — Captain Directives
 
@@ -15,11 +15,12 @@ Updated 2026-03-06 11:10 PM EST.
 
 - **Stop old `infiniclaw-supervisor` pm2 process** — relay is now running (`infiniclaw-relay` started 2026-03-06T14:29), but old supervisor pm2 (id 5, 14h uptime) is still alive alongside it. Captain must: `pm2 stop infiniclaw-supervisor && pm2 delete infiniclaw-supervisor`. Then `pm2 save`.
 - **Restart relay on HERACLES** — `pm2 restart infiniclaw-relay`. Needed to activate: `restart_relay` IPC type (`3b7c9d5`), relay self-restart after git sync (`9797f04`), and push capability. One-time manual restart, then fully automatic going forward.
+- **Decommission or silence mac139160** — relay on mac139160 is sending repeated SSH timeout alerts (code.ornl.gov port 22 unreachable) every ~20 min into Engineering. Machine appears orphaned. Captain must stop its relay: `pm2 stop infiniclaw-relay` on mac139160, or decommission entirely.
 
 ## MEDIUM — Next Up
 
 - **Concurrency ceiling starvation** — FIFO `waitingGroups` drain in `group-queue.ts` (upstream nanoclaw). Fix = priority-aware `drainWaiting()`. Needs Captain approval before touching upstream.
-- **Cid SIGKILL death spirals** — exit-137 cooldown + backoff already implemented in main.ts (`KILL_137_COOLDOWN_MS=60s`, `KILL_137_MAX_CONSECUTIVE=3`). Zero new kills in last 20h. Monitor; may be resolved.
+- **Cid SIGKILL death spirals** — exit-137 cooldown + backoff in main.ts (`KILL_137_COOLDOWN_MS=60s`, `KILL_137_MAX_CONSECUTIVE=3`). One spike 2026-03-06T21:12 (+233 kills from git rebase conflict loop, now resolved). Stable at 581 for 5h as of 02:14 UTC. Monitor for further spikes.
 
 ## MEDIUM — Blocked on Captain
 
@@ -50,4 +51,4 @@ Updated 2026-03-06 11:10 PM EST.
 - Relay rename (`93ea3ca`) — `supervisor.ts → relay.ts`, IPC health/fleet commands, dist deploy fix.
 - Exit-137 cooldown backoff in main.ts — `KILL_137_COOLDOWN_MS=60s`, `MAX_CONSECUTIVE=3`.
 - Parker transport to Poseidon — fixed `!join` fleet flush bug (`5ec2e27`/`8a9c0f6`), bot rerank persistence (`9e333c3`), rebase conflict auto-resolve (`2c1df84`), relay self-restart after git sync (`9797f04`), `restart_relay` IPC type (`3b7c9d5`).
-- Cid SIGKILL today: multiple kills (exit 137) observed 2026-03-06 — still under investigation.
+- Cid SIGKILL spike 2026-03-06T21:12 (+233) — caused by git rebase conflict loop, resolved by `2c1df84`. Fleet stable for 5h after.
