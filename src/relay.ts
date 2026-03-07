@@ -274,36 +274,50 @@ function isAuthorized(sender: string, captainUserId: string, operatorUserId: str
 // ── Git version helper ────────────────────────────────────────────
 
 /** Get git version string for a bot's deployed instance: " · sha ↑N↓N (age)" */
-function gitVersionStr(root: string, distFile: string): string {
+/**
+ * Git version string: ` · sha ↑0|↓N (age)`
+ *
+ * When distFile is provided, the sha is the commit at or before the file's
+ * mtime and the age is relative to that mtime. When distFile is omitted or
+ * doesn't exist, uses HEAD with HEAD commit time for age.
+ */
+function gitVersionStr(root: string, distFile?: string): string {
   const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
   try {
-    if (!fs.existsSync(distFile)) return '';
-    const mtime = fs.statSync(distFile).mtimeMs;
-    const agoMin = Math.round((Date.now() - mtime) / 60_000);
-    const agoStr = agoMin >= 60 ? `${Math.round(agoMin / 60)}h` : `${agoMin}m`;
-    const sha = execSync(`git log -1 --format=%h --before="${new Date(mtime).toISOString()}"`, { cwd: root, ...execOpts }).trim() ||
-      execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+    let sha: string;
+    let ageMs: number;
+
+    if (distFile && fs.existsSync(distFile)) {
+      const mtime = fs.statSync(distFile).mtimeMs;
+      ageMs = Date.now() - mtime;
+      sha = execSync(`git log -1 --format=%h --before="${new Date(mtime).toISOString()}"`, { cwd: root, ...execOpts }).trim() ||
+        execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+    } else {
+      sha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+      const epoch = parseInt(execSync('git log -1 --format=%ct', { cwd: root, ...execOpts }).trim(), 10) * 1000;
+      ageMs = Date.now() - epoch;
+    }
+
+    if (!sha) return '';
     const behind = parseInt(execSync(`git rev-list ${sha}..HEAD --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
     const ud = behind === 0 ? '↑0' : `↓${behind}`;
-    return ` · ${sha} ${ud} (${agoStr})`;
+    return ` · ${sha} ${ud} (${formatDuration(ageMs)})`;
   } catch { return ''; }
 }
 
+/** Version string for the relay dist. */
 function relayVersion(root: string): string {
   return gitVersionStr(root, path.join(root, 'dist', 'relay.js'));
 }
 
+/** Version string for a bot's deployed instance. */
 function botVersion(root: string, bot: string): string {
   return gitVersionStr(root, path.join(root, '_runtime', 'instances', bot, 'dist', 'main.js'));
 }
 
-/** Git HEAD sha for any repo directory (no dist file needed). */
-function repoHeadStr(repoDir: string): string {
-  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
-  try {
-    const sha = execSync('git rev-parse --short HEAD', { cwd: repoDir, ...execOpts }).trim();
-    return sha ? ` · ${sha}` : '';
-  } catch { return ''; }
+/** Version string for a repo (uses HEAD, no dist file). */
+function repoVersion(repoDir: string): string {
+  return gitVersionStr(repoDir);
 }
 
 // ── Speaker election via S3 commit timestamps ────────────────────
@@ -1444,7 +1458,7 @@ function registerRelayCommands(): void {
         const root = resolveRoot();
 
         const secretsResult = secretsGitSync();
-        const secretsVer = repoHeadStr(secretsRepoPath());
+        const secretsVer = repoVersion(secretsRepoPath());
         if (!secretsResult.ok) {
           await s(`⚠️ secrets sync failed${secretsVer}`);
         } else if (secretsResult.newCommits > 0) {
@@ -1454,7 +1468,7 @@ function registerRelayCommands(): void {
         }
 
         const icResult = gitSync();
-        const codeVer = repoHeadStr(root);
+        const codeVer = repoVersion(root);
         if (!icResult.ok) {
           await s(`⚠️ code sync failed${codeVer}`);
         } else if (icResult.newCommits > 0) {
