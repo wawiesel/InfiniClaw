@@ -97,6 +97,36 @@ Examples:
 
 Implemented by `statusLine()` in `src/relay.ts`.
 
+## Version String Format
+
+Version info follows a standard form:
+
+```
+· <sha> <relation to upstream> (<age>)
+```
+
+- **sha** — the short commit hash of what's deployed or checked out
+- **relation to upstream** — how the local state relates to the upstream ref:
+  - `↑0` — in sync with upstream
+  - `↑N` — N commits ahead of upstream (unpushed)
+  - `↓N` — N commits behind upstream (outdated)
+  - `↑N↓M` — diverged (ahead and behind)
+- **age** — how long ago the artifact was built (dist files) or the commit was made (repos)
+
+"Upstream" means different things depending on context:
+- **Repos** (secrets, code): compared to `origin/main`
+- **Dist files** (relay, bots): compared to current HEAD (how outdated is the deployed artifact?)
+
+Examples:
+
+```
+· 2a9cc64 ↑0 (0s)      ← just built, matches HEAD
+· f25432f ↓3 (45m)      ← deployed 45m ago, 3 commits behind HEAD
+· f814482 ↑1 (2m)       ← repo has 1 unpushed commit
+```
+
+Implemented by `gitVersionStr()`, `repoVersion()`, `relayVersion()`, `botVersion()` in `src/relay.ts`.
+
 ## Status Threads
 
 Multi-step operations and failure alerts use Matrix threads to keep the main timeline clean.
