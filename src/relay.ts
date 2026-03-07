@@ -1397,8 +1397,8 @@ function registerRelayCommands(): void {
         // Group bots by machine
         const byMachine: Record<string, Array<[string, FleetEntry]>> = {};
         for (const [bot, entry] of Object.entries(fleet)) {
-          const m = entry.machine || 'unassigned';
-          (byMachine[m] ??= []).push([bot, entry]);
+          if (!entry.machine) continue;
+          (byMachine[entry.machine] ??= []).push([bot, entry]);
         }
 
         // Sort machines by rank
