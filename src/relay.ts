@@ -1388,21 +1388,9 @@ function registerRelayCommands(): void {
           (machines[a]?.rank ?? 99) - (machines[b]?.rank ?? 99)
         );
 
-        // Git status for local ship
-        let gitInfo = '';
-        try {
-          execSync('git fetch --quiet', { cwd: root, timeout: 10_000, stdio: 'pipe' });
-          const sha = execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
-          const ahead = parseInt(execSync('git rev-list origin/main..HEAD --count', { cwd: root, ...execOpts }).trim(), 10) || 0;
-          const behind = parseInt(execSync('git rev-list HEAD..origin/main --count', { cwd: root, ...execOpts }).trim(), 10) || 0;
-          const lastCommitEpoch = parseInt(execSync('git log -1 --format=%ct HEAD', { cwd: root, ...execOpts }).trim(), 10) || 0;
-          const agoMin = lastCommitEpoch ? Math.round((Date.now() / 1000 - lastCommitEpoch) / 60) : 0;
-          const agoStr = agoMin >= 60 ? `${Math.round(agoMin / 60)}h` : `${agoMin}m`;
-          let ud = '';
-          if (ahead > 0) ud += `↑${ahead}`;
-          if (behind > 0) ud += `↓${behind}`;
-          gitInfo = ` · ${sha}${ud ? ' ' + ud : ''} (${agoStr})`;
-        } catch { /* best effort */ }
+        // Fetch once so rev-list is accurate
+        try { execSync('git fetch --quiet', { cwd: root, timeout: 10_000, stdio: 'pipe' }); } catch { /* best effort */ }
+        const originHead = (() => { try { return execSync('git rev-parse HEAD', { cwd: root, ...execOpts }).trim(); } catch { return ''; } })();
 
         const lines: string[] = [];
 
@@ -1410,8 +1398,7 @@ function registerRelayCommands(): void {
           const mConfig = machines[machine];
           const rank = mConfig?.rank ?? '?';
           const shipIcon = mConfig?.active ? '⚓' : '🚫';
-          const git = machine === HOSTNAME ? gitInfo : '';
-          lines.push(`${shipIcon} ${machine}[${rank}]${git}`);
+          lines.push(`${shipIcon} ${machine}[${rank}]`);
 
           const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
@@ -1432,7 +1419,31 @@ function registerRelayCommands(): void {
 
             const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
             const name = env?.ASSISTANT_NAME || botId;
-            lines.push(`      ${name} ${badge} · ${entry.role}[${entry.rank}]`);
+
+            // Git version of deployed code in this bot's instance
+            let gitSuffix = '';
+            if (isLocal) {
+              try {
+                const distMain = path.join(root, '_runtime', 'instances', botId, 'dist', 'main.js');
+                if (fs.existsSync(distMain)) {
+                  const mtime = fs.statSync(distMain).mtimeMs;
+                  const agoMin = Math.round((Date.now() - mtime) / 60_000);
+                  const agoStr = agoMin >= 60 ? `${Math.round(agoMin / 60)}h` : `${agoMin}m`;
+                  // Find what commit this dist was built from
+                  const sha = execSync(`git log -1 --format=%h --before="${new Date(mtime).toISOString()}"`, { cwd: root, ...execOpts }).trim() ||
+                    execSync('git rev-parse --short HEAD', { cwd: root, ...execOpts }).trim();
+                  const botHead = execSync(`git rev-parse ${sha}`, { cwd: root, ...execOpts }).trim();
+                  const ahead = parseInt(execSync(`git rev-list origin/main..${sha} --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
+                  const behind = parseInt(execSync(`git rev-list ${sha}..origin/main --count`, { cwd: root, ...execOpts }).trim(), 10) || 0;
+                  let ud = '';
+                  if (ahead > 0) ud += `↑${ahead}`;
+                  if (behind > 0) ud += `↓${behind}`;
+                  gitSuffix = ` · ${sha}${ud ? ' ' + ud : ''} (${agoStr})`;
+                }
+              } catch { /* best effort */ }
+            }
+
+            lines.push(`      ${name} ${badge} · ${entry.role}[${entry.rank}]${gitSuffix}`);
           }
         }
 
