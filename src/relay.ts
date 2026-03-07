@@ -1428,29 +1428,49 @@ async function handleLifecycleCommand(
     const name = env?.ASSISTANT_NAME || bot;
     const rank = liveFleet[bot]?.rank ?? 99;
     log(`!${action} ${name}`);
-    await reply(conn, `${action === 'join' ? '🟢' : action === 'dismiss' ? '🔴' : '🔄'} !${action} ${name} — accepted`);
-    try {
-      if (action === 'dismiss') {
+
+    if (action === 'dismiss') {
+      // Dismiss is fast — no thread needed
+      try {
         stopBot(bot);
         killStaleContainers(bot);
         fleetUpdate(bot, { status: 'dismissed' });
-        await reply(conn, `${name} dismissed`);
-      } else if (action === 'join') {
-        fleetUpdate(bot, { status: 'active', ship: HOSTNAME });
-        writeFleet(liveFleet); // persist to disk BEFORE bootstrapBot reads it
-        clearShipConfigCache(); // so bootstrapBot sees updated active state
-        bootstrapBot(root, bot);
-        await reply(conn, `${name} started (rank ${rank})`);
-      } else {
-        stopBot(bot);
-        killStaleContainers(bot);
-        bootstrapBot(root, bot);
-        await reply(conn, `${name} restarted (rank ${rank})`);
+        await reply(conn, `🔴 ${name} dismissed`);
+        publishFleetReport().catch(() => {});
+      } catch (err) {
+        log(`!dismiss ${name} failed: ${errStr(err)}`);
+        await reply(conn, `⛔ !dismiss ${name} — ${errStr(err)}`);
       }
-      publishFleetReport().catch(() => {}); // update S3 after state change
-    } catch (err) {
-      log(`!${action} ${name} failed: ${errStr(err)}`);
-      await reply(conn, `failed to ${action} ${name} — ${errStr(err)}`);
+    } else {
+      // Join/restart are slow (build) — use a thread
+      const startedAt = Date.now();
+      const emoji = action === 'join' ? '🟢' : '🔄';
+      const threadRoot = await reply(conn, statusLine(emoji, `!${action} ${name}`, 'starting', 0));
+      if (!threadRoot) continue;
+      const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
+      try {
+        if (action === 'restart') {
+          await step('stopping...');
+          stopBot(bot);
+          killStaleContainers(bot);
+        }
+        if (action === 'join') {
+          fleetUpdate(bot, { status: 'active', ship: HOSTNAME });
+          writeFleet(liveFleet);
+          clearShipConfigCache();
+        }
+        await step('building...');
+        bootstrapBot(root, bot);
+        const done = statusLine('✅', `!${action} ${name}`, `rank ${rank}`, Date.now() - startedAt);
+        await step(done);
+        await reply(conn, done);
+        publishFleetReport().catch(() => {});
+      } catch (err) {
+        log(`!${action} ${name} failed: ${errStr(err)}`);
+        const fail = `⛔ !${action} ${name} — ${errStr(err)}`;
+        await step(fail);
+        await reply(conn, fail);
+      }
     }
   }
 
