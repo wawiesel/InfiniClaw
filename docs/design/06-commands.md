@@ -54,13 +54,27 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 
 ### Auto-sync loops
 
-- **InfiniClaw repo**: Pull every 10 minutes, rebuild on new commits, redeploy all dist files to bot instances and restart them.
-- **Secrets repo**: Pull every 30 seconds. On new commits, check for transport materializations (bots assigned to this ship but inactive → activate and start).
-- **Health**: Run `health-check.sh` every 30 minutes, upload to S3.
+- **InfiniClaw repo**: Pull on interval (`GIT_SYNC_INTERVAL`), rebuild on new commits, redeploy all dist files to bot instances and restart them.
+- **Secrets repo**: Pull on interval (`SECRETS_SYNC_INTERVAL`). On new commits, check for transport materializations (bots assigned to this ship but inactive → activate and start).
+- **Health**: Run `health-check.sh` on interval (`HEALTH_INTERVAL`), upload to S3.
+
+See `src/relay.ts` for defaults.
 
 ### Speaker election
 
-Ships are ranked in `ships.json`. The lowest-rank **active** ship is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay. Per-ship commands (`!fleet`, `!provision`) reply from each ship with its local state.
+Every relay publishes its InfiniClaw HEAD commit epoch to S3 (`relay/<ship>.json`) at startup and after rebuilds. The **speaker** is the active ship running the newest code; ties are broken by ship rank (lowest wins). This ensures the most up-to-date relay formats aggregate responses.
+
+Speaker election runs before any aggregate command (`!fleet`, `!health`). Non-speakers silently return.
+
+### Fleet command protocol
+
+`!fleet` uses a two-phase S3 protocol so the speaker can assemble data from all ships:
+
+1. **Every ship** publishes its local fleet data to `fleet-report/<ship>.json` — relay version, per-bot status (including live process checks), names, and git versions.
+2. **The speaker** polls S3 for up to 5s, waiting for all active ships to report. Reports older than 10s are ignored (stale from a previous invocation).
+3. **Assembly**: The speaker merges all ship reports with its in-memory `liveFleet` as fallback for any ship that didn't report in time, then emits a single formatted response.
+
+This guarantees exactly one reply per `!fleet` command, with live process data from every reachable ship.
 
 ## IPC Commands (bot → host)
 
