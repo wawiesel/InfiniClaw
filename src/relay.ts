@@ -174,18 +174,14 @@ function loadIntercomConfig(): IntercomConfig {
 }
 
 function resolveCaptainUserId(): string {
-  const root = resolveRoot();
-  // Check ALL bots assigned to this machine, not just active ones.
-  // Captain must be able to control the relay even when all bots are dismissed.
-  const fleet = loadFleet();
-  const hostname = os.hostname();
-  for (const [bot, entry] of Object.entries(fleet)) {
-    if (entry.machine !== hostname) continue;
-    try {
-      const env = loadProfileEnv(root, bot);
-      if (env.CAPTAIN_USER_ID) return env.CAPTAIN_USER_ID;
-    } catch { /* skip */ }
-  }
+  try {
+    const captainFile = path.join(secretsRepoPath(), 'captain');
+    const lines = fs.readFileSync(captainFile, 'utf-8').split('\n');
+    for (const line of lines) {
+      const match = line.match(/^CAPTAIN_USER_ID=(.+)$/);
+      if (match) return match[1].trim();
+    }
+  } catch { /* missing file */ }
   return '';
 }
 
@@ -1572,7 +1568,7 @@ async function main(): Promise<void> {
   const intercom = loadIntercomConfig();
   const captainUserId = resolveCaptainUserId();
   if (!captainUserId) {
-    log('WARNING: no CAPTAIN_USER_ID found in any bot env — only intercom senders will be authorized');
+    log('WARNING: no CAPTAIN_USER_ID found in secrets/captain — only intercom senders will be authorized');
   } else {
     log(`captain: ${captainUserId}`);
   }
