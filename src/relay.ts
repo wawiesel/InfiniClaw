@@ -1305,31 +1305,43 @@ function registerRelayCommands(): void {
     refit: async (cmd, conn) => {
       const targetShip = cmd.slice('!refit'.length).trim() || null;
       if (targetShip && targetShip !== HOSTNAME) return;
-      const parts: string[] = [];
+      const prefix = `⚓ ${HOSTNAME}`;
+      const log: string[] = [];
       try {
+        await reply(conn, `${prefix}: refit starting`);
+
         const secretsResult = secretsGitSync();
-        parts.push(secretsResult.newCommits > 0 ? `secrets ↓${secretsResult.newCommits}` : 'secrets ↑0');
+        log.push(secretsResult.newCommits > 0 ? `pulled ${secretsResult.newCommits} secrets commit(s)` : 'secrets up to date');
         const icResult = gitSync();
-        parts.push(icResult.newCommits > 0 ? `code ↓${icResult.newCommits}` : 'code ↑0');
+        log.push(icResult.newCommits > 0 ? `pulled ${icResult.newCommits} code commit(s)` : 'code up to date');
+        await reply(conn, `${prefix}: ${log.join(', ')}`);
+
         const buildResult = rebuildInfiniClaw();
-        if (buildResult.includes('FAILED')) parts.push('build ⛔');
+        if (buildResult.includes('FAILED')) {
+          await reply(conn, `${prefix}: build failed ⛔`);
+        } else {
+          await reply(conn, `${prefix}: rebuilt`);
+        }
+
         const root = resolveRoot();
         const bots = getActiveBots();
-        let ok = 0; let fail = 0;
-        for (const bot of bots) {
-          try { bootstrapBot(root, bot); ok++; } catch { fail++; }
+        if (bots.length > 0) {
+          const botResults: string[] = [];
+          for (const bot of bots) {
+            try { bootstrapBot(root, bot); botResults.push(`${bot} ✓`); }
+            catch { botResults.push(`${bot} ⛔`); }
+          }
+          await reply(conn, `${prefix}: ${botResults.join(', ')}`);
         }
-        if (ok > 0) parts.push(`${ok} bot${ok > 1 ? 's' : ''} ✓`);
-        if (fail > 0) parts.push(`${fail} bot${fail > 1 ? 's' : ''} ⛔`);
+
         persistFleet();
-        const summary = parts.join(' · ');
-        await reply(conn, `⚓ ${HOSTNAME}: ${summary} · restarting relay`);
+        await reply(conn, `${prefix}: restarting relay`);
         await sleep(1_000);
         try {
           execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
-        await reply(conn, `⚓ ${HOSTNAME}: refit failed — ${errStr(err)}`);
+        await reply(conn, `${prefix}: refit failed — ${errStr(err)}`);
       }
     },
 
