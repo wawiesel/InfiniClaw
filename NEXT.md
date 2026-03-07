@@ -26,6 +26,10 @@ Updated 2026-03-06 9:43 PM EST.
 
 - **Gemini lobe delegation** — needs `GOOGLE_API_KEY` in bot env files at `~/.config/infiniclaw/secrets/bots/{bot}/env`. Captain must provide the key.
 
+## LOW — Design
+
+- **Help account for relay output** — Commands like `!` (help), `!fleet`, `!health` produce output that bots should ignore. Create a dedicated "help" Matrix account for relay responses. Add it to every bot's `IGNORE_SENDERS` so relay output never triggers bot processing. Currently relay sends via intercom accounts, which bots already watch — separating help output from intercom commands would be cleaner.
+
 ## LOW — Infrastructure
 
 - **Poseidon: update S3 endpoint to remove containerNetwork dependency** — currently uses `containerNetwork: "host"` to reach S3. Update S3 endpoint on Poseidon so it's reachable without host networking, then remove the `machines` section from fleet.json entirely.

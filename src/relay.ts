@@ -377,7 +377,7 @@ async function matrixSync(
   return resp.json() as Promise<SyncResponse>;
 }
 
-async function matrixSend(homeserver: string, token: string, roomId: string, text: string): Promise<void> {
+async function matrixSend(homeserver: string, token: string, roomId: string, text: string): Promise<string | undefined> {
   const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const resp = await fetch(
     `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
@@ -390,7 +390,36 @@ async function matrixSend(homeserver: string, token: string, roomId: string, tex
   if (!resp.ok) {
     const body = await resp.text();
     log(`send failed to ${roomId}: ${resp.status} ${body}`);
+    return undefined;
   }
+  const data = await resp.json() as { event_id?: string };
+  return data.event_id;
+}
+
+async function matrixSendThread(homeserver: string, token: string, roomId: string, threadRootId: string, text: string): Promise<string | undefined> {
+  const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const resp = await fetch(
+    `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        msgtype: 'm.text',
+        body: text,
+        'm.relates_to': {
+          rel_type: 'm.thread',
+          event_id: threadRootId,
+        },
+      }),
+    },
+  );
+  if (!resp.ok) {
+    const body = await resp.text();
+    log(`thread send failed to ${roomId}: ${resp.status} ${body}`);
+    return undefined;
+  }
+  const data = await resp.json() as { event_id?: string };
+  return data.event_id;
 }
 
 // ── Bot resolution (multi-ship aware) ───────────────────────────
@@ -1305,43 +1334,42 @@ function registerRelayCommands(): void {
     refit: async (cmd, conn) => {
       const targetShip = cmd.slice('!refit'.length).trim() || null;
       if (targetShip && targetShip !== HOSTNAME) return;
-      const prefix = `⚓ ${HOSTNAME}`;
-      const log: string[] = [];
-      try {
-        await reply(conn, `${prefix}: refit starting`);
 
+      const threadRoot = await reply(conn, `⚓ refit ${HOSTNAME}`);
+      if (!threadRoot) return;
+      const t = (text: string) => threadReply(conn, threadRoot, text);
+
+      try {
         const secretsResult = secretsGitSync();
-        log.push(secretsResult.newCommits > 0 ? `pulled ${secretsResult.newCommits} secrets commit(s)` : 'secrets up to date');
+        await t(secretsResult.newCommits > 0 ? `pulled ${secretsResult.newCommits} secrets commit(s)` : 'secrets up to date');
+
         const icResult = gitSync();
-        log.push(icResult.newCommits > 0 ? `pulled ${icResult.newCommits} code commit(s)` : 'code up to date');
-        await reply(conn, `${prefix}: ${log.join(', ')}`);
+        await t(icResult.newCommits > 0 ? `pulled ${icResult.newCommits} code commit(s)` : 'code up to date');
 
         const buildResult = rebuildInfiniClaw();
         if (buildResult.includes('FAILED')) {
-          await reply(conn, `${prefix}: build failed ⛔`);
-        } else {
-          await reply(conn, `${prefix}: rebuilt`);
+          await t('build failed ⛔');
+          return;
         }
+        await t('rebuilt ✓');
 
         const root = resolveRoot();
         const bots = getActiveBots();
         if (bots.length > 0) {
-          const botResults: string[] = [];
           for (const bot of bots) {
-            try { bootstrapBot(root, bot); botResults.push(`${bot} ✓`); }
-            catch { botResults.push(`${bot} ⛔`); }
+            try { bootstrapBot(root, bot); await t(`${bot} restarted ✓`); }
+            catch { await t(`${bot} restart failed ⛔`); }
           }
-          await reply(conn, `${prefix}: ${botResults.join(', ')}`);
         }
 
         persistFleet();
-        await reply(conn, `${prefix}: restarting relay`);
+        await t('restarting relay');
         await sleep(1_000);
         try {
           execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
-        await reply(conn, `${prefix}: refit failed — ${errStr(err)}`);
+        await t(`refit failed — ${errStr(err)}`);
       }
     },
 
@@ -1657,17 +1685,23 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 }
 
 async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[]): Promise<void> {
-  // ! (bare) — print help
+  // ! (bare) — print help (speaker only, one reply)
   if (cmd === '!') {
+    if (!isSpeaker()) return;
     await reply(conn, buildHelpText());
     return;
   }
   await dispatch(cmd, conn, allConns || []);
 }
 
-async function reply(conn: RoomConn, text: string): Promise<void> {
-  if (!conn.accessToken) return;
-  await matrixSend(conn.homeserver, conn.accessToken, conn.roomId, text);
+async function reply(conn: RoomConn, text: string): Promise<string | undefined> {
+  if (!conn.accessToken) return undefined;
+  return matrixSend(conn.homeserver, conn.accessToken, conn.roomId, text);
+}
+
+async function threadReply(conn: RoomConn, threadRootId: string, text: string): Promise<string | undefined> {
+  if (!conn.accessToken) return undefined;
+  return matrixSendThread(conn.homeserver, conn.accessToken, conn.roomId, threadRootId, text);
 }
 
 // ── Sync loop per room ─────────────────────────────────────────────
