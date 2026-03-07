@@ -81,6 +81,70 @@ const GIT_SYNC_INTERVAL = parseInt(process.env.GIT_SYNC_INTERVAL || '', 10) || 1
 const SECRETS_SYNC_INTERVAL = parseInt(process.env.SECRETS_SYNC_INTERVAL || '', 10) || 30_000;  // default 30s
 const HEALTH_INTERVAL = parseInt(process.env.HEALTH_INTERVAL || '', 10) || 30 * 60_000;         // default 30 min
 
+// ── Failure alerting (thread + exponential backoff) ─────────────────
+
+interface FailureState {
+  startedAt: number;        // when the failure first occurred
+  threadRootId: string;     // Matrix thread root event_id
+  nextAlertAt: number;      // next time to post an update
+  intervalMs: number;       // current backoff interval
+}
+
+const FAILURE_INITIAL_INTERVAL = 60_000;       // 1 minute
+const FAILURE_MAX_INTERVAL = 8 * 60 * 60_000;  // 8 hours
+const failureStates: Record<string, FailureState> = {};
+
+function findEngConn(conns: RoomConn[]): RoomConn | undefined {
+  return conns.find(c => c.name === 'engineering') || conns[0];
+}
+
+function formatDuration(ms: number): string {
+  const min = Math.round(ms / 60_000);
+  if (min < 60) return `${min}m`;
+  const hrs = (ms / 3_600_000).toFixed(1).replace(/\.0$/, '');
+  return `${hrs}h`;
+}
+
+async function reportFailure(system: string, detail: string, conns: RoomConn[]): Promise<void> {
+  const now = Date.now();
+  const conn = findEngConn(conns);
+  if (!conn?.accessToken) return;
+
+  const existing = failureStates[system];
+  if (!existing) {
+    // First failure — create thread
+    const rootId = await reply(conn, `⚠️ ${system} down on ${HOSTNAME}`);
+    if (!rootId) return;
+    await threadReply(conn, rootId, detail.slice(0, 500));
+    failureStates[system] = {
+      startedAt: now,
+      threadRootId: rootId,
+      nextAlertAt: now + FAILURE_INITIAL_INTERVAL,
+      intervalMs: FAILURE_INITIAL_INTERVAL,
+    };
+    return;
+  }
+
+  // Subsequent failure — only post if past nextAlertAt
+  if (now < existing.nextAlertAt) return;
+  const downtime = formatDuration(now - existing.startedAt);
+  await threadReply(conn, existing.threadRootId, `${system} has been down ${downtime} on ${HOSTNAME}`);
+  existing.intervalMs = Math.min(existing.intervalMs * 2, FAILURE_MAX_INTERVAL);
+  existing.nextAlertAt = now + existing.intervalMs;
+}
+
+async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> {
+  const state = failureStates[system];
+  if (!state) return;
+  delete failureStates[system];
+
+  const conn = findEngConn(conns);
+  if (!conn?.accessToken) return;
+  const downtime = formatDuration(Date.now() - state.startedAt);
+  // Recovery message goes to main timeline (not the thread)
+  await reply(conn, `✅ ${system} is now operational after ${downtime} on ${HOSTNAME}`);
+}
+
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
 type BotStatus = 'active' | 'dismissed' | 'transit';
@@ -713,25 +777,16 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
       const result = gitSync();
       if (!result.ok) {
         log(`git sync FAILED: ${result.output}`);
-        // Notify all rooms so the engineer on this ship sees it
-        const msg = `⚠️git sync failed — engineer please fix immediately.\n\`\`\`\n${result.output.slice(0, 500)}\n\`\`\``;
-        for (const conn of conns) {
-          if (conn.accessToken) {
-            await reply(conn, msg).catch(() => {});
-          }
-        }
+        await reportFailure('code sync', result.output, conns);
       } else if (result.newCommits > 0) {
+        await reportRecovery('code sync', conns);
         log(`git sync: pulled ${result.newCommits} new commit(s)`);
         const buildResult = rebuildInfiniClaw();
         log(`git sync: ${buildResult}`);
         if (buildResult.includes('FAILED')) {
-          const msg = `⚠️git pull succeeded (${result.newCommits} commits) but build failed — engineer please fix.\n\`\`\`\n${buildResult}\n\`\`\``;
-          for (const conn of conns) {
-            if (conn.accessToken) {
-              await reply(conn, msg).catch(() => {});
-            }
-          }
+          await reportFailure('code build', buildResult, conns);
         } else {
+          await reportRecovery('code build', conns);
           // Restart running bots so they pick up new code (skip dismissed)
           for (const bot of getActiveBots()) {
             if (liveFleet[bot]?.status !== 'active') continue;
@@ -751,6 +806,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
           }
         }
       } else {
+        await reportRecovery('code sync', conns);
         log('git sync: up to date');
       }
     } catch (err) {
@@ -854,12 +910,9 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
       const result = secretsGitSync();
       if (!result.ok) {
         log(`secrets sync FAILED: ${result.output}`);
-        for (const conn of conns) {
-          if (conn.accessToken) {
-            await reply(conn, `⚠️secrets repo sync failed — operator please fix.\n\`\`\`\n${result.output.slice(0, 500)}\n\`\`\``).catch(() => {});
-          }
-        }
+        await reportFailure('secrets sync', result.output, conns);
       } else if (result.newCommits > 0) {
+        await reportRecovery('secrets sync', conns);
         log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
         // Reload fleet.json from disk (may have transport assignments from other ships)
         try {
@@ -931,6 +984,9 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
             }
           }
         } catch { /* inbox check is best-effort */ }
+      } else {
+        // Success with 0 new commits — still clear any prior failure
+        await reportRecovery('secrets sync', conns);
       }
     } catch (err) {
       log(`secrets sync loop error: ${errStr(err)}`);
