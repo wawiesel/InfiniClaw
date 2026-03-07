@@ -21,6 +21,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { marked } from 'marked';
+import { upsertEnvLine } from 'nanoclaw/env-utils.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, writeShips, isShipActive, clearShipConfigCache } from './ship-config.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
@@ -174,8 +175,8 @@ async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> 
 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
-type BotStatus = 'active' | 'dismissed' | 'transit';
-type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatus; title?: string };
+type BotStatus = 'onduty' | 'lounge' | 'quarters' | 'sleep' | 'transit';
+type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatus; title?: string; quartersRoom?: string; activeBrainModel?: string };
 let liveFleet: Record<string, FleetEntry> = {};
 let fleetDirty = false;
 
@@ -334,7 +335,7 @@ function botVersion(root: string, bot: string): string {
   try {
     const versionFile = path.join(root, '_runtime', 'instances', bot, 'GIT_VERSION');
     const sha = fs.readFileSync(versionFile, 'utf-8').trim().split(' ')[0];
-    if (!sha) return '';
+    if (!sha || !/^[a-f0-9]{7,40}$/.test(sha)) return '';
     return fmtVersion(sha, commitAge(root, sha), gitRelation(root, sha, 'HEAD'));
   } catch { return ''; }
 }
@@ -669,8 +670,8 @@ function resolveBots(target: string | undefined, roomName: string, action?: stri
   const local = getActiveBots();
   if (target) {
     if (local.includes(target)) return [target];
-    // For !join, also match inactive bots assigned to this ship
-    if (action === 'join' && liveFleet[target]?.ship === HOSTNAME) return [target];
+    // For join/sleep/wake, also match inactive/sleeping bots assigned to this ship
+    if ((action === 'join' || action === 'sleep' || action === 'wake') && liveFleet[target]?.ship === HOSTNAME) return [target];
     return [];
   }
   // No target — scope to bots in this room on this ship
@@ -768,7 +769,7 @@ async function publishFleetReport(): Promise<FleetReport> {
       status: entry.status,
       gitVersion: botVersion(root, botId),
     };
-    if (entry.status === 'active' && !running) {
+    if (entry.status === 'onduty' && !running) {
       botReports[botId].status = 'warn';
     }
   }
@@ -1046,7 +1047,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
           await reportRecovery('code build', conns);
           // Restart running bots so they pick up new code (skip dismissed)
           for (const bot of getActiveBots()) {
-            if (liveFleet[bot]?.status !== 'active') continue;
+            if (liveFleet[bot]?.status !== 'onduty') continue;
             try {
               bootstrapBot(resolveRoot(), bot);
               log(`git sync: restarted ${bot}`);
@@ -1205,9 +1206,9 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
           for (const [bot, entry] of Object.entries(liveFleet)) {
             if (entry.ship === HOSTNAME && entry.status === 'transit') {
               log(`transport: materializing ${bot}`);
-              fleetUpdate(bot, { status: 'active' });
+              fleetUpdate(bot, { status: 'onduty' });
               writeFleet(liveFleet);
-              clearShipConfigCache(); // so bootstrapBot sees updated active state
+              clearShipConfigCache(); // so bootstrapBot sees updated onduty state
               secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${HOSTNAME}`);
               fleetDirty = false;
               const root = resolveRoot();
@@ -1319,18 +1320,6 @@ async function healthLoop(): Promise<void> {
 // ── Heartbeat — nudge idle bots to do autonomous work ──────────────
 
 const HEARTBEAT_INTERVAL = parseInt(process.env.HEARTBEAT_INTERVAL_MS || '', 10) || 30 * 60_000; // 30 min default
-const MIN_SESSION_AGE_MS = parseInt(process.env.MIN_SESSION_AGE_MS || '', 10) || 6 * 3_600_000; // 6h
-const MAX_SESSION_AGE_MS = parseInt(process.env.MAX_SESSION_AGE_MS || '', 10) || 8 * 3_600_000; // 8h
-const DREAM_DURATION_MS = parseInt(process.env.DREAM_DURATION_MS || '', 10) || 30 * 60_000; // 30m
-const DREAM_IDLE_WINDOW_MS = parseInt(process.env.DREAM_IDLE_WINDOW_MS || '', 10) || 15 * 60_000; // 15m
-const DREAM_LOOP_INTERVAL_MS = 5 * 60_000; // 5m
-
-type DreamPhase = 'idle' | 'dreaming' | 'recycling';
-const botDreamPhase = new Map<string, DreamPhase>();
-const botDreamStartedAt = new Map<string, number>();
-const botIdleSince = new Map<string, number>();
-let dreamingBot: string | null = null; // only one at a time
-// Bot state is tracked in liveFleet[bot].status: 'active' | 'dismissed' | 'transit'
 
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {
@@ -1340,93 +1329,6 @@ function hasRunningContainer(bot: string): boolean {
     });
     return result.status === 0 && (result.stdout || '').trim().length > 0;
   } catch { return false; }
-}
-
-/** Get container start time in ms for the bot's main container, or null if missing. */
-function getContainerStartTime(bot: string): number | null {
-  try {
-    const result = spawnSync('podman', ['ps', '--filter', `name=nanoclaw-${bot}-main`, '--format', 'json'], {
-      encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
-    });
-    if (result.status !== 0) return null;
-    const parsed: unknown = JSON.parse((result.stdout || '').trim() || '[]');
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    const started = (parsed[0] as Record<string, unknown>)?.StartedAt;
-    if (typeof started !== 'string') return null;
-    const ts = Date.parse(started);
-    return Number.isFinite(ts) ? ts : null;
-  } catch { return null; }
-}
-
-async function dreamLoop(conns: RoomConn[]): Promise<void> {
-  await sleep(2 * 60_000); // slight delay so room sync/login starts first
-  while (true) {
-    try {
-      const now = Date.now();
-
-      // Enforce dream duration for currently dreaming bot.
-      if (dreamingBot) {
-        const started = botDreamStartedAt.get(dreamingBot);
-        if (started && now - started >= DREAM_DURATION_MS) {
-          const bot = dreamingBot;
-          botDreamPhase.set(bot, 'recycling');
-          const taskPath = `/workspace/ipc/tasks/restart-${bot}-${now}.json`;
-          fs.mkdirSync('/workspace/ipc/tasks', { recursive: true });
-          fs.writeFileSync(taskPath, JSON.stringify({ type: 'restart_bot', bot }));
-          log(`dream: ${bot} transitioned to recycling; wrote ${taskPath}`);
-          botDreamStartedAt.delete(bot);
-          botDreamPhase.set(bot, 'idle');
-          dreamingBot = null;
-        }
-      }
-
-      // Only one dreaming bot fleet-wide.
-      if (dreamingBot) {
-        await sleep(DREAM_LOOP_INTERVAL_MS);
-        continue;
-      }
-
-      const root = resolveRoot();
-      const botRooms = buildBotRoomMap();
-      for (const bot of getActiveBots()) {
-        if (liveFleet[bot]?.status !== 'active') continue; // inactive — skip dream cycles
-        if (botDreamPhase.get(bot) === 'dreaming' || botDreamPhase.get(bot) === 'recycling') continue;
-
-        const startTime = getContainerStartTime(bot);
-        if (!startTime) {
-          botIdleSince.delete(bot);
-          continue;
-        }
-
-        const sessionAge = now - startTime;
-        const isRunning = hasRunningContainer(bot);
-        if (isRunning) botIdleSince.delete(bot);
-        else if (!botIdleSince.has(bot)) botIdleSince.set(bot, now);
-
-        const idleFor = isRunning ? 0 : now - (botIdleSince.get(bot) || now);
-        const shouldDream = sessionAge > MAX_SESSION_AGE_MS
-          || (sessionAge > MIN_SESSION_AGE_MS && !isRunning && idleFor >= DREAM_IDLE_WINDOW_MS);
-        if (!shouldDream) continue;
-
-        const roomName = botRooms[bot];
-        if (!roomName) continue;
-        const conn = conns.find((c) => c.name === roomName);
-        if (!conn?.accessToken) continue;
-        const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-        const name = env?.ASSISTANT_NAME || bot;
-        await matrixSend(conn.homeserver, conn.accessToken, conn.roomId,
-          `${name}, begin your dream period. Review recent conversation history, consolidate your memory files, and prepare for a fresh session. You have ${Math.floor(DREAM_DURATION_MS / 60_000)} minutes. Reply when done.`);
-        botDreamPhase.set(bot, 'dreaming');
-        botDreamStartedAt.set(bot, now);
-        dreamingBot = bot;
-        log(`dream: ${bot} entered dreaming for ${Math.floor(DREAM_DURATION_MS / 60_000)} minutes`);
-        break;
-      }
-    } catch (err) {
-      log(`dream loop error: ${errStr(err)}`);
-    }
-    await sleep(DREAM_LOOP_INTERVAL_MS);
-  }
 }
 
 /**
@@ -1441,7 +1343,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
       const root = resolveRoot();
       const botRooms = buildBotRoomMap();
       for (const bot of getActiveBots()) {
-        if (liveFleet[bot]?.status !== 'active') continue; // inactive — skip nudges
+        if (liveFleet[bot]?.status !== 'onduty') continue; // not on duty — skip nudges
         if (hasRunningContainer(bot)) continue; // already working
         const roomName = botRooms[bot];
         if (!roomName) continue;
@@ -1464,7 +1366,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
 // ── Command handling ───────────────────────────────────────────────
 
 async function handleLifecycleCommand(
-  action: 'join' | 'dismiss' | 'restart',
+  action: 'join' | 'dismiss' | 'restart' | 'sleep' | 'wake',
   target: string | undefined,
   conn: RoomConn,
 ): Promise<void> {
@@ -1475,7 +1377,7 @@ async function handleLifecycleCommand(
   // or the room simply has no bots from this ship.
   if (bots.length === 0) return;
 
-  if (action !== 'dismiss') {
+  if (action !== 'dismiss' && action !== 'sleep') {
     if (!isShipActive()) {
       await reply(conn, `ship is decommissioned — use !commission first`);
       return;
@@ -1498,33 +1400,90 @@ async function handleLifecycleCommand(
     const dutyRoomId = conn.roomId;
 
     if (action === 'dismiss') {
-      // Dismiss is fast — no thread needed
+      // Dismiss: stop bot, downgrade brain to sonnet, disable lobes, move to lounge
       try {
         stopBot(bot);
         killStaleContainers(bot);
+        // Save current brain model and downgrade to sonnet
+        const config = loadShipConfig();
+        const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
+        if (env?.BRAIN_MODEL && env.BRAIN_MODEL !== 'claude-sonnet-4-6') {
+          fleetUpdate(bot, { activeBrainModel: env.BRAIN_MODEL });
+        }
+        try {
+          upsertEnvLine(envFile, 'BRAIN_MODEL', 'claude-sonnet-4-6');
+          upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '1');
+          log(`${name}: brain downgraded to sonnet, lobes disabled`);
+        } catch (envErr) {
+          log(`${name}: env update failed (non-fatal): ${errStr(envErr)}`);
+        }
         // Move bot: leave duty room → join lounge
         try {
           const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
           await botLeaveRoom(botToken, homeserver, dutyRoomId);
           if (loungeId) await botJoinRoom(botToken, homeserver, loungeId, conn, botUserId);
           log(`${name}: moved to lounge`);
-          log(`${name}: moved to lounge`);
         } catch (roomErr) {
           log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
         }
-        fleetUpdate(bot, { status: 'dismissed' });
-        await reply(conn, `🔴 ${name} dismissed`);
+        fleetUpdate(bot, { status: 'lounge' });
+        await reply(conn, `🔴 ${name} dismissed → lounge (sonnet, no lobes)`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!dismiss ${name} failed: ${errStr(err)}`);
         await reply(conn, `⛔ !dismiss ${name} — ${errStr(err)}`);
+      }
+    } else if (action === 'sleep') {
+      // Sleep: hard stop — move to quarters, stop container
+      try {
+        stopBot(bot);
+        killStaleContainers(bot);
+        const quartersRoomId = liveFleet[bot]?.quartersRoom;
+        // Move bot: leave current room (duty or lounge) → quarters only
+        try {
+          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
+          await botLeaveRoom(botToken, homeserver, dutyRoomId);
+          if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
+          log(`${name}: moved to quarters (sleeping)`);
+        } catch (roomErr) {
+          log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
+        }
+        fleetUpdate(bot, { status: 'sleep' });
+        await reply(conn, `😴 ${name} sleeping (quarters, container stopped)`);
+        publishFleetReport().catch(() => {});
+      } catch (err) {
+        log(`!sleep ${name} failed: ${errStr(err)}`);
+        await reply(conn, `⛔ !sleep ${name} — ${errStr(err)}`);
+      }
+    } else if (action === 'wake') {
+      // Wake: restart in quarters (bot stays in quarters room, not duty room)
+      const startedAt = Date.now();
+      const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
+      const threadRoot = await reply(conn, `☀️ ${name} waking`);
+      if (!threadRoot) continue;
+      const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
+      try {
+        await step('building...');
+        fleetUpdate(bot, { status: 'quarters' }); // awake but not on duty
+        writeFleet(liveFleet);
+        clearShipConfigCache();
+        bootstrapBot(root, bot);
+        const model = env?.BRAIN_MODEL || '?';
+        const ver = botVersion(root, bot);
+        await step(`✅ awake · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+        await reply(conn, `☀️ ${name} awake (quarters)`);
+        publishFleetReport().catch(() => {});
+      } catch (err) {
+        log(`!wake ${name} failed: ${errStr(err)}`);
+        const fail = `⛔ !wake ${name} — ${errStr(err)}`;
+        await step(fail);
+        await reply(conn, fail);
       }
     } else {
       // Join/restart are slow (build) — use a thread
       const startedAt = Date.now();
       const emoji = action === 'join' ? '🟢' : '🔄';
       const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-      const model = env?.BRAIN_MODEL || '?';
       const threadRoot = await reply(conn, `${emoji} ${name} ${action === 'join' ? 'joining' : 'restarting'}`);
       if (!threadRoot) continue;
       const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
@@ -1535,7 +1494,24 @@ async function handleLifecycleCommand(
           killStaleContainers(bot);
         }
         if (action === 'join') {
-          fleetUpdate(bot, { status: 'active', ship: HOSTNAME });
+          // Restore brain model and enable lobes
+          const config = loadShipConfig();
+          const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
+          const savedModel = liveFleet[bot]?.activeBrainModel;
+          if (savedModel) {
+            try {
+              upsertEnvLine(envFile, 'BRAIN_MODEL', savedModel);
+              upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
+              log(`${name}: brain restored to ${savedModel}, lobes enabled`);
+            } catch (envErr) {
+              log(`${name}: env restore failed (non-fatal): ${errStr(envErr)}`);
+            }
+          } else {
+            try {
+              upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
+            } catch { /* ignore */ }
+          }
+          fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME });
           writeFleet(liveFleet);
           clearShipConfigCache();
         }
@@ -1551,6 +1527,7 @@ async function handleLifecycleCommand(
         }
         await step('building...');
         bootstrapBot(root, bot);
+        const model = env?.BRAIN_MODEL || '?';
         const ver = botVersion(root, bot);
         await step(`✅ online · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
         await reply(conn, `✅ ${name} online`);
@@ -1583,6 +1560,14 @@ function registerRelayCommands(): void {
     restart: async (cmd, conn) => {
       const parsed = parseTarget(cmd, '!restart');
       if (parsed.matched) await handleLifecycleCommand('restart', parsed.target, conn);
+    },
+    sleep: async (cmd, conn) => {
+      const parsed = parseTarget(cmd, '!sleep');
+      if (parsed.matched) await handleLifecycleCommand('sleep', parsed.target, conn);
+    },
+    wake: async (cmd, conn) => {
+      const parsed = parseTarget(cmd, '!wake');
+      if (parsed.matched) await handleLifecycleCommand('wake', parsed.target, conn);
     },
 
     relay: async (cmd, conn) => {
@@ -1627,7 +1612,7 @@ function registerRelayCommands(): void {
         for (const bot of getActiveBots()) {
           stopBot(bot);
           killStaleContainers(bot);
-          fleetUpdate(bot, { status: 'dismissed' });
+          fleetUpdate(bot, { status: 'sleep' });
         }
         ships[HOSTNAME].active = false;
         writeShips(ships);
@@ -1652,7 +1637,7 @@ function registerRelayCommands(): void {
         ensurePodmanReady();
         const started: string[] = [];
         for (const [name, entry] of Object.entries(fleet)) {
-          if (entry.ship === HOSTNAME && entry.status === 'active') {
+          if (entry.ship === HOSTNAME && entry.status === 'onduty') {
             bootstrapBot(root, name);
             started.push(name);
           }
@@ -1936,14 +1921,17 @@ function registerRelayCommands(): void {
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
           for (const [, entry] of bots) {
-            const isCO = entry.status === 'active' && !Object.values(allBots).some(
-              e => e.role === entry.role && e.status === 'active' && e.rank < entry.rank && e !== entry
+            const isCO = entry.status === 'onduty' && !Object.values(allBots).some(
+              e => e.role === entry.role && e.status === 'onduty' && e.rank < entry.rank && e !== entry
             );
 
             let badge: string;
             if (entry.localStatus === 'transit') badge = '🚀';
+            else if (entry.localStatus === 'sleep') badge = '💤';
             else if (entry.localStatus === 'warn') badge = '⚠️';
-            else if (entry.localStatus !== 'active') badge = '💤';
+            else if (entry.localStatus === 'lounge') badge = '🍸';
+            else if (entry.localStatus === 'quarters') badge = '🏠';
+            else if (entry.localStatus !== 'onduty') badge = '❓';
             else if (isCO) badge = '⭐';
             else badge = '🟢';
 
@@ -2267,7 +2255,7 @@ async function main(): Promise<void> {
       removeStaleProcesses();
       killStaleContainers();
       for (const [bot, entry] of Object.entries(liveFleet)) {
-        if (entry.ship === HOSTNAME && entry.status === 'active') {
+        if (entry.ship === HOSTNAME && entry.status === 'onduty') {
           try {
             bootstrapBot(root, bot);
             log(`bootstrap: ${bot} started`);
@@ -2288,7 +2276,6 @@ async function main(): Promise<void> {
   gitSyncLoop(conns).catch((err) => log(`git sync loop fatal: ${errStr(err)}`));
   secretsSyncLoop(conns).catch((err) => log(`secrets sync loop fatal: ${errStr(err)}`));
   heartbeatLoop(conns).catch((err) => log(`heartbeat loop fatal: ${errStr(err)}`));
-  dreamLoop(conns).catch((err) => log(`dream loop fatal: ${errStr(err)}`));
 
   await Promise.all(loops);
 }
