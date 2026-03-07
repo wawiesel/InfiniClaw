@@ -20,6 +20,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
+import { marked } from 'marked';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, writeShips, isShipActive, clearShipConfigCache } from './ship-config.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
@@ -80,7 +81,7 @@ const STARTUP_SYNC_DELAY = 3_000;
 
 // Configurable intervals (env vars in milliseconds, or use defaults)
 const GITHUB_REPO_URL = 'https://github.com/wawiesel/InfiniClaw';
-const GIT_SYNC_INTERVAL = parseInt(process.env.GIT_SYNC_INTERVAL || '', 10) || 10 * 60_000;    // default 10 min
+const GIT_SYNC_INTERVAL = parseInt(process.env.GIT_SYNC_INTERVAL || '', 10) || 3 * 60_000;     // default 3 min
 const SECRETS_SYNC_INTERVAL = parseInt(process.env.SECRETS_SYNC_INTERVAL || '', 10) || 30_000;  // default 30s
 const HEALTH_INTERVAL = parseInt(process.env.HEALTH_INTERVAL || '', 10) || 30 * 60_000;         // default 30 min
 
@@ -292,7 +293,7 @@ function isAuthorized(sender: string, captainUserId: string, operatorUserId: str
 /** Format version string: ` · 📦 [sha](github) (age) ↑N|↓N` */
 function fmtVersion(sha: string, ageMs: number, ud: string): string {
   const url = `${GITHUB_REPO_URL}/commit/${sha}`;
-  return ` · 📦 [\`${sha}\`](${url}) (${formatDuration(ageMs)}) ${ud}`;
+  return ` · 📦 [${sha}](${url}) (${formatDuration(ageMs)}) ${ud}`;
 }
 
 /** Compute ↑N/↓N relation between two refs. */
@@ -505,22 +506,21 @@ async function matrixSync(
   return resp.json() as Promise<SyncResponse>;
 }
 
-/** Convert markdown links [text](url) to HTML. Returns HTML string if links found, null otherwise. */
-function markdownToHtml(text: string): string | null {
-  if (!/\[.*?\]\(https?:\/\//.test(text)) return null;
-  // Escape HTML entities first, then convert markdown links
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2">$1</a>');
+/** Convert markdown to HTML for Matrix formatted_body. */
+function markdownToHtml(text: string): string {
+  const html = (marked.parse(text, { async: false, breaks: true }) as string).trim();
+  // Preserve leading whitespace that HTML would collapse
+  return html.replace(/^ +/gm, (m) => '&nbsp;'.repeat(m.length));
 }
 
 async function matrixSend(homeserver: string, token: string, roomId: string, text: string): Promise<string | undefined> {
   const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const html = markdownToHtml(text);
-  const content: Record<string, unknown> = { msgtype: 'm.text', body: text };
-  if (html) {
-    content.format = 'org.matrix.custom.html';
-    content.formatted_body = html;
-  }
+  const content: Record<string, unknown> = {
+    msgtype: 'm.text',
+    body: text,
+    format: 'org.matrix.custom.html',
+    formatted_body: markdownToHtml(text),
+  };
   const resp = await fetch(
     `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
     {
@@ -548,7 +548,8 @@ async function matrixSendThread(homeserver: string, token: string, roomId: strin
       body: JSON.stringify({
         msgtype: 'm.text',
         body: text,
-        ...(markdownToHtml(text) ? { format: 'org.matrix.custom.html', formatted_body: markdownToHtml(text) } : {}),
+        format: 'org.matrix.custom.html',
+        formatted_body: markdownToHtml(text),
         'm.relates_to': {
           rel_type: 'm.thread',
           event_id: threadRootId,
@@ -1445,7 +1446,9 @@ async function handleLifecycleCommand(
       // Join/restart are slow (build) — use a thread
       const startedAt = Date.now();
       const emoji = action === 'join' ? '🟢' : '🔄';
-      const threadRoot = await reply(conn, statusLine(emoji, `!${action} ${name}`, 'starting', 0));
+      const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
+      const model = env?.BRAIN_MODEL || '?';
+      const threadRoot = await reply(conn, `${emoji} ${name} ${action === 'join' ? 'joining' : 'restarting'}`);
       if (!threadRoot) continue;
       const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
       try {
@@ -1461,10 +1464,12 @@ async function handleLifecycleCommand(
         }
         await step('building...');
         bootstrapBot(root, bot);
-        const done = statusLine('✅', `!${action} ${name}`, `rank ${rank}`, Date.now() - startedAt);
-        await step(done);
-        await reply(conn, done);
+        const ver = botVersion(root, bot);
+        await step(`✅ online · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+        await reply(conn, `✅ ${name} online`);
         publishFleetReport().catch(() => {});
+        // Trigger the bot to acknowledge in the thread
+        await threadReply(conn, threadRoot, `${name}, reporting for duty!`);
       } catch (err) {
         log(`!${action} ${name} failed: ${errStr(err)}`);
         const fail = `⛔ !${action} ${name} — ${errStr(err)}`;
@@ -1631,15 +1636,10 @@ function registerRelayCommands(): void {
       if (!threadRoot) return;
       const elapsed = () => Date.now() - startedAt;
 
-      // All bots on this ship get deployed; only active get started
-      const localBots = Object.entries(liveFleet)
-        .filter(([, e]) => e.ship === HOSTNAME)
-        .map(([name]) => name);
       const activeBots = getActiveBots();
-      const inactiveBots = localBots.filter(b => !activeBots.includes(b));
 
-      // Stages: sync secrets, sync code, build, deploy inactive, bootstrap active, done
-      const totalStages = 3 + inactiveBots.length + activeBots.length + 1;
+      // Stages: sync secrets, sync code, build, bootstrap active, done
+      const totalStages = 3 + activeBots.length + 1;
       let stage = 0;
       let warnings = 0;
       let errors = 0;
@@ -1685,18 +1685,6 @@ function registerRelayCommands(): void {
         await s(stageOk('relay + dist rebuilt', relayVersion(root)));
 
         ensurePodmanReady();
-
-        // Deploy inactive bots (container image rebuild + instance sync, no start)
-        for (const bot of inactiveBots) {
-          try {
-            deployBot(root, bot);
-            await s(stageOk(`${bot} deployed`, botVersion(root, bot)));
-          } catch (err) {
-            errors++;
-            const link = await uploadErrorLog(`deploy-${bot}`, err);
-            await s(stageFail(`${bot} deploy failed`, link));
-          }
-        }
 
         // Bootstrap active bots (deploy + start)
         for (const bot of activeBots) {
@@ -1876,7 +1864,8 @@ function registerRelayCommands(): void {
           }
         }
 
-        await reply(conn, lines.join('\n'));
+        const threadRoot = await reply(conn, '📋 Fleet');
+        if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
       } catch (err) {
         await reply(conn, `!fleet failed: ${errStr(err)}`);
       }

@@ -28,6 +28,10 @@ With direct bind mounts, bot edits already persist to the repo. The sync-back st
 
 Auto-threading is implemented (1c30fdd) but navigators still need to manage thread-to-topic mapping in their memory so they return to the right thread for ongoing work.
 
+### Memex (experiential memory)
+
+SQLite FTS5-based experiential memory for bots. Bots record experiences (problems solved, patterns discovered, decisions made) and recall them via semantic search. Design discussed but never implemented — needs to be built from scratch. Core components: SQLite FTS5 store, `save_experience` / `recall_experience` MCP tools, auto-archival of thread outcomes.
+
 ### Scheduled task mount error
 
 Scheduled tasks fail with `statfs .../container/agent-runner/src: no such file or directory`. The agent-runner source mount path is only valid during development. Scheduled task containers need the same mount resolution as regular containers.

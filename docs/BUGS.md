@@ -31,7 +31,7 @@ The regex matches status indicator emoji patterns (💤, ⏳, 🔵, 🔷, 🔹) 
 ### 4. Bot persona CLAUDE.md files reference removed "standing orders"
 
 **Files:**
-- `bots/engineer/ROOM.md` line 18, 20-22
+- `bots/engineer/ROOM.md` line 22, 24-26
 - `bots/engineer/cid/CLAUDE.md` line 16
 - `bots/engineer/parker/CLAUDE.md` line 16
 - `bots/architect/albert/CLAUDE.md` line 86
@@ -40,7 +40,7 @@ The regex matches status indicator emoji patterns (💤, ⏳, 🔵, 🔷, 🔹) 
 - `bots/CLAUDE.md` lines 59, 78
 - `bots/skills/directive-writing/SKILL.md` lines 3, 43
 
-Standing orders were removed. These references will confuse bots. Update to reflect current behavior (consult NEXT.md / BUGS.md for work items).
+Standing orders were removed from main.ts. These references will confuse bots. Update to reflect current behavior: when idle, consult BUGS.md then NEXT.md for work items.
 
 ### 5. `_runtime/staging/` contains stale code with removed features
 
@@ -49,11 +49,3 @@ Standing orders were removed. These references will confuse bots. Update to refl
 Staging copies still have standing orders, status indicators, run-progress nudge, and PIP_PULSE code. These will be deployed into containers until bots are rebuilt.
 
 **Fix:** Rebuild and redeploy affected bots (`!refit` or `!restart`).
-
-### 6. `injectSystemNotice()` still exists in main.ts
-
-**File:** `src/main.ts` ~line 1199
-
-The function that was used by standing orders to inject system notices still exists. Its only remaining caller should be verified — if nothing uses it, remove it.
-
-**Fix:** Check callers. Remove if unused.

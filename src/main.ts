@@ -129,7 +129,6 @@ import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
 import { loadFleet } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
-import { getSystemStatus } from './status.js';
 
 // ── Display name helper ────────────────────────────────────────────────
 const BOT_LOCATION = os.hostname().toUpperCase();
@@ -1856,154 +1855,17 @@ async function main(): Promise<void> {
     logger.info({ thresholdMs: IDLE_PIP_THRESHOLD_MS }, 'Bot idle — pip set to 💤');
   }, IDLE_PIP_CHECK_MS));
 
-  // ── Startup checklist ──────────────────────────────────────────────
-  function buildStartupChecklist(): string {
-    const sessionDir = path.join(DATA_DIR, 'sessions', MAIN_GROUP_FOLDER);
-    const role = (ASSISTANT_ROLE || '').toLowerCase();
-    const isEngineer = role === 'engineer';
-    const isNavigator = role === 'navigator';
-    const sections: string[] = [];
-
-    // ── Skills (all bots) ──
-    const skillsDir = path.join(sessionDir, '.claude', 'skills');
-    let skillLines = '';
-    try {
-      const skillNames = fs.existsSync(skillsDir)
-        ? fs.readdirSync(skillsDir).filter((e) => {
-            try { return fs.statSync(path.join(skillsDir, e)).isDirectory(); } catch { return false; }
-          }).sort()
-        : [];
-      if (skillNames.length > 0) {
-        skillLines = skillNames.map((s) => {
-          const skillMd = path.join(skillsDir, s, 'SKILL.md');
-          let desc = '';
-          try {
-            const content = fs.readFileSync(skillMd, 'utf-8');
-            const m = content.match(/^description:\s*(.+)$/m);
-            if (m) desc = ' — ' + m[1].trim().slice(0, 120);
-          } catch { /* no description */ }
-          return `- \`${s}\`${desc}`;
-        }).join('\n');
-      } else {
-        skillLines = '_(none)_';
-      }
-    } catch { skillLines = '_(error reading skills)_'; }
-    sections.push(`### 🔧 Skills\n${skillLines}`);
-
-    // ── MCP Servers (all bots) ──
-    const settingsFile = path.join(sessionDir, '.claude', 'settings.json');
-    let mcpLines = '';
-    try {
-      if (fs.existsSync(settingsFile)) {
-        const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
-        const mcpNames = Object.keys(settings.mcpServers || {}).sort();
-        mcpLines = mcpNames.length > 0
-          ? mcpNames.map((m) => `- 🔌 ${m}`).join('\n')
-          : '_(none)_';
-      } else {
-        mcpLines = '_(none)_';
-      }
-    } catch { mcpLines = '_(error reading MCP)_'; }
-    sections.push(`### 🔌 MCP Servers\n${mcpLines}`);
-
-    // ── Active Todos (all bots) ──
-    const todos = readTodoItems(MAIN_GROUP_FOLDER);
-    const activeTodos = todos.filter((t) => t.status !== 'completed');
-    let todoLines = '';
-    if (activeTodos.length > 0) {
-      const statusEmoji: Record<string, string> = { in_progress: '🔄', pending: '⏳' };
-      todoLines = activeTodos.map((t) => `- ${statusEmoji[t.status] ?? '❓'} ${t.content}`).join('\n');
-    } else {
-      todoLines = '_(empty)_';
-    }
-    sections.push(`### ✅ Active Todos\n${todoLines}`);
-
-    // ── Machine Health (engineers only) ──
-    if (isEngineer) {
-      const machineName = os.hostname().toUpperCase();
-      let healthLines = '';
-      try {
-        const status = getSystemStatus(process.cwd());
-        const lines: string[] = [];
-        for (const bot of status.bots) {
-          const svc = bot.service === 'running' ? '🟢' : '🔴';
-          const uptime = bot.containers.length > 0
-            ? bot.containers.map((c) => c.uptime).join(', ')
-            : '—';
-          const lastErr = bot.lastErrorAt
-            ? ` · ⚠️ ${Math.round((Date.now() - new Date(bot.lastErrorAt).getTime()) / 60000)}m ago`
-            : '';
-          lines.push(`- ${svc} **${bot.name}** · ${bot.model ?? '?'} · ${uptime}${lastErr}`);
-        }
-        healthLines = lines.length > 0 ? lines.join('\n') : '_(no bots)_';
-      } catch { healthLines = '_(error reading health)_'; }
-      sections.push(`### 🏥 Machine Health — ${machineName}\n${healthLines}`);
-    }
-
-    // ── Weekly Goals + Knowledge Search (navigators only) ──
-    if (isNavigator) {
-      // Weekly goals — read from well-known file if present
-      let goalLines = '_(not configured)_';
-      const goalsFile = path.join(DATA_DIR, 'weekly-goals.md');
-      try {
-        if (fs.existsSync(goalsFile)) {
-          const lines = fs.readFileSync(goalsFile, 'utf-8').trim().split('\n').filter(Boolean);
-          goalLines = lines.map((l) => `- ${l}`).join('\n') || '_(empty)_';
-        }
-      } catch { goalLines = '_(error reading goals)_'; }
-      sections.push(`### 🎯 Weekly Goals\n${goalLines}`);
-
-      // Knowledge search latest entry
-      let knowledgeEntry = '_(not configured)_';
-      const knowledgeDir = path.join(DATA_DIR, 'knowledge');
-      try {
-        if (fs.existsSync(knowledgeDir)) {
-          const files = fs.readdirSync(knowledgeDir)
-            .filter((f) => f.endsWith('.md'))
-            .map((f) => ({ f, mtime: fs.statSync(path.join(knowledgeDir, f)).mtimeMs }))
-            .sort((a, b) => b.mtime - a.mtime);
-          if (files.length > 0) {
-            const latest = files[0].f;
-            const content = fs.readFileSync(path.join(knowledgeDir, latest), 'utf-8');
-            const firstLine = content.split('\n').find((l) => l.trim()) || latest;
-            knowledgeEntry = `\`${latest}\`: ${firstLine.replace(/^#+\s*/, '').slice(0, 80)}`;
-          }
-        }
-      } catch { knowledgeEntry = '_(error reading knowledge)_'; }
-      sections.push(`### 📚 Knowledge (latest)\n${knowledgeEntry}`);
-    }
-
-    const body = sections.join('\n\n');
-    return `## 🚀 ${ASSISTANT_NAME} startup checklist\n\n${body}`;
-  }
-
-  // Boot announcement
-  const bootAnnounceTimer = setInterval(async () => {
+  // Set presence on startup (boot announcement is handled by the relay/intercom)
+  const presenceTimer = setInterval(async () => {
     const mainJid = getMainChatJid();
     if (!mainJid) return;
     const ch = findChannel(channels, mainJid);
     if (!ch) return;
-    clearInterval(bootAnnounceTimer);
+    clearInterval(presenceTimer);
     try {
       if (ch.setPresenceStatus) await ch.setPresenceStatus('online', 'idle');
-      const mainGroup = registeredGroups[mainJid];
-      const groupName = mainGroup?.name || MAIN_GROUP_FOLDER;
-      const hostname = os.hostname();
-      const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
-      const boot = `🔄 ${ASSISTANT_NAME} · 🔧 ${ASSISTANT_ROLE} · 💬 ${groupName} · 🧠 ${providerName}/${mainLlm} · 🖥️ ${hostname} · 📦 ${GIT_VERSION}`;
-      const bootEventId = ch.sendMessageReturningId
-        ? await ch.sendMessageReturningId(mainJid, `<font color="#888888"><em>${esc(boot)}</em></font>`)
-        : (await ch.sendMessage(mainJid, `<font color="#888888"><em>${esc(boot)}</em></font>`), undefined);
-      // Send startup checklist in a thread off the boot message (keeps mobile timeline clean)
-      try {
-        const checklist = buildStartupChecklist();
-        await ch.sendMessage(mainJid, checklist, bootEventId);
-      } catch (checklistErr) {
-        logger.warn({ err: checklistErr }, 'Failed to send startup checklist');
-      }
-      // Todo list is sent after resume flow completes (see injectResumeMessage)
     } catch (err) {
-      logger.warn({ err }, 'Failed to send boot announcement');
+      logger.warn({ err }, 'Failed to set presence');
     }
   }, 2000);
 }

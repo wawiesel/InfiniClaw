@@ -87,7 +87,7 @@ The response includes: active bots per machine, memory usage, OOM counts, sessio
 
 ### Git Sync (automatic)
 
-The relay also runs `git fetch origin && git rebase origin/main` every **10 minutes**. If new commits are pulled, it auto-rebuilds (`npm run build`). On failure:
+The relay also runs `git fetch origin && git rebase origin/main` every **3 minutes**. If new commits are pulled, it auto-rebuilds (`npm run build`). On failure:
 
 - **Rebase conflict**: alerts all rooms — engineer must fix immediately
 - **Build failure**: alerts all rooms with error output
