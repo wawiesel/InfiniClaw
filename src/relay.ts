@@ -1393,8 +1393,8 @@ function registerRelayCommands(): void {
         for (const machine of machineOrder) {
           const mConfig = machines[machine];
           const rank = mConfig?.rank ?? '?';
-          const status = mConfig?.active ? 'commissioned' : 'decommissioned';
-          lines.push(`${machine} #${rank} (${status})`);
+          const shipIcon = mConfig?.active ? '⚓' : '🚫';
+          lines.push(`${shipIcon} ${machine} #${rank}`);
 
           const bots = byMachine[machine].sort((a, b) => a[1].rank - b[1].rank);
           for (const [botId, entry] of bots) {
