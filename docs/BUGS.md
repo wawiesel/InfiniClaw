@@ -51,7 +51,7 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-6: After refit, bots should go through the normal restart sequence
 
 **Reported:** 2026-03-08
-**Status:** open
+**Status:** fixed (e60a5d4)
 **Component:** relay / refit
 **Symptom:** After a successful `!refit`, bots are restarted via `bootstrapBot()` directly, bypassing the normal `!join` sequence (room management, brain restore, thread notification per bot).
 **Root cause:** Refit calls `bootstrapBot(root, bot)` directly instead of `handleLifecycleCommand('join', bot, conn)`.
