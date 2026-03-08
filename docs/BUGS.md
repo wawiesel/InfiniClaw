@@ -21,8 +21,8 @@ When this file has content, the commanding engineer must address these items fir
 **Status:** open
 **Component:** delegate-runner.ts / branch_to_thread / container lifecycle
 **Symptom:** Main brain calls `branch_to_thread`, dispatches correctly, says "Thread brain spawned." But the Thread Brain never posts because the bot's container restarts (triggered by git sync detecting new commits), killing the Thread Brain child process inside the old container.
-**Root cause:** `branch_to_thread` spawns the Thread Brain as a child process INSIDE the bot's container with `detached: true`. When the container is killed and replaced (by relay's git sync → refreshBot, or by `!refresh`), all child processes inside the old container die. The Thread Brain has no way to survive a container restart.
-**Fix:** Per design (02-threading.md), Thread Brains should be host-managed processes — the host creates the thread, spawns the Thread Brain as a separate container, and wires its output to the Matrix thread. The current `branch_to_thread` implementation is a placeholder (see `TODO(phase2)` comment). Fix: move Thread Brain spawn to host side (relay.ts or new thread-manager.ts), receiving spawn requests via IPC from the bot container.
+**Root cause:** Two compounding issues: (1) `branch_to_thread` spawns Thread Brain as a child process INSIDE the bot's container with `detached: true`. Container exit kills all children. (2) `--thread-id` is not a valid claude CLI flag — primary spawn always fails, fallback runs without `--resume`, but still dies when container exits.
+**Fix:** Per design (02-threading.md), Thread Brains should be host-managed processes. New IPC task type: `spawn_thread_brain`. In delegate-runner.ts: write `_runtime/relay-tasks/thread-brain-<id>.json` with `{type:'thread_brain', thread_id, objective, bot, sessionId}` instead of spawning child claude. In relay.ts `relayTasksLoop`: handle `thread_brain` tasks by spawning a new container (`bootstrapBot` variant) with the objective injected via the IPC input mechanism, routing its Matrix output to the specified thread.
 
 ---
 
