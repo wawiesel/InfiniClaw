@@ -1,24 +1,24 @@
 # bots/
 
-```
-bots/
-├── {role}/                 One directory per role (navigator, engineer, architect)
-│   ├── ROOM.md             Shared room context (mounted ro at /workspace/CLAUDE.md)
-│   ├── skills.json         Skills assigned to this role
-│   ├── mcp.json            MCP servers for this role
-│   └── {bot}/              Bot persona
-│       ├── CLAUDE.md       Identity and rules (mounted rw at /workspace/persona/CLAUDE.md)
-│       └── container-config.json  Extra mounts and container settings
-├── skills/                 Shared skill pool
-│   └── {name}/SKILL.md
-└── container/              Container images
-    ├── build.sh
-    └── {bot}/Dockerfile
-```
+Bot personas, roles, skills, and container definitions.
+
+- `CLAUDE.md` — Shared bot instructions (writable by bots)
+- `build.sh` — Container image build script (`./bots/build.sh all` or `./bots/build.sh <bot>`)
+- `{role}/` — One directory per role (navigator, engineer, architect)
+- `skills/` — Shared skill pool (see `skills/README.md`)
 
 ## Role directories
 
-Each role has a room, skills, and MCP config shared by all bots of that role. Bots are assigned to roles via `roster.json` in the secrets repo.
+Each role directory contains shared config and per-bot personas:
+
+- `ROOM.md` — Room context (read-only in containers)
+- `skills.json` — Skills assigned to this role
+- `mcp.json` — MCP servers for this role
+- `{bot}/CLAUDE.md` — Bot identity and rules (writable by bot)
+- `{bot}/Dockerfile` — Container image definition
+- `{bot}/container-config.json` — Extra mounts and container settings
+
+Bots are assigned to roles via `fleet.json` in the secrets repo.
 
 ## CLAUDE.md layers
 
@@ -28,4 +28,4 @@ Each role has a room, skills, and MCP config shared by all bots of that role. Bo
 
 ## Memory
 
-Bot memory lives in the secrets repo (`~/.config/infiniclaw/secrets/{bot}/memory/`), mounted writable at `/workspace/persona/memory/`.
+Bot memory lives in the secrets repo (`~/.config/infiniclaw/secrets/bots/{bot}/memory/`), mounted writable at `/workspace/persona/memory/`.

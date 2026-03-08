@@ -20,14 +20,14 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 
 ## Quick start
 
-1. Configure secrets (env files) at `~/.config/infiniclaw/secrets/bots/{persona}/env`
+1. Configure secrets (env files) at `~/.config/infiniclaw/secrets/bots/{bot}/env`
 
-2. Configure `~/.config/infiniclaw/machine.json` with which bots run on this machine
+2. Register this machine in `fleet.json` and assign bots (see secrets repo `README.md`)
 
 3. Build container images:
 
 ```bash
-./bots/container/build.sh all
+./bots/build.sh all
 ```
 
 4. Start all bots:
@@ -51,7 +51,7 @@ npm run cli chat johnny5
 
 ### What start/stop do
 
-**`start`** — For each bot in `machine.json`:
+**`start`** — For each bot in `fleet.json` assigned to this ship:
 1. Rsyncs the core library into `_runtime/instances/{bot}/core/`
 2. Appends the bot's persona CLAUDE.md to the base instructions
 3. Sets up persistent room context
@@ -76,36 +76,15 @@ Supports Anthropic (Claude), Ollama (local models), and any OpenAI-compatible AP
 
 Bot identity is defined in three layers of CLAUDE.md:
 
-1. **Base** (`core/CLAUDE.md`) — framework behavior, shared by all bots
-2. **Persona** (`bots/personas/{bot}/CLAUDE.md`) — identity, rules, style (two-way sync: bot can edit)
-3. **Group** (`groups/{group}/CLAUDE.md`) — room-specific context (one-way: repo to bot, read-only)
+1. **Base** (`external/nanoclaw/CLAUDE.md`) — framework behavior, shared by all bots
+2. **Persona** (`bots/{role}/{bot}/CLAUDE.md`) — identity, rules, style (writable by bot)
+3. **Room** (`bots/{role}/ROOM.md`) — room-specific context (read-only)
 
-Each persona also includes:
-- `skills/` — bot-specific skills (two-way sync)
-- `mcp-servers/` — bot-specific MCP servers (two-way sync)
-- `container-config.json` — additional mounts and MCP server declarations
-
-## Directory structure
-
-```
-src/                              InfiniClaw orchestrator source
-external/nanoclaw/                Core mechanics library
-bots/
-  roles/{role}/                   Abstract capability sets
-  personas/{persona}/             Concrete bot identities
-  container/{persona}/Dockerfile  Per-bot container image
-  container/build.sh              Build container images
-groups/                           Group working directories (mounted into containers)
-docs/
-  design/                         Architecture and design documents
-  faq/                            Frequently asked questions
-  assets/                         Images, banners
-_runtime/                         Local state (SQLite, sessions, IPC, logs)
-```
+See `bots/README.md` for full structure.
 
 ## Design
 
-See [`docs/design/00-overview.md`](docs/design/00-overview.md) for architecture, security model, and operations.
+See [`docs/design/README.md`](docs/design/README.md) for the architecture document index.
 
 ## Notes
 
