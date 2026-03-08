@@ -7,11 +7,11 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-15: git sync restarts fleet on every commit — doc commits should not restart
 
 **Reported:** 2026-03-08
-**Status:** open
+**Status:** fixed (d4c0c18)
 **Component:** relay.ts / gitSyncLoop
 **Symptom:** Every commit pushed to origin (including doc-only changes like BUGS.md, NEXT.md, README.md) triggers a full fleet restart. This kills any in-progress Thread Brains (BUG-14), interrupts Cid mid-task, and causes 3-5 restarts per working session.
 **Root cause:** `gitSyncLoop` restarts fleet on ANY `newCommits > 0`. No check for whether the changes actually affect running code.
-**Fix:** Before triggering rebuild+restart, diff the changed files. If only documentation changed (no `*.ts`, `package.json`, `Dockerfile*`), skip rebuild and restart. Pseudocode: `if (noSourceChanged(oldHead, newHead)) { log('git sync: doc-only, skipping restart'); continue; }`
+**Fix:** Added `hasSourceChanges()` function — diffs changed files between commits. If only documentation changed (no `*.ts`, `package.json`, `Dockerfile*`, `tsconfig*.json`), skips rebuild and restart.
 
 ---
 
