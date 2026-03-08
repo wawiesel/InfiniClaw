@@ -83,6 +83,7 @@ function normalizeAllowList(parsed: unknown): AllowList {
   if (!isRecord(parsed) || !isRecord(parsed.mounts)) return { mounts: {} };
   const mounts: Record<string, AllowEntry[]> = {};
   for (const [bot, entries] of Object.entries(parsed.mounts)) {
+    if (!/^[a-zA-Z0-9._-]+$/.test(bot)) continue;
     if (!Array.isArray(entries)) continue;
     mounts[bot] = entries
       .filter((e): e is Record<string, unknown> => isRecord(e))
@@ -200,7 +201,13 @@ export function pruneExpired(): number {
 /** Load paths.json (per-machine logical name → local path). */
 function loadPaths(): Record<string, string> {
   try {
-    return JSON.parse(fs.readFileSync(PATHS_PATH, 'utf-8'));
+    const raw: unknown = JSON.parse(fs.readFileSync(PATHS_PATH, 'utf-8'));
+    if (!isRecord(raw)) return {};
+    const result: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof v === 'string') result[k] = v;
+    }
+    return result;
   } catch {
     return {};
   }
