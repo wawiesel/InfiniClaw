@@ -160,7 +160,7 @@ export function normalizeMainLlm(model: string | undefined): string | undefined 
   }
 
   // Try to upgrade generic aliases to a concrete dated model if available.
-  const fromStats = getClaudeModelFromStatsCache()?.trim();
+  const fromStats = sanitizeModelName(getClaudeModelFromStatsCache());
   if (fromStats && !isGenericClaudeModel(fromStats)) {
     return fromStats;
   }
@@ -198,6 +198,7 @@ export async function maybeAutoSwitchBrainsOnQuotaError(
 ): Promise<void> {
   if (!isAnthropicQuotaError(rawError)) return;
   if (Date.now() - lastAutoBrainSwitchAt < AUTO_BRAIN_SWITCH_COOLDOWN_MS) return;
+  lastAutoBrainSwitchAt = Date.now();
 
   let config;
   try { config = loadShipConfig(); } catch { return; }
@@ -247,7 +248,6 @@ export async function maybeAutoSwitchBrainsOnQuotaError(
   if (switched.length === 0) return;
 
   try {
-    lastAutoBrainSwitchAt = Date.now();
     await sendMessage(
       chatJid,
       `Anthropic credits/quotas look exhausted. Switched ${switched.join(', ')} to ollama fallback. Restart bots to apply.`,
@@ -276,7 +276,7 @@ export const MAIN_PROVIDER = resolveMainProvider();
 export let mainLlm = resolveMainLlm();
 
 export function setMainLlm(model: string): void {
-  mainLlm = model;
+  mainLlm = sanitizeModelName(model) ?? 'unknown-model';
 }
 
 export function mainSender(): string {
