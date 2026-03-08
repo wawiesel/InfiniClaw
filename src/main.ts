@@ -647,8 +647,9 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
     });
   }
   const now = Date.now();
-  if (isToolCall || !lastProgressChatAt[ctx.chatJid] || now - lastProgressChatAt[ctx.chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
-    if (!isToolCall) lastProgressChatAt[ctx.chatJid] = now;
+  const inThread = Boolean(progressToolCallThreadIds[ctx.chatJid] ?? activeReplyThreadIds[ctx.chatJid]);
+  if (isToolCall || inThread || !lastProgressChatAt[ctx.chatJid] || now - lastProgressChatAt[ctx.chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
+    if (!isToolCall && !inThread) lastProgressChatAt[ctx.chatJid] = now;
     const ch = findChannel(channels, ctx.chatJid);
     if (ch) {
       if (isToolCall) {

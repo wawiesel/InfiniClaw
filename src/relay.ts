@@ -2148,15 +2148,38 @@ function registerRelayCommands(): void {
       for (const bot of bots) {
         const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
         const name = env?.ASSISTANT_NAME || bot;
-        const room = (env?.MAIN_GROUP_NAME || '').toLowerCase();
-        const statusPath = path.join(root, '_runtime', 'data', 'ipc', room, 'status.json');
-        lines.push(`📋 ${name}`);
+        lines.push(`📋 **${name}**`);
+        // Read actual todos from most recently modified session todos file
+        const todosDir = path.join(root, '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude', 'todos');
         try {
-          const snap = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
-          const g = snap.groups?.find((s: { folder: string }) => s.folder === room);
-          const objective = g?.lastProgress || g?.currentObjective;
-          lines.push(g?.active ? `Currently: ${objective ? objective.slice(0, 200) : 'working'}` : 'Currently: idle');
-        } catch { lines.push('Currently: unknown'); }
+          const files = fs.readdirSync(todosDir)
+            .map(f => ({ f, mtime: fs.statSync(path.join(todosDir, f)).mtimeMs }))
+            .sort((a, b) => b.mtime - a.mtime);
+          if (files.length > 0) {
+            const raw = JSON.parse(fs.readFileSync(path.join(todosDir, files[0].f), 'utf-8'));
+            const todos: Array<{ content: string; status: string; priority: string }> = Array.isArray(raw) ? raw : [];
+            if (todos.length === 0) {
+              lines.push('No todos');
+            } else {
+              for (const t of todos) {
+                const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '🔄' : '⬜';
+                lines.push(`${icon} ${t.content}`);
+              }
+            }
+          } else {
+            lines.push('No todos');
+          }
+        } catch {
+          // Fall back to status.json objective if todos dir unavailable
+          const room = (env?.MAIN_GROUP_NAME || '').toLowerCase();
+          const statusPath = path.join(root, '_runtime', 'data', 'ipc', room, 'status.json');
+          try {
+            const snap = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
+            const g = snap.groups?.find((s: { folder: string }) => s.folder === room);
+            const objective = g?.lastProgress || g?.currentObjective;
+            lines.push(g?.active ? `Currently: ${objective ? objective.slice(0, 200) : 'working'}` : 'idle');
+          } catch { lines.push('unknown'); }
+        }
         lines.push('');
       }
       await threadReply(conn, threadRoot, lines.join('\n').trim());

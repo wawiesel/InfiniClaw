@@ -5,6 +5,9 @@ Updated 2026-03-08 EST.
 
 ## HIGH PRIORITY — Captain Directives
 
+- **Thread brain model: bots must constantly evaluate "should I start a new thread?"** — At each response, evaluate complexity/length. If work will take multiple steps or be long, open a thread immediately with `branch_to_thread`. Then evaluate "should I delegate to a lobe?" — if yes, use `delegate_to_lobe`. This is the standard brain model for all bots.
+- **src directory READMEs** — Every `src/` directory must have a `README.md` explaining what belongs there and what doesn't. As engineers learn the codebase, record key observations in these files to jumpstart future engineers. Start with `src/` (InfiniClaw) and `external/nanoclaw/src/`.
+
 - **Bots must maintain personal todo lists at ALL times** — "You should have on your personal task list 2 things at all times: the thing you are working on and what you're doing next." Stop working on maintenance unless explicitly told to.
 - **2-second response time to Captain** — Bots must respond to Captain messages within 2 seconds. CO must ALWAYS respond to Captain — never ignore.
 - **Bot-to-bot cross-machine communication must be seamless** — "It should be seamless and just like human-to-human conversation." Cid and Parker must communicate fluidly in Engineering.

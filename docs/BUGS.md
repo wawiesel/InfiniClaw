@@ -4,6 +4,28 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-11: Thought process not visible in threads (possible streaming output bug)
+
+**Reported:** 2026-03-08
+**Status:** open
+**Component:** main.ts / streaming output / thread display
+**Symptom:** Captain cannot see enough of the bot's reasoning in threads. Text the bot "thinks out loud" before tool calls is not appearing — only the tool call anchors are visible.
+**Root cause (suspected):** Streaming text output may not be posted to the thread. Either: (a) only the final tool-call anchor is sent to Matrix, not intermediate text; (b) text is sent but gets swallowed or lost before thread creation; (c) thread text routing has a bug.
+**Fix:** Investigate streaming output path in `main.ts` — confirm whether text emitted before tool calls is routed to the active thread or dropped. If dropped, fix the routing so all bot text (not just tool anchors) appears in threads.
+
+---
+
+### BUG-10: Cid announces itself after refit restart (should be silent)
+
+**Reported:** 2026-03-08
+**Status:** fixed (CLAUDE.md update)
+**Component:** persona / restart behavior
+**Symptom:** After a refit, Cid receives a system "you were restarted" prompt and sends "Refit complete — back online on HERACLES." Captain did not ask for this — it's noise.
+**Root cause:** The restart system message always prompts for a response. Persona rules say "if not addressed and no work to report, produce zero output" but the restarted-after-refit case isn't being handled silently.
+**Fix:** When restarted with no pending Captain/crew messages and nothing in progress, produce zero output. The restart system message is not an address.
+
+---
+
 ### BUG-9: Refit fails to restart bots (Cid restart failed with 1E)
 
 **Reported:** 2026-03-08
@@ -18,11 +40,11 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-8: Engineers cannot git push from container (mcp_nanoclaw__git_push fails)
 
 **Reported:** 2026-03-08
-**Status:** open
+**Status:** fixed (baa713d)
 **Component:** ipc-commands / git_push
 **Symptom:** `mcp__nanoclaw__git_push` always fails with "failed to push some refs" or "could not read Username". The `git push` runs inside the bot container which has no GitHub credentials.
 **Root cause:** `handleGitPush` in `ipc-commands.ts` runs `git push` via `execFileSync` inside the container. The relay (on host) has git credentials; the container does not.
-**Fix:** Route git_push through the relay. Options: (a) add a relay-side file watcher for git_push tasks, (b) add a `!push` relay Matrix command, (c) configure SSH/token credentials in container.
+**Fix:** `handleGitPush` writes a task to `_runtime/relay-tasks/`; new `relayTasksLoop()` in `relay.ts` polls that dir every 2s and executes git push on the host. No operator commands involved.
 
 ---
 
@@ -48,14 +70,15 @@ When this file has content, the commanding engineer must address these items fir
 
 ---
 
-### BUG-2: `!todo <bot>` does not create a thread
+### BUG-2: `!todo <bot>` does not reply in-thread instantly
 
 **Reported:** 2026-03-08
-**Status:** fixed (d96372f)
-**Component:** operator-commands
-**Symptom:** `!todo cid` should immediately create a thread showing the todo list for the named bot. Currently no thread is created.
-**Root cause:** Unknown — `!todo` may not be implemented with thread creation.
-**Fix:** `!todo <bot>` should create a thread immediately and display current todo items inside it.
+**Re-opened:** 2026-03-08 (d96372f marked fixed but Captain confirms still broken)
+**Status:** open
+**Component:** operator-commands / relay
+**Symptom:** `!todo cid` should immediately open a thread and display the bot's current todo list. Captain reports it is not an instant in-thread reply.
+**Root cause:** The thread IS created by `reply()` in relay.ts — but content comes from `status.json` (`lastProgress`/`currentObjective`), which is the relay's stale snapshot, not the bot's actual TodoWrite task list. Bot todos are stored in the Claude Code session, not accessible to the relay.
+**Fix:** Bot should write its current todo list to a file the relay can read (e.g. `_runtime/instances/{bot}/data/todos.json`), updated on every TodoWrite call. `!todo` reads that file instead of status.json.
 
 ---
 
