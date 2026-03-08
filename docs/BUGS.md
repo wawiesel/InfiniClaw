@@ -4,6 +4,84 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-30: johnny5 stale runtime files
+
+**Reported:** 2026-03-08
+**Status:** open — no fix needed until johnny5 brought onduty
+**Priority:** LOW
+**Component:** `_runtime/instances/johnny5/` — `pm2-ecosystem.json`, `start.sh`
+**Symptom:** `pm2-ecosystem.json` has `ASSISTANT_ROLE=Commander` (title, not role; role is `navigator`). `start.sh` sources `secrets/johnny5/env` instead of correct `secrets/bots/johnny5/env`. Together cause `bots/commander/johnny5/` mount attempts → exit 125.
+**Fix:** Run `bootstrapBot("johnny5")` via relay to regenerate both files from current code with correct paths.
+
+---
+
+### BUG-29: Matrix sluggish on Poseidon — conduwuit 500 errors on federated rooms
+
+**Reported:** 2026-03-08
+**Status:** open
+**Priority:** LOW
+**Component:** Poseidon / conduwuit homeserver
+**Symptom:** conduwuit returns 500 errors on federated room operations. Status indicator spam throttled (5min cap) as workaround.
+**Fix:** Investigate conduwuit federation config on Poseidon. May require upgrade or federation disable.
+
+---
+
+### BUG-28: Podman SSH connection drops on macOS — silent death after sleep/wake
+
+**Reported:** 2026-03-08
+**Status:** open
+**Priority:** LOW
+**Component:** Infrastructure / Podman machine on macOS
+**Symptom:** Podman SSH socket dies silently after macOS sleep/wake cycle. Bots fail to spawn containers with no clear error.
+**Workaround:** `podman machine stop && podman machine start`
+**Fix:** Root cause unknown. Investigate Podman machine QEMU socket keepalive or auto-reconnect.
+
+---
+
+### BUG-27: mac139160 orphaned relay — SSH timeout spam in Engineering
+
+**Reported:** 2026-03-08
+**Status:** open — blocked on Captain
+**Priority:** HIGH (operational noise)
+**Component:** mac139160 relay instance
+**Symptom:** Relay on mac139160 sends repeated SSH timeout alerts (code.ornl.gov port 22 unreachable) every ~20 min into Engineering room. Machine appears orphaned — no bots assigned.
+**Fix:** Captain must run `pm2 stop infiniclaw-relay` on mac139160, or decommission entirely.
+
+---
+
+### BUG-26: Concurrency ceiling starvation in group-queue.ts
+
+**Reported:** 2026-03-08
+**Status:** open — blocked on Captain approval
+**Priority:** MEDIUM
+**Component:** `external/nanoclaw/src/group-queue.ts` — `drainWaiting()`
+**Symptom:** FIFO `waitingGroups` drain starves lower-priority groups when high-priority traffic is sustained. Groups queue indefinitely.
+**Fix:** Priority-aware `drainWaiting()`. Needs Captain approval before touching upstream nanoclaw.
+
+---
+
+### BUG-25: Media download fully buffered before size check — OOM risk
+
+**Reported:** 2026-03-08 (9th cycle audit)
+**Status:** open — deferred pending SDK investigation
+**Priority:** MEDIUM
+**Component:** `src/channels/matrix.ts` — `downloadContent()`
+**Symptom:** `downloadContent` buffers the full file into memory before the 50 MB cap is applied. Repeated large media from adversarial homeservers can spike RSS by hundreds of MB.
+**Fix:** Stream `Content-Length` pre-flight check OR streaming download with byte-count abort. Deferred — needs matrix-bot-sdk streaming API investigation.
+
+---
+
+### BUG-24: `isPreformattedHtml` bypass allows prompt injection via raw HTML
+
+**Reported:** 2026-03-08 (9th cycle audit)
+**Status:** open — deferred pending architecture review
+**Priority:** MEDIUM (security)
+**Component:** `src/channels/matrix.ts` — `sendMessage()` / `editMessage()`
+**Symptom:** Strings starting with `<details`, `<font`, or `<small` skip `renderMarkdownForMatrix` and are sent as raw HTML with no sanitization. A prompt-injection payload beginning with `<details>` can carry arbitrary HTML to Matrix clients.
+**Fix:** Either restrict the HTML allowlist or add a post-hoc sanitizer (e.g. `sanitize-html`) to strip unsafe tags/attrs on the bypass path. Deferred — architecture decision needed.
+
+---
+
 ### BUG-23: Thread Brain dispatch has no main-timeline title announcement
 
 **Reported:** 2026-03-08
