@@ -1272,6 +1272,33 @@ async function injectResumeMessage(): Promise<void> {
   logger.info('Resume complete, message loop unblocked');
 }
 
+// ── Session cleanup ─────────────────────────────────────────────────────
+
+/** Delete stale Claude session JSONL files (>200KB, not the most recent). */
+function pruneOldSessions(): void {
+  try {
+    const cwd = process.cwd();
+    const projectSlug = cwd.replace(/\//g, '-');
+    const projectDir = path.join(os.homedir(), '.claude', 'projects', projectSlug);
+    if (!fs.existsSync(projectDir)) return;
+    const files = fs.readdirSync(projectDir)
+      .filter(f => f.endsWith('.jsonl'))
+      .map(f => ({ name: f, mtime: fs.statSync(path.join(projectDir, f)).mtimeMs, size: fs.statSync(path.join(projectDir, f)).size }))
+      .sort((a, b) => b.mtime - a.mtime);
+    // Keep the newest; delete older ones over 200KB
+    let pruned = 0;
+    for (const f of files.slice(1)) {
+      if (f.size > 200_000) {
+        fs.unlinkSync(path.join(projectDir, f.name));
+        pruned++;
+      }
+    }
+    if (pruned > 0) logger.info({ pruned }, 'Pruned old session JSONL files');
+  } catch (err) {
+    logger.warn({ err }, 'pruneOldSessions failed');
+  }
+}
+
 // ── Main ───────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -1297,6 +1324,7 @@ async function main(): Promise<void> {
   await ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
+  pruneOldSessions();
 
   // Validate config and warn about missing values
   const configWarnings = validateConfig();
