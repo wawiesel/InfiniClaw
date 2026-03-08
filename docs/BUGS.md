@@ -45,3 +45,14 @@ When this file has content, the commanding engineer must address these items fir
 **Symptom:** After restart, Cid shows an older commit SHA (e.g. `4dba7c7` 3.6h old, ↑25↓16) instead of the latest. Repo should be synced (git pull) as part of restart.
 **Root cause:** Restart flow does not pull latest commits before building.
 **Fix:** Ensure `git pull` (or equivalent sync) runs during the restart/rebuild cycle so the bot starts on HEAD.
+
+---
+
+### BUG-5: `is_main` flag not set in DB, blocking IPC commands for main group
+
+**Reported:** 2026-03-08
+**Status:** fixed
+**Component:** ipc-commands / main.ts `loadState`
+**Symptom:** Bots in the main duty room get `Unauthorized rebuild_image attempt blocked` (and all other `requireMain`-gated IPC commands: `restart_bot`, `git_push`, etc.) even though their `sourceGroup` is `"main"`.
+**Root cause:** The `registered_groups` table had `is_main = 0` for the main folder group. Groups registered before the `isMain` column was added were persisted with `0` and never patched on reload. The IPC watcher builds `folderIsMain` from `group.isMain`, so the main group appeared unauthorized.
+**Fix:** Added a migration in `loadState()` (main.ts) that patches any group with `folder === MAIN_GROUP_FOLDER` to `isMain: true` and persists it back to DB. Also manually fixed existing DBs for cid, albert, and johnny5.

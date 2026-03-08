@@ -478,6 +478,14 @@ function loadState(): void {
   sessions = state.sessions;
   registeredGroups = state.registeredGroups;
 
+  // Ensure isMain is set on any group with the main folder (may be missing from older DBs)
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (group.folder === MAIN_GROUP_FOLDER && !group.isMain) {
+      registeredGroups[jid] = { ...group, isMain: true };
+      setRegisteredGroup(jid, registeredGroups[jid]);
+    }
+  }
+
   const configuredMainModel = resolveConfiguredMainModel();
   const storedMainModel = normalizeMainLlm(getRouterState('main_model'));
   if (configuredMainModel) {
