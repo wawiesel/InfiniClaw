@@ -4,7 +4,7 @@
 
 There are **3 layers** of communication, each serving a different purpose:
 
-1. **Relay** — Matrix lifecycle commands (`!join`, `!dismiss`, `!refresh`, `!fleet`, `!transport`, etc.)
+1. **Relay** — Matrix lifecycle commands (`!join`, `!dismiss`, `!rejoin`, `!refresh`, `!fleet`, `!transport`, etc.)
 2. **Intercom** — cross-room messaging (operator→bot and bot→bot)
 3. **Operator** — Claude Code in a tmux session, the human-in-the-loop escape hatch
 
@@ -25,7 +25,8 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 |---------|--------|
 | `!join <bot>` | Start bot, update fleet.json |
 | `!dismiss <bot>` | Stop bot, update fleet.json |
-| `!refresh <bot>` | Dismiss + join (full restart cycle) |
+| `!rejoin <bot>` | Dismiss + join (full lifecycle reset) |
+| `!refresh <bot>` | Rebuild + restart (pick up new code, no brain/room changes) |
 | `!transport <bot> <ship>` | Beam bot to another ship (dematerialize/materialize) |
 | `!promote <target>` / `!demote <target>` | Swap rank (bot within role, or ship) |
 | `!allow <bot> <path> [min]` / `!deny <bot> <path>` | Mount grants |
@@ -48,7 +49,7 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 
 ### Multi-ship fan-out
 
-Every `!` command is broadcast to all ships. When you say `!refresh cid` in Engineering, every ship's relay sees it. Each checks if `cid` is local (via fleet.json). Only the owning ship acts — the rest silently ignore. This works because all relays connect to the same intercom accounts.
+Every `!` command is broadcast to all ships. When you say `!rejoin cid` in Engineering, every ship's relay sees it. Each checks if `cid` is local (via fleet.json). Only the owning ship acts — the rest silently ignore. This works because all relays connect to the same intercom accounts.
 
 ### Speaker election
 

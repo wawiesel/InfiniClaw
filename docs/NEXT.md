@@ -46,7 +46,7 @@ Matrix SDK initial sync causes 429s distinct from outbound message rate limits. 
 
 ### What's Done
 
-- [x] **IPC task system** — Bots can trigger host-side actions: `restart_bot`, `rebuild_image`, `git_push`, `restart_wksm`, `send_to_room`
+- [x] **IPC task system** — Bots can trigger host-side actions: `refresh_bot`, `rebuild_image`, `git_push`, `restart_wksm`, `send_to_room`
 - [x] **MCP preflight** — Agent-runner validates all remote MCP servers at startup (5s timeout), drops unreachable ones, bot starts anyway
 - [x] **MCP failure reporting** — Dropped MCP servers are automatically reported to Engineering via `send_to_room` IPC
 - [x] **Session recovery** — Agent-runner recovers most recent session when host loses sessionId, preventing context loss on restart
@@ -159,7 +159,7 @@ Each bot already has its own `messages.db`. Since each bot runs on exactly one m
 
 The bots already communicate through Matrix rooms. The IPC filesystem (`data/ipc/<group>/messages/*.json` + 500ms polling) duplicates what Matrix already does. Eliminating filesystem IPC removes the biggest single-machine assumption.
 
-**How:** IPC commands (restart_bot, set_brain_mode, holodeck_*, git_push) become Matrix messages with a structured prefix (e.g., `!ipc restart_bot engineer`). The host process on each machine watches its bots' rooms for IPC commands and executes locally. This is already how the `!refresh` command works.
+**How:** IPC commands (refresh_bot, set_brain_mode, holodeck_*, git_push) become Matrix messages with a structured prefix (e.g., `!ipc refresh_bot engineer`). The host process on each machine watches its bots' rooms for IPC commands and executes locally. This is already how the `!refresh` command works.
 
 **Benefits:**
 - No shared filesystem needed for IPC

@@ -624,6 +624,16 @@ export function stopBot(bot: string): void {
   pm2Stop(pm2Name(bot));
 }
 
+/**
+ * Refresh a bot: stop → kill stale containers → redeploy → start.
+ * Shared core used by both the relay `!refresh` command and the IPC `refresh_bot` handler.
+ */
+export function refreshBot(root: string, bot: string): void {
+  stopBot(bot);
+  killStaleContainers(bot);
+  bootstrapBot(root, bot);
+}
+
 // ── Relay ────────────────────────────────────────────────────────────
 
 const RELAY_PM2_NAME = 'infiniclaw-relay';

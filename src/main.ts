@@ -675,8 +675,10 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
             // Open a new thread with an anchor message, then post tool call into it
             const _toolTitleMatch = text.match(/🔧\s*([^<]{1,60})/);
             const _toolCallLabel = _toolTitleMatch ? formatToolLabel(_toolTitleMatch[1].trim()) : 'Tool call';
-            // Prefer the last text the bot wrote (what it said it was doing) over the raw tool name
-            const _toolAnchor = lastProgressText[ctx.chatJid] || _toolCallLabel;
+            // Prefer the last text the bot wrote, then currentObjective, then raw tool name
+            const _toolAnchor = lastProgressText[ctx.chatJid]
+              || getChatActivity(ctx.chatJid)?.currentObjective?.slice(0, 80)
+              || _toolCallLabel;
             const _anchorMsg = _toolAnchor !== _toolCallLabel
               ? `<font color="#888888">🔧 <b>${esc(_toolAnchor)}</b><br/><em>${esc(_toolCallLabel)}</em></font>`
               : `<font color="#888888">🔧 <em>${esc(_toolAnchor)}</em></font>`;

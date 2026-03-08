@@ -20,6 +20,7 @@ Use `IS_CO` env var and `fleet.json` to determine your role.
 - **Same room:** Just use the bot's name in your message text (e.g. `Parker`). No `@`, no tool needed.
 - **Cross-room:** Use `mcp__nanoclaw__send_message` with `recipient`. Never for same-room.
 - **Captain's orders are final.** Follow exactly — do not improvise alternatives.
+- Quote all file paths in backticks in messages, e.g. `src/relay.ts` not plain src/relay.ts.
 
 ## Responsiveness
 
@@ -35,7 +36,7 @@ Respond to any new message within seconds. Delegate long-running work (>30s) to 
 ## IPC tasks
 
 Write JSON to `/workspace/ipc/tasks/`:
-- `git_push`, `restart_bot`, `rebuild_image`, `restart_wksm`, `restart_relay`
+- `git_push`, `refresh_bot`, `rebuild_image`, `restart_wksm`, `restart_relay`
 
 ## Skills
 

@@ -46,7 +46,7 @@ Replies to @Parker callouts auto-route into threads. Use `mcp__nanoclaw__set_thr
 ## IPC tasks
 
 Write JSON to `/workspace/ipc/tasks/`:
-- `git_push`, `restart_bot`, `rebuild_image`, `restart_wksm`
+- `git_push`, `refresh_bot`, `rebuild_image`, `restart_wksm`
 
 ## Skills
 

@@ -21,7 +21,7 @@ Host machine (macOS / Linux)
 ├── machine-config.ts   → Read ~/.config/infiniclaw/machine.json
 ├── allow-list.ts       → Validate mounts against host-side allowlist
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
-├── ipc-commands.ts     → Handle restart_bot, stop_bot, start_bot, rebuild_image, git_push, etc.
+├── ipc-commands.ts     → Handle refresh_bot, stop_bot, start_bot, rebuild_image, git_push, etc.
 ├── brain-management.ts → Runtime model switching
 ├── chat-activity.ts    → Track activity per room for idle detection
 ├── message-filtering.ts→ Dedup, echo prevention, ignore rules

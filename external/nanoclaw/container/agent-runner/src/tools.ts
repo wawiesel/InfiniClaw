@@ -215,7 +215,7 @@ Use this after making code changes that require a process restart.`,
       }
 
       const data = {
-        type: 'restart_bot',
+        type: 'refresh_bot',
         bot: args.bot,
         chatJid,
         groupFolder,
@@ -224,7 +224,7 @@ Use this after making code changes that require a process restart.`,
       writeIpcFile(tasksDir, data);
 
       return {
-        content: [{ type: 'text' as const, text: `Restart requested for ${args.bot}. The host daemon will handle the restart.` }],
+        content: [{ type: 'text' as const, text: `Refresh requested for ${args.bot}. The host daemon will handle the refresh.` }],
       };
     },
   );

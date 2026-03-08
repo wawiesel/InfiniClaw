@@ -64,7 +64,7 @@ Write JSON to `/workspace/ipc/tasks/` to trigger host-side actions:
 | `holodeck_send` | Send message to holodeck bot | `{"type":"holodeck_send","bot":"engineer","message":"test message"}` |
 | `holodeck_read` | Read holodeck bot messages | `{"type":"holodeck_read","bot":"engineer","limit":10}` |
 | `holodeck_status` | Check holodeck instance status | `{"type":"holodeck_status","bot":"engineer"}` |
-| `restart_bot` | Restart a bot | `{"type":"restart_bot","bot":"engineer"}` |
+| `refresh_bot` | Refresh a bot | `{"type":"refresh_bot","bot":"engineer"}` |
 | `rebuild_image` | Rebuild container image | `{"type":"rebuild_image","bot":"architect"}` |
 
 ## Skills

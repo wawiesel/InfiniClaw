@@ -22,6 +22,7 @@ import {
   bootstrapBot as serviceBootstrapBot,
   deployBot as serviceDeployBot,
   stopBot as serviceStopBot,
+  refreshBot as serviceRefreshBot,
   rebuildImage as serviceRebuildImage,
   refreshStartScript as serviceRefreshStartScript,
   resolveRoot,
@@ -361,7 +362,7 @@ async function handleSelfRefresh(bot: string, chatJid: string | null, ctx: Infin
 }
 
 async function handleCrossBotRefresh(bot: string, chatJid: string | null, ctx: InfiniClawIpcContext): Promise<void> {
-  logger.info({ bot }, 'Deploy validation passed — bootstrapping');
+  logger.info({ bot }, 'Deploy validation passed — refreshing');
   // Send refresh notice to target bot's main room
   try {
     const root = resolveRoot();
@@ -392,11 +393,11 @@ async function handleCrossBotRefresh(bot: string, chatJid: string | null, ctx: I
     logger.warn({ bot, err }, 'Failed to write refresh notice to target bot IPC');
   }
   try {
-    serviceBootstrapBot(resolveRoot(), bot);
-    logger.info({ bot }, 'Cross-bot bootstrap succeeded');
+    serviceRefreshBot(resolveRoot(), bot);
+    logger.info({ bot }, 'Cross-bot refresh succeeded');
   } catch (err) {
-    logger.error({ bot, err }, 'Cross-bot bootstrap failed');
-    await safeSend(ctx, chatJid, `⛔ bootstrap failed for ${bot}: ${errStr(err)}`);
+    logger.error({ bot, err }, 'Cross-bot refresh failed');
+    await safeSend(ctx, chatJid, `⛔ refresh failed for ${bot}: ${errStr(err)}`);
   }
 }
 

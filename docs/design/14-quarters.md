@@ -42,7 +42,8 @@ A bot cannot be `onduty` on a decommissioned ship, but can be awake in `lounge` 
 !dismiss cid   → onduty → lounge (downgrade to sonnet, disable lobes, join lounge)
 !sleep cid     → any → sleep (stop container, leave all rooms except quarters)
 !wake cid      → sleep → quarters (start container in quarters, sonnet brain)
-!refresh cid   → onduty → lounge → onduty (dismiss + join)
+!rejoin cid    → onduty → lounge → onduty (dismiss + join)
+!refresh cid   → onduty → onduty (stop + rebuild + start, no brain/room changes)
 ```
 
 ### !dismiss

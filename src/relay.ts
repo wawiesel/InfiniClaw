@@ -32,6 +32,7 @@ import {
   bootstrapBot,
   deployBot,
   stopBot,
+  refreshBot,
   ensurePodmanReady,
   killStaleContainers,
   loadProfileEnv,
@@ -1627,11 +1628,8 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
     const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
 
     try {
-      await step('stopping...');
-      stopBot(bot);
-      killStaleContainers(bot);
-      await step('building...');
-      bootstrapBot(root, bot);
+      await step('refreshing...');
+      refreshBot(root, bot);
       const model = env?.BRAIN_MODEL || '?';
       const ver = botVersion(root, bot);
       await step(`✅ refreshed · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);

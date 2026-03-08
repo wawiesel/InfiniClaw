@@ -5,7 +5,7 @@
 | Capability | How |
 |-----------|-----|
 | Rebuild own container image | IPC task `rebuild_image` |
-| Restart self or other bots | IPC task `restart_bot` |
+| Restart self or other bots | IPC task `refresh_bot` |
 | Push code to remote | IPC task `git_push` |
 | Fix broken MCP config | Edit persona `.mcp.json`, request restart |
 | Monitor health | Collect metrics, report via Matrix |

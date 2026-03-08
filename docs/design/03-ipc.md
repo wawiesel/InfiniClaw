@@ -8,7 +8,7 @@ Each room gets its own IPC directory (`_runtime/data/ipc/{room}/`). Prevents cro
 
 ## Main Room Elevation
 
-Only the main room's containers can run privileged IPC commands (`restart_bot`, `rebuild_image`, `git_push`). Other rooms are restricted to task scheduling and thread management.
+Only the main room's containers can run privileged IPC commands (`refresh_bot`, `rebuild_image`, `git_push`). Other rooms are restricted to task scheduling and thread management.
 
 ## Cooldowns
 
