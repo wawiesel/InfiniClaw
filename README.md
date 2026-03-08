@@ -76,7 +76,7 @@ Supports Anthropic (Claude), Ollama (local models), and any OpenAI-compatible AP
 
 Bot identity is defined in three layers of CLAUDE.md:
 
-1. **Base** (`external/nanoclaw/CLAUDE.md`) — framework behavior, shared by all bots
+1. **Base** (`bots/CLAUDE.md`) — shared bot instructions, fleet architecture
 2. **Persona** (`bots/{role}/{bot}/CLAUDE.md`) — identity, rules, style (writable by bot)
 3. **Room** (`bots/{role}/ROOM.md`) — room-specific context (read-only)
 

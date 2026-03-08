@@ -11,7 +11,7 @@ Architecture and design specifications for InfiniClaw. Each numbered document co
 - `06-commands.md` — Operator `!` commands and relay protocol
 - `07-intercom.md` — Cross-room relay accounts, operator messaging
 - `08-autonomy.md` — Bot self-healing, rebuilds, holodeck
-- `09-configuration.md` — CLAUDE.md layers, MCP, brain, session continuity
+- `09-configuration.md` — CLAUDE.md layers (base from `bots/CLAUDE.md`), MCP, brain, session continuity
 - `10-safety.md` — OOM handling, rate limits, isolation, MCP preflight
 - `11-containers.md` — Podman isolation, mounts, secrets
 - `12-deployment-chain.md` — Worktree workflow, holodeck simulation, gates
