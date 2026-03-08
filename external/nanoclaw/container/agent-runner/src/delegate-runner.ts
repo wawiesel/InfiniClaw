@@ -375,7 +375,7 @@ export function registerDelegateTools(
     `Spawn a new Claude thread brain in the background and return immediately.`,
     {
       objective: z.string().min(1).describe('Objective for the spawned thread brain'),
-      thread_id: z.string().min(1).describe('Target thread ID to resume/anchor'),
+      thread_id: z.string().min(1).describe('Matrix event ID of the thread root — MUST be a real $... event ID obtained via get_last_event_id immediately after posting the thread title on the main timeline. Do NOT use a custom string or label.'),
     },
     async (args) => {
       // Write a relay task so the HOST-side relay spawns the Thread Brain as an independent
