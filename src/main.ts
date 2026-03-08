@@ -70,7 +70,7 @@ import { pruneExpired } from './allow-list.js';
 import { MatrixChannel } from './channels/matrix.js';
 import { LocalCliChannel } from './channels/local-cli.js';
 import { findChannel, formatMessages, formatThreadContext, stripInternalTags } from 'nanoclaw/router.js';
-import { syncPersona, collectBotMatrixUserIds } from './service.js';
+import { collectBotMatrixUserIds } from './service.js';
 import { startSchedulerLoop } from 'nanoclaw/task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from 'nanoclaw/types.js';
 import { logger } from 'nanoclaw/logger.js';
@@ -451,19 +451,6 @@ function storeOutgoing(chatJid: string, text: string, threadId?: string): void {
     is_from_me: true,
     thread_id: threadId,
   });
-}
-
-function syncPersonas(): void {
-  const rootDir = process.env.INFINICLAW_ROOT;
-  const personaName = process.env.PERSONA_NAME;
-  if (!rootDir || !personaName) return;
-
-  try {
-    syncPersona(rootDir, personaName);
-    logger.info({ personaName }, 'Synced group memory and skills to personas/');
-  } catch (err) {
-    logger.warn({ err, personaName }, 'Failed to sync personas on shutdown');
-  }
 }
 
 let channels: Channel[] = [];
@@ -1427,7 +1414,6 @@ async function main(): Promise<void> {
     if (matrixRef) {
       try { await matrixRef.setDisplayName(botDisplayName('🔴')); } catch { /* best-effort */ }
     }
-    syncPersonas();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
