@@ -32,18 +32,18 @@ function sanitizeActivity(raw: unknown): ChatActivity {
   const record = raw as Record<string, unknown>;
   const out: ChatActivity = {};
   if (typeof record.runStartedAt === 'number' && Number.isFinite(record.runStartedAt)) out.runStartedAt = record.runStartedAt;
-  if (typeof record.currentObjective === 'string') out.currentObjective = record.currentObjective;
+  if (typeof record.currentObjective === 'string') out.currentObjective = record.currentObjective.slice(0, 220);
   if (typeof record.currentObjectiveAt === 'number' && Number.isFinite(record.currentObjectiveAt)) out.currentObjectiveAt = record.currentObjectiveAt;
-  if (typeof record.lastProgress === 'string') out.lastProgress = record.lastProgress;
+  if (typeof record.lastProgress === 'string') out.lastProgress = record.lastProgress.slice(0, 220);
   if (typeof record.lastProgressAt === 'number' && Number.isFinite(record.lastProgressAt)) out.lastProgressAt = record.lastProgressAt;
-  if (typeof record.lastCompletion === 'string') out.lastCompletion = record.lastCompletion;
+  if (typeof record.lastCompletion === 'string') out.lastCompletion = record.lastCompletion.slice(0, 220);
   if (typeof record.lastCompletionAt === 'number' && Number.isFinite(record.lastCompletionAt)) out.lastCompletionAt = record.lastCompletionAt;
-  if (typeof record.lastError === 'string') out.lastError = record.lastError;
+  if (typeof record.lastError === 'string') out.lastError = record.lastError.slice(0, 220);
   if (typeof record.lastErrorAt === 'number' && Number.isFinite(record.lastErrorAt)) out.lastErrorAt = record.lastErrorAt;
   if (Array.isArray(record.recentUserContext)) {
     out.recentUserContext = record.recentUserContext
       .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-      .map((v) => v.trim())
+      .map((v) => v.trim().slice(0, 220))
       .slice(-6);
   }
   return out;
@@ -83,7 +83,8 @@ export function getChatActivity(chatJid: string): ChatActivity | undefined {
 function compactMessage(text: string, maxLen = 220): string | undefined {
   let compact = text.trim();
   if (!compact) return undefined;
-  compact = compact.replace(TRIGGER_PATTERN, '').trim();
+  compact = compact.replace(new RegExp(TRIGGER_PATTERN.source, 'gi'), '').trim();
+  compact = compact.replace(/[\r\n]+/g, ' ').trim();
   compact = compact.replace(/\s+/g, ' ').trim();
   if (!compact) return undefined;
   return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact;
