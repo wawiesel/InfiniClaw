@@ -16,7 +16,7 @@ vi.mock('nanoclaw/config.js', async (importOriginal) => {
 });
 
 import { _initTestDatabase, setSession, setRegisteredGroup } from 'nanoclaw/db.js';
-import { readTodoItems, buildTodoMessage } from '../todo.js';
+import { readTodoItems, buildTodoMessage } from '../todo-service.js';
 
 // ── readTodoItems ──────────────────────────────────────────────────
 

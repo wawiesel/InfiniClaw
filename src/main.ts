@@ -69,25 +69,31 @@ import {
 import { pruneExpired } from './allow-list.js';
 import { MatrixChannel } from './channels/matrix.js';
 import { LocalCliChannel } from './channels/local-cli.js';
-import { findChannel, formatMessages, formatThreadContext, stripInternalTags } from 'nanoclaw/router.js';
-import { syncPersona, collectBotMatrixUserIds } from './service.js';
-import { startSchedulerLoop } from 'nanoclaw/task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from 'nanoclaw/types.js';
-import { logger } from 'nanoclaw/logger.js';
+import { channels, setChannels, findChannel, getMainChatJid } from './channel-manager.js';
+import {
+  shellQuote,
+  formatDuration,
+  formatTimestamp,
+  errStr,
+  resolveRoot,
+  assertValidBotName,
+} from './utils.js';
+import { getGitVersion, getGitVersionStr } from './formatting.js';
+import { fleetManager } from './fleet-manager.js';
+import { matrixService } from './matrix-service.js';
 
 import {
   MAIN_PROVIDER,
   mainLlm,
-  mainSender,
   defaultSenderForGroup,
   resolveConfiguredMainModel,
   normalizeMainLlm,
   setMainLlm,
   maybeAutoSwitchBrainsOnQuotaError,
-} from './brain-management.js';
+  recordMetrics,
+} from './llm-service.js';
 import {
   ensureChatActivity,
-  getChatActivity,
   setObjectiveFromMessages,
   markRunStarted,
   markRunEnded,
@@ -95,46 +101,26 @@ import {
   markCompletion,
   markError,
   buildMainMissionContext,
-} from './chat-activity.js';
-import { shouldIgnoreMessage } from './message-filtering.js';
+} from './chat-activity-service.js';
+import { shouldIgnoreMessage, normalizeInboundMessage } from './message-filtering.js';
 import { appendConversationLog } from './conversation-log.js';
-import { statusMessage } from './formatting.js';
+import { statusMessage, getGitVersion, getGitVersionStr } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { uploadContent, uploadHtml, getPublicS3Url } from './s3-sync.js';
 import { exportHistoryToS3 } from './history-export.js';
+import { toolCallBreadcrumb } from './chat-activity-service.js';
 
 // ── Git version info (resolved once at module load) ────────────────────────
-import { execSync as gitExecSync } from 'child_process';
+const GIT_VERSION = getGitVersion(resolveRoot());
 
-const GIT_VERSION = (() => {
-  const root = process.env.INFINICLAW_ROOT || process.cwd();
-  // Prefer stamped file written by deployBot() — always reflects deployed commit
-  try {
-    const stamped = fs.readFileSync(path.join(root, 'GIT_VERSION'), 'utf-8').trim();
-    if (stamped) return stamped;
-  } catch { /* fall through to live git */ }
-  // Fallback: live git query
-  try {
-    const hash = gitExecSync('git rev-parse --short HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    const date = gitExecSync('git log -1 --format=%ci HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().slice(0, 10);
-    const subject = gitExecSync('git log -1 --format=%s HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    return `${hash} (${date}) ${subject}`;
-  } catch {
-    return 'unknown';
-  }
-})();
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
-import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
+import { getActiveBots, loadProfileEnv } from './service.js';
 import { loadFleet } from './ship-config.js';
-import { buildTodoMessage, readTodoItems } from './todo.js';
+import { buildTodoMessage, readTodoItems } from './todo-service.js';
 
-// ── Display name helper ────────────────────────────────────────────────
-const BOT_LOCATION = os.hostname().toUpperCase();
-function botDisplayName(badge: string): string {
-  return `${ASSISTANT_NAME} ${badge} (${BOT_LOCATION})`;
-}
+import { botMatrixUserIds, setBotMatrixUserIds, botDisplayName } from './bot-manager.js';
 
 // ── Module-level state ─────────────────────────────────────────────────
 
@@ -156,82 +142,23 @@ const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve;
 let isResuming = false;
 
 // ── CO roster (initialized from fleet.json at startup, updated via lifecycle messages) ──
-const roomRoster: Record<string, Map<string, number>> = {};
-const roomCO: Record<string, string | undefined> = {};
 let matrixRef: MatrixChannel | null = null;
 
 /** Parse relay lifecycle messages to update CO roster at runtime. */
-function handleLifecycleMessage(msg: { content: string; chat_jid: string; sender: string }): boolean {
-  // Relay messages: "HOSTNAME: Name stopped" / "HOSTNAME: Name started (rank N)" / "HOSTNAME: Name restarted" / "HOSTNAME: Name reranked (rank N)"
-  const match = msg.content.match(/^\S+: (\S+) (stopped|started|restarted|reranked)(?:\s+\(rank (\d+)\))?$/);
-  if (!match) return false;
-  // Only process messages from intercom accounts (relay sends via intercom)
-  if (!msg.sender.includes('-intercom')) return false;
+async function handleLifecycleMessage(msg: { content: string; chat_jid: string; sender: string }): Promise<boolean> {
+  const previousIsCO = fleetManager.isCO(msg.chat_jid, ASSISTANT_NAME);
+  const result = fleetManager.handleLifecycleMessage(msg, ASSISTANT_NAME, botMatrixUserIds);
+  const currentIsCO = fleetManager.isCO(msg.chat_jid, ASSISTANT_NAME);
 
-  const [, botName, action, rankStr] = match;
-  const chatJid = msg.chat_jid;
-
-  if (!roomRoster[chatJid]) roomRoster[chatJid] = new Map();
-
-  if (action === 'stopped') {
-    roomRoster[chatJid].delete(botName);
-  } else if (action === 'started' || action === 'reranked') {
-    const rank = rankStr ? parseInt(rankStr, 10) : 99;
-    roomRoster[chatJid].set(botName, rank);
+  if (matrixRef && previousIsCO !== currentIsCO) {
+    await matrixService.setDisplayName(botDisplayName(currentIsCO ? '⭐' : '🟢'));
   }
-  // 'restarted' = no roster change (bot stays present)
-
-  void rerankCO(chatJid);
-  return false; // don't consume — still store the message for context
-}
-
-/** Recalculate CO for a room and update display name badge. */
-async function rerankCO(chatJid: string): Promise<void> {
-  const roster = roomRoster[chatJid];
-  if (!roster || roster.size === 0) { roomCO[chatJid] = undefined; return; }
-
-  // Lowest rank = CO
-  let coBotName: string | undefined;
-  let coRank = Infinity;
-  for (const [name, rank] of roster) {
-    if (rank < coRank) { coBotName = name; coRank = rank; }
-  }
-
-  const previousCO = roomCO[chatJid];
-  roomCO[chatJid] = coBotName;
-
-  if (!matrixRef) return;
-
-  if (coBotName === ASSISTANT_NAME && previousCO !== ASSISTANT_NAME) {
-    // This bot was promoted to CO
-    process.env.IS_CO = 'true';
-    await matrixRef.setDisplayName(botDisplayName('⭐'));
-  } else if (previousCO === ASSISTANT_NAME && coBotName !== ASSISTANT_NAME) {
-    // This bot was demoted from CO
-    process.env.IS_CO = '';
-    await matrixRef.setDisplayName(botDisplayName('🟢'));
-  }
+  return result;
 }
 
 /** Check if this bot is CO and there's an unaddressed human message on the main timeline. */
 function isCOMainTimelineTrigger(chatJid: string, messages: NewMessage[]): boolean {
-  if (roomCO[chatJid] !== ASSISTANT_NAME) return false;
-  // Build patterns for all known bot names in this room
-  const roster = roomRoster[chatJid];
-  const botNamePatterns: RegExp[] = [];
-  if (roster) {
-    for (const name of roster.keys()) {
-      botNamePatterns.push(new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'));
-    }
-  }
-  return messages.some(m => {
-    if (botMatrixUserIds.has(m.sender)) return false; // bot message
-    if (m.thread_id) return false; // thread message, not main timeline
-    const content = m.content.trim();
-    // Check if any bot is addressed
-    const addressesBot = botNamePatterns.some(p => p.test(content));
-    return !addressesBot;
-  });
+  return fleetManager.isCOMainTimelineTrigger(chatJid, messages, ASSISTANT_NAME, botMatrixUserIds);
 }
 
 /** Resolve which thread a response should go to. Reply where the message was. */
@@ -273,162 +200,21 @@ let idlePipActive = false;
 const METRICS_HISTORY_FILE = path.join(DATA_DIR, 'metrics-history.jsonl');
 const METRICS_HISTORY_MAX_LINES = 10_000;
 
-// All bot Matrix user IDs — populated at startup from secrets env files.
-// Used to distinguish human vs bot messages for response routing.
-let botMatrixUserIds: Set<string> = new Set();
-
 function isThreadContext(chatJid: string): boolean {
   threadMapLastSeen[`r:${chatJid}`] = Date.now();
   return Boolean(activeReplyThreadIds[chatJid]);
 }
 
 function sendTriggerAck(chatJid: string, messages: NewMessage[]): void {
-  const ch = findChannel(channels, chatJid);
-  if (!ch) return;
-
-  if (ch.setTyping) {
-    void ch.setTyping(chatJid, true).catch((err) => { logger.debug({ chatJid, err }, 'Set typing failed'); });
-  }
-
-  if (!ch.sendReaction) return;
+  void matrixService.setTyping(chatJid, true);
   for (const m of messages) {
-    if (!m.id) continue;
-    if (/^(resume|out|system|op)-/.test(m.id)) continue;
+    if (!m.id || /^(resume|out|system|op)-/.test(m.id)) continue;
     const key = `${chatJid}:${m.id}`;
     if (triggerAckByMessageKey[key]) continue;
     triggerAckByMessageKey[key] = Date.now();
-    void ch.sendReaction(chatJid, m.id, '👀').catch((err) => { logger.debug({ chatJid, msgId: m.id, err }, 'Trigger ack reaction failed'); });
+    void matrixService.sendReaction(chatJid, m.id, '👀');
   }
 }
-
-const MAX_INBOUND_CONTENT_CHARS = 100_000;
-const MAX_INBOUND_ID_CHARS = 255;
-const MAX_INBOUND_SENDER_CHARS = 255;
-const MAX_INBOUND_THREAD_CHARS = 255;
-const MAX_INBOUND_CHAT_JID_CHARS = 255;
-
-function isValidInboundChatJid(chatJid: string): boolean {
-  if (!chatJid || chatJid.length > MAX_INBOUND_CHAT_JID_CHARS) return false;
-  if (chatJid.startsWith('matrix:')) {
-    const roomId = chatJid.slice('matrix:'.length);
-    return /^[!#][^:\s]+:[^\s]+$/.test(roomId);
-  }
-  return true;
-}
-
-function isValidInboundSender(sender: string): boolean {
-  if (!sender || sender.length > MAX_INBOUND_SENDER_CHARS) return false;
-  if (sender.startsWith('@')) return /^@[^:\s]+:[^\s]+$/.test(sender);
-  return true;
-}
-
-function normalizeInboundMessage(msg: NewMessage): NewMessage | null {
-  if (!isValidInboundChatJid(msg.chat_jid)) return null;
-  if (!isValidInboundSender(msg.sender)) return null;
-  if (!msg.id || msg.id.length > MAX_INBOUND_ID_CHARS) return null;
-  if (!msg.sender_name || msg.sender_name.length > MAX_INBOUND_SENDER_CHARS) return null;
-  if (!msg.timestamp || Number.isNaN(new Date(msg.timestamp).getTime())) return null;
-
-  const content = typeof msg.content === 'string'
-    ? msg.content.slice(0, MAX_INBOUND_CONTENT_CHARS)
-    : '';
-  const threadId = typeof msg.thread_id === 'string' && msg.thread_id.length > 0
-    ? msg.thread_id.slice(0, MAX_INBOUND_THREAD_CHARS)
-    : undefined;
-
-  return {
-    ...msg,
-    content,
-    thread_id: threadId,
-  };
-}
-
-/** Build a standalone HTML page for a tool call, with surrounding conversation context. */
-function generateToolCallPage(opts: {
-  toolCallHtml: string;
-  botName: string;
-  groupName: string;
-  timestamp: number;
-  contextMessages: import('nanoclaw/types.js').NewMessage[];
-}): string {
-  const { toolCallHtml, botName, groupName, timestamp, contextMessages } = opts;
-  const dateStr = new Date(timestamp).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-
-  const msgHtml = contextMessages.map((m) => {
-    const isBot = m.is_from_me || m.is_bot_message;
-    const sender = esc(m.sender_name || m.sender);
-    const ts = new Date(m.timestamp).toISOString().slice(11, 19);
-    const content = esc(m.content || '').replace(/\n/g, '<br>');
-    return `<div class="msg ${isBot ? 'bot' : 'human'}">
-      <span class="meta">${sender} <span class="ts">${ts}</span></span>
-      <div class="body">${content}</div>
-    </div>`;
-  }).join('\n');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tool call - ${esc(botName)} - ${esc(groupName)}</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d1117;color:#c9d1d9;font-family:ui-monospace,monospace;font-size:13px;line-height:1.6;padding:16px}
-h1{font-size:15px;color:#58a6ff;margin-bottom:4px}
-.meta-bar{color:#6e7681;font-size:11px;margin-bottom:16px;border-bottom:1px solid #21262d;padding-bottom:8px}
-.section-label{color:#6e7681;font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin:16px 0 8px}
-.msg{padding:6px 10px;margin-bottom:4px;border-radius:4px;border-left:3px solid transparent}
-.msg.human{border-left-color:#388bfd;background:#161b22}
-.msg.bot{border-left-color:#3fb950;background:#0d1117}
-.msg .meta{color:#6e7681;font-size:11px}
-.msg .ts{color:#484f58}
-.msg .body{margin-top:2px;white-space:pre-wrap;word-break:break-word}
-.tool-call-block{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:12px;margin-top:8px;overflow-x:auto}
-.tool-call-block details{margin-bottom:8px}
-.tool-call-block summary{cursor:pointer;color:#e6edf3;font-weight:600;padding:4px 0}
-.tool-call-block summary:hover{color:#58a6ff}
-pre{background:#0d1117;border:1px solid #21262d;border-radius:4px;padding:10px;overflow-x:auto;font-size:12px}
-code{font-family:inherit}
-</style>
-</head>
-<body>
-<h1>🔧 Tool call - ${esc(botName)}</h1>
-<div class="meta-bar">${esc(groupName)} &middot; ${esc(dateStr)}</div>
-${contextMessages.length > 0 ? `<div class="section-label">Recent context</div>
-<div class="context">${msgHtml}</div>` : ''}
-<div class="section-label">Tool call</div>
-<div class="tool-call-block">${toolCallHtml}</div>
-</body>
-</html>`;
-}
-
-/** Compact single-line breadcrumb for a tool call. Full HTML page uploaded to S3 async. */
-function toolCallBreadcrumb(
-  text: string,
-  contextMessages: import('nanoclaw/types.js').NewMessage[],
-  groupName: string,
-): { html: string; s3Key: string; pageHtml: string } {
-  const hash = crypto.createHash('sha1').update(text).digest('hex').slice(0, 7);
-  const titleMatch = text.match(/🔧\s*([^<]{1,60})/);
-  const title = titleMatch ? titleMatch[1].trim() : 'Tool call';
-  const s3Key = `tool-calls/${ASSISTANT_NAME}/${Date.now()}-${hash}.html`;
-  const url = getPublicS3Url(s3Key);
-  const hashEl = url
-    ? `<a href="${url}"><code>${hash}</code></a>`
-    : `<code>${hash}</code>`;
-  const html = `<font color="#888888">🔧 <em>${esc(title)}</em> · ${hashEl}</font>`;
-  const pageHtml = generateToolCallPage({
-    toolCallHtml: text,
-    botName: ASSISTANT_NAME,
-    groupName,
-    timestamp: Date.now(),
-    contextMessages,
-  });
-  return { html, s3Key, pageHtml };
-}
-
-const esc = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function updateEventIdFile(groupFolder: string, key: 'lastSent' | 'lastReceived', eventId: string): void {
   const idsFile = path.join(DATA_DIR, 'ipc', groupFolder, 'last_event_ids.json');
@@ -444,13 +230,6 @@ function updateEventIdFile(groupFolder: string, key: 'lastSent' | 'lastReceived'
 }
 
 // ── Utility functions ──────────────────────────────────────────────────
-
-function getMainChatJid(): string | undefined {
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    if (group.folder === MAIN_GROUP_FOLDER) return jid;
-  }
-  return undefined;
-}
 
 let outgoingSeq = 0;
 
@@ -484,7 +263,6 @@ function syncPersonas(): void {
   }
 }
 
-let channels: Channel[] = [];
 const queue = new GroupQueue();
 
 // ── State load/save ────────────────────────────────────────────────────
@@ -647,7 +425,7 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
   const now = Date.now();
   if (isToolCall || !lastProgressChatAt[ctx.chatJid] || now - lastProgressChatAt[ctx.chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
     if (!isToolCall) lastProgressChatAt[ctx.chatJid] = now;
-    const ch = findChannel(channels, ctx.chatJid);
+    const ch = findChannel(ctx.chatJid);
     if (ch) {
       if (isToolCall) {
         threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
@@ -705,9 +483,9 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   markProgress(ctx.chatJid, text);
   // Set state before channel send to preserve original behavior if send throws
   ctx.onOutputSent(text);
-  const ch = findChannel(channels, ctx.chatJid);
+  const ch = findChannel(ctx.chatJid);
   if (ch) {
-    if (ch.setTyping) await ch.setTyping(ctx.chatJid, true);
+    await matrixService.setTyping(ctx.chatJid, true);
     try {
       let sentEventId: string | undefined;
       threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
@@ -723,7 +501,7 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
         if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
       }
     } finally {
-      if (ch.setTyping) await ch.setTyping(ctx.chatJid, false);
+      await matrixService.setTyping(ctx.chatJid, false);
     }
   }
 }
@@ -745,7 +523,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
-  const channel = findChannel(channels, chatJid);
+  const channel = findChannel(chatJid);
   if (!channel) {
     logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
     return true;
@@ -890,7 +668,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       runResult.error ||
       (hadError ? 'agent returned an error status' : 'unknown error');
     await maybeAutoSwitchBrainsOnQuotaError(rawError, chatJid, async (jid, text) => {
-      const ch = findChannel(channels, jid);
+      const ch = findChannel(jid);
       if (ch) await ch.sendMessage(jid, text);
     });
     const compactError = rawError.replace(/\s+/g, ' ').slice(0, 1000);
@@ -1133,8 +911,8 @@ function handlePipedToActiveContainer(
   lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
   saveState();
 
-  const ch = findChannel(channels, chatJid);
-  if (ch?.setTyping) void ch.setTyping(chatJid, true).catch((err) => { logger.debug({ chatJid, err }, 'Set typing failed'); });
+  const ch = findChannel(chatJid);
+  void matrixService.setTyping(chatJid, true);
   if (ch?.setPresenceStatus) void ch.setPresenceStatus('online', 'processing...').catch((err) => { logger.debug({ chatJid, err }, 'Set presence failed'); });
 }
 
@@ -1208,7 +986,7 @@ function injectSystemNotice(chatJid: string, content: string): void {
 }
 
 function handleMergeRequest(payload: { sourceGroup: string; threadId: string; bot: string; summary?: string }): void {
-  const mainJid = getMainChatJid();
+  const mainJid = getMainChatJid(registeredGroups);
   if (!mainJid) {
     logger.warn({ payload }, 'merge_request received but main group is not registered');
     return;
@@ -1224,7 +1002,7 @@ function handleMergeRequest(payload: { sourceGroup: string; threadId: string; bo
 
 async function injectResumeMessage(): Promise<void> {
   isResuming = true;
-  const mainJid = getMainChatJid();
+  const mainJid = getMainChatJid(registeredGroups);
 
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     // Ensure chat entry exists (FK constraint) — fresh deploys may not have one yet
@@ -1272,7 +1050,7 @@ async function injectResumeMessage(): Promise<void> {
   if (mainJid) {
     const items = readTodoItems(MAIN_GROUP_FOLDER);
     if (items.length > 0) {
-      const ch = findChannel(channels, mainJid);
+      const ch = findChannel(mainJid);
       if (ch) {
         await ch.sendMessage(mainJid, buildTodoMessage(mainJid));
       }
@@ -1323,7 +1101,7 @@ async function main(): Promise<void> {
 
   // Populate bot Matrix user IDs for human-vs-bot message filtering
   try {
-    botMatrixUserIds = collectBotMatrixUserIds();
+    setBotMatrixUserIds(collectBotMatrixUserIds());
     logger.info({ count: botMatrixUserIds.size, ids: [...botMatrixUserIds] }, 'Loaded bot Matrix user IDs');
   } catch (err) {
     logger.warn({ err }, 'Failed to collect bot Matrix user IDs, bot-filtering disabled');
@@ -1337,7 +1115,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     for (const timer of persistentTimers) clearInterval(timer);
     for (const jid of Object.keys(registeredGroups)) {
-      const ch = findChannel(channels, jid);
+      const ch = findChannel(jid);
       if (ch?.setStatusPip) {
         try { await ch.setStatusPip(jid, '🔴'); } catch { /* best-effort */ }
       }
@@ -1346,7 +1124,7 @@ async function main(): Promise<void> {
       if (ch.setPresenceStatus) await ch.setPresenceStatus('offline', 'shutting down...');
     }
     if (matrixRef) {
-      try { await matrixRef.setDisplayName(botDisplayName('🔴')); } catch { /* best-effort */ }
+      try { await matrixService.setDisplayName(botDisplayName('🔴')); } catch { /* best-effort */ }
     }
     syncPersonas();
     await queue.shutdown(10000);
@@ -1449,7 +1227,7 @@ async function main(): Promise<void> {
   // Build channels array
   const allChannels: (Channel | null)[] = [localCli, matrix];
   const refreshConnectedChannels = () => {
-    channels = allChannels.filter((ch): ch is Channel => ch != null && ch.isConnected());
+    setChannels(allChannels.filter((ch): ch is Channel => ch != null && ch.isConnected()));
   };
 
   if (localCli) {
@@ -1491,7 +1269,7 @@ async function main(): Promise<void> {
               matrixReconnectDelay = MATRIX_RECONNECT_INTERVAL;
               refreshConnectedChannels();
               reconnectCount++;
-              const mainJid = getMainChatJid();
+              const mainJid = getMainChatJid(registeredGroups);
               if (mainJid) {
                 const label = reconnectCount > 1
                   ? statusMessage('🔌', `reconnected (${reconnectCount}x).`)
@@ -1708,7 +1486,7 @@ async function main(): Promise<void> {
     runContainerAgent,
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid: string, rawText: string) => {
-      const ch = findChannel(channels, jid);
+      const ch = findChannel(jid);
       if (!ch) return;
       const text = stripInternalTags(rawText);
       if (text) {
@@ -1720,7 +1498,7 @@ async function main(): Promise<void> {
   startIpcWatcher({
     // TODO: Keep merge_request routing here while IPC task parsing lives in src/ipc-watcher.ts.
     sendMessage: async (jid, text, threadId) => {
-      const ch = findChannel(channels, jid);
+      const ch = findChannel(jid);
       if (!ch) {
         logger.warn({ jid }, 'No channel found for IPC message');
         return;
@@ -1729,7 +1507,7 @@ async function main(): Promise<void> {
       storeOutgoing(jid, text, threadId);
     },
     sendMessageReturningId: async (jid, text, threadId) => {
-      const ch = findChannel(channels, jid);
+      const ch = findChannel(jid);
       if (!ch) {
         logger.warn({ jid }, 'No channel found for IPC message (returning id)');
         return undefined;
@@ -1742,13 +1520,13 @@ async function main(): Promise<void> {
     },
     defaultSenderForGroup: (sourceGroup: string) => defaultSenderForGroup(sourceGroup, registeredGroups),
     sendImage: (jid, buffer, filename, mimetype, caption) => {
-      const ch = findChannel(channels, jid);
+      const ch = findChannel(jid);
       if (ch?.sendImage) return ch.sendImage(jid, buffer, filename, mimetype, caption);
       logger.warn({ jid }, 'No channel with image support found for IPC image');
       return Promise.resolve();
     },
     sendFile: (jid, buffer, filename, mimetype, caption) => {
-      const ch = findChannel(channels, jid);
+      const ch = findChannel(jid);
       if (ch?.sendFile) return ch.sendFile(jid, buffer, filename, mimetype, caption);
       logger.warn({ jid }, 'No channel with file support found for IPC file');
       return Promise.resolve();
@@ -1847,7 +1625,7 @@ async function main(): Promise<void> {
     if (Date.now() - lastActivityAt < IDLE_PIP_THRESHOLD_MS) return;
     idlePipActive = true;
     for (const [jid] of Object.entries(registeredGroups)) {
-      const ch = findChannel(channels, jid);
+      const ch = findChannel(jid);
       if (ch?.setStatusPip) {
         void ch.setStatusPip(jid, '💤').catch((err) => { logger.debug({ jid, err }, 'Idle pip set failed'); });
       }
@@ -1857,9 +1635,9 @@ async function main(): Promise<void> {
 
   // Set presence on startup (boot announcement is handled by the relay/intercom)
   const presenceTimer = setInterval(async () => {
-    const mainJid = getMainChatJid();
+    const mainJid = getMainChatJid(registeredGroups);
     if (!mainJid) return;
-    const ch = findChannel(channels, mainJid);
+    const ch = findChannel(mainJid);
     if (!ch) return;
     clearInterval(presenceTimer);
     try {
