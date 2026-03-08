@@ -1,5 +1,66 @@
 # NEXT — InfiniClaw Planned Work
 
+## Captain Directives — 2026-03-08 (HIGHEST PRIORITY)
+
+Design spec: "brain branch/merge" — full interactive Branch Brains, not one-shot --print.
+
+### Branch Brain: full Claude Code session (not one-shot)
+
+Replace `claude --print` in `spawnThreadBrain` with a nanoclaw group container session. Branch Brain must be:
+- **Resumable**: captured `session_id` stored in todo entry for context recovery
+- **Interactive**: receives new messages via IPC (same as main brain)
+- **Time-limited**: 10-minute countdown (configurable `BRANCH_BRAIN_TIMEOUT_MS`); relay sends interrupt message when expired, TB gets ~30s to finalize
+- **Titled**: Matrix thread title derived from todo item content
+
+### Context injection: main timeline → active branches
+
+When a message arrives on main timeline, relay fans it out to all active Branch Brain IPC queues with prefix:
+`"You are branch brain <title>. Here is a message from main timeline: <msg>. It may not apply to you. If it does apply, modify your task accordingly."`
+
+Branch brain responds in thread if relevant; ignores silently if not.
+
+### Main Cid: redirect task queries to thread
+
+If a main timeline message is about an in-progress task, Cid should respond:
+`"That's happening in [Task B thread](matrix.to link). Let's talk about it there."` — without doing any work inline.
+
+### Three thread types (Cid-specific)
+
+1. **Branch Brain** — task execution, interactive, in Matrix thread
+2. **Planning thread** ("Planning iteration at <time>") — Cid uses lobe to:
+   - Update WBS with time estimates and dependencies
+   - Generate GANTT view (rendered as HTML, uploaded to S3 as presigned URL)
+   - Refactor todo list into sequential tasks with dependency ordering
+3. **Memory update thread** — happens in quarters when Cid is dismissed:
+   - Reviews full conversation history, CLAUDE.md, MEMORY.md
+   - Rewrites all three (compact + update)
+   - Full restart at end to pick up changes
+   - Only main Cid (not branch Cids) may modify MEMORY.md or CLAUDE.md
+
+### WBS / PM skill
+
+New Cid skill: `pm` (project management). Capabilities:
+- Maintain WBS JSON at `_runtime/data/wbs-{bot}.json`
+- Render GANTT as HTML + upload to S3 presigned URL
+- Track dependencies between tasks
+- Predict time-to-completion from task complexity + historical TB durations
+- Generate weekly summary for Captain
+
+### TodoWrite persistence fix
+
+TodoWrite returns success but files don't appear in `_runtime/instances/cid/data/sessions/main/.claude/todos/` on Mar 8 despite the call succeeding in session transcript. Investigate: is Claude Code writing todos to a different path? Are they flushed only on session end? Fix so `!todo cid` reflects real-time state.
+
+### Behavioral standards (Cid persona gaps observed 2026-03-08)
+
+These are not new — they're in CLAUDE.md but Cid is not following them:
+1. **No conversational reply before tool calls** — Cid goes straight to tool calls; must say "Got it, dispatching..." first
+2. **Too many inline tool calls** — dispatched 6 tools in one turn (limit = 3); violates dispatch model
+3. **Multiple branch_to_thread without stop** — called branch_to_thread 3 times in one turn without stopping; must STOP after first dispatch
+4. **Thread structure missing** — Thread Brain lacks opening goal message ("I'll <approach> — steps: 1), 2), 3)") and no main timeline summary when done
+5. **TodoWrite not being called on restart** — always starts with empty todo list; must repopulate from context on restart
+
+---
+
 ## Engineering Backlog
 
 These are real problems. Simplify, don't add complexity.
