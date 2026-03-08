@@ -1171,11 +1171,14 @@ async function spawnThreadBrain(
   // Register task in thread-tasks.json for !todo deep-link annotation
   writeThreadTask(replyThreadId, { objective, chat_jid, bot, createdAt: Date.now() });
 
-  // Load bot credentials so claude can authenticate on the host
+  // Load bot credentials so claude can authenticate on the host.
+  // Raw env file uses BRAIN_* names; map to CLAUDE_CODE_* / ANTHROPIC_* as needed.
   const botEnv = bot ? (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })() : null;
   const childEnv: Record<string, string> = { ...process.env as Record<string, string> };
-  if (botEnv?.CLAUDE_CODE_OAUTH_TOKEN) childEnv['CLAUDE_CODE_OAUTH_TOKEN'] = botEnv.CLAUDE_CODE_OAUTH_TOKEN;
-  if (botEnv?.ANTHROPIC_API_KEY) childEnv['ANTHROPIC_API_KEY'] = botEnv.ANTHROPIC_API_KEY;
+  const oauthToken = botEnv?.CLAUDE_CODE_OAUTH_TOKEN || botEnv?.BRAIN_OAUTH_TOKEN;
+  const apiKey = botEnv?.ANTHROPIC_API_KEY || botEnv?.BRAIN_API_KEY;
+  if (oauthToken) childEnv['CLAUDE_CODE_OAUTH_TOKEN'] = oauthToken;
+  if (apiKey) childEnv['ANTHROPIC_API_KEY'] = apiKey;
   if (botEnv?.ANTHROPIC_BASE_URL) childEnv['ANTHROPIC_BASE_URL'] = botEnv.ANTHROPIC_BASE_URL;
   if (botEnv?.ANTHROPIC_AUTH_TOKEN) childEnv['ANTHROPIC_AUTH_TOKEN'] = botEnv.ANTHROPIC_AUTH_TOKEN;
   if (botEnv?.NODE_EXTRA_CA_CERTS) childEnv['NODE_EXTRA_CA_CERTS'] = botEnv.NODE_EXTRA_CA_CERTS;
@@ -1245,6 +1248,9 @@ async function spawnThreadBrain(
     }
   });
 
+  let stderrBuf = '';
+  child.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString(); });
+
   child.on('error', (err) => {
     log(`threadBrain: spawn error: ${errStr(err)}`);
     removeThreadTask(replyThreadId);
@@ -1252,6 +1258,7 @@ async function spawnThreadBrain(
   });
 
   child.on('close', (code) => {
+    if (stderrBuf.trim()) log(`threadBrain: stderr: ${stderrBuf.trim().slice(0, 400)}`);
     log(`threadBrain: done exit=${code} posted=${postedCount}`);
     removeThreadTask(replyThreadId);
     if (postedCount === 0) {
