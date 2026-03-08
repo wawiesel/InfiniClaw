@@ -671,7 +671,9 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
             sendToToolThread(progressToolCallThreadIds[ctx.chatJid]!);
           } else if (ch.sendMessageReturningId) {
             // Open a new thread with an anchor message, then post tool call into it
-            void ch.sendMessageReturningId(ctx.chatJid, '<font color="#888888"><em>🔧 Tool calls</em></font>').then((anchorId) => {
+            const _toolTitleMatch = text.match(/🔧\s*([^<]{1,60})/);
+            const _toolAnchor = _toolTitleMatch ? _toolTitleMatch[1].trim() : 'Tool call';
+            void ch.sendMessageReturningId(ctx.chatJid, `<font color="#888888"><em>🔧 ${esc(_toolAnchor)}</em></font>`).then((anchorId) => {
               if (anchorId) {
                 progressToolCallThreadIds[ctx.chatJid] = anchorId;
                 threadMapLastSeen[`p:${ctx.chatJid}`] = Date.now();
