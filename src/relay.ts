@@ -1707,6 +1707,25 @@ function registerRelayCommands(): void {
       }
     },
 
+    push: async (cmd, conn) => {
+      const arg = cmd.slice('!push'.length).trim();
+      const branch = arg || 'main';
+      if (!/^[a-zA-Z0-9._\-/]+$/.test(branch) || branch.startsWith('-')) {
+        await reply(conn, `⛔ !push: invalid branch name`);
+        return;
+      }
+      const root = resolveRoot();
+      const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
+      try {
+        execFileSync('git', ['push', 'origin', branch], execOpts);
+        const ver = repoVersion(root);
+        await reply(conn, `✅ pushed ${branch} to origin ${ver}`);
+      } catch (err) {
+        log(`!push failed: ${errStr(err)}`);
+        await reply(conn, `⛔ !push failed — ${errStr(err)}`);
+      }
+    },
+
     health: async (_cmd, conn) => {
       const report = runHealthCheck();
       if (report) await uploadHealthToS3(report);

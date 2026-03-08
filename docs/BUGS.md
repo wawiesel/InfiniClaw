@@ -7,11 +7,11 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-9: Refit fails to restart bots (Cid restart failed with 1E)
 
 **Reported:** 2026-03-08
-**Status:** open
+**Status:** fixed (78eff4d)
 **Component:** relay / refit (BUG-6 regression)
 **Symptom:** After refit, bot restart fails with ⛔. Likely a regression from BUG-6 fix — the join sequence adds git sync + room management, increasing failure surface during refit (Podman EOF, Matrix room errors).
-**Root cause:** `handleLifecycleCommand('join')` has too many failure points (git sync, room leave/join, brain restore) during a refit when Podman may be in a degraded state.
-**Fix:** Refit should use a simpler restart path — either `refreshBot()` (stop+rebuild+start) or `handleLifecycleCommand('refresh')`, not `join` which does full room/brain lifecycle. Or make join more resilient during refit.
+**Root cause:** `handleLifecycleCommand('join')` has too many failure points (git sync, room leave/join, brain restore) during a refit when Podman may be in a degraded state. Also, already-onduty bots are a no-op via join.
+**Fix:** Refit inlines `refreshBot()` directly — stop+kill+start, no room/brain management, no early-exit for onduty bots.
 
 ---
 
@@ -29,11 +29,11 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-7: Brain thread branching not visible in Engineering
 
 **Reported:** 2026-03-08
-**Status:** open (partial fix committed, not yet deployed)
+**Status:** fixed (f2eee23, built 2026-03-08, deploys on next bot refresh)
 **Component:** main.ts / thread display + bot behavior
 **Symptom:** Threads in Engineering show raw tool names ("🔧 TodoWrite") with no context. The lobe delegation and brain branching system is not apparent — Captain cannot tell what the bot is working on from the thread titles.
 **Root cause:** (1) Thread anchor uses tool name as fallback when bot has no `lastProgressText`. (2) Bots do not consistently write meaningful text before calling tools. (3) `branch_to_thread` / `delegate_to_lobe` threads are not prominent enough.
-**Fix:** (1) Use `currentObjective` as fallback anchor — committed in f2eee23, not yet deployed. (2) Bot must always write a brief description before calling tools. (3) Use `branch_to_thread` visibly for all multi-step work so delegation is clearly visible.
+**Fix:** (1) Use `currentObjective` as fallback anchor — committed in f2eee23. (2) Bot must always write a brief description before calling tools. (3) Use `branch_to_thread` visibly for all multi-step work so delegation is clearly visible.
 
 ---
 
