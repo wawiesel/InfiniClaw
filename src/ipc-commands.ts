@@ -584,18 +584,17 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
     await safeSend(ctx, chatJid, cooldownMsg);
     return;
   }
+  // git push requires host credentials — write to relay-tasks/ for the relay to execute on host.
+  const tasksDir = path.join(resolveRoot(), '_runtime', 'relay-tasks');
   try {
-    execFileSync('git', ['push', remote, ...branches], {
-      cwd: resolveRoot(),
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 30000,
-    });
-    logger.info({ remote, branches }, 'git_push succeeded');
-    await safeSend(ctx, chatJid, `✅ Pushed ${branches.join(', ')} to ${remote}`);
+    fs.mkdirSync(tasksDir, { recursive: true });
+    const taskFile = path.join(tasksDir, `git-push-${Date.now()}.json`);
+    fs.writeFileSync(taskFile, JSON.stringify({ type: 'git_push', remote, branches }));
+    logger.info({ remote, branches, taskFile }, 'git_push queued for host relay');
+    await safeSend(ctx, chatJid, `📤 git push ${branches.join(', ')} → ${remote} queued (relay executes on host)`);
   } catch (err) {
-    logger.error({ err, remote, branches }, 'git_push failed');
-    await safeSend(ctx, chatJid, `⛔ git_push failed: ${errStr(err)}`);
+    logger.error({ err, remote, branches }, 'git_push: failed to queue relay task');
+    await safeSend(ctx, chatJid, `⛔ git_push: failed to queue: ${errStr(err)}`);
   }
 }
 

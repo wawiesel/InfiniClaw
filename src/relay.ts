@@ -1084,6 +1084,57 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
   }
 }
 
+// ── Host-side relay task queue ──────────────────────────────────────────
+
+const RELAY_TASKS_POLL_INTERVAL = 2_000;
+
+/**
+ * Poll `_runtime/relay-tasks/` for tasks that require host credentials
+ * (e.g. git_push). Written by bots via ipc-commands.ts, executed here on host.
+ */
+async function relayTasksLoop(): Promise<void> {
+  const tasksDir = path.join(resolveRoot(), '_runtime', 'relay-tasks');
+  while (true) {
+    try {
+      if (fs.existsSync(tasksDir)) {
+        const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.json'));
+        for (const file of files) {
+          const filePath = path.join(tasksDir, file);
+          const processingPath = `${filePath}.processing`;
+          try {
+            fs.renameSync(filePath, processingPath);
+            const data = JSON.parse(fs.readFileSync(processingPath, 'utf-8')) as Record<string, unknown>;
+            if (data['type'] === 'git_push') {
+              const remote = typeof data['remote'] === 'string' ? data['remote'] : 'origin';
+              const branches = Array.isArray(data['branches']) ? (data['branches'] as unknown[]).map(String) : ['main'];
+              if (!/^[a-zA-Z0-9._\-/]+$/.test(remote) || remote.startsWith('-') ||
+                  branches.some((b) => !/^[a-zA-Z0-9._\-/]+$/.test(b) || b.startsWith('-'))) {
+                log(`relayTasks: git_push rejected — invalid remote or branch`);
+              } else {
+                try {
+                  execFileSync('git', ['push', remote, ...branches], {
+                    cwd: resolveRoot(), encoding: 'utf-8', timeout: 30_000, stdio: 'pipe',
+                  });
+                  log(`relayTasks: git pushed ${branches.join(', ')} → ${remote}`);
+                } catch (err) {
+                  log(`relayTasks: git_push failed: ${errStr(err)}`);
+                }
+              }
+            }
+            fs.unlinkSync(processingPath);
+          } catch (err) {
+            log(`relayTasks: error processing ${file}: ${errStr(err)}`);
+            try { fs.renameSync(processingPath, `${filePath}.error`); } catch { /* ignore */ }
+          }
+        }
+      }
+    } catch (err) {
+      log(`relayTasks loop error: ${errStr(err)}`);
+    }
+    await sleep(RELAY_TASKS_POLL_INTERVAL);
+  }
+}
+
 // ── Secrets repo sync ──────────────────────────────────────────
 
 function secretsRepoPath(): string {
@@ -2407,6 +2458,7 @@ async function main(): Promise<void> {
   // Start background loops (non-blocking alongside room sync loops)
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));
   gitSyncLoop(conns).catch((err) => log(`git sync loop fatal: ${errStr(err)}`));
+  relayTasksLoop().catch((err) => log(`relay tasks loop fatal: ${errStr(err)}`));
   secretsSyncLoop(conns).catch((err) => log(`secrets sync loop fatal: ${errStr(err)}`));
   heartbeatLoop(conns).catch((err) => log(`heartbeat loop fatal: ${errStr(err)}`));
 
