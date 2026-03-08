@@ -7,6 +7,11 @@
 export const ASSISTANT_ROLE = process.env.ASSISTANT_ROLE || '';
 export const CAPTAIN_USER_ID = process.env.CAPTAIN_USER_ID || '';
 export const MAIN_GROUP_FOLDER = process.env.MAIN_GROUP_FOLDER || 'main';
+// Max time the main brain may run per turn before being killed (0 = disabled).
+// Enforces the dispatch model: main brain triages, Thread Brain works.
+export const MAIN_BRAIN_TURN_TIMEOUT_MS = parseInt(process.env.MAIN_BRAIN_TURN_TIMEOUT_MS || '90000', 10);
+// Max inline tool calls before a dispatch warning is injected into the running container.
+export const MAIN_BRAIN_TOOL_LIMIT = parseInt(process.env.MAIN_BRAIN_TOOL_LIMIT || '3', 10);
 export const HEAP_LIMIT_MB = parseInt(process.env.HEAP_LIMIT_MB || '0', 10);
 export const RESUME_DELAY_SECONDS = parseInt(process.env.RESUME_DELAY_SECONDS || '0', 10);
 export const MEMORY_CHECK_INTERVAL = parseInt(process.env.MEMORY_CHECK_INTERVAL || '120000', 10);

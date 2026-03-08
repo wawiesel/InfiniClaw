@@ -24,6 +24,8 @@ import {
   LOCAL_CHANNEL_ENABLED,
   LOCAL_MIRROR_MATRIX_JID,
   MAIN_GROUP_FOLDER,
+  MAIN_BRAIN_TURN_TIMEOUT_MS,
+  MAIN_BRAIN_TOOL_LIMIT,
   MATRIX_ACCESS_TOKEN,
   MATRIX_HOMESERVER,
   MATRIX_PASSWORD,
@@ -135,6 +137,11 @@ const threadMapLastSeen: Record<string, number> = {};
 // Last non-tool-call progress text per chat — used as tool call thread anchor title
 const lastProgressText: Record<string, string> = {};
 const triggerAckByMessageKey: Record<string, number> = {};
+// Dispatch enforcement: counts tool calls per main-brain turn; tracks whether
+// branch_to_thread was called; tracks turns killed by timeout.
+const turnToolCallCount: Record<string, number> = {};
+const turnDispatchCalled: Record<string, boolean> = {};
+const turnKilledByTimeout: Record<string, boolean> = {};
 let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
@@ -635,6 +642,22 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
   }
   markProgress(ctx.chatJid, text);
   const isToolCall = text.includes('<details>');
+  if (isToolCall) {
+    // Track whether this is a dispatch call
+    if (text.includes('branch_to_thread')) turnDispatchCalled[ctx.chatJid] = true;
+    // Enforce dispatch limit on main brain
+    const isMainBrain = registeredGroups[ctx.chatJid]?.folder === MAIN_GROUP_FOLDER;
+    if (isMainBrain && !turnDispatchCalled[ctx.chatJid]) {
+      turnToolCallCount[ctx.chatJid] = (turnToolCallCount[ctx.chatJid] ?? 0) + 1;
+      if (MAIN_BRAIN_TOOL_LIMIT > 0 && turnToolCallCount[ctx.chatJid] >= MAIN_BRAIN_TOOL_LIMIT) {
+        const group = registeredGroups[ctx.chatJid];
+        if (group) {
+          writeMessageToActiveContainerIpc(ctx.chatJid, group,
+            `⚠️ DISPATCH LIMIT: You have made ${turnToolCallCount[ctx.chatJid]} inline tool calls without calling branch_to_thread. Call branch_to_thread NOW and stop. Main brain must not do heavy work inline.`);
+        }
+      }
+    }
+  }
   let toolCallHtml = '';
   if (isToolCall) {
     const group = registeredGroups[ctx.chatJid];
@@ -843,7 +866,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const threadContext = buildThreadContextBlock(chatJid, contextMessages);
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
-  const triageInstruction = 'The `branch_to_thread` tool is available for long-running tasks (>30s). Use it when a task needs to run in parallel without blocking new messages.';
+  const prevKilled = turnKilledByTimeout[chatJid];
+  if (prevKilled) delete turnKilledByTimeout[chatJid];
+  const triageInstruction = prevKilled
+    ? '⚠️ DISPATCH REQUIRED: Your previous turn was killed — it ran too long without calling `branch_to_thread`. This turn: acknowledge the task and call `branch_to_thread` immediately. No inline tool calls.'
+    : `Use \`branch_to_thread\` for any task requiring more than ${MAIN_BRAIN_TOOL_LIMIT} tool calls. Main brain must stay responsive.`;
   const activeThread = activeReplyThreadIds[chatJid];
   const threadNote = activeThread
     ? `The incoming message is in Matrix thread \`${activeThread}\`. Your response will be sent there automatically. Use this ID with \`set_thread\` if you need to send intermediate messages in-thread.`
@@ -885,6 +912,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const agentResponses: string[] = [];
   let lastResponseBody: string | undefined;
   markRunStarted(chatJid);
+  // Reset per-turn dispatch counters
+  turnToolCallCount[chatJid] = 0;
+  turnDispatchCalled[chatJid] = false;
 
 
   const outputHandler = createOutputHandler({
@@ -1001,6 +1031,19 @@ async function runAgent(
   writeAgentSnapshots(group.folder, isMain, registeredGroups, getAvailableGroups);
   const wrappedOnOutput = wrapOnOutputForSession(sessions, group.folder, onOutput);
 
+  // Main-brain turn timeout: kill the process if it runs too long without dispatching.
+  let turnKillTimer: ReturnType<typeof setTimeout> | null = null;
+  let killProc: (() => void) | null = null;
+  if (isMain && MAIN_BRAIN_TURN_TIMEOUT_MS > 0) {
+    turnKillTimer = setTimeout(() => {
+      if (killProc) {
+        logger.warn({ chatJid, timeoutMs: MAIN_BRAIN_TURN_TIMEOUT_MS }, 'main brain turn timeout — killing process');
+        killProc();
+        turnKilledByTimeout[chatJid] = true;
+      }
+    }, MAIN_BRAIN_TURN_TIMEOUT_MS);
+  }
+
   try {
     const output = await runContainerAgent(
       group,
@@ -1011,9 +1054,13 @@ async function runAgent(
         chatJid,
         isMain,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName) => {
+        killProc = () => proc.kill('SIGTERM');
+        queue.registerProcess(chatJid, proc, containerName, group.folder);
+      },
       wrappedOnOutput,
     );
+    if (turnKillTimer) clearTimeout(turnKillTimer);
 
     if (output.newSessionId && output.status !== 'error') {
       sessions[group.folder] = output.newSessionId;
@@ -1030,6 +1077,7 @@ async function runAgent(
 
     return { status: 'success' };
   } catch (err) {
+    if (turnKillTimer) clearTimeout(turnKillTimer);
     logger.error({ group: group.name, err }, 'Agent error');
     return { status: 'error', error: errStr(err) };
   }
