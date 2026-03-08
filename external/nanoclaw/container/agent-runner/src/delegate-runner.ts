@@ -396,6 +396,17 @@ export function registerDelegateTools(
       const logStream = fs.createWriteStream(logPath, { flags: 'a' });
       const startedAt = Date.now();
 
+      // Auto-inject set_thread boilerplate so Thread Brain always enters the thread
+      // without bots having to remember to include it manually (BUG-13 fix).
+      const threadBoilerplate =
+        `First: call set_thread with thread_id="${args.thread_id}". ` +
+        `Post a brief opening goal message in that thread. ` +
+        `Then proceed with the objective below. ` +
+        `When done, call set_thread with empty string then call send_message to post a one-line summary on the main timeline.\n\nObjective:\n`;
+      const fullObjective = args.objective.includes('set_thread')
+        ? args.objective
+        : threadBoilerplate + args.objective;
+
       // TODO(phase2): Hydrate immutable thread context via host-side ContainerInput injection in src/main.ts.
       // This runner only launches the child process; full history injection is handled by the host.
       const launchClaude = (useResumeFlags: boolean) => {
@@ -421,7 +432,7 @@ export function registerDelegateTools(
         child.stdout?.pipe(logStream, { end: false });
         child.stderr?.pipe(logStream, { end: false });
 
-        child.stdin?.write(args.objective);
+        child.stdin?.write(fullObjective);
         child.stdin?.end();
         child.unref();
         return child;
