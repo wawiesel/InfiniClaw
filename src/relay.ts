@@ -1194,7 +1194,7 @@ async function spawnThreadBrain(
   const child = spawn('claude', [
     '--print',
     '--dangerously-skip-permissions',
-    '--output-format', 'text',
+    '--output-format', 'stream-json',
     '--add-dir', resolveRoot(),
   ], {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -1204,8 +1204,29 @@ async function spawnThreadBrain(
   child.stdin?.write(fullPrompt);
   child.stdin?.end();
 
-  let output = '';
-  child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+  let stdoutBuf = '';
+  let postedCount = 0;
+
+  child.stdout?.on('data', (chunk: Buffer) => {
+    stdoutBuf += chunk.toString();
+    while (true) {
+      const idx = stdoutBuf.indexOf('\n');
+      if (idx === -1) break;
+      const line = stdoutBuf.slice(0, idx).trim();
+      stdoutBuf = stdoutBuf.slice(idx + 1);
+      if (!line) continue;
+      try {
+        const event = JSON.parse(line) as { type?: string; content?: string; result?: string };
+        if (event.type === 'assistant' && typeof event.content === 'string' && event.content.trim()) {
+          postedCount++;
+          threadReply(conn, replyThreadId, event.content.trim()).catch((err) => log(`threadBrain: stream post failed: ${errStr(err)}`));
+        } else if (event.type === 'result' && typeof event.result === 'string' && event.result.trim() && postedCount === 0) {
+          postedCount++;
+          threadReply(conn, replyThreadId, event.result.trim()).catch((err) => log(`threadBrain: result post failed: ${errStr(err)}`));
+        }
+      } catch { /* not JSON, skip */ }
+    }
+  });
 
   child.on('error', (err) => {
     log(`threadBrain: spawn error: ${errStr(err)}`);
@@ -1214,10 +1235,11 @@ async function spawnThreadBrain(
   });
 
   child.on('close', (code) => {
-    const text = output.trim() || `Thread Brain completed with no output (exit ${code ?? 'null'})`;
-    log(`threadBrain: done exit=${code} len=${output.length}`);
+    log(`threadBrain: done exit=${code} posted=${postedCount}`);
     removeThreadTask(replyThreadId);
-    threadReply(conn, replyThreadId, text).catch((err) => log(`threadBrain: post failed: ${errStr(err)}`));
+    if (postedCount === 0) {
+      threadReply(conn, replyThreadId, `Thread Brain completed with no output (exit ${code ?? 'null'})`).catch((err) => log(`threadBrain: post failed: ${errStr(err)}`));
+    }
 
     // Schedule debounced main-brain restart so it picks up Thread Brain findings (30s delay).
     // Reset timer on each successive TB exit; fires once all TBs for this bot are done.
