@@ -609,7 +609,18 @@ function createOutputHandler(ctx: OutputHandlerContext): (result: ContainerOutpu
   };
 }
 
+/** Format a raw tool name for display (strips MCP prefixes, underscores → spaces). */
+function formatToolLabel(raw: string): string {
+  return raw.replace(/^mcp__\w+?__/, '').replace(/_/g, ' ');
+}
+
 function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
+  // Handle TITLE-only progress events emitted by agent-runner (bot's text alongside tool calls)
+  if (text.startsWith('\x00TITLE:')) {
+    const title = text.slice(7).replace(/<[^>]+>/g, '').trim().slice(0, 120);
+    if (title) lastProgressText[ctx.chatJid] = title;
+    return;
+  }
   markProgress(ctx.chatJid, text);
   const isToolCall = text.includes('<details>');
   let toolCallHtml = '';
@@ -654,7 +665,7 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
           } else if (ch.sendMessageReturningId) {
             // Open a new thread with an anchor message, then post tool call into it
             const _toolTitleMatch = text.match(/🔧\s*([^<]{1,60})/);
-            const _toolCallLabel = _toolTitleMatch ? _toolTitleMatch[1].trim() : 'Tool call';
+            const _toolCallLabel = _toolTitleMatch ? formatToolLabel(_toolTitleMatch[1].trim()) : 'Tool call';
             // Prefer the last text the bot wrote (what it said it was doing) over the raw tool name
             const _toolAnchor = lastProgressText[ctx.chatJid] || _toolCallLabel;
             const _anchorMsg = _toolAnchor !== _toolCallLabel

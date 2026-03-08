@@ -291,11 +291,19 @@ function runClaude(
 
         // Tool use — capture for progress
         if (event.type === 'assistant' && event.message?.content) {
+          let assistantText = '';
           for (const block of event.message.content) {
             if (block.type === 'tool_use') {
               currentToolName = block.name;
               currentToolInput = block.input;
+            } else if (block.type === 'text' && typeof block.text === 'string') {
+              assistantText += block.text;
             }
+          }
+          // Emit assistant text alongside tool calls as a thread-title hint (not displayed)
+          const trimmed = assistantText.trim();
+          if (trimmed && event.message.content.some((b: { type: string }) => b.type === 'tool_use')) {
+            emitProgress('\x00TITLE:' + trimmed.slice(0, 200));
           }
           return;
         }
