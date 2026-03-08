@@ -11,7 +11,7 @@ When this file has content, the commanding engineer must address these items fir
 **Component:** `src/main.ts` — `resolveReplyThread()`
 **Symptom:** After restart, bot responded to main-timeline messages (BUG-19 test, status ping) by routing to the old `!refresh` thread instead of main timeline. Messages sent to `@cid` on main timeline got replies inside `$KPS0azO4puk3Lfj1KldZrPmbQykUgSu67GuuLx7SgBo`.
 **Root cause:** `resolveReplyThread` scans `messagesToSend` (full context since `lastAgentTimestamp`) for the most recent message with a non-null `thread_id`. The context batch included the old `[1m] ⛔ !refresh Cid — fetch failed` notification (which is in the `!refresh` thread), and it matched the TRIGGER_PATTERN because it contains "Cid". The scan returned this old thread_id even though the actual trigger messages were on the main timeline.
-**Fix:** Only accept a thread_id from the scan if the message also matches TRIGGER_PATTERN (i.e., is an explicit callout). Old notifications that happen to be in threads don't count. Falls back to `lastMsg.thread_id` for CO/participating-thread scenarios.
+**Fix:** Only accept a thread_id from the scan if the message also matches TRIGGER_PATTERN AND is from a non-intercom sender (`!sender.includes('-intercom')`). Relay notifications from intercom accounts (e.g. `@engineering-intercom:a-gis.org`) that mention "Cid" should not trigger thread routing. Falls back to `lastMsg.thread_id` for CO/participating-thread scenarios.
 
 ---
 
