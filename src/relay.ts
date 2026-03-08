@@ -2659,7 +2659,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
               execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(secretsRepoPath()), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
               await sleep(3000);
             }
-            execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', `[BTC] ${body}`], { stdio: 'pipe' });
+            execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', `[BehindTheCurtain | ${roomId}] ${body}`], { stdio: 'pipe' });
             execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
           } catch (err) {
             log(`curtain: tmux send failed: ${errStr(err)}`);
@@ -2738,7 +2738,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                     execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(loadShipConfig().secretsPath), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
                     await sleep(3000);
                   }
-                  execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', text], { stdio: 'pipe' });
+                  execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', `[${conn.name} | ${conn.roomId}] ${text}`], { stdio: 'pipe' });
                   execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
                 } catch (err) {
                   log(`${conn.name}: @ tmux send failed: ${errStr(err)}`);
