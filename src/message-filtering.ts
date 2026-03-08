@@ -2,7 +2,7 @@
  * InfiniClaw message filtering.
  * Determines which messages should be ignored (other bot output, wrong triggers).
  */
-import { IGNORE_PATTERNS, IGNORE_SENDERS } from './infini-config.js';
+import { IGNORE_PATTERNS, IGNORE_SENDERS, CAPTAIN_USER_ID } from './infini-config.js';
 import type { NewMessage } from 'nanoclaw/types.js';
 
 const NORMALIZED_IGNORE_SENDERS: Set<string> = new Set(
@@ -29,6 +29,6 @@ export function isIgnoredTrigger(text: string): boolean {
 export function shouldIgnoreMessage(msg: NewMessage): boolean {
   if (typeof msg.content !== 'string') return isIgnoredSender(msg.sender);
   const content = msg.content.trimStart();
-  if (content.startsWith('@')) return true; // operator callout — not for bots
+  if (content.startsWith('@') && msg.sender === CAPTAIN_USER_ID) return true; // operator callout — not for bots
   return isIgnoredSender(msg.sender) || isIgnoredTrigger(content);
 }
