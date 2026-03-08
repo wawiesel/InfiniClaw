@@ -1825,6 +1825,9 @@ function registerRelayCommands(): void {
 
     fleet: async (cmd, conn) => {
       try {
+        // Create the thread immediately for responsiveness
+        const threadRoot = await reply(conn, '📋 Fleet');
+
         // Every ship publishes its report, then the speaker assembles
         const report = await publishFleetReport();
 
@@ -1916,7 +1919,8 @@ function registerRelayCommands(): void {
           }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
-          for (const [, entry] of bots) {
+          for (const [i, [, entry]] of bots.entries()) {
+            const isLast = i === bots.length - 1;
             const isCO = entry.status === 'onduty' && !Object.values(allBots).some(
               e => e.role === entry.role && e.status === 'onduty' && e.rank < entry.rank && e !== entry
             );
@@ -1931,11 +1935,11 @@ function registerRelayCommands(): void {
             else if (isCO) badge = '⭐';
             else badge = '🟢';
 
-            lines.push(`      ${entry.name} ${badge} · ${entry.role}[${entry.rank}]${entry.gitVersion}`);
+            const prefix = isLast ? '  └' : '  ├';
+            lines.push(`${prefix} ${entry.name} ${badge} · ${entry.role}[${entry.rank}]${entry.gitVersion}`);
           }
         }
 
-        const threadRoot = await reply(conn, '📋 Fleet');
         if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
       } catch (err) {
         await reply(conn, `!fleet failed: ${errStr(err)}`);
