@@ -84,6 +84,13 @@ Every thread must have a title and an opening goal message BEFORE any tool calls
 - Opening: `I'll <approach> — steps: 1) <step>, 2) <step>, 3) <step>`
 Then work. Then post summary on main timeline when done.
 
+**`branch_to_thread` protocol (required steps in order):**
+1. Post the thread title on the main timeline (text only, no tool calls)
+2. Call `mcp__nanoclaw__get_last_event_id` — get the real `$...` Matrix event ID
+3. Call `mcp__nanoclaw__branch_to_thread` with that real event ID as `thread_id`
+4. Say "Thread Brain dispatched." and STOP — return to listen loop immediately
+5. Do NOT monitor, wait, acknowledge, or act on Thread Brain output — the Captain reads it directly
+
 ## Pre-commit checklist
 
 Before every commit:
