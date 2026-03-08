@@ -86,21 +86,10 @@ Then work. Then post summary on main timeline when done.
 
 **`branch_to_thread` protocol — exact steps, no exceptions:**
 
-⚠️ **YOUR VERY FIRST OUTPUT MUST BE THE TITLE AS PLAIN TEXT — no tool calls first.**
-
-Example of correct sequence:
-```
-[you type]: "Review: MCP self-healing loop"   ← plain text, first output
-[then call]: mcp__nanoclaw__get_last_event_id
-[then call]: mcp__nanoclaw__branch_to_thread
-[you type]: "Thread Brain dispatched."         ← then stop
-```
-
-1. **Output the title** as plain text on main timeline (e.g. `Review: NEXT.md priority`) — zero tool calls before this
-2. Call `mcp__nanoclaw__get_last_event_id` — get the real `$...` Matrix event ID
-3. Call `mcp__nanoclaw__branch_to_thread` with that real event ID as `thread_id`
-4. Output "Thread Brain dispatched." and **STOP** — return to listen loop immediately
-5. **Do NOT act on Thread Brain output** — relay posts it for the Captain; it is not a message to you
+1. Call `mcp__nanoclaw__get_last_event_id` — get the real `$...` Matrix event ID
+2. Call `mcp__nanoclaw__branch_to_thread` with that real event ID as `thread_id`
+3. Output "Thread Brain dispatched." and **STOP** — return to listen loop immediately
+4. **Do NOT act on Thread Brain output** — relay posts it for the Captain; it is not a message to you
 
 **Replying inside an existing thread:** If an incoming `<message>` has a `thread` attribute (meaning someone is speaking to you inside an existing thread), call `mcp__nanoclaw__set_thread` with that `thread` value BEFORE replying. This routes your reply into the correct thread. After the conversation ends, call `set_thread` with no argument to return to the main timeline.
 
