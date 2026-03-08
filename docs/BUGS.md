@@ -18,7 +18,7 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-16: Bot doesn't reply in-thread when addressed in an existing thread
 
 **Reported:** 2026-03-08
-**Status:** open
+**Status:** fixed (pending commit SHA)
 **Component:** main.ts / message routing / bot persona
 **Symptom:** When operator/Captain posts a message inside an existing thread (with `m.relates_to.rel_type = "m.thread"`), the bot receives and acknowledges the content but replies on the main timeline instead of within the thread.
 **Root cause:** The agent-runner's auto-threading logic creates new threads for @callouts, but when a message arrives that's already part of a thread, the bot doesn't automatically call `set_thread` to route replies back into that thread. The bot sees the `thread_id` attribute on the incoming `<message>` but has no standing instruction to `set_thread` first.

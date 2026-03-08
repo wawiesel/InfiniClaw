@@ -825,6 +825,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, contextMessages);
   threadMapLastSeen[`r:${chatJid}`] = Date.now();
+  // BUG-16: auto-set work thread when incoming message is in a thread, so bot's
+  // send_message MCP calls also route there without requiring an explicit set_thread call.
+  if (activeReplyThreadIds[chatJid]) {
+    workThreadIds[chatJid] = activeReplyThreadIds[chatJid]!;
+    threadMapLastSeen[`w:${chatJid}`] = Date.now();
+  }
   logger.info(
     { group: group.name, replyThreadId: activeReplyThreadIds[chatJid], msgCount: contextMessages.length },
     'Thread routing resolved',
@@ -1113,6 +1119,11 @@ async function handleGroupMessagesInLoop(
   const rawFormatted = formatMessages(messagesToSend);
 
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
+  // BUG-16: auto-set work thread when piped message is in a thread.
+  if (activeReplyThreadIds[chatJid]) {
+    workThreadIds[chatJid] = activeReplyThreadIds[chatJid]!;
+    threadMapLastSeen[`w:${chatJid}`] = Date.now();
+  }
   const pipedActiveThread = activeReplyThreadIds[chatJid];
   const pipedThreadNote = pipedActiveThread
     ? `The incoming message is in Matrix thread \`${pipedActiveThread}\`. Your response will be sent there automatically. Use this ID with \`set_thread\` if you need to send intermediate messages in-thread.`
@@ -1849,6 +1860,7 @@ async function main(): Promise<void> {
         } catch (err) { logger.debug({ chatJid, err }, 'Failed to write workThread to IPC file'); }
       }
     },
+    getWorkThread: (chatJid: string) => workThreadIds[chatJid],
     syncGroups: async () => { },
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),

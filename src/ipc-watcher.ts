@@ -29,6 +29,7 @@ export interface IpcDeps {
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   unregisterGroup: (jid: string) => void;
   setWorkThread: (chatJid: string, threadId: string | null) => void;
+  getWorkThread: (chatJid: string) => string | undefined;
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -110,7 +111,9 @@ async function handleTextMessage(
   const body = String(data.text);
   const isDelegateHeader = body.startsWith('💭');
 
-  const threadId = explicitThreadId ?? delegateThreadIds[sourceGroup];
+  // BUG-16: fall back to work thread (auto-set when incoming message had a thread_id)
+  // so bot's send_message calls route to the thread without an explicit set_thread call.
+  const threadId = explicitThreadId ?? delegateThreadIds[sourceGroup] ?? deps.getWorkThread(data.chatJid);
 
   if (isDelegateHeader && !explicitThreadId) {
     const eventId = await deps.sendMessageReturningId(data.chatJid, body, undefined);
