@@ -1964,14 +1964,13 @@ function registerRelayCommands(): void {
     relay: async (cmd, conn) => {
       const arg = cmd.slice('!relay'.length).trim();
 
-      // !relay — status report (speaker only)
+      // !relay — status report (each ship replies with its own status)
       if (!arg) {
-        if (!isSpeaker()) return;
         const ships = (() => { try { return loadShips(); } catch { return {} as Record<string, { operatorRelay?: boolean }>; } })();
         const lines = Object.entries(ships).map(([name, s]) =>
           `  ${name}: ${s.operatorRelay === false ? '🔇 off' : '✅ on'}`
         );
-        await reply(conn, `operator relay status:\n${lines.join('\n')}`);
+        await reply(conn, `${HOSTNAME} operator relay status:\n${lines.join('\n')}`);
         return;
       }
 
