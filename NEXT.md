@@ -24,6 +24,12 @@ Updated 2026-03-08 EST.
 
 ## MEDIUM — Next Up
 
+- **`channels/matrix.ts` F2: `isPreformattedHtml` raw HTML passthrough (9th cycle)** — `sendMessage`/`editMessage` skip `renderMarkdownForMatrix` for strings starting with `<details`, `<font`, `<small`. No sanitization follows. A prompt-injection payload opening with `<details>` can carry arbitrary HTML to Matrix clients. Fix requires architectural decision: either restrict the allowlist or add a post-hoc HTML sanitizer (e.g. `sanitize-html`) to strip unsafe tags/attrs after the bypass path. Deferred pending architecture review.
+- **`channels/matrix.ts` F4: media fully buffered before size check (9th cycle)** — `downloadContent` buffers the full file before the 50MB cap is applied. Repeated large media from adversarial homeservers can spike RSS by hundreds of MB. Fix requires streaming `Content-Length` pre-flight or streaming download with byte-count abort. Deferred — needs SDK streaming API investigation.
+- **johnny5 stale runtime files (lounge — no fix needed until brought onduty)** — `_runtime/instances/johnny5/pm2-ecosystem.json` has `ASSISTANT_ROLE=Commander` (title, not role; role is `navigator`). `start.sh` sources `secrets/johnny5/env` instead of correct `secrets/bots/johnny5/env`. Together caused `bots/commander/johnny5/` mount attempts → exit 125 (resolved 2026-03-02). Fix: run `bootstrapBot("johnny5")` via relay — regenerates both files from current code with correct paths.
+
+
+
 - **Concurrency ceiling starvation** — FIFO `waitingGroups` drain in `group-queue.ts` (upstream nanoclaw). Fix = priority-aware `drainWaiting()`. Needs Captain approval before touching upstream.
 - ~~**Cid SIGKILL death spirals**~~ — stable at 614 for 4h+ as of 2026-03-08T04:21 UTC. Session OOM addressed by `997fb21`. Monitor.
 
