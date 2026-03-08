@@ -834,9 +834,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
   const triageInstruction = 'The `branch_to_thread` tool is available for long-running tasks (>30s). Use it when a task needs to run in parallel without blocking new messages.';
+  const activeThread = activeReplyThreadIds[chatJid];
+  const threadNote = activeThread
+    ? `The incoming message is in Matrix thread \`${activeThread}\`. Your response will be sent there automatically. Use this ID with \`set_thread\` if you need to send intermediate messages in-thread.`
+    : undefined;
   const parts: string[] = [];
   if (missionContext) parts.push(missionContext);
   if (isMainGroup) parts.push(triageInstruction);
+  if (threadNote) parts.push(threadNote);
   if (threadContext) parts.push(threadContext);
   parts.push(basePrompt);
   const prompt = parts.join('\n\n');
@@ -1105,9 +1110,14 @@ async function handleGroupMessagesInLoop(
   setObjectiveFromMessages(chatJid, messagesToSend);
   const threadCtx = buildThreadContextBlock(chatJid, messagesToSend);
   const rawFormatted = formatMessages(messagesToSend);
-  const formatted = threadCtx ? `${threadCtx}\n\n${rawFormatted}` : rawFormatted;
 
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
+  const pipedActiveThread = activeReplyThreadIds[chatJid];
+  const pipedThreadNote = pipedActiveThread
+    ? `The incoming message is in Matrix thread \`${pipedActiveThread}\`. Your response will be sent there automatically. Use this ID with \`set_thread\` if you need to send intermediate messages in-thread.`
+    : undefined;
+  const formattedParts = [pipedThreadNote, threadCtx, rawFormatted].filter(Boolean);
+  const formatted = formattedParts.join('\n\n');
   threadMapLastSeen[`r:${chatJid}`] = Date.now();
 
   const groupStatus = queue.getGroupStatus(chatJid);
