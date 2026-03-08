@@ -1203,6 +1203,7 @@ async function spawnThreadBrain(
 
   const child = spawn('claude', [
     '--print',
+    '--verbose',
     '--dangerously-skip-permissions',
     '--output-format', 'stream-json',
     '--add-dir', resolveRoot(),
