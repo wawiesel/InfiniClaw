@@ -355,7 +355,7 @@ Use this after making code changes that require a process restart.`,
         return { content: [{ type: 'text' as const, text: 'Message store not available.' }], isError: true };
       }
       try {
-        const { execSync } = await import('child_process');
+        const { execFileSync } = await import('child_process');
         const script = `
           const Database = require('better-sqlite3');
           const db = new Database(${JSON.stringify(dbPath)}, { readonly: true });
@@ -363,7 +363,8 @@ Use this after making code changes that require a process restart.`,
           db.close();
           console.log(JSON.stringify(row || null));
         `;
-        const result = execSync(`node -e ${JSON.stringify(script)}`, { encoding: 'utf-8', timeout: 5000 }).trim();
+        // Use execFileSync (no shell) to avoid $ in Matrix event IDs being interpolated
+        const result = execFileSync('node', ['-e', script], { encoding: 'utf-8', timeout: 5000 }).trim();
         const row = JSON.parse(result);
         if (!row) {
           return { content: [{ type: 'text' as const, text: `Message not found: ${args.id}` }] };
