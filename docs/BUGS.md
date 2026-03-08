@@ -4,6 +4,18 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-17: `@rollup/rollup-darwin-x64` optional dep disappears after npm install
+
+**Reported:** 2026-03-08
+**Status:** open
+**Component:** pre-push hook / npm optional dependencies
+**Symptom:** Pre-push hook runs `npm test` (vitest) which needs `@rollup/rollup-darwin-x64`. After `npm install`, this optional dep is missing on HERACLES (arm64 Mac with Rosetta/x64 compatibility). Push fails: "Cannot find module @rollup/rollup-darwin-x64".
+**Workaround:** `npm i @rollup/rollup-darwin-x64 --no-save` before pushing. Pre-push cache (5-min TTL) covers relay's subsequent push within the window.
+**Root cause:** npm bug ([npm/cli#4828](https://github.com/npm/cli/issues/4828)) — optional deps sometimes not installed. The pre-push hook runs `npm test --if-present` which invokes vitest which imports rollup.
+**Fix candidates:** (a) Add `@rollup/rollup-darwin-x64` to `devDependencies` directly (not just optional). (b) Add `npm i @rollup/rollup-darwin-x64 --no-save` at start of pre-push hook. (c) Replace `npm test` with a direct vitest invocation after ensuring rollup is present.
+
+---
+
 ### BUG-16: Bot doesn't reply in-thread when addressed in an existing thread
 
 **Reported:** 2026-03-08
