@@ -1113,10 +1113,10 @@ const RELAY_TASKS_POLL_INTERVAL = 2_000;
  * and posting results to the specified Matrix thread.
  */
 function spawnThreadBrain(
-  task: { thread_id: string; objective: string; chat_jid: string },
+  task: { thread_id: string; objective: string; chat_jid: string; bot?: string },
   conns: RoomConn[],
 ): void {
-  const { thread_id, objective, chat_jid } = task;
+  const { thread_id, objective, chat_jid, bot } = task;
   log(`threadBrain: spawning for thread=${thread_id.slice(0, 20)}`);
 
   // Find the connection for this room (strip matrix: prefix if present)
@@ -1126,6 +1126,17 @@ function spawnThreadBrain(
     log(`threadBrain: no active connection for chat_jid=${chat_jid}`);
     return;
   }
+
+  // Load bot credentials so claude can authenticate on the host
+  const botEnv = bot ? (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })() : null;
+  const childEnv: Record<string, string> = { ...process.env as Record<string, string> };
+  if (botEnv?.CLAUDE_CODE_OAUTH_TOKEN) childEnv['CLAUDE_CODE_OAUTH_TOKEN'] = botEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  if (botEnv?.ANTHROPIC_API_KEY) childEnv['ANTHROPIC_API_KEY'] = botEnv.ANTHROPIC_API_KEY;
+  if (botEnv?.ANTHROPIC_BASE_URL) childEnv['ANTHROPIC_BASE_URL'] = botEnv.ANTHROPIC_BASE_URL;
+  if (botEnv?.ANTHROPIC_AUTH_TOKEN) childEnv['ANTHROPIC_AUTH_TOKEN'] = botEnv.ANTHROPIC_AUTH_TOKEN;
+  if (botEnv?.NODE_EXTRA_CA_CERTS) childEnv['NODE_EXTRA_CA_CERTS'] = botEnv.NODE_EXTRA_CA_CERTS;
+  // Prevent nested Claude Code rejection
+  delete childEnv['CLAUDECODE'];
 
   const fullPrompt = [
     'You are a Thread Brain — a focused research/analysis agent.',
@@ -1143,7 +1154,7 @@ function spawnThreadBrain(
     '--add-dir', resolveRoot(),
   ], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: childEnv,
   });
 
   child.stdin?.write(fullPrompt);
@@ -1202,8 +1213,9 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
               const thread_id = typeof data['thread_id'] === 'string' ? data['thread_id'] : '';
               const objective = typeof data['objective'] === 'string' ? data['objective'] : '';
               const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
+              const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
               if (thread_id && objective) {
-                spawnThreadBrain({ thread_id, objective, chat_jid }, conns);
+                spawnThreadBrain({ thread_id, objective, chat_jid, bot }, conns);
               } else {
                 log(`relayTasks: thread_brain missing required fields (thread_id or objective)`);
               }
