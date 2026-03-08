@@ -251,7 +251,7 @@ function createSafeMarkdownRenderer() {
     const href = typeof token?.href === 'string' ? token.href : '';
     const text = typeof token?.text === 'string' ? token.text : '';
     const safeHref = sanitizeHref(href);
-    const safeText = text || escapeHtml(href);
+    const safeText = escapeHtml(text) || escapeHtml(href);
     if (!safeHref) return safeText;
     return `<a href="${safeHref}">${safeText}</a>`;
   };
@@ -483,6 +483,7 @@ export class MatrixChannel implements Channel {
 
   private client: MatrixClient | null = null;
   private _connected = false;
+  private _connecting = false;
   private botUserId = MATRIX_USER_ID;
   private opts: MatrixChannelOpts;
   private lastMessageEventId = new Map<string, string>();
@@ -631,6 +632,7 @@ export class MatrixChannel implements Channel {
 
   private markDisconnected(context: string, err?: unknown): void {
     this._connected = false;
+    this._connecting = false;
     if (err) {
       logger.warn({ errcode: matrixErrCode(err), err }, context);
     } else {
@@ -787,7 +789,8 @@ export class MatrixChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    if (this._connected) return;
+    if (this._connected || this._connecting) return;
+    this._connecting = true;
 
     if (!MATRIX_HOMESERVER) {
       logger.debug('Matrix not configured, channel dormant');
