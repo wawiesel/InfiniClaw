@@ -7,7 +7,7 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-19: `resolveReplyThread()` routes main-timeline messages to stale work thread
 
 **Reported:** 2026-03-08
-**Status:** fixed (see below)
+**Status:** fixed (52d39a2)
 **Component:** main.ts — `resolveReplyThread()`
 **Symptom:** After bot replies to a message IN a thread (e.g., the BUG-18 test message), the next unrelated main-timeline message is incorrectly routed to the old thread. Bot responds inside the stale thread instead of on the main timeline.
 **Root cause:** `resolveReplyThread()` had a fallback: if no thread is found in incoming `contextMessages`, check `workThreadIds[chatJid]` (set by the BUG-16 auto-routing when a thread message was processed). `workThreadIds` is never cleared after processing, so the stale thread ID persists and hijacks routing of the next main-timeline message. The `threadNote` injected into the prompt says "incoming message is in Matrix thread `$old...`" — bot believes it and works in the wrong thread.
