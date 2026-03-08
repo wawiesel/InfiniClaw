@@ -46,9 +46,39 @@ New Cid skill: `pm` (project management). Capabilities:
 - Predict time-to-completion from task complexity + historical TB durations
 - Generate weekly summary for Captain
 
-### TodoWrite persistence fix
+### Branch Brain completion: INTERCOM → main timeline
 
-TodoWrite returns success but files don't appear in `_runtime/instances/cid/data/sessions/main/.claude/todos/` on Mar 8 despite the call succeeding in session transcript. Investigate: is Claude Code writing todos to a different path? Are they flushed only on session end? Fix so `!todo cid` reflects real-time state.
+When a Branch Brain (Thread Brain) finishes, the relay must post a structured completion notice to the **main timeline** via INTERCOM so Cid can update his todo list. Format:
+```
+🔁 Task complete: <title> — <one-line summary>
+```
+Cid's CLAUDE.md: "When you see `🔁 Task complete:` from INTERCOM, update your todo list in thread." The relay already has the `finally()` handler on `spawnThreadBrain()`; extend it to post this message. Required by design point 10.
+
+### Retrospective cycle (duty timer + quarters debrief)
+
+After a configurable duty period (`DUTY_CYCLE_MS`, default 3600000), relay forces Cid to quarters for a structured retrospective. Implementation:
+
+1. **Duty timer**: Track `ondutyAt` per bot in `_runtime/data/ipc/{bot}/status.json`. On each TB completion or heartbeat, check if duty period expired.
+2. **Force to quarters**: On expiry, relay runs `!dismiss → quarters` with `RETROSPECTIVE=1` flag in the IPC message.
+3. **Retrospective sequencer**: Relay sends questions to Cid's quarters room as INTERCOM, waits for reply, then sends next question. Standard questions:
+   - "What went well since your last duty cycle?"
+   - "What didn't go well? Any blockers or mistakes?"
+   - "How could you do better next time?"
+   - "Which parts of your CLAUDE.md helped you achieve your goals? Which parts didn't?"
+   - "Update your CLAUDE.md and MEMORY.md now. Post 'Update complete.' when done."
+4. **Auto-rejoin**: When Cid posts "Update complete." or after a timeout (configurable `RETROSPECTIVE_TIMEOUT_MS`), relay commits/pushes Cid's memory files then runs `!join`.
+5. **Quarters room**: Verify Cid has a quarters room in the HERACLES ship space. If not, relay creates it.
+
+Retrospective prompt template lives as a Cid skill: `skills/retrospective/SKILL.md`.
+
+### TodoWrite persistence fix — root cause identified
+
+The `!todo` command reads the most recently modified file from `_runtime/instances/cid/data/sessions/main/.claude/todos/`. The directory contains hundreds of `{session_id}-agent-{session_id}.json` files — one per Claude Code sub-agent invocation (every `Agent` tool call creates a new sub-agent session). The most recently modified file is always the last sub-agent's empty todos, not Cid's main session todos.
+
+**Fix**: `!todo` must identify the main brain's session ID and read that specific file, not the most recently modified one. Options:
+- Bot writes its session ID to `_runtime/instances/{bot}/data/sessions/main/session-id` at startup via IPC
+- Or: relay filters to files NOT matching the `{id}-agent-{id}.json` pattern (sub-agents use this naming)
+- Or: `nanoclaw` is configured to use a fixed session ID for main brain via `--session-id main` → would produce `main.json` — no ambiguity
 
 ### Behavioral standards (Cid persona gaps observed 2026-03-08)
 
