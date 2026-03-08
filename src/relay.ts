@@ -1964,10 +1964,10 @@ function registerRelayCommands(): void {
     relay: async (cmd, conn) => {
       const arg = cmd.slice('!relay'.length).trim();
 
-      // !relay — each ship reports only its own status
+      // !relay — each ship reports only its own status (ship report)
       if (!arg) {
         const status = isOperatorRelayEnabled() ? '✅ on' : '🔇 off';
-        await reply(conn, `${HOSTNAME}: operator relay ${status}`);
+        await shipReport(conn, `${HOSTNAME}: operator relay ${status}`);
         return;
       }
 
@@ -2017,7 +2017,7 @@ function registerRelayCommands(): void {
         await sleep(3_000);
         const reports = await fetchAllHealthReports();
         const summary = formatHealthSummary(reports);
-        await reply(conn, summary);
+        await speakerReport(conn, summary);
       }
     },
 
@@ -2501,12 +2501,12 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
     if (!isSpeaker()) return;
     const result = rankSwap(Object.entries(ships), target, direction);
     if (!result) {
-      await reply(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank ship`);
+      await speakerReport(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank ship`);
       return;
     }
     writeShips(ships);
     secretsGitCommit(['operator/ships.json'], `rerank ships: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
-    await reply(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank}`);
+    await speakerReport(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank}`);
     return;
   }
 
@@ -2545,8 +2545,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[]): Promise<void> {
   // ! (bare) — print help (speaker only, one reply)
   if (cmd === '!') {
-    if (!isSpeaker()) return;
-    await reply(conn, buildHelpText());
+    await speakerReport(conn, buildHelpText());
     return;
   }
   await dispatch(cmd, conn, allConns || []);
@@ -2555,6 +2554,17 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
 async function reply(conn: RoomConn, text: string): Promise<string | undefined> {
   if (!conn.accessToken) return undefined;
   return matrixSend(conn.homeserver, conn.accessToken, conn.roomId, text);
+}
+
+/** Ship report — every ship that receives the command replies with its own data. */
+async function shipReport(conn: RoomConn, text: string): Promise<string | undefined> {
+  return reply(conn, text);
+}
+
+/** Speaker report — only the lowest-rank active ship replies, avoiding duplicate aggregates. */
+async function speakerReport(conn: RoomConn, text: string): Promise<string | undefined> {
+  if (!isSpeaker()) return undefined;
+  return reply(conn, text);
 }
 
 async function threadReply(conn: RoomConn, threadRootId: string, text: string): Promise<string | undefined> {
