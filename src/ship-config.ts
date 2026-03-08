@@ -151,6 +151,7 @@ export interface ShipEntry {
   spaceId?: string;
   loungeId?: string;
   quartersSpaceId?: string;
+  operatorRelay?: boolean; // whether @ messages are forwarded to this ship's operator tmux
 }
 
 /** Load all ships from operator/ships.json. */

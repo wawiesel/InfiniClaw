@@ -176,6 +176,10 @@ async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> 
 type BotStatus = 'onduty' | 'lounge' | 'quarters' | 'sleep' | 'transit';
 type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatus; title?: string; quartersRoom?: string; activeBrainModel?: string };
 let liveFleet: Record<string, FleetEntry> = {};
+/** Read this ship's operatorRelay flag from ships.json (default: true). */
+function isOperatorRelayEnabled(): boolean {
+  try { return loadShips()[HOSTNAME]?.operatorRelay !== false; } catch { return true; }
+}
 let fleetDirty = false;
 
 function fleetUpdate(bot: string, updates: Partial<FleetEntry>): void {
@@ -1958,23 +1962,35 @@ function registerRelayCommands(): void {
     },
 
     relay: async (cmd, conn) => {
-      const text = cmd.slice('!relay'.length).trim();
-      const SESSION = 'operator';
+      const arg = cmd.slice('!relay'.length).trim();
+
+      // !relay — status report (speaker only)
+      if (!arg) {
+        if (!isSpeaker()) return;
+        const ships = (() => { try { return loadShips(); } catch { return {} as Record<string, { operatorRelay?: boolean }>; } })();
+        const lines = Object.entries(ships).map(([name, s]) =>
+          `  ${name}: ${s.operatorRelay === false ? '🔇 off' : '✅ on'}`
+        );
+        await reply(conn, `operator relay status:\n${lines.join('\n')}`);
+        return;
+      }
+
+      const [action, targetShip] = arg.split(/\s+/, 2);
+      if (action !== 'on' && action !== 'off') {
+        await reply(conn, `usage: !relay | !relay on [ship] | !relay off [ship]`);
+        return;
+      }
+      if (targetShip && !isThisShip(targetShip)) return; // not for this ship
+
       try {
-        let existed = true;
-        try { execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' }); } catch { existed = false; }
-        if (!existed) {
-          execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(loadShipConfig().secretsPath), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
-          await sleep(3000);
-        }
-        if (text) {
-          execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', text], { stdio: 'pipe' });
-          execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
-        }
-        const status = existed ? 'sent to running operator' : 'started new operator session';
-        await reply(conn, `${status}`);
+        const ships = loadShips();
+        if (!ships[HOSTNAME]) { await reply(conn, `${HOSTNAME} not in ships.json`); return; }
+        ships[HOSTNAME].operatorRelay = action === 'on';
+        writeShips(ships);
+        secretsGitCommit(['operator/ships.json'], `relay ${action} ${HOSTNAME}`);
+        log(`operator relay ${action}`);
+        await reply(conn, `${HOSTNAME}: operator relay ${action === 'on' ? 'on ✅' : 'off 🔇'}`);
       } catch (err) {
-        log(`!relay failed: ${errStr(err)}`);
         await reply(conn, `!relay failed — ${errStr(err)}`);
       }
     },
@@ -2615,6 +2631,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           if (captainUserId && event.sender !== captainUserId) continue; // Captain only
           const body = event.content.body?.trim();
           if (!body) continue;
+          if (!isOperatorRelayEnabled()) continue;
 
           log(`curtain: message from ${event.sender}: ${body.slice(0, 80)}`);
           const SESSION = 'operator';
@@ -2691,8 +2708,8 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             if (event.content?.msgtype !== 'm.text') continue;
             const body = event.content.body?.trim() || '';
 
-            // Captain-only: @ <text> — pipe to operator tmux
-            if (event.sender === captainUserId && body.startsWith('@')) {
+            // Captain-only: @ <text> — pipe to operator tmux (if relay enabled)
+            if (event.sender === captainUserId && body.startsWith('@') && isOperatorRelayEnabled()) {
               const text = body.slice(1).trim();
               if (text) {
                 log(`${conn.name}: @ message from captain: ${text.slice(0, 80)}`);
