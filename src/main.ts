@@ -231,12 +231,9 @@ function resolveReplyThread(
   // Also check last message (could be a bot thread message we're continuing)
   const lastMsg = messages[messages.length - 1];
   if (lastMsg?.thread_id) return lastMsg.thread_id;
-  // Work thread override (set by setWorkThread MCP tool)
-  if (workThreadIds[chatJid]) {
-    threadMapLastSeen[`w:${chatJid}`] = Date.now();
-    return workThreadIds[chatJid];
-  }
   // Main timeline message → reply on main timeline (no auto-threading)
+  // workThreadIds is NOT checked here — it controls outbound IPC routing only,
+  // not where we reply to incoming messages.
   return undefined;
 }
 
