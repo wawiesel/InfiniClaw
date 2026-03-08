@@ -16,13 +16,13 @@ Ship spaces are set up in Matrix (HERACLES, Poseidon). Each has a Lounge and per
 
 Bots produce nothing visible while thinking, then dump the full response. The agent-runner emits output markers only when Claude calls `send_message`. Matrix supports message editing (`m.replace`), so progressive display is possible — send a placeholder, edit as tokens arrive. This requires streaming raw LLM tokens from the container to the host.
 
-### `restorePersona()` is redundant
+### ~~`restorePersona()` is redundant~~ ✅
 
-Persona directories are now bind-mounted into containers. The `restorePersona()` function in `service.ts` that copies persona content into the instance is legacy. Remove it. Deploy flow should be: rsync nanoclaw → write crew status → start launchd.
+Done: removed in `f5fc240`. Deploy flow is now: rsync nanoclaw → write crew status → start launchd.
 
-### `syncPersona()` is fragile
+### ~~`syncPersona()` is fragile~~ ✅
 
-With direct bind mounts, bot edits already persist to the repo. The sync-back step on stop is a no-op for mounted paths and a bug source for everything else. Remove it.
+Done: removed in `f5fc240`. All sync is strictly one-way.
 
 ### Navigator thread-to-topic mapping
 
