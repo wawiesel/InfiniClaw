@@ -295,14 +295,14 @@ async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext):
     return;
   }
   try {
-    const summary = applyBrainMode(
+    applyBrainMode(
       data.bot,
       data.mode as 'anthropic' | 'ollama',
       typeof data.model === 'string' ? data.model : undefined,
     );
-    logger.info({ bot: data.bot, mode: data.mode }, 'Brain mode updated via IPC');
-    const chatJid = parseChatJid(data);
-    if (chatJid) await ctx.sendMessage(chatJid, `${data.bot || ASSISTANT_NAME.toLowerCase()}:\n\n${summary}`);
+    logger.info({ bot: data.bot, mode: data.mode }, 'Brain mode updated via IPC — triggering restart');
+    // Auto-restart so the new model takes effect immediately
+    await handleRestartBot(data, ctx);
   } catch (err) {
     logger.error({ err, data }, 'Failed to apply set_brain_mode');
   }

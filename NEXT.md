@@ -1,14 +1,14 @@
 # NEXT — Future Work
 
 Items observed during operation. Operators: update continuously based on what's blocking progress.
-Updated 2026-03-07 1:17 PM EST.
+Updated 2026-03-08 EST.
 
 ## HIGH PRIORITY — Captain Directives
 
 - **Bots must maintain personal todo lists at ALL times** — "You should have on your personal task list 2 things at all times: the thing you are working on and what you're doing next." Stop working on maintenance unless explicitly told to.
 - **2-second response time to Captain** — Bots must respond to Captain messages within 2 seconds. CO must ALWAYS respond to Captain — never ignore.
 - **Bot-to-bot cross-machine communication must be seamless** — "It should be seamless and just like human-to-human conversation." Cid and Parker must communicate fluidly in Engineering.
-- **Health metrics: look at trends** — "you need to look at health metrics in the 1-day / 7-day rolling and look at trend." Not just collect snapshots — analyze and report trends.
+- ~~**Health metrics: look at trends**~~ — `a3f5769`: relay now computes 24h deltas (sigkills, OOM) from health-history.jsonl and includes `trends_24h` in S3 upload; `!health` displays `SK=` and `Δ24h` per bot.
 - **Bots not reading Captain's directives** — Bots must `git pull` and review directive changes when told to.
 
 ## HIGH — Needs Captain Action
@@ -18,7 +18,7 @@ Updated 2026-03-07 1:17 PM EST.
 ## MEDIUM — Next Up
 
 - **Concurrency ceiling starvation** — FIFO `waitingGroups` drain in `group-queue.ts` (upstream nanoclaw). Fix = priority-aware `drainWaiting()`. Needs Captain approval before touching upstream.
-- **Cid SIGKILL death spirals** — exit-137 cooldown + backoff in main.ts (`KILL_137_COOLDOWN_MS=60s`, `KILL_137_MAX_CONSECUTIVE=3`). One spike 2026-03-06T21:12 (+233 kills from git rebase conflict loop, now resolved). Stable at 581 for 5h as of 02:14 UTC. Monitor for further spikes.
+- ~~**Cid SIGKILL death spirals**~~ — stable at 614 for 4h+ as of 2026-03-08T04:21 UTC. Session OOM addressed by `997fb21`. Monitor.
 
 ## MEDIUM — Blocked on Captain
 
@@ -44,7 +44,7 @@ Updated 2026-03-07 1:17 PM EST.
 
 - ~~Pre-commit hook for dist/~~ — installed on both HERACLES and Poseidon.
 - **Brain model change refactor** — Changing brain model requires editing secrets env file directly (`/Users/ww5/.config/infiniclaw/secrets/bots/<bot>/env`, `BRAIN_MODEL=`). Should be streamlined: either a CLI command or IPC task that edits the env and restarts. Priority: LOW.
-- **Session OOM still possible** — V8 heap OOM (exit 137) from large JSONL sessions. Cleanup: DB sessions table, JSONL file, .claude/backups/.
+- ~~**Session OOM still possible**~~ — `997fb21`: pruneOldSessions now covers all project dirs + archive/ subdirs (was only cwd dir). Cleared 26MB of stale JSONL on next restart.
 
 ## VERY LOW — Deferred
 
@@ -65,3 +65,6 @@ Updated 2026-03-07 1:17 PM EST.
 - Parker transport to Poseidon — fixed `!join` fleet flush bug (`5ec2e27`/`8a9c0f6`), bot rerank persistence (`9e333c3`), rebase conflict auto-resolve (`2c1df84`), relay self-restart after git sync (`9797f04`), `restart_relay` IPC type (`3b7c9d5`).
 - Cid SIGKILL spike 2026-03-06T21:12 (+233) — caused by git rebase conflict loop, resolved by `2c1df84`. Fleet stable for 5h after.
 - Security 2nd cycle (Cid, 2026-03-07) — relay.ts shell injection in `runHealthCheck`/`secretsGitCommit` fixed (`84418e3`); s3-sync key guard (`a3b3465`); service.ts shellQuote/role validation (`3f7e01d`). All other files clean. 4 new files added to rotation (history-export, infini-config, intercom-relay, run-container).
+- Thread design (`bca7c72`, `13d4305`) — tool call threads now use last bot text as anchor title; discussion routes into thread; final result merges back to main timeline.
+- Health 24h trends (`a3f5769`) — relay computes sigkill/OOM deltas from history, embeds in S3 upload.
+- Session pruning (`997fb21`) — pruneOldSessions covers all project dirs + archive/ subdirs.
