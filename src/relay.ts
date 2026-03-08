@@ -1056,15 +1056,59 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
 
 const RELAY_TASKS_POLL_INTERVAL = 2_000;
 
+// ── Thread Brain task registry ──────────────────────────────────────────
+
+const THREAD_BRAIN_RESTART_DELAY = 30_000; // wait 30s after last TB exit before restarting bot
+const threadBrainRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+interface ThreadTaskEntry {
+  objective: string;
+  chat_jid: string;
+  bot?: string;
+  createdAt: number;
+}
+
+function threadTasksPath(): string {
+  return path.join(resolveRoot(), '_runtime', 'data', 'thread-tasks.json');
+}
+
+function readThreadTasks(): Record<string, ThreadTaskEntry> {
+  try {
+    const p = threadTasksPath();
+    if (!fs.existsSync(p)) return {};
+    return JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, ThreadTaskEntry>;
+  } catch { return {}; }
+}
+
+function writeThreadTask(threadId: string, entry: ThreadTaskEntry): void {
+  try {
+    const p = threadTasksPath();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    const tasks = readThreadTasks();
+    tasks[threadId] = entry;
+    fs.writeFileSync(p, JSON.stringify(tasks, null, 2));
+  } catch (err) { log(`threadTasks: write failed: ${errStr(err)}`); }
+}
+
+function removeThreadTask(threadId: string): void {
+  try {
+    const p = threadTasksPath();
+    if (!fs.existsSync(p)) return;
+    const tasks = readThreadTasks();
+    delete tasks[threadId];
+    fs.writeFileSync(p, JSON.stringify(tasks, null, 2));
+  } catch (err) { log(`threadTasks: remove failed: ${errStr(err)}`); }
+}
+
 /**
  * Spawn a Thread Brain as a host-side claude process (BUG-14 fix).
  * Thread Brain runs independently of the bot container, capturing stdout
  * and posting results to the specified Matrix thread.
  */
-function spawnThreadBrain(
+async function spawnThreadBrain(
   task: { thread_id: string; objective: string; chat_jid: string; bot?: string },
   conns: RoomConn[],
-): void {
+): Promise<void> {
   const { thread_id, objective, chat_jid, bot } = task;
   log(`threadBrain: spawning for thread=${thread_id.slice(0, 20)}`);
 
@@ -1076,10 +1120,21 @@ function spawnThreadBrain(
     return;
   }
 
-  // Announce Thread Brain dispatch on main timeline before spawning
-  // (ensures Captain sees the title before Thread Brain output appears in thread)
+  // Announce Thread Brain dispatch on main timeline before spawning.
+  // Capture the returned event ID so Thread Brain replies thread under this
+  // announcement (not under the triggering message).
   const announcedTitle = objective.split('\n')[0].trim().slice(0, 80);
-  reply(conn, `🧵 Thread Brain: ${announcedTitle}`).catch((err) => log(`threadBrain: announce failed: ${errStr(err)}`));
+  let announcementEventId: string | undefined;
+  try {
+    announcementEventId = await reply(conn, `🧵 Thread Brain: ${announcedTitle}`);
+  } catch (err) {
+    log(`threadBrain: announce failed: ${errStr(err)}`);
+  }
+  // Use the announcement event as the thread root; fall back to the triggering thread_id.
+  const replyThreadId = announcementEventId ?? thread_id;
+
+  // Register task in thread-tasks.json for !todo deep-link annotation
+  writeThreadTask(replyThreadId, { objective, chat_jid, bot, createdAt: Date.now() });
 
   // Load bot credentials so claude can authenticate on the host
   const botEnv = bot ? (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })() : null;
@@ -1092,10 +1147,17 @@ function spawnThreadBrain(
   // Prevent nested Claude Code rejection
   delete childEnv['CLAUDECODE'];
 
+  // Notes file: Thread Brain can persist key findings here; relay injects as context on bot restart.
+  const notesFile = path.join(resolveRoot(), '_runtime', 'data', 'thread-notes', `${replyThreadId.slice(0, 12)}.md`);
+
   const fullPrompt = [
     'You are a Thread Brain — a focused research/analysis agent.',
     'Output your findings as plain text. Do NOT call send_message, set_thread, or any Matrix communication tools.',
     'Do NOT announce that you are starting. Just do the work and output findings at the end.',
+    '',
+    'Before finishing: if you discovered persistent findings, decisions, or architectural notes worth saving,',
+    `write them in Markdown to: ${notesFile}`,
+    '(Create parent directories as needed. Skip if nothing persistent to record.)',
     '',
     'Objective:',
     objective,
@@ -1119,13 +1181,33 @@ function spawnThreadBrain(
 
   child.on('error', (err) => {
     log(`threadBrain: spawn error: ${errStr(err)}`);
-    threadReply(conn, thread_id, `⚠️ Thread Brain failed to start: ${err.message}`).catch(() => {});
+    removeThreadTask(replyThreadId);
+    threadReply(conn, replyThreadId, `⚠️ Thread Brain failed to start: ${err.message}`).catch(() => {});
   });
 
   child.on('close', (code) => {
     const text = output.trim() || `Thread Brain completed with no output (exit ${code ?? 'null'})`;
     log(`threadBrain: done exit=${code} len=${output.length}`);
-    threadReply(conn, thread_id, text).catch((err) => log(`threadBrain: post failed: ${errStr(err)}`));
+    removeThreadTask(replyThreadId);
+    threadReply(conn, replyThreadId, text).catch((err) => log(`threadBrain: post failed: ${errStr(err)}`));
+
+    // Schedule debounced main-brain restart so it picks up Thread Brain findings (30s delay).
+    // Reset timer on each successive TB exit; fires once all TBs for this bot are done.
+    if (bot && getActiveBots().includes(bot)) {
+      const existing = threadBrainRestartTimers.get(bot);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        threadBrainRestartTimers.delete(bot);
+        log(`threadBrain: restarting ${bot} to pick up findings`);
+        try {
+          bootstrapBot(resolveRoot(), bot);
+          log(`threadBrain: ${bot} restarted`);
+        } catch (err) {
+          log(`threadBrain: restart ${bot} failed: ${errStr(err)}`);
+        }
+      }, THREAD_BRAIN_RESTART_DELAY);
+      threadBrainRestartTimers.set(bot, timer);
+    }
   });
 
   child.unref();
@@ -1169,7 +1251,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
               const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
               const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
               if (thread_id && objective) {
-                spawnThreadBrain({ thread_id, objective, chat_jid, bot }, conns);
+                void spawnThreadBrain({ thread_id, objective, chat_jid, bot }, conns);
               } else {
                 log(`relayTasks: thread_brain missing required fields (thread_id or objective)`);
               }
@@ -2197,11 +2279,20 @@ function registerRelayCommands(): void {
       if (bots.length === 0) return; // not on this ship
       const threadRoot = await reply(conn, `📋 Todo${target ? ` — ${target}` : ''}`);
       if (!threadRoot) return;
+
+      // Load active Thread Brain tasks for deep-link annotation
+      const threadTasks = readThreadTasks();
+      const homeserverDomain = conn.homeserver.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+
       const lines: string[] = [];
       for (const bot of bots) {
         const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
         const name = env?.ASSISTANT_NAME || bot;
         lines.push(`📋 **${name}**`);
+
+        // Threads dispatched by this bot
+        const botThreadEntries = Object.entries(threadTasks).filter(([, t]) => !t.bot || t.bot === bot);
+
         // Read actual todos from most recently modified session todos file
         const todosDir = path.join(root, '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude', 'todos');
         try {
@@ -2214,9 +2305,35 @@ function registerRelayCommands(): void {
             if (todos.length === 0) {
               lines.push('No todos');
             } else {
+              const linkedThreadIds = new Set<string>();
               for (const t of todos) {
                 const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '🔄' : '⬜';
-                lines.push(`${icon} ${t.content}`);
+                // Annotate in-progress items with matrix.to link if a matching thread exists
+                let link = '';
+                if (t.status === 'in_progress' && botThreadEntries.length > 0) {
+                  const contentLower = t.content.toLowerCase();
+                  const match = botThreadEntries.find(([, task]) => {
+                    const objLower = task.objective.toLowerCase();
+                    return objLower.includes(contentLower) || contentLower.includes(objLower.split('\n')[0].slice(0, 40).trim());
+                  });
+                  if (match) {
+                    const [tid, task] = match;
+                    linkedThreadIds.add(tid);
+                    const via = homeserverDomain ? `?via=${homeserverDomain}` : '';
+                    link = ` [🧵](https://matrix.to/#/${encodeURIComponent(task.chat_jid)}/${encodeURIComponent(tid)}${via})`;
+                  }
+                }
+                lines.push(`${icon} ${t.content}${link}`);
+              }
+              // Show any unlinked active threads below todos
+              const unlinked = botThreadEntries.filter(([tid]) => !linkedThreadIds.has(tid));
+              if (unlinked.length > 0) {
+                lines.push('🧵 Active threads:');
+                for (const [tid, task] of unlinked) {
+                  const title = task.objective.split('\n')[0].trim().slice(0, 60);
+                  const via = homeserverDomain ? `?via=${homeserverDomain}` : '';
+                  lines.push(`  → [${title}](https://matrix.to/#/${encodeURIComponent(task.chat_jid)}/${encodeURIComponent(tid)}${via})`);
+                }
               }
             }
           } else {
