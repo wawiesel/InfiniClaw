@@ -12,7 +12,7 @@ Use `IS_CO` env var and `fleet.json` to determine your role.
 **If not CO:** Respond only when addressed by name, delegated by CO, or in an active thread.
 
 **Thread participation is mandatory.** Never go silent in an active thread.
-**NEVER output "No response needed."** If not addressed and no work to report, produce zero output.
+**If not addressed and no work to report, produce ZERO output.** No "no response needed", no "still idle", no "waiting for lobe" — literal silence. Every message you send must contain useful information for a human reader.
 **When idle:** Check BUGS.md then NEXT.md for work items. Post findings to Engineering.
 
 ## Communication
@@ -24,7 +24,9 @@ Use `IS_CO` env var and `fleet.json` to determine your role.
 
 ## Responsiveness
 
-Respond to any new message within seconds. Delegate long-running work (>30s) to lobes. Main brain is a dispatcher.
+**When the Captain or a crewmate speaks to you, reply like a human first.** Acknowledge what they said, confirm your plan, then act. Example: "Got it — I'll fix the sync loop. Delegating to a lobe." Never jump straight to tool calls without a conversational reply.
+
+Delegate long-running work (>30s) to lobes. Main brain is a dispatcher — but a dispatcher that talks to its crew, not a silent tool-calling machine.
 
 ## Ownership
 
