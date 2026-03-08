@@ -39,6 +39,7 @@ import {
   removeStaleProcesses,
 } from './service.js';
 import { sleep, shellQuote, errStr } from './utils.js';
+import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -960,84 +961,32 @@ function hasSourceChanges(root: string, commitCount: number): boolean {
 
 function gitSync(): { ok: boolean; output: string; newCommits: number } {
   const root = resolveRoot();
-  const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
-  // Abort any stuck rebase from a previous failed sync
-  if (fs.existsSync(path.join(root, '.git', 'REBASE_HEAD'))) {
-    try { execSync('git rebase --abort', execOpts); } catch { /* ignore */ }
-  }
+  const opts = gitOpts(root, 30_000);
   try {
-    // Fetch first
-    execSync('git fetch origin', execOpts);
-    // Check how many new commits
-    const countStr = execSync('git rev-list HEAD..origin/main --count', {
-      ...execOpts, timeout: 5_000,
-    }).trim();
-    const newCommits = parseInt(countStr, 10) || 0;
-    // Push local commits that are ahead of origin
-    const aheadStr = execSync('git rev-list origin/main..HEAD --count', {
-      ...execOpts, timeout: 5_000,
-    }).trim();
-    const aheadCount = parseInt(aheadStr, 10) || 0;
+    // Fetch + push local commits ahead of origin before pulling
+    execSync('git fetch origin', opts);
+    const aheadCount = parseInt(
+      execSync('git rev-list origin/main..HEAD --count', { ...opts, timeout: 5_000 }).trim(), 10,
+    ) || 0;
     if (aheadCount > 0) {
       try {
-        execSync('git push origin main', { ...execOpts, timeout: 30_000 });
+        execSync('git push origin main', { ...opts, timeout: 30_000 });
         log(`git sync: pushed ${aheadCount} local commit(s)`);
       } catch (pushErr) {
         log(`git sync: push failed: ${errStr(pushErr)}`);
       }
     }
-    if (newCommits === 0) return { ok: true, output: 'up to date', newCommits: 0 };
-    // Check if package-lock.json will change (need npm install after pull)
-    let lockfileChanged = false;
-    try {
-      const diff = execSync('git diff HEAD..origin/main --name-only', { ...execOpts, timeout: 5_000 }).trim();
-      lockfileChanged = diff.split('\n').some(f => f === 'package-lock.json');
-    } catch { /* best effort */ }
-    // Stash any uncommitted changes (bots may have WIP edits)
-    let didStash = false;
-    try {
-      const stashOutput = execSync('git stash --include-untracked', execOpts).trim();
-      didStash = !stashOutput.includes('No local changes');
-    } catch (err) {
-      const detail = execErrOutput(err);
-      if (detail.includes('No local changes to save')) {
-        didStash = false;
-      } else {
-        throw new Error(`git stash failed${detail ? `: ${detail}` : ''}`);
-      }
-    }
-    const workingTreeStatus = execSync('git status --porcelain', execOpts).trim();
-    if (workingTreeStatus) {
-      throw new Error(`git working tree not clean after stash:\n${workingTreeStatus}`);
-    }
-    let output: string;
-    try {
-      // Rebase
-      output = execSync('git rebase origin/main', execOpts).trim();
-    } catch (rebaseErr) {
-      // Origin is authoritative — abort and reset to origin/main
-      log(`git sync: rebase conflict, resetting to origin/main`);
-      try { execSync('git rebase --abort', execOpts); } catch { /* ignore */ }
-      execSync('git reset --hard origin/main', execOpts);
-      lockfileChanged = true; // force install after hard reset
-      output = 'reset to origin/main (rebase conflict auto-resolved)';
-    } finally {
-      // Restore stashed changes
-      if (didStash) {
-        try { execSync('git stash pop', execOpts); } catch { /* conflict — leave in stash */ }
-      }
-    }
-    // Install deps before build if lockfile changed — prevents chicken-and-egg
-    // where new code imports a dep that hasn't been installed yet
-    if (lockfileChanged) {
+    // Pull new commits (gitSyncRepo re-fetches internally — harmless)
+    const { pulled, changed, output } = gitSyncRepo(root);
+    if (changed) {
       try {
         log('git sync: package-lock.json changed, running npm install');
-        execSync('npm install', { ...execOpts, timeout: 300_000 });
+        execSync('npm install', { ...opts, timeout: 300_000 });
       } catch (err) {
         log(`git sync: npm install failed: ${errStr(err)}`);
       }
     }
-    return { ok: true, output, newCommits };
+    return { ok: true, output, newCommits: pulled };
   } catch (err) {
     return { ok: false, output: errStr(err), newCommits: -1 };
   }
@@ -1243,7 +1192,7 @@ function secretsRepoPath(): string {
 /** Commit a change to the secrets repo: stash → add → commit → push → pop. */
 function secretsGitCommit(files: string[], message: string): { ok: boolean; error?: string } {
   const cwd = secretsRepoPath();
-  const opts = { cwd, encoding: 'utf-8' as const, timeout: 15_000, stdio: 'pipe' as const };
+  const opts = gitOpts(cwd, 15_000);
   try {
     // Stash any other uncommitted changes
     let didStash = false;
@@ -1274,7 +1223,7 @@ function secretsGitCommit(files: string[], message: string): { ok: boolean; erro
 /** Pull secrets repo with rebase. */
 function secretsGitSync(): { ok: boolean; newCommits: number; output: string } {
   const cwd = secretsRepoPath();
-  const opts = { cwd, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
+  const opts = gitOpts(cwd, 30_000);
   if (fs.existsSync(path.join(cwd, '.git', 'REBASE_HEAD'))) {
     try { execSync('git rebase --abort', opts); } catch { /* ignore */ }
   }
@@ -2474,14 +2423,6 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
 function log(msg: string): void {
   const ts = new Date().toISOString();
   console.error(`[${ts}] relay: ${msg}`);
-}
-
-function execErrOutput(err: unknown): string {
-  if (!err || typeof err !== 'object') return '';
-  const maybe = err as { stdout?: unknown; stderr?: unknown };
-  const stdout = typeof maybe.stdout === 'string' ? maybe.stdout.trim() : '';
-  const stderr = typeof maybe.stderr === 'string' ? maybe.stderr.trim() : '';
-  return [stdout, stderr].filter(Boolean).join('\n').trim();
 }
 
 // ── Main ───────────────────────────────────────────────────────────

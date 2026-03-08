@@ -6,10 +6,10 @@
  * history-mcp-server using the same S3 credentials.
  */
 
-import fs from 'fs';
 import path from 'path';
 import { getMessagesSince } from 'nanoclaw/db.js';
 import { logger } from 'nanoclaw/logger.js';
+import { readJson, writeJson } from './utils.js';
 import { uploadContent } from './s3-sync.js';
 
 interface RegisteredGroup {
@@ -26,19 +26,12 @@ function slugify(name: string): string {
 }
 
 function loadState(stateFile: string): ExportState {
-  try {
-    if (fs.existsSync(stateFile)) {
-      return JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as ExportState;
-    }
-  } catch { /* ok — start fresh */ }
-  return { lastExportedAt: {} };
+  return readJson<ExportState>(stateFile, { lastExportedAt: {} });
 }
 
 function saveState(stateFile: string, state: ExportState): void {
   try {
-    const tmp = `${stateFile}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(state));
-    fs.renameSync(tmp, stateFile);
+    writeJson(stateFile, state);
   } catch { /* best effort */ }
 }
 

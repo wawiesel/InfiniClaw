@@ -7,7 +7,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { isRecord } from './utils.js';
+import { isRecord, readJson, writeJson } from './utils.js';
 
 export interface S3Config {
   endpoint: string;
@@ -118,8 +118,8 @@ export function botsPath(): string {
 
 /** Load the full fleet config (all bots, not just this ship's). */
 export function loadFleet(): Record<string, BotEntry> {
-  const raw = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
-  const bots: Record<string, BotEntry> = raw.bots || {};
+  const raw = readJson<Record<string, unknown>>(FLEET_PATH);
+  const bots: Record<string, BotEntry> = (raw.bots as Record<string, BotEntry>) || {};
   // Migrate legacy statuses
   for (const entry of Object.values(bots)) {
     if (!entry.status && 'active' in entry) {
@@ -137,9 +137,9 @@ export function loadFleet(): Record<string, BotEntry> {
 
 /** Write updated fleet config back to disk. */
 export function writeFleet(fleet: Record<string, BotEntry>): void {
-  const raw = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
+  const raw = readJson<Record<string, unknown>>(FLEET_PATH);
   raw.bots = fleet;
-  fs.writeFileSync(FLEET_PATH, JSON.stringify(raw, null, 2) + '\n');
+  writeJson(FLEET_PATH, raw);
 }
 
 export interface ShipEntry {
@@ -155,12 +155,12 @@ export interface ShipEntry {
 
 /** Load all ships from operator/ships.json. */
 export function loadShips(): Record<string, ShipEntry> {
-  return JSON.parse(fs.readFileSync(SHIPS_PATH, 'utf-8'));
+  return readJson<Record<string, ShipEntry>>(SHIPS_PATH);
 }
 
 /** Write updated ships config back to disk. */
 export function writeShips(ships: Record<string, ShipEntry>): void {
-  fs.writeFileSync(SHIPS_PATH, JSON.stringify(ships, null, 2) + '\n');
+  writeJson(SHIPS_PATH, ships);
 }
 
 /** Check if this ship is active. */
