@@ -1873,9 +1873,17 @@ function registerRelayCommands(): void {
 
         ensurePodmanReady();
 
-        // Restart active bots via normal join sequence (room management, brain restore, per-bot thread)
+        // Restart active bots via lightweight refresh (stop+kill+start, no room/brain changes)
         for (const bot of activeBots) {
-          await handleLifecycleCommand('join', bot, conn);
+          const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+          const bName = bEnv?.ASSISTANT_NAME || bot;
+          try {
+            refreshBot(root, bot);
+            await s(stageOk(`${bName} restarted`));
+          } catch (err) {
+            errors++;
+            await s(stageFail(`${bName} restart`, ` — ${errStr(err)}`));
+          }
         }
 
         persistFleet();
