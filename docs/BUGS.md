@@ -4,6 +4,30 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-18: `thread_id` lost at DB layer — BUG-16 fix is a no-op, `thread` attr never in XML
+
+**Reported:** 2026-03-08
+**Status:** fixed (29648e5)
+**Component:** nanoclaw/db.ts — `storeMessage` / `getNewMessages`
+**Symptom:** Operator posts in Matrix thread EEj0QqC at 12:51. Message reaches Cid but WITHOUT a `thread` attribute in the XML. Bot replies on main timeline. BUG-16 fix (85d69dc) is also silently inactive.
+**Root cause:** Two missing DB fields in `nanoclaw/src/db.ts`:
+1. `storeMessage` INSERT does not include `thread_id` — stored as NULL for every inbound message, regardless of Matrix thread membership.
+2. `getNewMessages` SELECT does not include `thread_id` — even if a row had it, the field is absent from returned `NewMessage` objects.
+**Full path the 12:51 message took:**
+- `matrix.ts:888` — `threadId = "EEj0QqC"` correctly extracted from `m.relates_to.event_id`
+- `matrix.ts:933` — `NewMessage` created with `thread_id: "EEj0QqC"` ✓
+- `main.ts:1484` — `normalizeInboundMessage` preserves `thread_id` ✓
+- `main.ts:1491` — `storeMessage(safeMsg)` called — INSERT omits `thread_id` → stored NULL ✗
+- `processGroupMessages` → `getNewMessages` → SELECT omits `thread_id` → all `NewMessage.thread_id = undefined` ✗
+- `resolveReplyThread` scans: no `m.thread_id` found → returns `undefined`
+- BUG-16 fix: `if (activeReplyThreadIds[chatJid])` → false → `workThreadIds` never set (no-op)
+- `formatMessages` → `m.thread_id ? \` thread="${...}"\` : ''` → empty → no `thread` attr in XML
+- Bot receives XML without `thread` attribute → replies on main timeline
+**Note:** Live Cid DB DOES have a `thread_id` column on `messages` (verified via PRAGMA — it's column 7). It was added by a migration that no longer exists in source. But `storeMessage` still doesn't write it, so it's always NULL.
+**Fix:** In `nanoclaw/src/db.ts`: (1) add `thread_id` to `storeMessage` INSERT and its VALUES. (2) add `thread_id` to `getNewMessages` SELECT. (3) add migration `ALTER TABLE messages ADD COLUMN thread_id TEXT` guarded with try-catch (for fresh DBs — live DBs already have the column). Once `thread_id` flows through the DB, `resolveReplyThread` will find it, the BUG-16 auto-set will fire, and `formatMessages` will emit `thread="EEj0QqC"` in the XML.
+
+---
+
 ### BUG-17: `@rollup/rollup-darwin-x64` optional dep disappears after npm install
 
 **Reported:** 2026-03-08
