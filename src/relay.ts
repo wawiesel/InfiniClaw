@@ -578,6 +578,8 @@ async function botMatrixLogin(root: string, bot: string): Promise<{ token: strin
   return { token: accessToken, homeserver, userId };
 }
 
+const MATRIX_OP_TIMEOUT_MS = 15_000; // 15s for invite/join/leave ops
+
 /** Invite a bot to a room using the intercom account, then join as the bot. */
 async function botJoinRoom(botToken: string, homeserver: string, roomId: string, conn: RoomConn, botUserId: string): Promise<void> {
   // Invite via intercom (bot can't self-join after leaving)
@@ -586,6 +588,7 @@ async function botJoinRoom(botToken: string, homeserver: string, roomId: string,
       method: 'POST',
       headers: { Authorization: `Bearer ${conn.accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: botUserId }),
+      signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS),
     });
     if (!invResp.ok) {
       const body = await invResp.text();
@@ -595,16 +598,29 @@ async function botJoinRoom(botToken: string, homeserver: string, roomId: string,
       }
     }
   }
-  // Now join as the bot
-  const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
-    body: '{}',
-  });
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`join room failed: ${resp.status} ${body}`);
+  // Now join as the bot (retry once on timeout/transient failure)
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS),
+      });
+      if (!resp.ok) {
+        const body = await resp.text();
+        // Already in room is a success
+        if (body.includes('already in the room') || body.includes('already joined')) return;
+        throw new Error(`join room failed: ${resp.status} ${body}`);
+      }
+      return; // success
+    } catch (err) {
+      lastErr = err;
+      if (attempt === 0) log(`botJoinRoom: attempt 1 failed (${errStr(err)}), retrying...`);
+    }
   }
+  throw lastErr;
 }
 
 /** Make a bot leave a Matrix room. Silently succeeds if bot isn't in the room. */
@@ -613,6 +629,7 @@ async function botLeaveRoom(token: string, homeserver: string, roomId: string): 
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: '{}',
+    signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS),
   });
   if (!resp.ok) {
     const body = await resp.text();
@@ -1072,11 +1089,22 @@ function threadTasksPath(): string {
   return path.join(resolveRoot(), '_runtime', 'data', 'thread-tasks.json');
 }
 
+const THREAD_TASK_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
 function readThreadTasks(): Record<string, ThreadTaskEntry> {
   try {
     const p = threadTasksPath();
     if (!fs.existsSync(p)) return {};
-    return JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, ThreadTaskEntry>;
+    const tasks = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, ThreadTaskEntry>;
+    // Auto-prune entries older than TTL
+    const now = Date.now();
+    const stale = Object.keys(tasks).filter(k => !tasks[k].createdAt || now - tasks[k].createdAt > THREAD_TASK_TTL_MS);
+    if (stale.length > 0) {
+      stale.forEach(k => { delete tasks[k]; });
+      try { fs.writeFileSync(p, JSON.stringify(tasks, null, 2)); } catch { /* best-effort */ }
+      log(`threadTasks: pruned ${stale.length} stale entr${stale.length === 1 ? 'y' : 'ies'}`);
+    }
+    return tasks;
   } catch { return {}; }
 }
 
