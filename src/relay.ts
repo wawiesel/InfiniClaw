@@ -2659,7 +2659,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
               execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(secretsRepoPath()), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
               await sleep(3000);
             }
-            execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', body], { stdio: 'pipe' });
+            execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', `[BTC] ${body}`], { stdio: 'pipe' });
             execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
           } catch (err) {
             log(`curtain: tmux send failed: ${errStr(err)}`);
