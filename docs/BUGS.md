@@ -4,6 +4,29 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-21: `resolveReplyThread()` picks up old context messages with `thread_id`
+
+**Reported:** 2026-03-08
+**Status:** fixed (this commit)
+**Component:** `src/main.ts` — `resolveReplyThread()`
+**Symptom:** After restart, bot responded to main-timeline messages (BUG-19 test, status ping) by routing to the old `!refresh` thread instead of main timeline. Messages sent to `@cid` on main timeline got replies inside `$KPS0azO4puk3Lfj1KldZrPmbQykUgSu67GuuLx7SgBo`.
+**Root cause:** `resolveReplyThread` scans `messagesToSend` (full context since `lastAgentTimestamp`) for the most recent message with a non-null `thread_id`. The context batch included the old `[1m] ⛔ !refresh Cid — fetch failed` notification (which is in the `!refresh` thread), and it matched the TRIGGER_PATTERN because it contains "Cid". The scan returned this old thread_id even though the actual trigger messages were on the main timeline.
+**Fix:** Only accept a thread_id from the scan if the message also matches TRIGGER_PATTERN (i.e., is an explicit callout). Old notifications that happen to be in threads don't count. Falls back to `lastMsg.thread_id` for CO/participating-thread scenarios.
+
+---
+
+### BUG-20: `resumeGate` blocks message loop for full container idle timeout at startup
+
+**Reported:** 2026-03-08
+**Status:** open
+**Component:** `src/main.ts` — `injectResumeMessage()`
+**Symptom:** After Cid restarts, messages sent during the first ~30 minutes are silently buffered in the DB. They are not processed until the startup container's idle timeout fires. Observed: BUG-19 test and status ping waited ~30 minutes before Cid responded.
+**Root cause:** `injectResumeMessage()` calls `await processGroupMessages(mainJid)`, which calls `await runAgent(...)`, which blocks until the container exits. The container only exits via idle timeout (30 min after last output). `resumeGateResolve()` is called only AFTER `processGroupMessages()` returns. `startMessageLoop()` awaits `resumeGate`, so the message loop is blocked for the full container lifetime. Any messages that arrive during the startup container run pile up in the DB and are only processed in a batch after the gate opens.
+**Impact:** Startup responsiveness is severely degraded — urgent operator messages can wait up to 30 minutes for acknowledgment.
+**Fix proposal:** Open `resumeGate` immediately after injecting the resume message (or after first output), not after container exit. The IPC piping mechanism (`groupStatus.active` check in `handleGroupMessagesInLoop`) already handles routing new messages to the active container, so blocking the message loop is unnecessary. Remove `await processGroupMessages(mainJid)` from `injectResumeMessage` — let the queue handle it via `queue.enqueueMessageCheck` (already called at line 1285).
+
+---
+
 ### BUG-19: `resolveReplyThread()` routes main-timeline messages to stale work thread
 
 **Reported:** 2026-03-08

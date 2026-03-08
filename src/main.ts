@@ -222,15 +222,17 @@ function resolveReplyThread(
   chatJid: string,
   messages: NewMessage[],
 ): string | undefined {
-  // Find the most recent triggered/human thread message — that's where we should reply.
-  // Scanning from end to find the latest thread message that triggered us.
+  // Only route to a thread if the TRIGGER message (direct callout) is in that thread.
+  // Old context messages with thread_ids must not contaminate routing.
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.thread_id && !botMatrixUserIds.has(m.sender)) return m.thread_id;
+    if (m.thread_id && !botMatrixUserIds.has(m.sender) && TRIGGER_PATTERN.test(m.content.trim())) {
+      return m.thread_id;
+    }
   }
-  // Also check last message (could be a bot thread message we're continuing)
+  // No trigger in a thread — check the last message for CO/participating-thread replies.
   const lastMsg = messages[messages.length - 1];
-  if (lastMsg?.thread_id) return lastMsg.thread_id;
+  if (lastMsg?.thread_id && !botMatrixUserIds.has(lastMsg.sender)) return lastMsg.thread_id;
   // Main timeline message → reply on main timeline (no auto-threading)
   // workThreadIds is NOT checked here — it controls outbound IPC routing only,
   // not where we reply to incoming messages.
