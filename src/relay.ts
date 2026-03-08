@@ -2691,11 +2691,11 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             if (event.content?.msgtype !== 'm.text') continue;
             const body = event.content.body?.trim() || '';
 
-            // Captain-only: @operator <text> — pipe to operator tmux
-            if (event.sender === captainUserId && /^@operator\b/i.test(body)) {
-              const text = body.replace(/^@operator\s*/i, '').trim();
+            // Captain-only: @ <text> — pipe to operator tmux
+            if (event.sender === captainUserId && body.startsWith('@')) {
+              const text = body.slice(1).trim();
               if (text) {
-                log(`${conn.name}: @operator message from captain: ${text.slice(0, 80)}`);
+                log(`${conn.name}: @ message from captain: ${text.slice(0, 80)}`);
                 const SESSION = 'operator';
                 try {
                   let existed = true;
@@ -2707,7 +2707,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                   execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', text], { stdio: 'pipe' });
                   execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
                 } catch (err) {
-                  log(`${conn.name}: @operator tmux send failed: ${errStr(err)}`);
+                  log(`${conn.name}: @ tmux send failed: ${errStr(err)}`);
                 }
               }
               continue;
