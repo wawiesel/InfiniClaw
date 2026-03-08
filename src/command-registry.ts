@@ -54,6 +54,8 @@ export const COMMANDS: CommandDef[] = [
   { name: 'dismiss',       usage: '!dismiss [bot]',            description: 'stop a bot',                           match: prefix('dismiss') },
   { name: 'join',          usage: '!join <bot>',               description: 'start a bot',                          match: prefix('join') },
   { name: 'restart',       usage: '!restart [bot]',            description: 'restart a bot',                        match: prefix('restart') },
+  { name: 'sleep',         usage: '!sleep [bot]',              description: 'hard stop: stop container, quarters',  match: prefix('sleep') },
+  { name: 'wake',          usage: '!wake [bot]',               description: 'wake in quarters with sonnet brain',   match: prefix('wake') },
   { name: 'transport',     usage: '!transport <bot> <ship>',   description: 'beam bot to another ship',             match: startsWith('transport') },
   { name: 'promote',       usage: '!promote <target>',         description: 'raise rank (bot or ship)',             match: startsWith('promote') },
   { name: 'demote',        usage: '!demote <target>',          description: 'lower rank (bot or ship)',             match: startsWith('demote') },
