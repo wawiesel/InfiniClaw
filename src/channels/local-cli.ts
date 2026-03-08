@@ -36,7 +36,8 @@ export class LocalCliChannel implements Channel {
   }
 
   private formatMirrorInbound(text: string): string {
-    return `\`\`\`\n${this.senderName}: ${text}\n\`\`\``;
+    const escaped = text.replace(/`/g, '\\`');
+    return `\`\`\`\n${this.senderName}: ${escaped}\n\`\`\``;
   }
 
   private formatMirrorOutbound(text: string): string {
@@ -50,14 +51,13 @@ export class LocalCliChannel implements Channel {
         'LOCAL_CHAT_SENDER_NAME is required for local terminal channel',
       );
     }
+    this.connected = true;
 
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
       terminal: true,
     });
-
-    this.connected = true;
     this.opts.onChatMetadata(LOCAL_CHAT_JID, new Date().toISOString(), LOCAL_CHAT_NAME);
 
     process.stdout.write(
