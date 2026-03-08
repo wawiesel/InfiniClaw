@@ -4,6 +4,17 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-22: Thread Brain output triggers bot main loop (feedback loop)
+
+**Reported:** 2026-03-08
+**Status:** fixed (this commit)
+**Component:** `src/infini-config.ts` — `IGNORE_SENDERS` / `bots/cid/env`
+**Symptom:** Thread Brain posts its summary via @engineering-intercom to the Engineering room. If the summary mentions the bot's name (e.g. "Owner: Cid (Engineer)" quoted from NEXT.md), it matches TRIGGER_PATTERN and triggers the bot's message loop. The bot then processes the Thread Brain output as if it were a new message — violating step 5 of the `branch_to_thread` protocol ("do not act on Thread Brain output").
+**Root cause:** @engineering-intercom (and other relay intercom accounts) were not in `IGNORE_SENDERS`. Relay notifications are status updates for the Captain, not messages to the bot. Any mention of the bot's name in relay output triggers a full response cycle.
+**Fix:** Added `IGNORE_SENDERS=@engineering-intercom:a-gis.org,@bridge-intercom:a-gis.org,@astrometrics-intercom:a-gis.org` to `bots/cid/env`. Relay intercom messages are now filtered before trigger checking. Also strengthened the `branch_to_thread` step 5 instruction in `bots/engineer/cid/CLAUDE.md`.
+
+---
+
 ### BUG-21: `resolveReplyThread()` picks up old context messages with `thread_id`
 
 **Reported:** 2026-03-08
