@@ -131,6 +131,8 @@ const activeReplyThreadIds: Record<string, string | undefined> = {};
 // Per-turn thread for tool call <details> blocks when on main timeline
 const progressToolCallThreadIds: Record<string, string | undefined> = {};
 const threadMapLastSeen: Record<string, number> = {};
+// Last non-tool-call progress text per chat — used as tool call thread anchor title
+const lastProgressText: Record<string, string> = {};
 const triggerAckByMessageKey: Record<string, number> = {};
 let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
@@ -652,7 +654,9 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
           } else if (ch.sendMessageReturningId) {
             // Open a new thread with an anchor message, then post tool call into it
             const _toolTitleMatch = text.match(/🔧\s*([^<]{1,60})/);
-            const _toolAnchor = _toolTitleMatch ? _toolTitleMatch[1].trim() : 'Tool call';
+            const _toolCallLabel = _toolTitleMatch ? _toolTitleMatch[1].trim() : 'Tool call';
+            // Prefer the last text the bot wrote (what it said it was doing) over the raw tool name
+            const _toolAnchor = lastProgressText[ctx.chatJid] || _toolCallLabel;
             void ch.sendMessageReturningId(ctx.chatJid, `<font color="#888888"><em>🔧 ${esc(_toolAnchor)}</em></font>`).then((anchorId) => {
               if (anchorId) {
                 progressToolCallThreadIds[ctx.chatJid] = anchorId;
@@ -671,6 +675,9 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
           }
         }
       } else {
+        // Capture this as potential tool call thread anchor title
+        const stripped = text.replace(/<[^>]+>/g, '').trim().slice(0, 80);
+        if (stripped) lastProgressText[ctx.chatJid] = stripped;
         const formatted = `<small><em>${esc(text)}</em></small>`;
         threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
         void ch.sendMessage(ctx.chatJid, formatted, activeReplyThreadIds[ctx.chatJid]).then(() => {
@@ -860,6 +867,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   delete workThreadIds[chatJid];
   // Clear per-turn tool call thread so next turn opens a fresh anchor
   delete progressToolCallThreadIds[chatJid];
+  delete lastProgressText[chatJid];
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (channel?.setPresenceStatus) await channel.setPresenceStatus('online', 'idle');
   if (channel?.setStatusPip) {
