@@ -28,9 +28,9 @@ With direct bind mounts, bot edits already persist to the repo. The sync-back st
 
 Auto-threading is implemented (1c30fdd) but navigators still need to manage thread-to-topic mapping in their memory so they return to the right thread for ongoing work.
 
-### Scheduled task mount error
+### ~~Scheduled task mount error~~ ✅
 
-Scheduled tasks fail with `statfs .../container/agent-runner/src: no such file or directory`. The agent-runner source mount path is only valid during development. Scheduled task containers need the same mount resolution as regular containers.
+Fixed in `b6a3544` (2026-03-02). `task-scheduler.ts` now accepts `runContainerAgent?` in `SchedulerDependencies`. InfiniClaw's `main.ts` injects the correct `runContainerAgent` (which uses `external/nanoclaw/container/agent-runner/src` path with `mountIfExists` guard). No recurrences since 2026-03-02T21:43.
 
 ### Rate limit visibility
 
