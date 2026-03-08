@@ -10,30 +10,37 @@ InfiniClaw wraps NanoClaw (`external/nanoclaw/`) with Matrix-specific logic. Eac
 Host machine (macOS / Linux)
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2
-├── relay.ts            → Supervisor relay: Matrix watcher for bot lifecycle (!join, !dismiss, !refresh)
+├── relay.ts            → Supervisor relay: Matrix watcher for bot lifecycle and operator commands
 ├── main.ts             → Message loop, indicators, container lifecycle
 ├── container-spawn.ts  → Build podman args, delegate to upstream runContainer()
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)
 ├── container-secrets.ts→ Normalize provider secrets for containers
+├── run-container.ts    → Container run loop (extracted from NanoClaw for composability)
 ├── channels/
 │   ├── matrix.ts       → Matrix SDK: connect, send, edit, react, sync
 │   └── local-cli.ts    → Terminal channel for `npm run cli chat`
-├── machine-config.ts   → Read ~/.config/infiniclaw/machine.json
+├── infini-config.ts    → InfiniClaw-specific env config (removed from upstream)
+├── ship-config.ts      → Load fleet.json, per-ship bot roster and S3 settings
 ├── allow-list.ts       → Validate mounts against host-side allowlist
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
 ├── ipc-commands.ts     → Handle refresh_bot, stop_bot, start_bot, rebuild_image, git_push, etc.
 ├── brain-management.ts → Runtime model switching
 ├── chat-activity.ts    → Track activity per room for idle detection
 ├── message-filtering.ts→ Dedup, echo prevention, ignore rules
+├── intercom-relay.ts   → Cross-room messaging via per-room intercom Matrix accounts
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts       → Copy persona skills into container session
 ├── mcp-sync.ts         → Sync MCP server config (persona → session)
-├── operator-commands.ts→ !allow, !deny, !todo, !roster, !operator system commands
+├── command-registry.ts → Single source of truth for ! command names
 ├── s3-sync.ts          → S3 backup/restore for cross-machine moves
 ├── podman-bootstrap.ts → Ensure podman machine is running
+├── history-export.ts   → Periodic S3 export of conversation history (JSONL by date)
 ├── status.ts           → Bot status reporting
-├── status-cli.ts       → Status display for CLI
-└── formatting.ts       → Message formatting helpers
+├── status-cli.ts       → Status display for CLI and MCP server
+├── todo.ts             → Read Claude Code task state from session files
+├── formatting.ts       → Message formatting helpers
+├── utils.ts            → Shared utilities (isRecord, sleep, shellQuote, errStr)
+└── version.ts          → Git version resolution (prefers stamped GIT_VERSION file)
 ```
 
 ## Key flows
@@ -52,5 +59,7 @@ Host machine (macOS / Linux)
 - **IPC paths**: `/workspace/ipc/tasks/` → runs inside container (no git credentials). Git push uses `_runtime/relay-tasks/` → picked up by `relayTasksLoop()` in relay.ts and executed on host.
 - **Speaker**: `isSpeaker()` returns true for only one machine per Engineering room. That relay handles all `!` commands. `!refit` currently only refits the speaker's local bots — multi-machine refit coordination is a known issue.
 - **`!todo`**: Reads most-recently-modified `.claude/todos/*.json` from `_runtime/instances/{bot}/data/sessions/main/` to show actual todo items (since `ca16ce9`).
+- **`operator-commands.ts` removed**: Operator commands (`!allow`, `!deny`, `!todo`, `!roster`, etc.) were folded into `relay.ts`. `command-registry.ts` is now the single source of truth for all `!` command names.
+- **`machine-config.ts` removed**: Split into `infini-config.ts` (env-based config) and `ship-config.ts` (fleet.json loader).
 - **`get_message` tool bug**: Fails on event IDs containing `$` due to shell variable interpolation in the node -e command. Unfixed as of session 8.
 - **`resolveReplyThread`**: Scans messages in reverse for `thread_id` from non-bot senders. Returns `workThreadIds` override if set. Cleared after each response turn.
