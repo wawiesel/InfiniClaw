@@ -100,7 +100,8 @@ import { shouldIgnoreMessage } from './message-filtering.js';
 import { appendConversationLog } from './conversation-log.js';
 import { statusMessage, escapeHtml } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
-import { uploadContent, uploadHtml, getPublicS3Url } from './s3-sync.js';
+import { uploadContent, uploadHtml, getPresignedUrl } from './s3-sync.js';
+import { errStr } from './utils.js';
 import { exportHistoryToS3 } from './history-export.js';
 
 import { GIT_VERSION } from './version.js';
@@ -388,16 +389,16 @@ ${contextMessages.length > 0 ? `<div class="section-label">Recent context</div>
 }
 
 /** Compact single-line breadcrumb for a tool call. Full HTML page uploaded to S3 async. */
-function toolCallBreadcrumb(
+async function toolCallBreadcrumb(
   text: string,
   contextMessages: import('nanoclaw/types.js').NewMessage[],
   groupName: string,
-): { html: string; s3Key: string; pageHtml: string } {
+): Promise<{ html: string; s3Key: string; pageHtml: string }> {
   const hash = crypto.createHash('sha1').update(text).digest('hex').slice(0, 7);
   const titleMatch = text.match(/🔧\s*([^<]{1,60})/);
   const title = titleMatch ? titleMatch[1].trim() : 'Tool call';
   const s3Key = `tool-calls/${ASSISTANT_NAME}/${Date.now()}-${hash}.html`;
-  const url = getPublicS3Url(s3Key);
+  const url = await getPresignedUrl(s3Key);
   const hashEl = url
     ? `<a href="${url}"><code>${hash}</code></a>`
     : `<code>${hash}</code>`;
@@ -592,7 +593,7 @@ function createOutputHandler(ctx: OutputHandlerContext): (result: ContainerOutpu
         ctx.onProgress(text);
 
         if (result.isProgress) {
-          handleProgressOutput(ctx, text);
+          void handleProgressOutput(ctx, text);
         } else {
           const dedupKey = text.replace(/\s+/g, ' ').trim();
           if (dedupKey === lastSentResultText) {
@@ -625,7 +626,7 @@ function formatToolLabel(raw: string): string {
   return raw.replace(/^mcp__\w+?__/, '').replace(/_/g, ' ');
 }
 
-function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
+async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Promise<void> {
   // Handle TITLE-only progress events emitted by agent-runner (bot's text alongside tool calls)
   if (text.startsWith('\x00TITLE:')) {
     const title = text.slice(7).replace(/<[^>]+>/g, '').trim().slice(0, 120);
@@ -642,7 +643,7 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
     const contextMessages = threadId
       ? getThreadMessages(ctx.chatJid, threadId, 20)
       : getRecentMessages(ctx.chatJid, ASSISTANT_NAME, 10).reverse();
-    const bc = toolCallBreadcrumb(text, contextMessages, groupName);
+    const bc = await toolCallBreadcrumb(text, contextMessages, groupName);
     toolCallHtml = bc.html;
     void uploadHtml(bc.s3Key, bc.pageHtml).catch((err) => {
       logger.warn({ err }, 'Failed to upload tool call to S3');
@@ -1030,7 +1031,7 @@ async function runAgent(
     return { status: 'success' };
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return { status: 'error', error: err instanceof Error ? err.message : String(err) };
+    return { status: 'error', error: errStr(err) };
   }
 }
 

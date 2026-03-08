@@ -14,6 +14,7 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { logger } from 'nanoclaw/logger.js';
 import { loadShipConfig } from './ship-config.js';
@@ -87,20 +88,18 @@ export async function uploadContent(key: string, content: string): Promise<void>
   assertSafeS3Key(key);
   const s3 = getClient();
   if (!s3) return;
-  await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: content, ACL: 'public-read' }));
+  await s3.client.send(new PutObjectCommand({ Bucket: s3.bucket, Key: key, Body: content }));
 }
 
-/** Returns the public HTTP URL for an S3 key, or null if S3 not configured. */
-export function getPublicS3Url(key: string): string | null {
+/** Returns a presigned GET URL for an S3 key (7-day expiry), or null if S3 not configured. */
+export async function getPresignedUrl(key: string, expiresIn = 7 * 86_400): Promise<string | null> {
   assertSafeS3Key(key);
-  const config = loadShipConfig();
-  if (!config.s3) return null;
-  const { endpoint, bucket } = config.s3;
-  const base = endpoint.replace(/\/$/, '');
-  return `${base}/${bucket}/${key}`;
+  const s3 = getClient();
+  if (!s3) return null;
+  return getSignedUrl(s3.client, new GetObjectCommand({ Bucket: s3.bucket, Key: key }), { expiresIn });
 }
 
-/** Upload HTML content with text/html content-type. */
+/** Upload HTML content with text/html content-type. No-op if S3 not configured. */
 export async function uploadHtml(key: string, html: string): Promise<void> {
   assertSafeS3Key(key);
   const s3 = getClient();
@@ -110,7 +109,6 @@ export async function uploadHtml(key: string, html: string): Promise<void> {
     Key: key,
     Body: html,
     ContentType: 'text/html; charset=utf-8',
-    ACL: 'public-read',
   }));
 }
 
