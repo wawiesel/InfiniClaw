@@ -23,7 +23,7 @@ Skills, CLAUDE.md changes, and container image updates all take effect after reb
 
 ## Edit Container Images
 
-Dockerfiles live at `$INFINICLAW_ROOT/bots/container/{bot}/Dockerfile`.
+Dockerfiles live at `$INFINICLAW_ROOT/bots/{role}/{bot}/Dockerfile` (next to CLAUDE.md).
 
 To rebuild without a full bot restart:
 ```bash

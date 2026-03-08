@@ -382,8 +382,21 @@ export function validateDeploy(root: string, bot: string): { ok: boolean; errors
   }
 }
 
+/** Find a bot's Dockerfile: searches bots/{role}/{bot}/Dockerfile. */
+function findDockerfile(root: string, bot: string): string | null {
+  const botsDir = path.join(root, 'bots');
+  try {
+    for (const role of fs.readdirSync(botsDir, { withFileTypes: true })) {
+      if (!role.isDirectory()) continue;
+      const candidate = path.join(botsDir, role.name, bot, 'Dockerfile');
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 export function rebuildImage(root: string, bot: string): void {
-  const script = path.join(root, 'bots', 'container', 'build.sh');
+  const script = path.join(root, 'bots', 'build.sh');
   execFileSync(script, [bot], { stdio: 'inherit' });
 }
 
@@ -391,8 +404,8 @@ export function rebuildImage(root: string, bot: string): void {
 function computeBuildContextHash(root: string, bot: string): string {
   const hash = crypto.createHash('sha256');
   // Bot-specific Dockerfile
-  const dockerfile = path.join(root, 'bots', 'container', bot, 'Dockerfile');
-  if (fs.existsSync(dockerfile)) hash.update(fs.readFileSync(dockerfile));
+  const dockerfile = findDockerfile(root, bot);
+  if (dockerfile) hash.update(fs.readFileSync(dockerfile));
   // Shared build context: external/nanoclaw/container/agent-runner/
   const agentRunner = path.join(root, 'external', 'nanoclaw', 'container', 'agent-runner');
   if (fs.existsSync(agentRunner)) {

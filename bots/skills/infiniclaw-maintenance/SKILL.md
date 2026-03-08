@@ -18,8 +18,8 @@ $INFINICLAW_ROOT/
 │   ├── {role}/skills.json           <- skills assigned to this role
 │   ├── {role}/mcp.json              <- MCP servers for this role
 │   ├── {role}/{bot}/CLAUDE.md       <- persona identity (writable)
-│   ├── skills/{name}/SKILL.md       <- shared skill pool
-│   └── container/{bot}/Dockerfile   <- container images
+│   ├── {role}/{bot}/Dockerfile      <- container image (co-located with persona)
+│   └── skills/{name}/SKILL.md       <- shared skill pool
 └── _runtime/                        <- gitignored
 ```
 
@@ -34,7 +34,7 @@ $INFINICLAW_ROOT/
 | Role MCP servers | `bots/{role}/mcp.json` |
 | InfiniClaw source | `src/` |
 | Upstream fixes | `external/nanoclaw/src/` (Captain approval) |
-| Container image | `bots/container/{bot}/Dockerfile` |
+| Container image | `bots/{role}/{bot}/Dockerfile` |
 | Agent tools | `external/nanoclaw/container/agent-runner/src/tools.ts` |
 | Delegate lobes | `external/nanoclaw/container/agent-runner/src/delegate-runner.ts` |
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Build agent container images.
-# Usage: ./container/build.sh [nora|johnny5|cid|parker|albert|all]
+# Usage: ./bots/build.sh [nora|johnny5|cid|parker|albert|max|all]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 NANOCLAW_CONTAINER="${ROOT_DIR}/external/nanoclaw/container"
 
 if ! command -v podman >/dev/null 2>&1; then
@@ -15,14 +15,16 @@ fi
 build_image() {
   local bot="$1"
   local image_name="nanoclaw-${bot}:latest"
-  local dockerfile="${SCRIPT_DIR}/${bot}/Dockerfile"
+  # Find Dockerfile in any role subdirectory
+  local dockerfile
+  dockerfile=$(find "${SCRIPT_DIR}" -mindepth 3 -maxdepth 3 -name Dockerfile -path "*/${bot}/Dockerfile" | head -1)
 
-  if [[ ! -f "${dockerfile}" ]]; then
-    echo "Dockerfile not found: ${dockerfile}" >&2
+  if [[ -z "${dockerfile}" ]]; then
+    echo "Dockerfile not found for bot: ${bot}" >&2
     return 1
   fi
 
-  echo "Building ${image_name}..."
+  echo "Building ${image_name} (${dockerfile#"${ROOT_DIR}/"})"
   # Build context is nanoclaw/container/ so COPY agent-runner/ works
   podman build --network host -t "${image_name}" -f "${dockerfile}" "${NANOCLAW_CONTAINER}"
   echo "${image_name}: done"
