@@ -151,10 +151,6 @@ function spawnNpxDelegate(
   });
 }
 
-function sanitizeThreadIdForFilename(threadId: string): string {
-  return threadId.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
-
 function buildLobeId(): string {
   return `lobe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -382,82 +378,32 @@ export function registerDelegateTools(
       thread_id: z.string().min(1).describe('Target thread ID to resume/anchor'),
     },
     async (args) => {
-      const cwdResult = resolveDelegateCwd('/workspace');
-      if (!cwdResult.ok) {
+      // Write a relay task so the HOST-side relay spawns the Thread Brain as an independent
+      // process (BUG-14 fix). Child processes inside the container die on container restart.
+      const infiniclawRoot = process.env.INFINICLAW_ROOT || '/workspace/extra/InfiniClaw';
+      const relayTasksDir = path.join(infiniclawRoot, '_runtime', 'relay-tasks');
+      try {
+        fs.mkdirSync(relayTasksDir, { recursive: true });
+        const taskId = `thread-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const taskFile = path.join(relayTasksDir, `${taskId}.json`);
+        const tempPath = `${taskFile}.tmp`;
+        const payload = {
+          type: 'thread_brain',
+          thread_id: args.thread_id,
+          objective: args.objective,
+          bot: process.env.ASSISTANT_NAME || '',
+          chat_jid: ctx.chatJid,
+          timestamp: new Date().toISOString(),
+        };
+        fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2));
+        fs.renameSync(tempPath, taskFile);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: 'text' as const, text: `branch_to_thread unavailable: ${cwdResult.error}` }],
+          content: [{ type: 'text' as const, text: `branch_to_thread failed to queue relay task: ${msg}` }],
           isError: true,
         };
       }
-
-      const delegateEnv = buildDelegateEnv();
-      const safeThreadId = sanitizeThreadIdForFilename(args.thread_id);
-      const logPath = `/tmp/thread-${safeThreadId}.log`;
-      const logStream = fs.createWriteStream(logPath, { flags: 'a' });
-      const startedAt = Date.now();
-
-      // Auto-inject set_thread boilerplate so Thread Brain always enters the thread
-      // without bots having to remember to include it manually (BUG-13 fix).
-      const threadBoilerplate =
-        `First: call set_thread with thread_id="${args.thread_id}". ` +
-        `Post a brief opening goal message in that thread. ` +
-        `Then proceed with the objective below. ` +
-        `When done, call set_thread with empty string then call send_message to post a one-line summary on the main timeline.\n\nObjective:\n`;
-      const fullObjective = args.objective.includes('set_thread')
-        ? args.objective
-        : threadBoilerplate + args.objective;
-
-      // TODO(phase2): Hydrate immutable thread context via host-side ContainerInput injection in src/main.ts.
-      // This runner only launches the child process; full history injection is handled by the host.
-      const launchClaude = (useResumeFlags: boolean) => {
-        const baseArgs = [
-          '--print',
-          '--verbose',
-          '--output-format', 'stream-json',
-          '--dangerously-skip-permissions',
-          '--add-dir', cwdResult.cwd,
-        ];
-        const claudeArgs = useResumeFlags
-          ? ['--resume', '--thread-id', args.thread_id, ...baseArgs]
-          : baseArgs;
-
-        const child = spawn('claude', claudeArgs, {
-          cwd: cwdResult.cwd,
-          env: delegateEnv,
-          stdio: ['pipe', 'pipe', 'pipe'],
-          detached: true,
-        });
-
-        logStream.write(`\n[${new Date().toISOString()}] started pid=${child.pid ?? 'unknown'} mode=${useResumeFlags ? 'resume' : 'fallback'}\n`);
-        child.stdout?.pipe(logStream, { end: false });
-        child.stderr?.pipe(logStream, { end: false });
-
-        child.stdin?.write(fullObjective);
-        child.stdin?.end();
-        child.unref();
-        return child;
-      };
-
-      const primary = launchClaude(true);
-      let fallbackLaunched = false;
-
-      primary.on('error', (err) => {
-        logStream.write(`[${new Date().toISOString()}] primary error: ${err.message}\n`);
-        if (!fallbackLaunched) {
-          fallbackLaunched = true;
-          launchClaude(false);
-        }
-      });
-
-      primary.on('close', (code, signal) => {
-        logStream.write(`[${new Date().toISOString()}] primary closed code=${String(code)} signal=${String(signal)}\n`);
-        const endedQuickly = Date.now() - startedAt < 5000;
-        if (!fallbackLaunched && endedQuickly && code !== 0) {
-          fallbackLaunched = true;
-          logStream.write(`[${new Date().toISOString()}] launching fallback without --resume/--thread-id\n`);
-          launchClaude(false);
-        }
-      });
 
       return {
         content: [{

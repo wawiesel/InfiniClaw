@@ -18,7 +18,7 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-14: Thread Brain dies on container restart — branch_to_thread unreliable
 
 **Reported:** 2026-03-08
-**Status:** open
+**Status:** fixed (this commit)
 **Component:** delegate-runner.ts / branch_to_thread / container lifecycle
 **Symptom:** Main brain calls `branch_to_thread`, dispatches correctly, says "Thread brain spawned." But the Thread Brain never posts because the bot's container restarts (triggered by git sync detecting new commits), killing the Thread Brain child process inside the old container.
 **Root cause:** Two compounding issues: (1) `branch_to_thread` spawns Thread Brain as a child process INSIDE the bot's container with `detached: true`. Container exit kills all children. (2) `--thread-id` is not a valid claude CLI flag — primary spawn always fails, fallback runs without `--resume`, but still dies when container exits.

@@ -7,7 +7,7 @@
  *
  * Run: node dist/relay.js
  */
-import { execFileSync, execSync, spawnSync } from 'child_process';
+import { execFileSync, execSync, spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -1108,10 +1108,69 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
 const RELAY_TASKS_POLL_INTERVAL = 2_000;
 
 /**
+ * Spawn a Thread Brain as a host-side claude process (BUG-14 fix).
+ * Thread Brain runs independently of the bot container, capturing stdout
+ * and posting results to the specified Matrix thread.
+ */
+function spawnThreadBrain(
+  task: { thread_id: string; objective: string; chat_jid: string },
+  conns: RoomConn[],
+): void {
+  const { thread_id, objective, chat_jid } = task;
+  log(`threadBrain: spawning for thread=${thread_id.slice(0, 20)}`);
+
+  // Find the connection for this room (strip matrix: prefix if present)
+  const roomId = chat_jid.replace(/^matrix:/, '');
+  const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
+  if (!conn?.accessToken) {
+    log(`threadBrain: no active connection for chat_jid=${chat_jid}`);
+    return;
+  }
+
+  const fullPrompt = [
+    'You are a Thread Brain — a focused research/analysis agent.',
+    'Output your findings as plain text. Do NOT call send_message, set_thread, or any Matrix communication tools.',
+    'Do NOT announce that you are starting. Just do the work and output findings at the end.',
+    '',
+    'Objective:',
+    objective,
+  ].join('\n');
+
+  const child = spawn('claude', [
+    '--print',
+    '--dangerously-skip-permissions',
+    '--output-format', 'text',
+    '--add-dir', resolveRoot(),
+  ], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env },
+  });
+
+  child.stdin?.write(fullPrompt);
+  child.stdin?.end();
+
+  let output = '';
+  child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+
+  child.on('error', (err) => {
+    log(`threadBrain: spawn error: ${errStr(err)}`);
+    threadReply(conn, thread_id, `⚠️ Thread Brain failed to start: ${err.message}`).catch(() => {});
+  });
+
+  child.on('close', (code) => {
+    const text = output.trim() || `Thread Brain completed with no output (exit ${code ?? 'null'})`;
+    log(`threadBrain: done exit=${code} len=${output.length}`);
+    threadReply(conn, thread_id, text).catch((err) => log(`threadBrain: post failed: ${errStr(err)}`));
+  });
+
+  child.unref();
+}
+
+/**
  * Poll `_runtime/relay-tasks/` for tasks that require host credentials
  * (e.g. git_push). Written by bots via ipc-commands.ts, executed here on host.
  */
-async function relayTasksLoop(): Promise<void> {
+async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
   const tasksDir = path.join(resolveRoot(), '_runtime', 'relay-tasks');
   while (true) {
     try {
@@ -1138,6 +1197,15 @@ async function relayTasksLoop(): Promise<void> {
                 } catch (err) {
                   log(`relayTasks: git_push failed: ${errStr(err)}`);
                 }
+              }
+            } else if (data['type'] === 'thread_brain') {
+              const thread_id = typeof data['thread_id'] === 'string' ? data['thread_id'] : '';
+              const objective = typeof data['objective'] === 'string' ? data['objective'] : '';
+              const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
+              if (thread_id && objective) {
+                spawnThreadBrain({ thread_id, objective, chat_jid }, conns);
+              } else {
+                log(`relayTasks: thread_brain missing required fields (thread_id or objective)`);
               }
             }
             fs.unlinkSync(processingPath);
@@ -2500,7 +2568,7 @@ async function main(): Promise<void> {
   // Start background loops (non-blocking alongside room sync loops)
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));
   gitSyncLoop(conns).catch((err) => log(`git sync loop fatal: ${errStr(err)}`));
-  relayTasksLoop().catch((err) => log(`relay tasks loop fatal: ${errStr(err)}`));
+  relayTasksLoop(conns).catch((err) => log(`relay tasks loop fatal: ${errStr(err)}`));
   secretsSyncLoop(conns).catch((err) => log(`secrets sync loop fatal: ${errStr(err)}`));
   heartbeatLoop(conns).catch((err) => log(`heartbeat loop fatal: ${errStr(err)}`));
 
