@@ -2631,6 +2631,23 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           if (captainUserId && event.sender !== captainUserId) continue; // Captain only
           const body = event.content.body?.trim();
           if (!body) continue;
+
+          const curtainConn: RoomConn = {
+            name: 'BehindTheCurtain', roomId, homeserver,
+            username: '', password: '', accessToken, syncToken, filterId, userId,
+          };
+
+          // ! commands — execute and reply to BehindTheCurtain
+          if (body.startsWith('!')) {
+            log(`curtain: command from ${event.sender}: ${body.slice(0, 80)}`);
+            try {
+              await handleCommand(body, curtainConn, []);
+            } catch (err) {
+              log(`curtain: command error: ${errStr(err)}`);
+            }
+            continue;
+          }
+
           if (!isOperatorRelayEnabled()) continue;
 
           log(`curtain: message from ${event.sender}: ${body.slice(0, 80)}`);
