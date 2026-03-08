@@ -657,7 +657,10 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
             const _toolCallLabel = _toolTitleMatch ? _toolTitleMatch[1].trim() : 'Tool call';
             // Prefer the last text the bot wrote (what it said it was doing) over the raw tool name
             const _toolAnchor = lastProgressText[ctx.chatJid] || _toolCallLabel;
-            void ch.sendMessageReturningId(ctx.chatJid, `<font color="#888888"><em>🔧 ${esc(_toolAnchor)}</em></font>`).then((anchorId) => {
+            const _anchorMsg = _toolAnchor !== _toolCallLabel
+              ? `<font color="#888888">🔧 <b>${esc(_toolAnchor)}</b><br/><em>${esc(_toolCallLabel)}</em></font>`
+              : `<font color="#888888">🔧 <em>${esc(_toolAnchor)}</em></font>`;
+            void ch.sendMessageReturningId(ctx.chatJid, _anchorMsg).then((anchorId) => {
               if (anchorId) {
                 progressToolCallThreadIds[ctx.chatJid] = anchorId;
                 threadMapLastSeen[`p:${ctx.chatJid}`] = Date.now();
@@ -679,8 +682,10 @@ function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
         const stripped = text.replace(/<[^>]+>/g, '').trim().slice(0, 80);
         if (stripped) lastProgressText[ctx.chatJid] = stripped;
         const formatted = `<small><em>${esc(text)}</em></small>`;
+        // Route discussion into the tool call thread if one is open; otherwise to reply thread
+        const textThread = progressToolCallThreadIds[ctx.chatJid] ?? activeReplyThreadIds[ctx.chatJid];
         threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
-        void ch.sendMessage(ctx.chatJid, formatted, activeReplyThreadIds[ctx.chatJid]).then(() => {
+        void ch.sendMessage(ctx.chatJid, formatted, textThread).then(() => {
           threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
         }).catch((err) => {
           logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send progress to chat');
