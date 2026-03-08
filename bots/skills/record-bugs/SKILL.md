@@ -12,7 +12,8 @@ Use this skill when a bug has been verified (observed, reproduced, or confirmed 
 1. **Verify** — confirm the bug is real before recording. Do not record suspected issues.
 2. **Check** — read `docs/BUGS.md` to avoid duplicates.
 3. **Record** — add an entry under `## Active Bugs`.
-4. **Commit** — commit the change to git with message `bug: record <short description>`.
+4. **Test** — write a regression test in `src/__tests__/` that would have caught this bug. The test should fail without the fix and pass with it.
+5. **Commit** — commit the bug entry and test together with message `bug: record <short description>`.
 
 ## Entry Format
 
