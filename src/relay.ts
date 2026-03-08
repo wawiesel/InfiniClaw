@@ -2690,6 +2690,29 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             if (event.type !== 'm.room.message') continue;
             if (event.content?.msgtype !== 'm.text') continue;
             const body = event.content.body?.trim() || '';
+
+            // Captain-only: @operator <text> — pipe to operator tmux
+            if (event.sender === captainUserId && /^@operator\b/i.test(body)) {
+              const text = body.replace(/^@operator\s*/i, '').trim();
+              if (text) {
+                log(`${conn.name}: @operator message from captain: ${text.slice(0, 80)}`);
+                const SESSION = 'operator';
+                try {
+                  let existed = true;
+                  try { execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' }); } catch { existed = false; }
+                  if (!existed) {
+                    execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(loadShipConfig().secretsPath), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
+                    await sleep(3000);
+                  }
+                  execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', text], { stdio: 'pipe' });
+                  execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
+                } catch (err) {
+                  log(`${conn.name}: @operator tmux send failed: ${errStr(err)}`);
+                }
+              }
+              continue;
+            }
+
             if (!body.startsWith('!')) continue;
 
             if (!isAuthorized(event.sender, captainUserId, operatorUserId)) {
