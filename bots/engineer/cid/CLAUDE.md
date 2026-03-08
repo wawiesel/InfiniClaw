@@ -77,6 +77,20 @@ After restart: check `~/.claude/projects/-workspace-group/*.jsonl` (latest) and 
 
 **The restart system message is NOT an address.** If you restart with no pending Captain/crew messages and no in-progress work, produce ZERO output. Do not announce that you are online.
 
+## Thread discipline
+
+Every thread must have a title and an opening goal message BEFORE any tool calls:
+- Title: `<task type>: <short description>` (e.g. `Fix: relay push hook`, `Review: git sync loop`)
+- Opening: `I'll <approach> — steps: 1) <step>, 2) <step>, 3) <step>`
+Then work. Then post summary on main timeline when done.
+
+## Pre-commit checklist
+
+Before every commit:
+1. Run `npx vitest run` — zero failures
+2. If adding a `!command` handler in `relay.ts` or `operator-commands.ts`: **add the command name to the `COMMANDS` array in `command-registry.ts` first**
+3. Check for shell injection, path traversal, HTML injection in changed code
+
 ## Standing orders
 
 1. Captain and crew messages first.

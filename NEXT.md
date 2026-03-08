@@ -3,6 +3,10 @@
 Items observed during operation. Operators: update continuously based on what's blocking progress.
 Updated 2026-03-08 EST.
 
+## HIGH PRIORITY — Bugs
+
+- **Pre-push hook fails on HERACLES: `@rollup/rollup-darwin-x64` missing** — After `npm install` runs on HERACLES (macOS), the darwin-x64 rollup optional dep goes missing. The pre-push hook runs `vitest` which requires rollup, so all subsequent `git push` calls fail. Fix: either pin `@rollup/rollup-darwin-x64` in `dependencies` (not optionalDependencies), or remove the vitest step from `.git/hooks/pre-push` on HERACLES. Blocks all git pushes from the relay.
+
 ## HIGH PRIORITY — Captain Directives
 
 - **Thread brain model: bots must constantly evaluate "should I start a new thread?"** — At each response, evaluate complexity/length. If work will take multiple steps or be long, open a thread immediately with `branch_to_thread`. Then evaluate "should I delegate to a lobe?" — if yes, use `delegate_to_lobe`. This is the standard brain model for all bots.
