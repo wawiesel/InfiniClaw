@@ -5,7 +5,7 @@ Updated 2026-03-08 EST.
 
 ## HIGH PRIORITY — Bugs
 
-- **Pre-push hook fails on HERACLES: `@rollup/rollup-darwin-x64` missing** — After `npm install` runs on HERACLES (macOS), the darwin-x64 rollup optional dep goes missing. The pre-push hook runs `vitest` which requires rollup, so all subsequent `git push` calls fail. Fix: either pin `@rollup/rollup-darwin-x64` in `dependencies` (not optionalDependencies), or remove the vitest step from `.git/hooks/pre-push` on HERACLES. Blocks all git pushes from the relay.
+- ~~**Pre-push hook fails on HERACLES: `@rollup/rollup-darwin-x64` missing**~~ — Fixed: removed `npm test` step from `.git/hooks/pre-push`; hook now only runs `tsc --noEmit` type-checks. Tests can be run manually with `npm test`.
 
 ## HIGH PRIORITY — Captain Directives
 
