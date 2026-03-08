@@ -114,10 +114,9 @@ function collectContainerSecrets(projectRoot: string): Record<string, string> {
   // Auto-inject git identity from Matrix username so commits are attributed to the bot
   const botName = secrets['ASSISTANT_NAME'];
   const matrixUser = process.env['MATRIX_USERNAME'];
-  const matrixServer = process.env['MATRIX_HOMESERVER']?.replace(/^https?:\/\//, '') || 'a-gis.org';
   if (botName) {
     const displayName = botName.charAt(0).toUpperCase() + botName.slice(1).toLowerCase();
-    const email = matrixUser ? `${matrixUser}@${matrixServer}` : `${botName.toLowerCase()}@infiniclaw.local`;
+    const email = matrixUser ? `${matrixUser}@a-gis.org` : `${botName.toLowerCase()}@a-gis.org`;
     if (!secrets['GIT_AUTHOR_NAME']) secrets['GIT_AUTHOR_NAME'] = displayName;
     if (!secrets['GIT_AUTHOR_EMAIL']) secrets['GIT_AUTHOR_EMAIL'] = email;
     if (!secrets['GIT_COMMITTER_NAME']) secrets['GIT_COMMITTER_NAME'] = displayName;
