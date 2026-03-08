@@ -18,11 +18,11 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-14: Thread Brain dies on container restart — branch_to_thread unreliable
 
 **Reported:** 2026-03-08
-**Status:** fixed (this commit)
+**Status:** fixed (0e2f5c3, 5db9263)
 **Component:** delegate-runner.ts / branch_to_thread / container lifecycle
 **Symptom:** Main brain calls `branch_to_thread`, dispatches correctly, says "Thread brain spawned." But the Thread Brain never posts because the bot's container restarts (triggered by git sync detecting new commits), killing the Thread Brain child process inside the old container.
 **Root cause:** Two compounding issues: (1) `branch_to_thread` spawns Thread Brain as a child process INSIDE the bot's container with `detached: true`. Container exit kills all children. (2) `--thread-id` is not a valid claude CLI flag — primary spawn always fails, fallback runs without `--resume`, but still dies when container exits.
-**Fix:** Per design (02-threading.md), Thread Brains should be host-managed processes. New IPC task type: `spawn_thread_brain`. In delegate-runner.ts: write `_runtime/relay-tasks/thread-brain-<id>.json` with `{type:'thread_brain', thread_id, objective, bot, sessionId}` instead of spawning child claude. In relay.ts `relayTasksLoop`: handle `thread_brain` tasks by spawning a new container (`bootstrapBot` variant) with the objective injected via the IPC input mechanism, routing its Matrix output to the specified thread.
+**Fix:** Per design (02-threading.md), Thread Brains should be host-managed processes. `branch_to_thread` now writes `_runtime/relay-tasks/thread-brain-<id>.json` with `{type:'thread_brain', thread_id, objective, bot, chat_jid}`. `relayTasksLoop` in relay.ts picks it up and spawns `claude --print` on the HOST with bot credentials loaded via `loadProfileEnv()`. Thread Brain output is posted to the Matrix thread via `threadReply()`. End-to-end verified 2026-03-08.
 
 ---
 
@@ -42,7 +42,7 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-12: Lobes use send_message/intercom tools, routing output to wrong channel
 
 **Reported:** 2026-03-08
-**Status:** fixed (this commit)
+**Status:** fixed (bed1bbc)
 **Component:** delegate-runner.ts / lobe execution constraints
 **Symptom:** A lobe dispatched for research/file-ops sent "📋 Fleet" through the Engineering intercom. Bots should never deliver output via the intercom — only relay `!` commands do that.
 **Root cause:** `delegatedObjective` constraints in `delegate-runner.ts` didn't prohibit communication tools. Lobes had access to `send_message`, `send_image`, etc. and could inadvertently use them.
