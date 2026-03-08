@@ -405,75 +405,80 @@ function createOutputHandler(ctx: OutputHandlerContext): (result: ContainerOutpu
   };
 }
 
+function sendToolCallToMainTimeline(ctx: OutputHandlerContext, ch: Channel, toolCallHtml: string): void {
+  const sendToToolThread = (targetThreadId: string) => {
+    void ch.sendMessage(ctx.chatJid, toolCallHtml, targetThreadId).then(() => {
+    }).catch((err) => {
+      logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call to dedicated thread');
+    });
+  };
+  threadMapLastSeen[`p:${ctx.chatJid}`] = Date.now();
+  if (progressToolCallThreadIds[ctx.chatJid]) {
+    sendToToolThread(progressToolCallThreadIds[ctx.chatJid]!);
+  } else if (ch.sendMessageReturningId) {
+    void ch.sendMessageReturningId(ctx.chatJid, '<font color="#888888"><em>🔧 Tool calls</em></font>').then((anchorId) => {
+      if (anchorId) {
+        progressToolCallThreadIds[ctx.chatJid] = anchorId;
+        threadMapLastSeen[`p:${ctx.chatJid}`] = Date.now();
+        sendToToolThread(anchorId);
+      } else {
+        void ch.sendMessage(ctx.chatJid, toolCallHtml).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Fallback tool call send failed'); });
+      }
+    }).catch((err) => {
+      logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to open tool call thread anchor');
+    });
+  } else {
+    void ch.sendMessage(ctx.chatJid, toolCallHtml).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Inline tool call send failed'); });
+  }
+}
+
+function handleToolCallProgress(ctx: OutputHandlerContext, text: string, ch: Channel): void {
+  const group = registeredGroups[ctx.chatJid];
+  const groupName = group?.name ?? ctx.chatJid;
+  const threadId = activeReplyThreadIds[ctx.chatJid];
+  const contextMessages = threadId
+    ? getThreadMessages(ctx.chatJid, threadId, 20)
+    : getRecentMessages(ctx.chatJid, ASSISTANT_NAME, 10).reverse();
+  const bc = toolCallBreadcrumb(text, contextMessages, groupName);
+  const toolCallHtml = bc.html;
+  void uploadHtml(bc.s3Key, bc.pageHtml).catch((err) => {
+    logger.warn({ err }, 'Failed to upload tool call to S3');
+  });
+
+  threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
+  const activeThread = activeReplyThreadIds[ctx.chatJid];
+  if (activeThread) {
+    void ch.sendMessage(ctx.chatJid, toolCallHtml, activeThread).then(() => {
+    }).catch((err) => {
+      logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call progress to thread');
+    });
+  } else {
+    sendToolCallToMainTimeline(ctx, ch, toolCallHtml);
+  }
+}
+
+function handleRegularProgress(ctx: OutputHandlerContext, text: string, ch: Channel): void {
+  const formatted = `<small><em>${esc(text)}</em></small>`;
+  threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
+  void ch.sendMessage(ctx.chatJid, formatted, activeReplyThreadIds[ctx.chatJid]).then(() => {
+    threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
+  }).catch((err) => {
+    logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send progress to chat');
+  });
+}
+
 function handleProgressOutput(ctx: OutputHandlerContext, text: string): void {
   markProgress(ctx.chatJid, text);
   const isToolCall = text.includes('<details>');
-  let toolCallHtml = '';
-  if (isToolCall) {
-    const group = registeredGroups[ctx.chatJid];
-    const groupName = group?.name ?? ctx.chatJid;
-    const threadId = activeReplyThreadIds[ctx.chatJid];
-    const contextMessages = threadId
-      ? getThreadMessages(ctx.chatJid, threadId, 20)
-      : getRecentMessages(ctx.chatJid, ASSISTANT_NAME, 10).reverse();
-    const bc = toolCallBreadcrumb(text, contextMessages, groupName);
-    toolCallHtml = bc.html;
-    void uploadHtml(bc.s3Key, bc.pageHtml).catch((err) => {
-      logger.warn({ err }, 'Failed to upload tool call to S3');
-    });
-  }
   const now = Date.now();
   if (isToolCall || !lastProgressChatAt[ctx.chatJid] || now - lastProgressChatAt[ctx.chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
     if (!isToolCall) lastProgressChatAt[ctx.chatJid] = now;
     const ch = findChannel(ctx.chatJid);
     if (ch) {
       if (isToolCall) {
-        threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
-        const activeThread = activeReplyThreadIds[ctx.chatJid];
-        if (activeThread) {
-          // Already in a thread — send <details> collapsible in-thread (desktop renders it; mobile shows inline but off main timeline)
-          void ch.sendMessage(ctx.chatJid, toolCallHtml, activeThread).then(() => {
-                      }).catch((err) => {
-            logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call progress to thread');
-          });
-        } else {
-          // Main timeline — route tool calls to a dedicated per-turn thread
-          const sendToToolThread = (threadId: string) => {
-            void ch.sendMessage(ctx.chatJid, toolCallHtml, threadId).then(() => {
-            }).catch((err) => {
-              logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call to dedicated thread');
-            });
-          };
-          threadMapLastSeen[`p:${ctx.chatJid}`] = Date.now();
-          if (progressToolCallThreadIds[ctx.chatJid]) {
-            sendToToolThread(progressToolCallThreadIds[ctx.chatJid]!);
-          } else if (ch.sendMessageReturningId) {
-            // Open a new thread with an anchor message, then post tool call into it
-            void ch.sendMessageReturningId(ctx.chatJid, '<font color="#888888"><em>🔧 Tool calls</em></font>').then((anchorId) => {
-              if (anchorId) {
-                progressToolCallThreadIds[ctx.chatJid] = anchorId;
-                threadMapLastSeen[`p:${ctx.chatJid}`] = Date.now();
-                sendToToolThread(anchorId);
-              } else {
-                // Fallback: send inline if we couldn't get an anchor ID
-                void ch.sendMessage(ctx.chatJid, toolCallHtml).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Fallback tool call send failed'); });
-              }
-            }).catch((err) => {
-              logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to open tool call thread anchor');
-            });
-          } else {
-            // Channel doesn't support returning IDs — send inline as fallback
-            void ch.sendMessage(ctx.chatJid, toolCallHtml).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Inline tool call send failed'); });
-          }
-        }
+        handleToolCallProgress(ctx, text, ch);
       } else {
-        const formatted = `<small><em>${esc(text)}</em></small>`;
-        threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
-        void ch.sendMessage(ctx.chatJid, formatted, activeReplyThreadIds[ctx.chatJid]).then(() => {
-          threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
-        }).catch((err) => {
-          logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send progress to chat');
-        });
+        handleRegularProgress(ctx, text, ch);
       }
     }
   }

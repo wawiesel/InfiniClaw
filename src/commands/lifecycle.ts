@@ -67,6 +67,116 @@ function botVersion(root: string, bot: string): string {
   } catch { return ''; }
 }
 
+async function processDismiss(bot: string, name: string, env: any, loungeId: string | undefined, dutyRoomId: string, conn: RoomConn, root: string) {
+  try {
+    stopBot(bot);
+    killStaleContainers(bot);
+    const config = loadShipConfig();
+    const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
+    if (env?.BRAIN_MODEL && env.BRAIN_MODEL !== 'claude-sonnet-4-6') {
+      fleetManager.updateBot(bot, { activeBrainModel: env.BRAIN_MODEL });
+    }
+    try {
+      upsertEnvLine(envFile, 'BRAIN_MODEL', 'claude-sonnet-4-6');
+      upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '1');
+    } catch { /* ignore */ }
+    try {
+      const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
+      await botLeaveRoom(botToken, homeserver, dutyRoomId);
+      if (loungeId) await botJoinRoom(botToken, homeserver, loungeId, conn.accessToken, botUserId);
+    } catch { /* ignore */ }
+    fleetManager.updateBot(bot, { status: 'lounge' });
+    await reply(conn, `🔴 ${name} dismissed → lounge (sonnet, no lobes)`);
+  } catch (err) {
+    await reply(conn, `⛔ !dismiss ${name} — ${errStr(err)}`);
+  }
+}
+
+async function processSleep(bot: string, name: string, loungeId: string | undefined, dutyRoomId: string, conn: RoomConn, root: string) {
+  try {
+    stopBot(bot);
+    killStaleContainers(bot);
+    try {
+      const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
+      await botLeaveRoom(botToken, homeserver, dutyRoomId);
+      if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
+    } catch { /* ignore */ }
+    fleetManager.updateBot(bot, { status: 'sleep' });
+    await reply(conn, `😴 ${name} sleeping (quarters, container stopped)`);
+  } catch (err) {
+    await reply(conn, `⛔ !sleep ${name} — ${errStr(err)}`);
+  }
+}
+
+async function processWake(bot: string, name: string, rank: number, role: string, root: string, env: any, conn: RoomConn) {
+  const startedAt = Date.now();
+  const threadRoot = await reply(conn, `☀️ ${name} waking`);
+  if (!threadRoot) return;
+  const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
+  try {
+    await step('building...');
+    fleetManager.updateBot(bot, { status: 'quarters' });
+    fleetManager.persist();
+    clearShipConfigCache();
+    bootstrapBot(root, bot);
+    const model = env?.BRAIN_MODEL || '?';
+    const ver = botVersion(root, bot);
+    await step(`✅ awake · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+    await reply(conn, `☀️ ${name} awake (quarters)`);
+  } catch (err) {
+    const fail = `⛔ !wake ${name} — ${errStr(err)}`;
+    await step(fail);
+    await reply(conn, fail);
+  }
+}
+
+async function processJoinOrRestart(action: 'join' | 'restart', bot: string, name: string, rank: number, role: string, root: string, env: any, loungeId: string | undefined, dutyRoomId: string, conn: RoomConn) {
+  const startedAt = Date.now();
+  const emoji = action === 'join' ? '🟢' : '🔄';
+  const threadRoot = await reply(conn, `${emoji} ${name} ${action === 'join' ? 'joining' : 'restarting'}`);
+  if (!threadRoot) return;
+  const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
+  try {
+    if (action === 'restart') {
+      await step('stopping...');
+      stopBot(bot);
+      killStaleContainers(bot);
+    }
+    if (action === 'join') {
+      const config = loadShipConfig();
+      const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
+      const liveFleet = fleetManager.getLiveFleet();
+      const savedModel = liveFleet[bot]?.activeBrainModel;
+      if (savedModel) {
+        try {
+          upsertEnvLine(envFile, 'BRAIN_MODEL', savedModel);
+          upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
+        } catch { /* ignore */ }
+      }
+      fleetManager.updateBot(bot, { status: 'onduty', ship: HOSTNAME });
+      fleetManager.persist();
+      clearShipConfigCache();
+    }
+    try {
+      const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
+      if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
+      await botJoinRoom(botToken, homeserver, dutyRoomId, conn.accessToken, botUserId);
+      await step('room joined');
+    } catch { /* ignore */ }
+    await step('building...');
+    bootstrapBot(root, bot);
+    const model = env?.BRAIN_MODEL || '?';
+    const ver = botVersion(root, bot);
+    await step(`✅ online · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+    await reply(conn, `✅ ${name} online`);
+    await threadReply(conn, threadRoot, `${name}, reporting for duty!`);
+  } catch (err) {
+    const fail = `⛔ !${action} ${name} — ${errStr(err)}`;
+    await step(fail);
+    await reply(conn, fail);
+  }
+}
+
 export async function handleLifecycleCommand(
   action: 'join' | 'dismiss' | 'restart' | 'sleep' | 'wake',
   target: string | undefined,
@@ -88,114 +198,20 @@ export async function handleLifecycleCommand(
     const name = env?.ASSISTANT_NAME || bot;
     const liveFleet = fleetManager.getLiveFleet();
     const rank = liveFleet[bot]?.rank ?? 99;
+    const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
     
     const ships = (() => { try { return loadShips(); } catch { return {}; } })();
     const loungeId = ships[HOSTNAME]?.loungeId as string | undefined;
     const dutyRoomId = conn.roomId;
 
     if (action === 'dismiss') {
-      try {
-        stopBot(bot);
-        killStaleContainers(bot);
-        const config = loadShipConfig();
-        const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
-        if (env?.BRAIN_MODEL && env.BRAIN_MODEL !== 'claude-sonnet-4-6') {
-          fleetManager.updateBot(bot, { activeBrainModel: env.BRAIN_MODEL });
-        }
-        try {
-          upsertEnvLine(envFile, 'BRAIN_MODEL', 'claude-sonnet-4-6');
-          upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '1');
-        } catch { /* ignore */ }
-        try {
-          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
-          await botLeaveRoom(botToken, homeserver, dutyRoomId);
-          if (loungeId) await botJoinRoom(botToken, homeserver, loungeId, conn.accessToken, botUserId);
-        } catch { /* ignore */ }
-        fleetManager.updateBot(bot, { status: 'lounge' });
-        await reply(conn, `🔴 ${name} dismissed → lounge (sonnet, no lobes)`);
-      } catch (err) {
-        await reply(conn, `⛔ !dismiss ${name} — ${errStr(err)}`);
-      }
+      await processDismiss(bot, name, env, loungeId, dutyRoomId, conn, root);
     } else if (action === 'sleep') {
-      try {
-        stopBot(bot);
-        killStaleContainers(bot);
-        try {
-          const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
-          await botLeaveRoom(botToken, homeserver, dutyRoomId);
-          if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
-        } catch { /* ignore */ }
-        fleetManager.updateBot(bot, { status: 'sleep' });
-        await reply(conn, `😴 ${name} sleeping (quarters, container stopped)`);
-      } catch (err) {
-        await reply(conn, `⛔ !sleep ${name} — ${errStr(err)}`);
-      }
+      await processSleep(bot, name, loungeId, dutyRoomId, conn, root);
     } else if (action === 'wake') {
-      const startedAt = Date.now();
-      const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-      const threadRoot = await reply(conn, `☀️ ${name} waking`);
-      if (!threadRoot) continue;
-      const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
-      try {
-        await step('building...');
-        fleetManager.updateBot(bot, { status: 'quarters' });
-        fleetManager.persist();
-        clearShipConfigCache();
-        bootstrapBot(root, bot);
-        const model = env?.BRAIN_MODEL || '?';
-        const ver = botVersion(root, bot);
-        await step(`✅ awake · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
-        await reply(conn, `☀️ ${name} awake (quarters)`);
-      } catch (err) {
-        const fail = `⛔ !wake ${name} — ${errStr(err)}`;
-        await step(fail);
-        await reply(conn, fail);
-      }
+      await processWake(bot, name, rank, role, root, env, conn);
     } else {
-      const startedAt = Date.now();
-      const emoji = action === 'join' ? '🟢' : '🔄';
-      const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-      const threadRoot = await reply(conn, `${emoji} ${name} ${action === 'join' ? 'joining' : 'restarting'}`);
-      if (!threadRoot) continue;
-      const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
-      try {
-        if (action === 'restart') {
-          await step('stopping...');
-          stopBot(bot);
-          killStaleContainers(bot);
-        }
-        if (action === 'join') {
-          const config = loadShipConfig();
-          const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
-          const savedModel = liveFleet[bot]?.activeBrainModel;
-          if (savedModel) {
-            try {
-              upsertEnvLine(envFile, 'BRAIN_MODEL', savedModel);
-              upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
-            } catch { /* ignore */ }
-          }
-          fleetManager.updateBot(bot, { status: 'onduty', ship: HOSTNAME });
-          fleetManager.persist();
-          clearShipConfigCache();
-        }
-        try {
-          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
-          if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
-          await botJoinRoom(botToken, homeserver, dutyRoomId, conn.accessToken, botUserId);
-          await step('room joined');
-        } catch { /* ignore */ }
-        await step('building...');
-        bootstrapBot(root, bot);
-        const model = env?.BRAIN_MODEL || '?';
-        const ver = botVersion(root, bot);
-        await step(`✅ online · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
-        await reply(conn, `✅ ${name} online`);
-        await threadReply(conn, threadRoot, `${name}, reporting for duty!`);
-      } catch (err) {
-        const fail = `⛔ !${action} ${name} — ${errStr(err)}`;
-        await step(fail);
-        await reply(conn, fail);
-      }
+      await processJoinOrRestart(action, bot, name, rank, role, root, env, loungeId, dutyRoomId, conn);
     }
   }
 }
