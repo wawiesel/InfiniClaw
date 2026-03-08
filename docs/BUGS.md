@@ -4,14 +4,36 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-9: Refit fails to restart bots (Cid restart failed with 1E)
+
+**Reported:** 2026-03-08
+**Status:** open
+**Component:** relay / refit (BUG-6 regression)
+**Symptom:** After refit, bot restart fails with ⛔. Likely a regression from BUG-6 fix — the join sequence adds git sync + room management, increasing failure surface during refit (Podman EOF, Matrix room errors).
+**Root cause:** `handleLifecycleCommand('join')` has too many failure points (git sync, room leave/join, brain restore) during a refit when Podman may be in a degraded state.
+**Fix:** Refit should use a simpler restart path — either `refreshBot()` (stop+rebuild+start) or `handleLifecycleCommand('refresh')`, not `join` which does full room/brain lifecycle. Or make join more resilient during refit.
+
+---
+
+### BUG-8: Engineers cannot git push from container (mcp_nanoclaw__git_push fails)
+
+**Reported:** 2026-03-08
+**Status:** open
+**Component:** ipc-commands / git_push
+**Symptom:** `mcp__nanoclaw__git_push` always fails with "failed to push some refs" or "could not read Username". The `git push` runs inside the bot container which has no GitHub credentials.
+**Root cause:** `handleGitPush` in `ipc-commands.ts` runs `git push` via `execFileSync` inside the container. The relay (on host) has git credentials; the container does not.
+**Fix:** Route git_push through the relay. Options: (a) add a relay-side file watcher for git_push tasks, (b) add a `!push` relay Matrix command, (c) configure SSH/token credentials in container.
+
+---
+
 ### BUG-7: Brain thread branching not visible in Engineering
 
 **Reported:** 2026-03-08
-**Status:** fixed (pending push)
-**Component:** main.ts / thread display
-**Symptom:** In Engineering, threads appear with names like "🔧 TodoWrite" — raw tool names with no context. The lobe delegation and brain branching system is not apparent to the Captain. Work threads should communicate what work is being done, not what tool was called.
-**Root cause:** Thread anchor uses the last tool progress text (tool name) rather than a meaningful description of the work being done.
-**Fix:** Thread titles should reflect the actual work objective, not the tool name. Lobe delegations should create recognizable, descriptive threads.
+**Status:** open (partial fix committed, not yet deployed)
+**Component:** main.ts / thread display + bot behavior
+**Symptom:** Threads in Engineering show raw tool names ("🔧 TodoWrite") with no context. The lobe delegation and brain branching system is not apparent — Captain cannot tell what the bot is working on from the thread titles.
+**Root cause:** (1) Thread anchor uses tool name as fallback when bot has no `lastProgressText`. (2) Bots do not consistently write meaningful text before calling tools. (3) `branch_to_thread` / `delegate_to_lobe` threads are not prominent enough.
+**Fix:** (1) Use `currentObjective` as fallback anchor — committed in f2eee23, not yet deployed. (2) Bot must always write a brief description before calling tools. (3) Use `branch_to_thread` visibly for all multi-step work so delegation is clearly visible.
 
 ---
 
