@@ -302,47 +302,47 @@ async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext):
     );
     logger.info({ bot: data.bot, mode: data.mode }, 'Brain mode updated via IPC — triggering restart');
     // Auto-restart so the new model takes effect immediately
-    await handleRestartBot(data, ctx);
+    await handleRefreshBot(data, ctx);
   } catch (err) {
     logger.error({ err, data }, 'Failed to apply set_brain_mode');
   }
 }
 
-async function handleRestartBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'restart_bot')) return;
+async function handleRefreshBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'refresh_bot')) return;
   const bot = parseBot(data);
   const chatJid = parseChatJid(data);
 
-  const cooldownMsg = checkCooldown(`restart:${bot}`, RESTART_COOLDOWN_MS);
+  const cooldownMsg = checkCooldown(`refresh:${bot}`, RESTART_COOLDOWN_MS);
   if (cooldownMsg) {
-    logger.warn({ bot }, 'Restart rejected — cooldown active');
+    logger.warn({ bot }, 'Refresh rejected — cooldown active');
     await safeSend(ctx, chatJid, cooldownMsg);
     return;
   }
 
-  logger.info({ bot }, 'Restart requested via IPC — validating deploy');
+  logger.info({ bot }, 'Refresh requested via IPC — validating deploy');
 
   const { ok, errors } = validateDeploy(bot);
   if (!ok) {
-    logger.error({ bot, errors }, 'Deploy validation failed — aborting restart');
-    await safeSend(ctx, chatJid, `⛔ deploy validation failed — not restarting:\n\n\`\`\`\n${truncateOutput(errors)}\n\`\`\``);
+    logger.error({ bot, errors }, 'Deploy validation failed — aborting refresh');
+    await safeSend(ctx, chatJid, `⛔ deploy validation failed — not refreshing:\n\n\`\`\`\n${truncateOutput(errors)}\n\`\`\``);
     return;
   }
 
   const selfBot = ASSISTANT_NAME.toLowerCase();
   if (bot === selfBot) {
-    await handleSelfRestart(bot, chatJid, ctx);
+    await handleSelfRefresh(bot, chatJid, ctx);
   } else {
-    await handleCrossBotRestart(bot, chatJid, ctx);
+    await handleCrossBotRefresh(bot, chatJid, ctx);
   }
 }
 
-async function handleSelfRestart(bot: string, chatJid: string | null, ctx: InfiniClawIpcContext): Promise<void> {
-  logger.info({ bot }, 'Deploy validation passed — deploying to self then restarting');
+async function handleSelfRefresh(bot: string, chatJid: string | null, ctx: InfiniClawIpcContext): Promise<void> {
+  logger.info({ bot }, 'Deploy validation passed — deploying to self then refreshing');
   const deploy = deployInstance(bot);
   if (!deploy.ok) {
-    logger.error({ bot, output: deploy.output }, 'Self-deploy failed — aborting restart');
-    await safeSend(ctx, chatJid, `⛔ self-deploy failed — not restarting:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
+    logger.error({ bot, output: deploy.output }, 'Self-deploy failed — aborting refresh');
+    await safeSend(ctx, chatJid, `⛔ self-deploy failed — not refreshing:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
     return;
   }
   const mainJid = getMainRoomJid(ctx) || chatJid;
@@ -350,19 +350,19 @@ async function handleSelfRestart(bot: string, chatJid: string | null, ctx: Infin
   try {
     serviceRefreshStartScript(resolveRoot(), bot);
   } catch (err) {
-    logger.warn({ bot, err }, 'Start script refresh failed — restarting anyway');
+    logger.warn({ bot, err }, 'Start script refresh failed — refreshing anyway');
   }
   // Allow time for pending sends to flush before exiting
-  logger.info({ bot }, 'Self-restart: waiting for pending operations before exit');
+  logger.info({ bot }, 'Self-refresh: waiting for pending operations before exit');
   setTimeout(() => {
-    logger.info({ bot }, 'Self-restart: exiting now');
+    logger.info({ bot }, 'Self-refresh: exiting now');
     process.exit(0);
   }, 2000);
 }
 
-async function handleCrossBotRestart(bot: string, chatJid: string | null, ctx: InfiniClawIpcContext): Promise<void> {
+async function handleCrossBotRefresh(bot: string, chatJid: string | null, ctx: InfiniClawIpcContext): Promise<void> {
   logger.info({ bot }, 'Deploy validation passed — bootstrapping');
-  // Send restart notice to target bot's main room
+  // Send refresh notice to target bot's main room
   try {
     const root = resolveRoot();
     const targetIpcMain = path.join(instanceDir(root, bot), 'data', 'ipc', 'main');
@@ -383,13 +383,13 @@ async function handleCrossBotRestart(bot: string, chatJid: string | null, ctx: I
           timestamp: new Date().toISOString(),
         };
         fs.writeFileSync(
-          path.join(messagesDir, `restart-notice-${Date.now()}.json`),
+          path.join(messagesDir, `refresh-notice-${Date.now()}.json`),
           JSON.stringify(msg),
         );
       }
     }
   } catch (err) {
-    logger.warn({ bot, err }, 'Failed to write restart notice to target bot IPC');
+    logger.warn({ bot, err }, 'Failed to write refresh notice to target bot IPC');
   }
   try {
     serviceBootstrapBot(resolveRoot(), bot);
@@ -1041,7 +1041,7 @@ async function handleSubmitVerification(data: CommandData, ctx: InfiniClawIpcCon
 
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_brain_mode: handleSetBrainMode,
-  restart_bot: handleRestartBot,
+  refresh_bot: handleRefreshBot,
   stop_bot: handleStopBot,
   rebuild_image: handleRebuildImage,
   bot_status: handleBotStatus,

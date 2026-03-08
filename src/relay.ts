@@ -1528,6 +1528,11 @@ async function handleLifecycleCommand(
         await reply(conn, fail);
       }
     } else {
+      // Join: no-op if already onduty
+      if (action === 'join' && liveFleet[bot]?.status === 'onduty') {
+        await reply(conn, `${name} is already on duty`);
+        continue;
+      }
       // Join is slow (build) — use a thread
       const startedAt = Date.now();
       const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
@@ -1594,6 +1599,53 @@ async function handleLifecycleCommand(
 
 }
 
+/** Lightweight refresh: stop → rebuild → start. No brain/lobe/room changes. */
+async function handleRefresh(target: string | undefined, conn: RoomConn): Promise<void> {
+  const root = resolveRoot();
+  const bots = resolveBots(target, conn.name, 'join');
+  if (bots.length === 0) return;
+
+  if (!isShipActive()) {
+    await reply(conn, `ship is decommissioned — use !commission first`);
+    return;
+  }
+  try { ensurePodmanReady(); } catch (err) {
+    await reply(conn, `podman not ready — ${errStr(err)}`);
+    return;
+  }
+
+  for (const bot of bots) {
+    const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+    const name = env?.ASSISTANT_NAME || bot;
+    const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
+    const rank = liveFleet[bot]?.rank ?? 99;
+    log(`!refresh ${name}`);
+
+    const startedAt = Date.now();
+    const threadRoot = await reply(conn, `🔄 ${name} refreshing`);
+    if (!threadRoot) continue;
+    const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
+
+    try {
+      await step('stopping...');
+      stopBot(bot);
+      killStaleContainers(bot);
+      await step('building...');
+      bootstrapBot(root, bot);
+      const model = env?.BRAIN_MODEL || '?';
+      const ver = botVersion(root, bot);
+      await step(`✅ refreshed · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+      await reply(conn, `✅ ${name} refreshed`);
+      publishFleetReport().catch(() => {});
+    } catch (err) {
+      log(`!refresh ${name} failed: ${errStr(err)}`);
+      const fail = `⛔ !refresh ${name} — ${errStr(err)}`;
+      await step(fail);
+      await reply(conn, fail);
+    }
+  }
+}
+
 // ── Register command handlers with the registry ──────────────────
 
 function registerRelayCommands(): void {
@@ -1606,12 +1658,16 @@ function registerRelayCommands(): void {
       const parsed = parseTarget(cmd, '!dismiss');
       if (parsed.matched) await handleLifecycleCommand('dismiss', parsed.target, conn);
     },
-    refresh: async (cmd, conn) => {
-      const parsed = parseTarget(cmd, '!refresh');
+    rejoin: async (cmd, conn) => {
+      const parsed = parseTarget(cmd, '!rejoin');
       if (parsed.matched) {
         await handleLifecycleCommand('dismiss', parsed.target, conn);
         await handleLifecycleCommand('join', parsed.target, conn);
       }
+    },
+    refresh: async (cmd, conn) => {
+      const parsed = parseTarget(cmd, '!refresh');
+      if (parsed.matched) await handleRefresh(parsed.target, conn);
     },
     sleep: async (cmd, conn) => {
       const parsed = parseTarget(cmd, '!sleep');
@@ -1810,16 +1866,9 @@ function registerRelayCommands(): void {
 
         ensurePodmanReady();
 
-        // Bootstrap active bots (deploy + start)
+        // Restart active bots via normal join sequence (room management, brain restore, per-bot thread)
         for (const bot of activeBots) {
-          try {
-            bootstrapBot(root, bot);
-            await s(stageOk(`${bot} restarted`, botVersion(root, bot)));
-          } catch (err) {
-            errors++;
-            const link = await uploadErrorLog(`restart-${bot}`, err);
-            await s(stageFail(`${bot} restart failed`, link));
-          }
+          await handleLifecycleCommand('join', bot, conn);
         }
 
         persistFleet();

@@ -48,11 +48,22 @@ When this file has content, the commanding engineer must address these items fir
 
 ---
 
+### BUG-6: After refit, bots should go through the normal restart sequence
+
+**Reported:** 2026-03-08
+**Status:** open
+**Component:** relay / refit
+**Symptom:** After a successful `!refit`, bots are restarted via `bootstrapBot()` directly, bypassing the normal `!join` sequence (room management, brain restore, thread notification per bot).
+**Root cause:** Refit calls `bootstrapBot(root, bot)` directly instead of `handleLifecycleCommand('join', bot, conn)`.
+**Fix:** Refit should invoke the same join flow as `!join` for each bot, so room state, brain model, and visible progress are all handled consistently.
+
+---
+
 ### BUG-5: `is_main` flag not set in DB, blocking IPC commands for main group
 
 **Reported:** 2026-03-08
 **Status:** fixed
 **Component:** ipc-commands / main.ts `loadState`
-**Symptom:** Bots in the main duty room get `Unauthorized rebuild_image attempt blocked` (and all other `requireMain`-gated IPC commands: `restart_bot`, `git_push`, etc.) even though their `sourceGroup` is `"main"`.
+**Symptom:** Bots in the main duty room get `Unauthorized rebuild_image attempt blocked` (and all other `requireMain`-gated IPC commands: `refresh_bot`, `git_push`, etc.) even though their `sourceGroup` is `"main"`.
 **Root cause:** The `registered_groups` table had `is_main = 0` for the main folder group. Groups registered before the `isMain` column was added were persisted with `0` and never patched on reload. The IPC watcher builds `folderIsMain` from `group.isMain`, so the main group appeared unauthorized.
 **Fix:** Added a migration in `loadState()` (main.ts) that patches any group with `folder === MAIN_GROUP_FOLDER` to `isMain: true` and persists it back to DB. Also manually fixed existing DBs for cid, albert, and johnny5.
