@@ -22,6 +22,11 @@ if [[ -f "$CACHE_FILE" ]]; then
   fi
 fi
 
+# BUG-17: ensure @rollup/rollup-darwin-x64 is installed (npm optional dep bug on macOS)
+if [[ "$(uname)" == "Darwin" ]] && ! node -e "require('@rollup/rollup-darwin-x64')" 2>/dev/null; then
+  npm i @rollup/rollup-darwin-x64 --no-save --prefer-offline 2>/dev/null || true
+fi
+
 echo "pre-push: type-checking nanoclaw..."
 npx tsc --noEmit -p external/nanoclaw/tsconfig.json
 
