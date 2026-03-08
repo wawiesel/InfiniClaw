@@ -512,6 +512,7 @@ function saveState(): void {
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
+  if (group.folder === MAIN_GROUP_FOLDER) group = { ...group, isMain: true };
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
 
