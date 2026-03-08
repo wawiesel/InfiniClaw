@@ -23,56 +23,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function validateCommandOrUrl(cfg: Record<string, unknown>, manifestPath: string, server: string): boolean {
-  if (cfg.command !== undefined && (typeof cfg.command !== 'string' || cfg.command.trim() === '')) {
-    logger.warn({ manifestPath, server }, 'Invalid mcp.json: "command" must be a non-empty string; skipping MCP server');
-    return false;
-  }
-  if (cfg.url !== undefined && (typeof cfg.url !== 'string' || cfg.url.trim() === '')) {
-    logger.warn({ manifestPath, server }, 'Invalid mcp.json: "url" must be a non-empty string; skipping MCP server');
-    return false;
-  }
-  if (cfg.command === undefined && cfg.url === undefined) {
-    logger.warn({ manifestPath, server }, 'Invalid mcp.json: one of "command" or "url" is required; skipping MCP server');
-    return false;
-  }
-  return true;
-}
-
-function validateArgs(cfg: Record<string, unknown>, manifestPath: string, server: string): boolean {
-  if (cfg.args !== undefined) {
-    if (!Array.isArray(cfg.args) || cfg.args.some((arg) => typeof arg !== 'string')) {
-      logger.warn({ manifestPath, server }, 'Invalid mcp.json: "args" must be an array of strings; skipping MCP server');
-      return false;
-    }
-  }
-  return true;
-}
-
-function validateCwd(cfg: Record<string, unknown>, manifestPath: string, server: string): boolean {
-  if (cfg.cwd !== undefined && typeof cfg.cwd !== 'string') {
-    logger.warn({ manifestPath, server }, 'Invalid mcp.json: "cwd" must be a string; skipping MCP server');
-    return false;
-  }
-  return true;
-}
-
-function validateEnv(cfg: Record<string, unknown>, manifestPath: string, server: string): boolean {
-  if (cfg.env !== undefined) {
-    if (!isPlainObject(cfg.env)) {
-      logger.warn({ manifestPath, server }, 'Invalid mcp.json: "env" must be an object; skipping MCP server');
-      return false;
-    }
-    for (const [key, value] of Object.entries(cfg.env)) {
-      if (!SAFE_ENV_NAME.test(key) || typeof value !== 'string') {
-        logger.warn({ manifestPath, server }, 'Invalid mcp.json: "env" must map safe variable names to string values; skipping MCP server');
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 function validateManifest(
   manifest: unknown,
   manifestPath: string,
@@ -87,11 +37,61 @@ function validateManifest(
   }
 
   const cfg = manifest as Record<string, unknown>;
-
-  if (!validateCommandOrUrl(cfg, manifestPath, server)) return null;
-  if (!validateArgs(cfg, manifestPath, server)) return null;
-  if (!validateCwd(cfg, manifestPath, server)) return null;
-  if (!validateEnv(cfg, manifestPath, server)) return null;
+  if (cfg.command !== undefined && (typeof cfg.command !== 'string' || cfg.command.trim() === '')) {
+    logger.warn(
+      { manifestPath, server },
+      'Invalid mcp.json: "command" must be a non-empty string; skipping MCP server',
+    );
+    return null;
+  }
+  if (cfg.url !== undefined && (typeof cfg.url !== 'string' || cfg.url.trim() === '')) {
+    logger.warn(
+      { manifestPath, server },
+      'Invalid mcp.json: "url" must be a non-empty string; skipping MCP server',
+    );
+    return null;
+  }
+  if (cfg.command === undefined && cfg.url === undefined) {
+    logger.warn(
+      { manifestPath, server },
+      'Invalid mcp.json: one of "command" or "url" is required; skipping MCP server',
+    );
+    return null;
+  }
+  if (cfg.args !== undefined) {
+    if (!Array.isArray(cfg.args) || cfg.args.some((arg) => typeof arg !== 'string')) {
+      logger.warn(
+        { manifestPath, server },
+        'Invalid mcp.json: "args" must be an array of strings; skipping MCP server',
+      );
+      return null;
+    }
+  }
+  if (cfg.cwd !== undefined && typeof cfg.cwd !== 'string') {
+    logger.warn(
+      { manifestPath, server },
+      'Invalid mcp.json: "cwd" must be a string; skipping MCP server',
+    );
+    return null;
+  }
+  if (cfg.env !== undefined) {
+    if (!isPlainObject(cfg.env)) {
+      logger.warn(
+        { manifestPath, server },
+        'Invalid mcp.json: "env" must be an object; skipping MCP server',
+      );
+      return null;
+    }
+    for (const [key, value] of Object.entries(cfg.env)) {
+      if (!SAFE_ENV_NAME.test(key) || typeof value !== 'string') {
+        logger.warn(
+          { manifestPath, server },
+          'Invalid mcp.json: "env" must map safe variable names to string values; skipping MCP server',
+        );
+        return null;
+      }
+    }
+  }
 
   return cfg as McpServerConfig;
 }

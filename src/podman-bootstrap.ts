@@ -130,47 +130,6 @@ function selectPodmanMachine(machines: PodmanMachineListEntry[]): PodmanMachineL
   return machines.find((m) => m.Default) || machines[0];
 }
 
-function stopPodmanMachine(machineName: string): void {
-  try {
-    spawnSync('podman', ['machine', 'stop', machineName], {
-      stdio: 'pipe',
-      timeout: 30000,
-    });
-  } catch {
-    // Best effort stop
-  }
-}
-
-function startPodmanMachine(machineName: string): void {
-  const startResult = spawnSync('podman', ['machine', 'start', machineName], {
-    stdio: 'pipe',
-    timeout: 180000,
-  });
-  if (startResult.error) {
-    throw startResult.error;
-  }
-  if (startResult.status !== 0) {
-    throw new Error(
-      `podman machine start failed with exit code ${startResult.status ?? 'unknown'}`,
-    );
-  }
-}
-
-function recoverPodmanMachineState(machine: PodmanMachineListEntry): void {
-  const machineName = machine.Name;
-  if (!isSafeMachineName(machineName)) {
-    throw new Error(`Invalid podman machine name: ${machineName}`);
-  }
-  if (machine.Starting && !machine.Running) {
-    logger.warn({ machineName }, 'Podman machine stuck in starting state; forcing stop');
-    stopPodmanMachine(machineName);
-  } else if (machine.Running) {
-    logger.warn({ machineName }, 'Podman machine reports running but API is unavailable; restarting');
-    stopPodmanMachine(machineName);
-  }
-  startPodmanMachine(machineName);
-}
-
 async function ensurePodmanRuntimeAvailable(): Promise<void> {
   if (await waitForPodmanApi(2000)) {
     logger.debug('Podman runtime available');
@@ -186,7 +145,43 @@ async function ensurePodmanRuntimeAvailable(): Promise<void> {
       throw new Error('No podman machine exists. Run: podman machine init');
     }
     machineName = machine.Name;
-    recoverPodmanMachineState(machine);
+    if (!isSafeMachineName(machineName)) {
+      throw new Error(`Invalid podman machine name: ${machineName}`);
+    }
+    if (machine.Starting && !machine.Running) {
+      logger.warn({ machineName }, 'Podman machine stuck in starting state; forcing stop');
+      try {
+        spawnSync('podman', ['machine', 'stop', machineName], {
+          stdio: 'pipe',
+          timeout: 30000,
+        });
+      } catch {
+        // Best effort: a stale "starting" state may not stop cleanly.
+      }
+    } else if (machine.Running) {
+      logger.warn({ machineName }, 'Podman machine reports running but API is unavailable; restarting');
+      try {
+        spawnSync('podman', ['machine', 'stop', machineName], {
+          stdio: 'pipe',
+          timeout: 30000,
+        });
+      } catch {
+        // Best effort before restart.
+      }
+    }
+
+    const startResult = spawnSync('podman', ['machine', 'start', machineName], {
+      stdio: 'pipe',
+      timeout: 180000,
+    });
+    if (startResult.error) {
+      throw startResult.error;
+    }
+    if (startResult.status !== 0) {
+      throw new Error(
+        `podman machine start failed with exit code ${startResult.status ?? 'unknown'}`,
+      );
+    }
   } catch (err) {
     logger.error({ err, machineName }, 'Failed to start Podman machine');
     throw err;

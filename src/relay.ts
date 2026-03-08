@@ -70,24 +70,12 @@ interface SyncResponse {
 
 // ── Config ─────────────────────────────────────────────────────────
 
-import {
-  shellQuote,
-  formatDuration,
-  formatTimestamp,
-  errStr,
-  resolveRoot,
-  assertValidBotName,
-} from './utils.js';
-import { getGitVersion, getGitVersionStr } from './formatting.js';
-import { fleetManager } from './fleet-manager.js';
-import { pm2Stop, pm2StartBot, removeStaleProcesses, pm2Name } from './process-manager.js';
-import { getS3Client, uploadToS3, getPresignedUrl } from './s3-service.js';
-import { getGitRelation, getCommitAge, getRepoVersion, gitSync } from './git-service.js';
-import { reportFailure, reportRecovery, statusLine } from './alert-manager.js';
-import { matrixLogin, matrixSync, matrixSend, botJoinRoom, botLeaveRoom, SyncResponse } from './matrix-api.js';
-
 const HOSTNAME = os.hostname();
 const SYNC_TIMEOUT = 30_000;
+
+function shellQuote(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
 const RETRY_DELAY_BASE = 10_000;
 const RETRY_DELAY_MAX = 5 * 60_000; // cap at 5 minutes
 const STARTUP_SYNC_DELAY = 3_000;
@@ -98,14 +86,116 @@ const GIT_SYNC_INTERVAL = parseInt(process.env.GIT_SYNC_INTERVAL || '', 10) || 3
 const SECRETS_SYNC_INTERVAL = parseInt(process.env.SECRETS_SYNC_INTERVAL || '', 10) || 30_000;  // default 30s
 const HEALTH_INTERVAL = parseInt(process.env.HEALTH_INTERVAL || '', 10) || 30 * 60_000;         // default 30 min
 
+// ── Failure alerting (thread + exponential backoff) ─────────────────
+
+interface FailureState {
+  startedAt: number;        // when the failure first occurred
+  threadRootId: string;     // Matrix thread root event_id
+  nextAlertAt: number;      // next time to post an update
+  intervalMs: number;       // current backoff interval
+}
+
+const FAILURE_INITIAL_INTERVAL = 60_000;       // 1 minute
+const FAILURE_MAX_INTERVAL = 8 * 60 * 60_000;  // 8 hours
+const failureStates: Record<string, FailureState> = {};
+
+function findEngConn(conns: RoomConn[]): RoomConn | undefined {
+  return conns.find(c => c.name === 'engineering') || conns[0];
+}
+
+function formatDuration(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.round(ms / 60_000);
+  if (min < 60) return `${min}m`;
+  const hrs = (ms / 3_600_000).toFixed(1).replace(/\.0$/, '');
+  return `${hrs}h`;
+}
+
+function formatTimestamp(): string {
+  const d = new Date();
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
+
+/** Standard status line: `<emoji> <what> (<ship>) <status> (<time>)` */
+function statusLine(emoji: string, what: string, status: string, elapsedMs: number): string {
+  const time = elapsedMs > 0
+    ? `${formatTimestamp()} · ${formatDuration(elapsedMs)}`
+    : formatTimestamp();
+  return `${emoji} ${what} (${HOSTNAME}) ${status} (${time})`;
+}
+
+/** Stage result: `✅ <what><suffix>` or `⛔ <what><suffix>` or `⚠️ <what><suffix>` */
+function stageOk(what: string, suffix = ''): string { return `✅ ${what}${suffix}`; }
+function stageFail(what: string, suffix = ''): string { return `⛔ ${what}${suffix}`; }
+function stageWarn(what: string, suffix = ''): string { return `⚠️ ${what}${suffix}`; }
+function resultEmoji(warnings: number, errors: number): string { return errors > 0 ? '⛔' : warnings > 0 ? '⚠️' : '✅'; }
+function refitResult(outcome: string, warnings: number, errors: number, elapsedMs: number): string {
+  return statusLine(resultEmoji(warnings, errors), 'refit', `${outcome} (${warnings}W ${errors}E)`, elapsedMs);
+}
+
+async function reportFailure(system: string, detail: string, conns: RoomConn[]): Promise<void> {
+  const now = Date.now();
+  const conn = findEngConn(conns);
+  if (!conn?.accessToken) return;
+
+  const existing = failureStates[system];
+  if (!existing) {
+    // First failure — create thread
+    const rootId = await reply(conn, statusLine('⚠️', system, 'down', 0));
+    if (!rootId) return;
+    await threadReply(conn, rootId, detail.slice(0, 500));
+    failureStates[system] = {
+      startedAt: now,
+      threadRootId: rootId,
+      nextAlertAt: now + FAILURE_INITIAL_INTERVAL,
+      intervalMs: FAILURE_INITIAL_INTERVAL,
+    };
+    return;
+  }
+
+  // Subsequent failure — only post if past nextAlertAt
+  if (now < existing.nextAlertAt) return;
+  await threadReply(conn, existing.threadRootId, statusLine('⚠️', system, 'down', now - existing.startedAt));
+  existing.intervalMs = Math.min(existing.intervalMs * 2, FAILURE_MAX_INTERVAL);
+  existing.nextAlertAt = now + existing.intervalMs;
+}
+
+async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> {
+  const state = failureStates[system];
+  if (!state) return;
+  delete failureStates[system];
+
+  const conn = findEngConn(conns);
+  if (!conn?.accessToken) return;
+  const recoveryMsg = statusLine('✅', system, 'operational', Date.now() - state.startedAt);
+  await threadReply(conn, state.threadRootId, recoveryMsg);
+  await reply(conn, recoveryMsg);
+}
+
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
+type BotStatus = 'onduty' | 'lounge' | 'quarters' | 'sleep' | 'transit';
+type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatus; title?: string; quartersRoom?: string; activeBrainModel?: string };
+let liveFleet: Record<string, FleetEntry> = {};
+let fleetDirty = false;
+
 function fleetUpdate(bot: string, updates: Partial<FleetEntry>): void {
-  fleetManager.updateBot(bot, updates);
+  if (!liveFleet[bot]) return;
+  Object.assign(liveFleet[bot], updates);
+  fleetDirty = true;
 }
 
 function persistFleet(): void {
-  fleetManager.persist();
+  if (!fleetDirty) return;
+  try {
+    writeFleet(liveFleet);
+    secretsGitCommit(['bots/fleet.json'], `fleet: persist on ${HOSTNAME}`);
+    fleetDirty = false;
+    log('fleet: persisted to fleet.json');
+  } catch (err) {
+    log(`fleet: persist failed: ${errStr(err)}`);
+  }
 }
 
 // ── Rank swap (shared by bots and ships) ──────────────────────
@@ -116,17 +206,365 @@ function rankSwap<T extends { rank: number }>(
   target: string,
   direction: 'up' | 'down',
 ): { target: string; swap: string; targetRank: number; swapRank: number } | null {
-  return fleetManager.rankSwap(entries, target, direction);
+  const sorted = [...entries].sort((a, b) => a[1].rank - b[1].rank);
+  const idx = sorted.findIndex(([name]) => name === target);
+  if (idx < 0) return null;
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= sorted.length) return null;
+  const oldRank = sorted[idx][1].rank;
+  sorted[idx][1].rank = sorted[swapIdx][1].rank;
+  sorted[swapIdx][1].rank = oldRank;
+  return { target, swap: sorted[swapIdx][0], targetRank: sorted[idx][1].rank, swapRank: sorted[swapIdx][1].rank };
+}
+
+// ── Sync/rebuild helpers (shared by !provision and !refit) ────────
+
+function formatSyncResult(name: string, r: { ok: boolean; newCommits: number; output: string }): string {
+  if (!r.ok) return `${name}: failed — ${r.output.slice(0, 200)}`;
+  return r.newCommits > 0 ? `${name}: pulled ${r.newCommits} commit(s)` : `${name}: up to date`;
+}
+
+function rebuildInfiniClaw(): string {
+  const root = resolveRoot();
+  try {
+    const nodeBinDir = path.dirname(process.execPath);
+    const execOpts = { cwd: root, encoding: 'utf-8' as const, stdio: 'pipe' as const, env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` } };
+    // Use rebuild script (pulled via git, so it's always up to date)
+    const script = path.join(root, 'scripts', 'rebuild.sh');
+    if (fs.existsSync(script)) {
+      execSync(`bash ${shellQuote(script)}`, { ...execOpts, timeout: 300_000 });
+    } else {
+      // Fallback for repos without the script
+      execSync('npm run build', { ...execOpts, timeout: 120_000 });
+    }
+    try { installGitHooks(); } catch { /* best effort */ }
+    // Deploy dist files to active bot instances
+    const distDir = path.join(root, 'dist');
+    if (fs.existsSync(distDir)) {
+      const jsFiles = fs.readdirSync(distDir).filter(f => f.endsWith('.js'));
+      for (const bot of getActiveBots()) {
+        const dstDir = path.join(root, '_runtime', 'instances', bot, 'dist');
+        for (const f of jsFiles) {
+          try { fs.copyFileSync(path.join(distDir, f), path.join(dstDir, f)); } catch { /* instance may not exist yet */ }
+        }
+      }
+    }
+    refreshLocalCommitEpoch();
+    publishCommitEpoch().catch(() => {});
+    return 'infiniclaw: rebuild succeeded';
+  } catch (err) {
+    return `infiniclaw: rebuild FAILED — ${errStr(err).slice(0, 200)}`;
+  }
+}
+
+function loadIntercomConfig(): IntercomConfig {
+  const config = loadShipConfig();
+  const configPath = path.join(config.secretsPath, 'operator', 'intercom.json');
+  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+}
+
+function resolveCaptainUserId(): string {
+  try {
+    const captainFile = path.join(secretsRepoPath(), 'captain');
+    const lines = fs.readFileSync(captainFile, 'utf-8').split('\n');
+    for (const line of lines) {
+      const match = line.match(/^CAPTAIN_USER_ID=(.+)$/);
+      if (match) return match[1].trim();
+    }
+  } catch { /* missing file */ }
+  return '';
+}
+
+function resolveOperatorUserId(): string {
+  try {
+    const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
+    const config = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+    return config.userId || '';
+  } catch { return ''; }
+}
+
+/** Captain and operator are both fully trusted. */
+function isAuthorized(sender: string, captainUserId: string, operatorUserId: string): boolean {
+  return sender === captainUserId || sender === operatorUserId;
+}
+
+/** Is this ship the "speaker" — lowest-rank active ship? Used to avoid duplicate replies. */
+// ── Git version helper ────────────────────────────────────────────
+
+/** Format version string: ` · 📦 [sha](github) (age) ↑N|↓N` */
+function fmtVersion(sha: string, ageMs: number, ud: string): string {
+  const url = `${GITHUB_REPO_URL}/commit/${sha}`;
+  return ` · 📦 [${sha}](${url}) (${formatDuration(ageMs)}) ${ud}`;
+}
+
+/** Compute ↑N/↓N relation between two refs. */
+function gitRelation(root: string, local: string, upstream: string): string {
+  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: root };
+  const ahead = parseInt(execSync(`git rev-list ${upstream}..${local} --count`, execOpts).trim(), 10) || 0;
+  const behind = parseInt(execSync(`git rev-list ${local}..${upstream} --count`, execOpts).trim(), 10) || 0;
+  if (ahead > 0 && behind > 0) return `↑${ahead}↓${behind}`;
+  if (ahead > 0) return `↑${ahead}`;
+  if (behind > 0) return `↓${behind}`;
+  return '↑0';
+}
+
+/** Commit age in ms from a sha. */
+function commitAge(root: string, sha: string): number {
+  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: root };
+  const epoch = parseInt(execSync(`git log -1 --format=%ct ${sha}`, execOpts).trim(), 10) * 1000;
+  return Date.now() - epoch;
+}
+
+/** Version string for a repo: HEAD vs origin/main. */
+function repoVersion(repoDir: string): string {
+  try {
+    const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: repoDir };
+    const sha = execSync('git rev-parse --short HEAD', execOpts).trim();
+    if (!sha) return '';
+    return fmtVersion(sha, commitAge(repoDir, sha), gitRelation(repoDir, 'HEAD', 'origin/main'));
+  } catch { return ''; }
+}
+
+/** Version string for the relay dist: HEAD vs origin (relay is built from repo HEAD). */
+function relayVersion(root: string): string {
+  return repoVersion(root);
+}
+
+/** Version string for a bot's deployed instance: stamped sha vs HEAD. */
+function botVersion(root: string, bot: string): string {
+  try {
+    const versionFile = path.join(root, '_runtime', 'instances', bot, 'GIT_VERSION');
+    const sha = fs.readFileSync(versionFile, 'utf-8').trim().split(' ')[0];
+    if (!sha || !/^[a-f0-9]{7,40}$/.test(sha)) return '';
+    return fmtVersion(sha, commitAge(root, sha), gitRelation(root, sha, 'HEAD'));
+  } catch { return ''; }
+}
+
+// ── Speaker election via S3 commit timestamps ────────────────────
+
+const RELAY_S3_PREFIX = 'relay';
+const FLEET_S3_PREFIX = 'fleet-report';
+let localCommitEpoch = 0; // epoch seconds of HEAD commit the relay is running
+
+/** Read the commit timestamp of the code this relay is actually running. Called once at startup and after rebuilds. */
+function refreshLocalCommitEpoch(): void {
+  try {
+    const root = resolveRoot();
+    const epoch = execSync('git log -1 --format=%ct HEAD', {
+      cwd: root, encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
+    }).trim();
+    localCommitEpoch = parseInt(epoch, 10) || 0;
+  } catch {
+    localCommitEpoch = 0;
+  }
+}
+
+/** Upload this ship's commit epoch to S3 so other ships can compare. */
+async function publishCommitEpoch(): Promise<void> {
+  const s3 = getS3Client();
+  if (!s3 || !localCommitEpoch) return;
+  try {
+    await s3.client.send(new PutObjectCommand({
+      Bucket: s3.bucket,
+      Key: `${RELAY_S3_PREFIX}/${HOSTNAME}.json`,
+      Body: Buffer.from(JSON.stringify({ hostname: HOSTNAME, commitEpoch: localCommitEpoch, updatedAt: new Date().toISOString() })),
+      ContentType: 'application/json',
+    }));
+  } catch (err) {
+    log(`S3 commit epoch publish failed: ${errStr(err)}`);
+  }
+}
+
+/** Fetch all ships' commit epochs from S3. */
+async function fetchCommitEpochs(): Promise<Record<string, number>> {
+  const s3 = getS3Client();
+  if (!s3) return {};
+  const result: Record<string, number> = {};
+  try {
+    const listed = await s3.client.send(new ListObjectsV2Command({
+      Bucket: s3.bucket,
+      Prefix: `${RELAY_S3_PREFIX}/`,
+    }));
+    for (const obj of listed.Contents || []) {
+      if (!obj.Key?.endsWith('.json')) continue;
+      try {
+        const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: obj.Key }));
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+        const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+        if (data.hostname && typeof data.commitEpoch === 'number') {
+          result[data.hostname] = data.commitEpoch;
+        }
+      } catch { /* skip corrupt */ }
+    }
+  } catch (err) {
+    log(`S3 commit epoch fetch failed: ${errStr(err)}`);
+  }
+  return result;
+}
+
+/** Cached speaker result — refreshed by async election. */
+let cachedIsSpeaker = true;
+
+async function electSpeaker(): Promise<boolean> {
+  try {
+    const ships = loadShips();
+    const active = Object.entries(ships).filter(([_, m]) => m.active);
+    if (active.length === 0) return true;
+    if (!active.some(([name]) => name === HOSTNAME)) return false;
+
+    const epochs = await fetchCommitEpochs();
+    // Find the newest commit epoch among active ships
+    let maxEpoch = 0;
+    for (const [name] of active) {
+      const e = epochs[name] ?? 0;
+      if (e > maxEpoch) maxEpoch = e;
+    }
+
+    const myEpoch = epochs[HOSTNAME] ?? localCommitEpoch;
+
+    if (myEpoch < maxEpoch) {
+      log(`speaker: deferring — local commit ${myEpoch} < newest ${maxEpoch}`);
+      return false;
+    }
+
+    // Tiebreak: among ships at maxEpoch, lowest rank wins
+    const atMax = active
+      .filter(([name]) => (epochs[name] ?? 0) >= maxEpoch)
+      .sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
+    return atMax.length > 0 && atMax[0][0] === HOSTNAME;
+  } catch {
+    return true;
+  }
+}
+
+function isSpeaker(): boolean {
+  // Trigger async re-election in background, return cached result
+  electSpeaker().then(v => { cachedIsSpeaker = v; }).catch(() => {});
+  return cachedIsSpeaker;
 }
 
 // ── Matrix API helpers ─────────────────────────────────────────────
 
-async function reply(conn: RoomConn, text: string): Promise<string | undefined> {
-  return matrixSend(conn.homeserver, conn.accessToken!, conn.roomId, text);
+async function matrixLogin(homeserver: string, username: string, password: string): Promise<{ accessToken: string; userId: string }> {
+  const resp = await fetch(`${homeserver}/_matrix/client/v3/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: 'm.login.password',
+      user: username,
+      password,
+      device_id: `relay-${HOSTNAME}`,
+    }),
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`Login failed for ${username}: ${resp.status} ${body}`);
+  }
+  const data = await resp.json() as { access_token: string; user_id: string };
+  return { accessToken: data.access_token, userId: data.user_id };
 }
 
-async function threadReply(conn: RoomConn, threadRootId: string, text: string): Promise<string | undefined> {
-  return matrixSend(conn.homeserver, conn.accessToken!, conn.roomId, text, threadRootId);
+async function matrixCreateFilter(homeserver: string, token: string, userId: string): Promise<string> {
+  const filter = {
+    room: {
+      timeline: { limit: 10, types: ['m.room.message'] },
+      state: { types: [] },
+      ephemeral: { types: [] },
+      account_data: { types: [] },
+    },
+    presence: { types: [] },
+    account_data: { types: [] },
+  };
+  const resp = await fetch(
+    `${homeserver}/_matrix/client/v3/user/${encodeURIComponent(userId)}/filter`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(filter),
+    },
+  );
+  if (!resp.ok) throw new Error(`Filter creation failed: ${resp.status}`);
+  const data = await resp.json() as { filter_id: string };
+  return data.filter_id;
+}
+
+async function matrixSync(
+  homeserver: string,
+  token: string,
+  since: string | null,
+  filterId: string | null,
+  timeout: number,
+): Promise<SyncResponse> {
+  const params = new URLSearchParams({ timeout: String(timeout) });
+  if (since) params.set('since', since);
+  if (filterId) params.set('filter', filterId);
+  const resp = await fetch(`${homeserver}/_matrix/client/v3/sync?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(timeout + 15_000),
+  });
+  if (!resp.ok) throw new Error(`Sync failed: ${resp.status}`);
+  return resp.json() as Promise<SyncResponse>;
+}
+
+/** Convert markdown to HTML for Matrix formatted_body. */
+function markdownToHtml(text: string): string {
+  const html = (marked.parse(text, { async: false, breaks: true }) as string).trim();
+  // Preserve leading whitespace that HTML would collapse
+  return html.replace(/^ +/gm, (m) => '&nbsp;'.repeat(m.length));
+}
+
+async function matrixSend(homeserver: string, token: string, roomId: string, text: string): Promise<string | undefined> {
+  const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const content: Record<string, unknown> = {
+    msgtype: 'm.text',
+    body: text,
+    format: 'org.matrix.custom.html',
+    formatted_body: markdownToHtml(text),
+  };
+  const resp = await fetch(
+    `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(content),
+    },
+  );
+  if (!resp.ok) {
+    const body = await resp.text();
+    log(`send failed to ${roomId}: ${resp.status} ${body}`);
+    return undefined;
+  }
+  const data = await resp.json() as { event_id?: string };
+  return data.event_id;
+}
+
+async function matrixSendThread(homeserver: string, token: string, roomId: string, threadRootId: string, text: string): Promise<string | undefined> {
+  const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const resp = await fetch(
+    `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        msgtype: 'm.text',
+        body: text,
+        format: 'org.matrix.custom.html',
+        formatted_body: markdownToHtml(text),
+        'm.relates_to': {
+          rel_type: 'm.thread',
+          event_id: threadRootId,
+        },
+      }),
+    },
+  );
+  if (!resp.ok) {
+    const body = await resp.text();
+    log(`thread send failed to ${roomId}: ${resp.status} ${body}`);
+    return undefined;
+  }
+  const data = await resp.json() as { event_id?: string };
+  return data.event_id;
 }
 
 // ── Bot Matrix room management ──────────────────────────────────
@@ -138,8 +576,52 @@ async function botMatrixLogin(root: string, bot: string): Promise<{ token: strin
   const username = env.MATRIX_USERNAME;
   const password = env.MATRIX_PASSWORD;
   if (!homeserver || !username || !password) throw new Error(`${bot}: missing Matrix credentials in env`);
-  const { accessToken, userId } = await matrixLogin(homeserver, username, password, `relay-${bot}-${HOSTNAME}`);
+  const { accessToken, userId } = await matrixLogin(homeserver, username, password);
   return { token: accessToken, homeserver, userId };
+}
+
+/** Invite a bot to a room using the intercom account, then join as the bot. */
+async function botJoinRoom(botToken: string, homeserver: string, roomId: string, conn: RoomConn, botUserId: string): Promise<void> {
+  // Invite via intercom (bot can't self-join after leaving)
+  if (conn.accessToken) {
+    const invResp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${conn.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: botUserId }),
+    });
+    if (!invResp.ok) {
+      const body = await invResp.text();
+      // Already in room is fine
+      if (!body.includes('already in the room') && !body.includes('already joined')) {
+        log(`invite failed: ${invResp.status} ${body}`);
+      }
+    }
+  }
+  // Now join as the bot
+  const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`join room failed: ${resp.status} ${body}`);
+  }
+}
+
+/** Make a bot leave a Matrix room. Silently succeeds if bot isn't in the room. */
+async function botLeaveRoom(token: string, homeserver: string, roomId: string): Promise<void> {
+  const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  if (!resp.ok) {
+    const body = await resp.text();
+    // Not in room / forbidden (already left) is fine
+    if (resp.status === 403 || body.includes('not in room') || body.includes('not a member')) return;
+    throw new Error(`leave room failed: ${resp.status} ${body}`);
+  }
 }
 
 // ── Bot resolution (multi-ship aware) ───────────────────────────
@@ -309,12 +791,94 @@ async function publishFleetReport(): Promise<FleetReport> {
   return report;
 }
 
-function runHealthCheckLocal(): string | null {
-  return runHealthCheck(HOSTNAME);
+function runHealthCheck(): string | null {
+  const root = resolveRoot();
+  const script = path.join(root, 'scripts', 'health-check.sh');
+  if (!fs.existsSync(script)) return null;
+  try {
+    return execSync(`bash ${shellQuote(script)} --json`, {
+      encoding: 'utf-8',
+      timeout: 30_000,
+      env: { ...process.env, MACHINE_NAME: HOSTNAME },
+    }).trim();
+  } catch (err) {
+    log(`health-check.sh failed: ${errStr(err)}`);
+    return null;
+  }
 }
 
-function formatHealthSummaryLocal(reports: Array<{ ship: string; data: Record<string, unknown> }>): string {
-  return formatHealthSummary(reports);
+async function uploadHealthToS3(report: string): Promise<boolean> {
+  const s3 = getS3Client();
+  if (!s3) return false;
+  const key = `${HEALTH_S3_PREFIX}/${HOSTNAME}.json`;
+  try {
+    await s3.client.send(new PutObjectCommand({
+      Bucket: s3.bucket,
+      Key: key,
+      Body: Buffer.from(report),
+      ContentType: 'application/json',
+    }));
+    return true;
+  } catch (err) {
+    log(`S3 health upload failed: ${errStr(err)}`);
+    return false;
+  }
+}
+
+async function fetchAllHealthReports(): Promise<Array<{ ship: string; data: Record<string, unknown> }>> {
+  const s3 = getS3Client();
+  if (!s3) return [];
+  const results: Array<{ ship: string; data: Record<string, unknown> }> = [];
+  try {
+    const listed = await s3.client.send(new ListObjectsV2Command({
+      Bucket: s3.bucket,
+      Prefix: `${HEALTH_S3_PREFIX}/`,
+    }));
+    for (const obj of listed.Contents || []) {
+      if (!obj.Key?.endsWith('.json')) continue;
+      try {
+        const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: obj.Key }));
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+        const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+        const ship = obj.Key.replace(`${HEALTH_S3_PREFIX}/`, '').replace('.json', '');
+        results.push({ ship, data });
+      } catch { /* skip corrupt reports */ }
+    }
+  } catch (err) {
+    log(`S3 health fetch failed: ${errStr(err)}`);
+  }
+  return results;
+}
+
+function formatHealthSummary(reports: Array<{ ship: string; data: Record<string, unknown> }>): string {
+  if (reports.length === 0) return '⚠️ No health reports available.';
+  const lines: string[] = [`🏥 Fleet Health — ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n`];
+  let totalOom = 0;
+  let totalSessions = 0;
+
+  for (const { ship, data } of reports) {
+    const bots = (data.bots || {}) as Record<string, Record<string, unknown>>;
+    const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => n);
+    const ts = String(data.ts || '?').slice(0, 19);
+    lines.push(`**${ship}** (${ts})`);
+    lines.push(`  Active: ${active.length > 0 ? active.join(', ') : 'none'}`);
+
+    for (const [name, b] of Object.entries(bots)) {
+      const oom = Number(b.oom_kills || 0);
+      totalOom += oom;
+      if (b.status === 'ACTIVE' || oom > 0) {
+        const mem = b.rss_mb != null ? `RSS=${b.rss_mb}/${b.limit_mb}MB` : '';
+        lines.push(`  ${name}: ${b.status} ${mem} OOM=${oom}`);
+      }
+    }
+    const sess = Number(data.session_total_mb || 0);
+    totalSessions += sess;
+    lines.push(`  Sessions: ${sess}MB\n`);
+  }
+
+  lines.push(`**Totals:** ${reports.length} ships, ${totalOom} OOM kills, ${totalSessions}MB sessions`);
+  return lines.join('\n');
 }
 
 // ── Git hooks ─────────────────────────────────────────────────
@@ -801,54 +1365,636 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
 
 // ── Command handling ───────────────────────────────────────────────
 
-import { handleCommission, handleDecommission, handleProvision, handleRefit } from './commands/ship.js';
-import { handleTransport, handleFleet } from './commands/fleet.js';
-import { handleRelay, handleHealth, handleTodo, handleAllow } from './commands/misc.js';
-import { handleLifecycleCommand } from './commands/lifecycle.js';
+async function handleLifecycleCommand(
+  action: 'join' | 'dismiss' | 'restart' | 'sleep' | 'wake',
+  target: string | undefined,
+  conn: RoomConn,
+): Promise<void> {
+  const root = resolveRoot();
+  const bots = resolveBots(target, conn.name, action);
 
+  // No local bots matched — silently ignore. Another ship handles it,
+  // or the room simply has no bots from this ship.
+  if (bots.length === 0) return;
+
+  if (action !== 'dismiss' && action !== 'sleep') {
+    if (!isShipActive()) {
+      await reply(conn, `ship is decommissioned — use !commission first`);
+      return;
+    }
+    try { ensurePodmanReady(); } catch (err) {
+      await reply(conn, `podman not ready — ${errStr(err)}`);
+      return;
+    }
+  }
+
+  for (const bot of bots) {
+    const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+    const name = env?.ASSISTANT_NAME || bot;
+    const rank = liveFleet[bot]?.rank ?? 99;
+    log(`!${action} ${name}`);
+
+    // Resolve ship room IDs for room management
+    const ships = (() => { try { return loadShips(); } catch { return {}; } })();
+    const loungeId = ships[HOSTNAME]?.loungeId as string | undefined;
+    const dutyRoomId = conn.roomId;
+
+    if (action === 'dismiss') {
+      // Dismiss: stop bot, downgrade brain to sonnet, disable lobes, move to lounge
+      try {
+        stopBot(bot);
+        killStaleContainers(bot);
+        // Save current brain model and downgrade to sonnet
+        const config = loadShipConfig();
+        const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
+        if (env?.BRAIN_MODEL && env.BRAIN_MODEL !== 'claude-sonnet-4-6') {
+          fleetUpdate(bot, { activeBrainModel: env.BRAIN_MODEL });
+        }
+        try {
+          upsertEnvLine(envFile, 'BRAIN_MODEL', 'claude-sonnet-4-6');
+          upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '1');
+          log(`${name}: brain downgraded to sonnet, lobes disabled`);
+        } catch (envErr) {
+          log(`${name}: env update failed (non-fatal): ${errStr(envErr)}`);
+        }
+        // Move bot: leave duty room → join lounge
+        try {
+          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
+          await botLeaveRoom(botToken, homeserver, dutyRoomId);
+          if (loungeId) await botJoinRoom(botToken, homeserver, loungeId, conn, botUserId);
+          log(`${name}: moved to lounge`);
+        } catch (roomErr) {
+          log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
+        }
+        fleetUpdate(bot, { status: 'lounge' });
+        await reply(conn, `🔴 ${name} dismissed → lounge (sonnet, no lobes)`);
+        publishFleetReport().catch(() => {});
+      } catch (err) {
+        log(`!dismiss ${name} failed: ${errStr(err)}`);
+        await reply(conn, `⛔ !dismiss ${name} — ${errStr(err)}`);
+      }
+    } else if (action === 'sleep') {
+      // Sleep: hard stop — move to quarters, stop container
+      try {
+        stopBot(bot);
+        killStaleContainers(bot);
+        const quartersRoomId = liveFleet[bot]?.quartersRoom;
+        // Move bot: leave current room (duty or lounge) → quarters only
+        try {
+          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
+          await botLeaveRoom(botToken, homeserver, dutyRoomId);
+          if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
+          log(`${name}: moved to quarters (sleeping)`);
+        } catch (roomErr) {
+          log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
+        }
+        fleetUpdate(bot, { status: 'sleep' });
+        await reply(conn, `😴 ${name} sleeping (quarters, container stopped)`);
+        publishFleetReport().catch(() => {});
+      } catch (err) {
+        log(`!sleep ${name} failed: ${errStr(err)}`);
+        await reply(conn, `⛔ !sleep ${name} — ${errStr(err)}`);
+      }
+    } else if (action === 'wake') {
+      // Wake: restart in quarters (bot stays in quarters room, not duty room)
+      const startedAt = Date.now();
+      const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
+      const threadRoot = await reply(conn, `☀️ ${name} waking`);
+      if (!threadRoot) continue;
+      const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
+      try {
+        await step('building...');
+        fleetUpdate(bot, { status: 'quarters' }); // awake but not on duty
+        writeFleet(liveFleet);
+        clearShipConfigCache();
+        bootstrapBot(root, bot);
+        const model = env?.BRAIN_MODEL || '?';
+        const ver = botVersion(root, bot);
+        await step(`✅ awake · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+        await reply(conn, `☀️ ${name} awake (quarters)`);
+        publishFleetReport().catch(() => {});
+      } catch (err) {
+        log(`!wake ${name} failed: ${errStr(err)}`);
+        const fail = `⛔ !wake ${name} — ${errStr(err)}`;
+        await step(fail);
+        await reply(conn, fail);
+      }
+    } else {
+      // Join/restart are slow (build) — use a thread
+      const startedAt = Date.now();
+      const emoji = action === 'join' ? '🟢' : '🔄';
+      const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
+      const threadRoot = await reply(conn, `${emoji} ${name} ${action === 'join' ? 'joining' : 'restarting'}`);
+      if (!threadRoot) continue;
+      const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
+      try {
+        if (action === 'restart') {
+          await step('stopping...');
+          stopBot(bot);
+          killStaleContainers(bot);
+        }
+        if (action === 'join') {
+          // Restore brain model and enable lobes
+          const config = loadShipConfig();
+          const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
+          const savedModel = liveFleet[bot]?.activeBrainModel;
+          if (savedModel) {
+            try {
+              upsertEnvLine(envFile, 'BRAIN_MODEL', savedModel);
+              upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
+              log(`${name}: brain restored to ${savedModel}, lobes enabled`);
+            } catch (envErr) {
+              log(`${name}: env restore failed (non-fatal): ${errStr(envErr)}`);
+            }
+          } else {
+            try {
+              upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
+            } catch { /* ignore */ }
+          }
+          fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME });
+          writeFleet(liveFleet);
+          clearShipConfigCache();
+        }
+        // Move bot: leave lounge → join duty room
+        try {
+          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
+          if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
+          await botJoinRoom(botToken, homeserver, dutyRoomId, conn, botUserId);
+          await step('room joined');
+        } catch (roomErr) {
+          log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
+          await step(`room move failed: ${errStr(roomErr)}`);
+        }
+        await step('building...');
+        bootstrapBot(root, bot);
+        const model = env?.BRAIN_MODEL || '?';
+        const ver = botVersion(root, bot);
+        await step(`✅ online · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+        await reply(conn, `✅ ${name} online`);
+        publishFleetReport().catch(() => {});
+        // Trigger the bot to acknowledge in the thread
+        await threadReply(conn, threadRoot, `${name}, reporting for duty!`);
+      } catch (err) {
+        log(`!${action} ${name} failed: ${errStr(err)}`);
+        const fail = `⛔ !${action} ${name} — ${errStr(err)}`;
+        await step(fail);
+        await reply(conn, fail);
+      }
+    }
+  }
+
+}
 
 // ── Register command handlers with the registry ──────────────────
-
-import { handleCommission, handleDecommission, handleProvision, handleRefit } from './commands/ship.js';
-import { handleTransport, handleFleet } from './commands/fleet.js';
-import { handleRelay, handleHealth, handleTodo, handleAllow } from './commands/misc.js';
 
 function registerRelayCommands(): void {
   registerHandlers({
     join: async (cmd, conn) => {
-      const target = cmd.slice('!join'.length).trim().toLowerCase() || undefined;
-      await handleLifecycleCommand('join', target, conn);
+      const parsed = parseTarget(cmd, '!join');
+      if (parsed.matched) await handleLifecycleCommand('join', parsed.target, conn);
     },
     dismiss: async (cmd, conn) => {
-      const target = cmd.slice('!dismiss'.length).trim().toLowerCase() || undefined;
-      await handleLifecycleCommand('dismiss', target, conn);
+      const parsed = parseTarget(cmd, '!dismiss');
+      if (parsed.matched) await handleLifecycleCommand('dismiss', parsed.target, conn);
     },
     restart: async (cmd, conn) => {
-      const target = cmd.slice('!restart'.length).trim().toLowerCase() || undefined;
-      await handleLifecycleCommand('restart', target, conn);
+      const parsed = parseTarget(cmd, '!restart');
+      if (parsed.matched) await handleLifecycleCommand('restart', parsed.target, conn);
     },
     sleep: async (cmd, conn) => {
-      const target = cmd.slice('!sleep'.length).trim().toLowerCase() || undefined;
-      await handleLifecycleCommand('sleep', target, conn);
+      const parsed = parseTarget(cmd, '!sleep');
+      if (parsed.matched) await handleLifecycleCommand('sleep', parsed.target, conn);
     },
     wake: async (cmd, conn) => {
-      const target = cmd.slice('!wake'.length).trim().toLowerCase() || undefined;
-      await handleLifecycleCommand('wake', target, conn);
+      const parsed = parseTarget(cmd, '!wake');
+      if (parsed.matched) await handleLifecycleCommand('wake', parsed.target, conn);
     },
-    relay: handleRelay,
-    health: handleHealth,
-    decommission: handleDecommission,
-    commission: handleCommission,
-    provision: handleProvision,
-    refit: handleRefit,
-    transport: handleTransport,
-    fleet: handleFleet,
-    todo: handleTodo,
-    allow: handleAllow,
+
+    relay: async (cmd, conn) => {
+      const text = cmd.slice('!relay'.length).trim();
+      const SESSION = 'operator';
+      try {
+        let existed = true;
+        try { execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' }); } catch { existed = false; }
+        if (!existed) {
+          execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(loadShipConfig().secretsPath), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
+          await sleep(3000);
+        }
+        if (text) {
+          execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', text], { stdio: 'pipe' });
+          execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
+        }
+        const status = existed ? 'sent to running operator' : 'started new operator session';
+        await reply(conn, `${status}`);
+      } catch (err) {
+        log(`!relay failed: ${errStr(err)}`);
+        await reply(conn, `!relay failed — ${errStr(err)}`);
+      }
+    },
+
+    health: async (_cmd, conn) => {
+      const report = runHealthCheck();
+      if (report) await uploadHealthToS3(report);
+      if (isSpeaker()) {
+        await sleep(3_000);
+        const reports = await fetchAllHealthReports();
+        const summary = formatHealthSummary(reports);
+        await reply(conn, summary);
+      }
+    },
+
+    decommission: async (cmd, conn) => {
+      const targetShip = cmd.slice('!decommission'.length).trim() || null;
+      if (targetShip && !isThisShip(targetShip)) return;
+      try {
+        const ships = loadShips();
+        if (!ships[HOSTNAME]) { await reply(conn, `not in ships.json`); return; }
+        for (const bot of getActiveBots()) {
+          stopBot(bot);
+          killStaleContainers(bot);
+          fleetUpdate(bot, { status: 'sleep' });
+        }
+        ships[HOSTNAME].active = false;
+        writeShips(ships);
+        secretsGitCommit(['operator/ships.json'], `decommission ${HOSTNAME}: bots stopped, relay only`);
+        await reply(conn, `decommissioned — all bots stopped, relay still running`);
+      } catch (err) {
+        await reply(conn, `decommission failed — ${errStr(err)}`);
+      }
+    },
+
+    commission: async (cmd, conn) => {
+      const targetShip = cmd.slice('!commission'.length).trim() || null;
+      if (targetShip && !isThisShip(targetShip)) return;
+      try {
+        const ships = loadShips();
+        if (!ships[HOSTNAME]) { await reply(conn, `not in ships.json`); return; }
+        ships[HOSTNAME].active = true;
+        writeShips(ships);
+        secretsGitCommit(['operator/ships.json'], `commission ${HOSTNAME}`);
+        const fleet = loadFleet();
+        const root = resolveRoot();
+        ensurePodmanReady();
+        const started: string[] = [];
+        for (const [name, entry] of Object.entries(fleet)) {
+          if (entry.ship === HOSTNAME && entry.status === 'onduty') {
+            bootstrapBot(root, name);
+            started.push(name);
+          }
+        }
+        await reply(conn, `commissioned — started ${started.join(', ') || 'no bots assigned'}`);
+      } catch (err) {
+        await reply(conn, `commission failed — ${errStr(err)}`);
+      }
+    },
+
+    provision: async (cmd, conn) => {
+      const target = cmd.slice('!provision'.length).trim() || null;
+      const results: string[] = [];
+
+      const syncRepo = (name: string, repoPath: string): string => {
+        const resolved = repoPath.replace(/^~/, os.homedir());
+        if (!fs.existsSync(path.join(resolved, '.git'))) return `${name}: not a git repo`;
+        try {
+          const opts = { cwd: resolved, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
+          execSync('git fetch origin', opts);
+          const count = parseInt(execSync('git rev-list HEAD..origin/main --count', { ...opts, timeout: 5_000 }).trim(), 10) || 0;
+          if (count === 0) return `${name}: up to date`;
+          execSync('git pull --rebase', opts);
+          return `${name}: pulled ${count} commit(s)`;
+        } catch (err) {
+          return `${name}: sync failed — ${errStr(err).slice(0, 200)}`;
+        }
+      };
+
+      try {
+        if (!target) {
+          const secretsResult = secretsGitSync();
+          results.push(formatSyncResult('secrets', secretsResult));
+          const icResult = gitSync();
+          results.push(formatSyncResult('infiniclaw', icResult));
+          if (icResult.ok && icResult.newCommits > 0) results.push(rebuildInfiniClaw());
+        } else if (target === 'secrets') {
+          results.push(formatSyncResult('secrets', secretsGitSync()));
+        } else if (target === 'infiniclaw') {
+          const r = gitSync();
+          results.push(formatSyncResult('infiniclaw', r));
+          if (r.ok && r.newCommits > 0) results.push(rebuildInfiniClaw());
+        } else {
+          let paths: Record<string, string> = {};
+          try {
+            const configDir = path.dirname(secretsRepoPath());
+            paths = JSON.parse(fs.readFileSync(path.join(configDir, 'paths.json'), 'utf-8'));
+          } catch { /* no paths.json */ }
+          if (paths[target]) {
+            results.push(syncRepo(target, paths[target]));
+          } else {
+            await reply(conn, `unknown target "${target}" — not in paths.json`);
+            return;
+          }
+        }
+        await reply(conn, `${results.join('\n')}`);
+      } catch (err) {
+        await reply(conn, `!provision failed — ${errStr(err)}`);
+      }
+    },
+
+    refit: async (cmd, conn) => {
+      const targetShip = cmd.slice('!refit'.length).trim() || null;
+      if (targetShip && !isThisShip(targetShip)) return;
+      const startedAt = Date.now();
+
+      const threadRoot = await reply(conn, statusLine('⚓', 'refit', 'starting', 0));
+      if (!threadRoot) return;
+      const elapsed = () => Date.now() - startedAt;
+
+      const activeBots = getActiveBots();
+
+      // Stages: sync secrets, sync code, build, bootstrap active, done
+      const totalStages = 3 + activeBots.length + 1;
+      let stage = 0;
+      let warnings = 0;
+      let errors = 0;
+      const s = (text: string) => threadReply(conn, threadRoot, `[${++stage}/${totalStages} ${formatDuration(elapsed())}] ${text}`);
+
+      try {
+        const root = resolveRoot();
+
+        const secretsResult = secretsGitSync();
+        const secretsVer = repoVersion(secretsRepoPath());
+        if (!secretsResult.ok) {
+          warnings++;
+          const link = await uploadErrorLog('secrets-sync', new Error(secretsResult.output));
+          await s(stageWarn('secrets sync failed', link || secretsVer));
+        } else if (secretsResult.newCommits > 0) {
+          await s(stageOk(`secrets pulled ${secretsResult.newCommits} commit(s)`, secretsVer));
+        } else {
+          await s(stageOk('secrets up to date', secretsVer));
+        }
+
+        const icResult = gitSync();
+        const codeVer = repoVersion(root);
+        if (!icResult.ok) {
+          warnings++;
+          const link = await uploadErrorLog('code-sync', new Error(icResult.output));
+          await s(stageWarn('code sync failed', link || codeVer));
+        } else if (icResult.newCommits > 0) {
+          await s(stageOk(`code pulled ${icResult.newCommits} commit(s)`, codeVer));
+        } else {
+          await s(stageOk('code up to date', codeVer));
+        }
+
+        const buildResult = rebuildInfiniClaw();
+        if (buildResult.includes('FAILED')) {
+          errors++;
+          const link = await uploadErrorLog('build', new Error(buildResult));
+          await s(stageFail('relay + dist rebuild', link));
+          const msg = refitResult('failed', warnings, errors, elapsed());
+          await s(msg);
+          await reply(conn, msg);
+          return;
+        }
+        await s(stageOk('relay + dist rebuilt', relayVersion(root)));
+
+        ensurePodmanReady();
+
+        // Bootstrap active bots (deploy + start)
+        for (const bot of activeBots) {
+          try {
+            bootstrapBot(root, bot);
+            await s(stageOk(`${bot} restarted`, botVersion(root, bot)));
+          } catch (err) {
+            errors++;
+            const link = await uploadErrorLog(`restart-${bot}`, err);
+            await s(stageFail(`${bot} restart failed`, link));
+          }
+        }
+
+        persistFleet();
+        await publishFleetReport().catch(() => {});
+        const msg = refitResult('complete', warnings, errors, elapsed());
+        await s(msg);
+        await reply(conn, msg);
+        await sleep(1_000);
+        try {
+          execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
+        } catch { /* pm2 restart kills us */ }
+      } catch (err) {
+        errors++;
+        const msg = refitResult('failed', warnings, errors, elapsed());
+        await threadReply(conn, threadRoot, msg);
+        await reply(conn, msg);
+      }
+    },
+
+    transport: async (cmd, conn) => {
+      const parts = cmd.slice('!transport '.length).trim().split(/\s+/);
+      if (parts.length !== 2) {
+        await reply(conn, `Usage: !transport <bot> <ship>`);
+        return;
+      }
+      const [botInput, shipInput] = parts;
+      const bot = botInput.toLowerCase();
+      if (!liveFleet[bot]) { await reply(conn, `Unknown bot: ${botInput}`); return; }
+      let targetShip: string;
+      try {
+        const ships = loadShips();
+        const resolved = resolveShipName(shipInput, ships);
+        if (!resolved) { await reply(conn, `Unknown ship: ${shipInput}`); return; }
+        targetShip = resolved;
+        if (!ships[targetShip].active) { await reply(conn, `${targetShip} is decommissioned`); return; }
+      } catch { targetShip = shipInput; /* ships.json missing — skip validation */ }
+      if (liveFleet[bot].ship !== HOSTNAME) return;
+      try {
+        stopBot(bot);
+        killStaleContainers(bot);
+        removeBotMounts(bot);
+        fleetUpdate(bot, { status: 'transit', ship: targetShip });
+        writeFleet(liveFleet);
+        const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetShip}`);
+        fleetDirty = false;
+        if (!result.ok) throw new Error(result.error);
+        await reply(conn, `${bot} dematerialized — awaiting materialization on ${targetShip}`);
+      } catch (err) {
+        await reply(conn, `transport failed — ${errStr(err)}`);
+      }
+    },
+
+    promote: async (cmd, conn, allConns) => {
+      await handleRank(cmd, conn, allConns, true);
+    },
+    demote: async (cmd, conn, allConns) => {
+      await handleRank(cmd, conn, allConns, false);
+    },
+
+    fleet: async (cmd, conn) => {
+      try {
+        // Every ship publishes its report, then the speaker assembles
+        const report = await publishFleetReport();
+
+        if (!await electSpeaker()) return;
+
+        const ships = (() => { try { return loadShips(); } catch { return {}; } })();
+        const allShipNames = Object.keys(ships);
+        const s3 = getS3Client();
+
+        // Poll S3 for fresh reports (up to 5s), then read stale as fallback
+        const freshReports: Record<string, FleetReport> = { [HOSTNAME]: report };
+        const staleReports: Record<string, FleetReport> = {};
+        if (s3 && allShipNames.length > 1) {
+          const deadline = Date.now() + 5_000;
+          while (Date.now() < deadline) {
+            const missing = allShipNames.filter(s => !freshReports[s]);
+            if (missing.length === 0) break;
+            await sleep(500);
+            for (const shipName of missing) {
+              try {
+                const resp = await s3.client.send(new GetObjectCommand({
+                  Bucket: s3.bucket,
+                  Key: `${FLEET_S3_PREFIX}/${shipName}.json`,
+                }));
+                const chunks: Uint8Array[] = [];
+                for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+                const data = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as FleetReport;
+                if (data.ts && Date.now() - data.ts < 10_000) {
+                  freshReports[data.ship] = data;
+                } else if (data.ts) {
+                  staleReports[data.ship] = data;
+                }
+              } catch { /* not available */ }
+            }
+          }
+        }
+
+        // Merge: fresh reports win, then stale, then liveFleet fallback
+        const allReports: Record<string, FleetReport> = { ...staleReports, ...freshReports };
+
+        // Assemble output
+        const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; localStatus: string }> = {};
+        for (const [botId, entry] of Object.entries(liveFleet)) {
+          allBots[botId] = { ...entry, name: botId, gitVersion: '', localStatus: entry.status };
+        }
+        for (const [, shipReport] of Object.entries(allReports)) {
+          for (const [botId, botData] of Object.entries(shipReport.bots)) {
+            if (allBots[botId]) {
+              allBots[botId].name = botData.name;
+              allBots[botId].gitVersion = botData.gitVersion;
+              allBots[botId].localStatus = botData.status;
+            }
+          }
+        }
+
+        // Group by ship
+        const byShip: Record<string, Array<[string, typeof allBots[string]]>> = {};
+        for (const [botId, entry] of Object.entries(allBots)) {
+          const s = entry.ship || 'drydock';
+          (byShip[s] ??= []).push([botId, entry]);
+        }
+        for (const s of Object.keys(ships)) { byShip[s] ??= []; }
+
+        const shipOrder = Object.keys(byShip).sort((a, b) => {
+          if (a === 'drydock') return 1;
+          if (b === 'drydock') return -1;
+          return (ships[a]?.rank ?? 99) - (ships[b]?.rank ?? 99);
+        });
+
+        const lines: string[] = [];
+        for (const shipName of shipOrder) {
+          const sConfig = ships[shipName];
+          const shipReport = allReports[shipName];
+
+          if (shipName === 'drydock') {
+            lines.push('🔧 drydock');
+          } else {
+            const rank = sConfig?.rank ?? '?';
+            const shipIcon = sConfig?.active ? '⚓' : '🚫';
+            let shipStatus: string;
+            if (shipReport) {
+              const isFresh = freshReports[shipName] != null;
+              const rv = shipReport.relayVersion ?? '';
+              shipStatus = isFresh ? rv : ` · last seen ${formatDuration(Date.now() - shipReport.ts)} ago${rv}`;
+            } else {
+              shipStatus = ' · unknown';
+            }
+            lines.push(`${shipIcon} ${shipName}[${rank}]${shipStatus}`);
+          }
+
+          const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
+          for (const [, entry] of bots) {
+            const isCO = entry.status === 'onduty' && !Object.values(allBots).some(
+              e => e.role === entry.role && e.status === 'onduty' && e.rank < entry.rank && e !== entry
+            );
+
+            let badge: string;
+            if (entry.localStatus === 'transit') badge = '🚀';
+            else if (entry.localStatus === 'sleep') badge = '💤';
+            else if (entry.localStatus === 'warn') badge = '⚠️';
+            else if (entry.localStatus === 'lounge') badge = '🍸';
+            else if (entry.localStatus === 'quarters') badge = '🏠';
+            else if (entry.localStatus !== 'onduty') badge = '❓';
+            else if (isCO) badge = '⭐';
+            else badge = '🟢';
+
+            lines.push(`      ${entry.name} ${badge} · ${entry.role}[${entry.rank}]${entry.gitVersion}`);
+          }
+        }
+
+        const threadRoot = await reply(conn, '📋 Fleet');
+        if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
+      } catch (err) {
+        await reply(conn, `!fleet failed: ${errStr(err)}`);
+      }
+    },
+
+    todo: async (cmd, conn) => {
+      const target = cmd.slice('!todo'.length).trim().toLowerCase() || null;
+      const root = resolveRoot();
+      const local = getActiveBots();
+      const bots = target ? local.filter(b => b === target) : local;
+      if (bots.length === 0) return; // not on this ship
+      const lines: string[] = [];
+      for (const bot of bots) {
+        const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+        const name = env?.ASSISTANT_NAME || bot;
+        const room = (env?.MAIN_GROUP_NAME || '').toLowerCase();
+        const statusPath = path.join(root, '_runtime', 'data', 'ipc', room, 'status.json');
+        lines.push(`📋 ${name}`);
+        try {
+          const snap = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
+          const g = snap.groups?.find((s: { folder: string }) => s.folder === room);
+          const objective = g?.lastProgress || g?.currentObjective;
+          lines.push(g?.active ? `Currently: ${objective ? objective.slice(0, 200) : 'working'}` : 'Currently: idle');
+        } catch { lines.push('Currently: unknown'); }
+        lines.push('');
+      }
+      await reply(conn, lines.join('\n').trim());
+    },
+
+    allow: async (cmd, conn) => {
+      const match = cmd.match(/^!allow\s+(\S+)\s+(\S+)(?:\s+(\d+))?$/);
+      if (!match) { await reply(conn, 'Usage: !allow <bot> <path> [minutes]'); return; }
+      const [, botName, hostPath, mins] = match;
+      const local = getActiveBots();
+      if (!local.includes(botName.toLowerCase())) return; // not on this ship
+      const defaultDuration = 30;
+      const parsedDuration = parseInt(mins ?? String(defaultDuration), 10);
+      let duration = parsedDuration <= 0 ? defaultDuration : parsedDuration;
+      if (duration > 1440) duration = 1440;
+      try {
+        grantMount(botName.toLowerCase(), hostPath, duration);
+        const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
+        await reply(conn, `✅ Mount granted to ${botName}: ${hostPath} (rw, expires ~${expiry})\nRestart required to pick up new mount.`);
+      } catch (err) {
+        await reply(conn, `⛔ !allow failed: ${errStr(err)}`);
+      }
+    },
+
     deny: async (cmd, conn) => {
       const match = cmd.match(/^!deny\s+(\S+)\s+(\S+)$/);
       if (!match) { await reply(conn, 'Usage: !deny <bot> <path>'); return; }
       const [, botName, hostPath] = match;
+      const local = getActiveBots();
+      if (!local.includes(botName.toLowerCase())) return; // not on this ship
       try {
         const removed = revokeMount(botName.toLowerCase(), hostPath);
         await reply(conn, `${removed ? `✅ Mount revoked: ${hostPath}` : `ℹ️ No mount found for: ${hostPath}`}`);
@@ -856,6 +2002,113 @@ function registerRelayCommands(): void {
         await reply(conn, `⛔ !deny failed: ${errStr(err)}`);
       }
     },
+  });
+}
+
+/** Shared promote/demote handler */
+async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isPromote: boolean): Promise<void> {
+  const direction = isPromote ? 'up' : 'down';
+  const rawTarget = cmd.slice(isPromote ? '!promote '.length : '!demote '.length).trim();
+
+  // Try ship name first (case-insensitive)
+  const ships = (() => { try { return loadShips(); } catch { return null; } })();
+  const shipName = ships ? resolveShipName(rawTarget, ships) : null;
+  if (ships && shipName) {
+    const target = shipName;
+    if (!isSpeaker()) return;
+    const result = rankSwap(Object.entries(ships), target, direction);
+    if (!result) {
+      await reply(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank ship`);
+      return;
+    }
+    writeShips(ships);
+    secretsGitCommit(['operator/ships.json'], `rerank ships: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
+    await reply(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank}`);
+    return;
+  }
+
+  const target = rawTarget.toLowerCase();
+  const local = getActiveBots();
+  if (!local.includes(target)) return;
+  if (!liveFleet[target]) { await reply(conn, `Unknown: ${rawTarget}`); return; }
+  const role = liveFleet[target].role;
+  const sameRole = Object.entries(liveFleet).filter(([_, b]) => b.role === role);
+  const result = rankSwap(sameRole, target, direction);
+  if (!result) {
+    await reply(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
+    return;
+  }
+  fleetUpdate(result.target, { rank: result.targetRank });
+  fleetUpdate(result.swap, { rank: result.swapRank });
+  writeFleet(liveFleet);
+  secretsGitCommit(['bots/fleet.json'], `rerank ${role}: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
+  fleetDirty = false;
+  await reply(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank} (in ${role})`);
+
+  const root = resolveRoot();
+  const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
+  const swapEnv = (() => { try { return loadProfileEnv(root, result.swap); } catch { return null; } })();
+  const botDisplayName = botEnv?.ASSISTANT_NAME || target;
+  const swapDisplayName = swapEnv?.ASSISTANT_NAME || result.swap;
+  const botRoom = (botEnv?.MAIN_GROUP_NAME || '').toLowerCase();
+
+  const targetConn = allConns.find(c => c.name === botRoom) || conn;
+  if (targetConn.accessToken) {
+    await reply(targetConn, `${botDisplayName} reranked (rank ${result.targetRank})`);
+    await reply(targetConn, `${swapDisplayName} reranked (rank ${result.swapRank})`);
+  }
+}
+
+async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[]): Promise<void> {
+  // ! (bare) — print help (speaker only, one reply)
+  if (cmd === '!') {
+    if (!isSpeaker()) return;
+    await reply(conn, buildHelpText());
+    return;
+  }
+  await dispatch(cmd, conn, allConns || []);
+}
+
+async function reply(conn: RoomConn, text: string): Promise<string | undefined> {
+  if (!conn.accessToken) return undefined;
+  return matrixSend(conn.homeserver, conn.accessToken, conn.roomId, text);
+}
+
+async function threadReply(conn: RoomConn, threadRootId: string, text: string): Promise<string | undefined> {
+  if (!conn.accessToken) return undefined;
+  return matrixSendThread(conn.homeserver, conn.accessToken, conn.roomId, threadRootId, text);
+}
+
+// ── Sync loop per room ─────────────────────────────────────────────
+
+async function connectRoom(conn: RoomConn): Promise<void> {
+  const { accessToken, userId } = await matrixLogin(conn.homeserver, conn.username, conn.password);
+  conn.accessToken = accessToken;
+  conn.userId = userId;
+  conn.filterId = await matrixCreateFilter(conn.homeserver, accessToken, userId);
+  log(`connected to ${conn.name} as ${userId}`);
+}
+
+async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: string, conns: RoomConn[]): Promise<void> {
+  let retryDelay = RETRY_DELAY_BASE;
+
+  // Initial sync to get the since token (discard old events)
+  while (!conn.syncToken) {
+    try {
+      await connectRoom(conn);
+      const initial = await matrixSync(conn.homeserver, conn.accessToken!, conn.syncToken, conn.filterId, 0);
+      conn.syncToken = initial.next_batch;
+      retryDelay = RETRY_DELAY_BASE;
+      log(`${conn.name}: initial sync done, watching for commands`);
+    } catch (err) {
+      log(`${conn.name}: initial sync failed (retry in ${Math.round(retryDelay / 1000)}s): ${errStr(err)}`);
+      conn.accessToken = null;
+      await sleep(retryDelay);
+      retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
+    }
+  }
+
+  while (true) {
     try {
       if (!conn.accessToken) {
         await connectRoom(conn);
