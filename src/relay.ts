@@ -1062,9 +1062,12 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               if (engConn && threadRoot) await threadReply(engConn, threadRoot, `⛔ ${bot} restart failed: ${errStr(err).slice(0, 100)}`);
             }
           }
+          // Post completion summary before relay restarts
+          if (engConn) await reply(engConn, `✅ git sync: fleet restarted`);
           // Restart relay itself to pick up new relay code
           try {
             log('git sync: restarting relay to pick up new code');
+            if (engConn && threadRoot) await threadReply(engConn, threadRoot, `🔄 relay restarting...`);
             execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
           } catch (err) {
             log(`git sync: relay self-restart failed: ${errStr(err)}`);
@@ -1393,7 +1396,13 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
       const botRooms = buildBotRoomMap();
       for (const bot of getActiveBots()) {
         if (liveFleet[bot]?.status !== 'onduty') continue; // not on duty — skip nudges
-        if (hasRunningContainer(bot)) continue; // already working
+        if (hasRunningContainer(bot)) continue; // container running — active
+        // Also check heartbeat file: if written recently, bot just restarted — skip nudge
+        try {
+          const hbPath = path.join(root, '_runtime', 'instances', bot, 'data', 'heartbeat');
+          const hbAge = Date.now() - fs.statSync(hbPath).mtimeMs;
+          if (hbAge < HEARTBEAT_INTERVAL) continue; // heartbeat recent — not truly idle
+        } catch { /* no heartbeat file — proceed */ }
         const roomName = botRooms[bot];
         if (!roomName) continue;
         const conn = conns.find((c) => c.name === roomName);
