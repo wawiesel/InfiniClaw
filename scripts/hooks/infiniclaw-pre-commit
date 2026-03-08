@@ -18,7 +18,38 @@ if echo "$staged" | grep -q 'node_modules/'; then
   exit 1
 fi
 
-# ── Role-based restrictions (ASSISTANT_ROLE set inside containers) ──
+# ── README sibling rule ──
+# Any change to a non-README sibling must include a change to the directory's README.md.
+
+readme_missing=()
+while IFS= read -r file; do
+  dir=$(dirname "$file")
+  base=$(basename "$file")
+  [[ "$base" == "README.md" ]] && continue
+  readme="$dir/README.md"
+  [[ ! -f "$readme" ]] && continue
+  if ! echo "$staged" | grep -qF "$readme"; then
+    readme_missing+=("$readme (changed $file)")
+  fi
+done <<< "$staged"
+
+if [[ ${#readme_missing[@]} -gt 0 ]]; then
+  # Deduplicate by README path
+  seen=()
+  for entry in "${readme_missing[@]}"; do
+    readme_path="${entry%% (*}"
+    skip=false
+    for s in "${seen[@]+"${seen[@]}"}"; do
+      [[ "$s" == "$readme_path" ]] && skip=true && break
+    done
+    $skip && continue
+    seen+=("$readme_path")
+  done
+  echo "ERROR: The following README.md files must be updated when changing siblings:"
+  printf "  %s\n" "${seen[@]}"
+  echo "Stage the README.md changes or use --no-verify to bypass."
+  exit 1
+fi
 
 # ── Role-based restrictions (ASSISTANT_ROLE set inside containers) ──
 

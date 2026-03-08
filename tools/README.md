@@ -6,7 +6,7 @@ Standalone utilities for host-side use. No compilation required.
 
 MCP server that reads conversation history from S3.
 
-**Requires**: S3 configured in `~/.config/infiniclaw/machine.json`
+**Requires**: S3 configured in `fleet.json` (secrets repo)
 
 **Add to your `~/.claude/claude_desktop_config.json` or `.mcp.json`:**
 ```json
