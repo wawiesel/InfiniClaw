@@ -4,6 +4,17 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-16: Bot doesn't reply in-thread when addressed in an existing thread
+
+**Reported:** 2026-03-08
+**Status:** open
+**Component:** main.ts / message routing / bot persona
+**Symptom:** When operator/Captain posts a message inside an existing thread (with `m.relates_to.rel_type = "m.thread"`), the bot receives and acknowledges the content but replies on the main timeline instead of within the thread.
+**Root cause:** The agent-runner's auto-threading logic creates new threads for @callouts, but when a message arrives that's already part of a thread, the bot doesn't automatically call `set_thread` to route replies back into that thread. The bot sees the `thread_id` attribute on the incoming `<message>` but has no standing instruction to `set_thread` first.
+**Fix candidates:** (a) Code: in `main.ts`, detect `threadId` on incoming messages and auto-call `set_thread` before injecting the message to the bot session. (b) Persona: add instruction to CLAUDE.md — "If incoming `<message>` has a `thread_id`, call `mcp__nanoclaw__set_thread` with that ID before replying." Option (a) is cleaner (no bot should have to remember this boilerplate).
+
+---
+
 ### BUG-15: git sync restarts fleet on every commit — doc commits should not restart
 
 **Reported:** 2026-03-08
