@@ -98,7 +98,7 @@ import {
 } from './chat-activity.js';
 import { shouldIgnoreMessage } from './message-filtering.js';
 import { appendConversationLog } from './conversation-log.js';
-import { statusMessage } from './formatting.js';
+import { statusMessage, escapeHtml } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { uploadContent, uploadHtml, getPublicS3Url } from './s3-sync.js';
 import { exportHistoryToS3 } from './history-export.js';
@@ -408,8 +408,7 @@ function toolCallBreadcrumb(
   return { html, s3Key, pageHtml };
 }
 
-const esc = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const esc = escapeHtml;
 
 function updateEventIdFile(groupFolder: string, key: 'lastSent' | 'lastReceived', eventId: string): void {
   const idsFile = path.join(DATA_DIR, 'ipc', groupFolder, 'last_event_ids.json');

@@ -27,6 +27,7 @@ import {
   OnInboundMessage,
   RegisteredGroup,
 } from 'nanoclaw/types.js';
+import { escapeHtml } from '../formatting.js';
 
 export interface MatrixChannelOpts {
   onMessage: OnInboundMessage;
@@ -187,14 +188,6 @@ function sanitizeGroupFolderSegment(folder: string): string | null {
   return /^[a-zA-Z0-9._-]+$/.test(trimmed) ? trimmed : null;
 }
 
-function escapeHtml(input: string): string {
-  return input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 function isEscaped(text: string, index: number): boolean {
   let slashCount = 0;
