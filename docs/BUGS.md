@@ -4,14 +4,25 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-12: Lobes use send_message/intercom tools, routing output to wrong channel
+
+**Reported:** 2026-03-08
+**Status:** fixed (this commit)
+**Component:** delegate-runner.ts / lobe execution constraints
+**Symptom:** A lobe dispatched for research/file-ops sent "📋 Fleet" through the Engineering intercom. Bots should never deliver output via the intercom — only relay `!` commands do that.
+**Root cause:** `delegatedObjective` constraints in `delegate-runner.ts` didn't prohibit communication tools. Lobes had access to `send_message`, `send_image`, etc. and could inadvertently use them.
+**Fix:** Added constraint to `delegatedObjective`: "Do NOT use send_message, send_image, send_file, or any intercom/communication tools." Output is delivered to the delegate thread automatically.
+
+---
+
 ### BUG-11: Thought process not visible in threads (possible streaming output bug)
 
 **Reported:** 2026-03-08
-**Status:** open
+**Status:** fixed (ca16ce9)
 **Component:** main.ts / streaming output / thread display
 **Symptom:** Captain cannot see enough of the bot's reasoning in threads. Text the bot "thinks out loud" before tool calls is not appearing — only the tool call anchors are visible.
-**Root cause (suspected):** Streaming text output may not be posted to the thread. Either: (a) only the final tool-call anchor is sent to Matrix, not intermediate text; (b) text is sent but gets swallowed or lost before thread creation; (c) thread text routing has a bug.
-**Fix:** Investigate streaming output path in `main.ts` — confirm whether text emitted before tool calls is routed to the active thread or dropped. If dropped, fix the routing so all bot text (not just tool anchors) appears in threads.
+**Root cause:** 10s `PROGRESS_CHAT_COOLDOWN_MS` throttle was dropping all but the first text chunk per 10s window. Tool calls bypass this throttle but text doesn't — so bot thinking was silently discarded.
+**Fix:** Skip cooldown check when in an active thread (`progressToolCallThreadIds` or `activeReplyThreadIds` set). In-thread text now flows at full rate. (ca16ce9)
 
 ---
 
@@ -74,11 +85,11 @@ When this file has content, the commanding engineer must address these items fir
 
 **Reported:** 2026-03-08
 **Re-opened:** 2026-03-08 (d96372f marked fixed but Captain confirms still broken)
-**Status:** open
+**Status:** fixed (ca16ce9)
 **Component:** operator-commands / relay
 **Symptom:** `!todo cid` should immediately open a thread and display the bot's current todo list. Captain reports it is not an instant in-thread reply.
 **Root cause:** The thread IS created by `reply()` in relay.ts — but content comes from `status.json` (`lastProgress`/`currentObjective`), which is the relay's stale snapshot, not the bot's actual TodoWrite task list. Bot todos are stored in the Claude Code session, not accessible to the relay.
-**Fix:** Bot should write its current todo list to a file the relay can read (e.g. `_runtime/instances/{bot}/data/todos.json`), updated on every TodoWrite call. `!todo` reads that file instead of status.json.
+**Fix:** `!todo` now reads most recently modified `.claude/todos/*.json` session file; displays items with ✅/🔄/⬜ icons. Falls back to status.json if unavailable. (ca16ce9)
 
 ---
 

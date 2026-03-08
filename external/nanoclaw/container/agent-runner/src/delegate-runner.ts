@@ -555,6 +555,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         '- Do NOT create Python virtual environments inside /workspace/persona/temp or /workspace/extra.',
         '- If a Python environment is required, create it under /workspace/cache/venvs.',
         '- Route large model/package caches under /workspace/cache.',
+        '- Do NOT use send_message, send_image, send_file, or any intercom/communication tools. Your output is delivered to the delegate thread automatically — using those tools would route to the wrong channel.',
         '',
         'Objective:',
         args.objective,
