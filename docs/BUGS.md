@@ -18,7 +18,7 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-20: `resumeGate` blocks message loop for full container idle timeout at startup
 
 **Reported:** 2026-03-08
-**Status:** open
+**Status:** fixed (this commit)
 **Component:** `src/main.ts` — `injectResumeMessage()`
 **Symptom:** After Cid restarts, messages sent during the first ~30 minutes are silently buffered in the DB. They are not processed until the startup container's idle timeout fires. Observed: BUG-19 test and status ping waited ~30 minutes before Cid responded.
 **Root cause:** `injectResumeMessage()` calls `await processGroupMessages(mainJid)`, which calls `await runAgent(...)`, which blocks until the container exits. The container only exits via idle timeout (30 min after last output). `resumeGateResolve()` is called only AFTER `processGroupMessages()` returns. `startMessageLoop()` awaits `resumeGate`, so the message loop is blocked for the full container lifetime. Any messages that arrive during the startup container run pile up in the DB and are only processed in a batch after the gate opens.

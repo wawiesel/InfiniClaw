@@ -1288,11 +1288,6 @@ async function injectResumeMessage(): Promise<void> {
     logger.info({ chatJid, group: group.name, recentCount: recent.length }, 'Injected resume message with context');
   }
 
-  // Process main group resume synchronously (container runs, reviews session)
-  if (mainJid) {
-    await processGroupMessages(mainJid);
-  }
-
   // Send updated todo list to main room
   if (mainJid) {
     const items = readTodoItems(MAIN_GROUP_FOLDER);
@@ -1313,6 +1308,8 @@ async function injectResumeMessage(): Promise<void> {
   isResuming = false;
   resumeGateResolve!();
   logger.info('Resume complete, message loop unblocked');
+  // Resume message is already queued via enqueueMessageCheck above.
+  // The container starts via queue; new messages are piped to it via IPC.
 }
 
 // ── Session cleanup ─────────────────────────────────────────────────────
