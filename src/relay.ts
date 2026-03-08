@@ -2550,6 +2550,96 @@ async function threadReply(conn: RoomConn, threadRootId: string, text: string): 
   return matrixSendThread(conn.homeserver, conn.accessToken, conn.roomId, threadRootId, text);
 }
 
+// ── BehindTheCurtain — direct operator chat ────────────────────────
+
+/** Watch BehindTheCurtain using the @operator account. Every Captain message
+ *  is piped verbatim to the 'operator' tmux session, creating a seamless
+ *  direct chat between the Captain and the active operator instance. */
+async function curtainLoop(captainUserId: string): Promise<void> {
+  const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
+  let opConfig: { homeserver: string; accessToken: string; userId: string; rooms?: Record<string, string> };
+  try {
+    opConfig = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+  } catch {
+    log('curtain: operator-matrix.json not found — skipping BehindTheCurtain');
+    return;
+  }
+
+  const roomId = opConfig.rooms?.['BehindTheCurtain'];
+  if (!roomId) {
+    log('curtain: no BehindTheCurtain room configured — skipping');
+    return;
+  }
+
+  const { homeserver, accessToken, userId } = opConfig;
+  if (!accessToken || !userId) {
+    log('curtain: missing accessToken or userId in operator-matrix.json — skipping');
+    return;
+  }
+
+  log(`curtain: watching BehindTheCurtain as ${userId}`);
+
+  const filterId = await matrixCreateFilter(homeserver, accessToken, userId).catch(() => null);
+  let syncToken: string | null = null;
+  let retryDelay = RETRY_DELAY_BASE;
+
+  // Initial sync to skip old messages
+  while (!syncToken) {
+    try {
+      const initial = await matrixSync(homeserver, accessToken, null, filterId, 0);
+      syncToken = initial.next_batch;
+      log('curtain: initial sync done, watching for Captain messages');
+      retryDelay = RETRY_DELAY_BASE;
+    } catch (err) {
+      log(`curtain: initial sync failed (retry in ${Math.round(retryDelay / 1000)}s): ${errStr(err)}`);
+      await sleep(retryDelay);
+      retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
+    }
+  }
+
+  while (true) {
+    try {
+      const data = await matrixSync(homeserver, accessToken, syncToken, filterId, SYNC_TIMEOUT);
+      syncToken = data.next_batch;
+      retryDelay = RETRY_DELAY_BASE;
+
+      const joinedRooms = data.rooms?.join;
+      if (!joinedRooms) continue;
+
+      for (const [rid, roomData] of Object.entries(joinedRooms)) {
+        if (rid !== roomId) continue;
+        for (const event of (roomData as any).timeline?.events || []) {
+          if (event.type !== 'm.room.message') continue;
+          if (event.content?.msgtype !== 'm.text') continue;
+          if (event.sender === userId) continue; // skip own messages
+          if (captainUserId && event.sender !== captainUserId) continue; // Captain only
+          const body = event.content.body?.trim();
+          if (!body) continue;
+
+          log(`curtain: message from ${event.sender}: ${body.slice(0, 80)}`);
+          const SESSION = 'operator';
+          try {
+            let existed = true;
+            try { execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' }); } catch { existed = false; }
+            if (!existed) {
+              execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(secretsRepoPath()), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
+              await sleep(3000);
+            }
+            execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', body], { stdio: 'pipe' });
+            execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
+          } catch (err) {
+            log(`curtain: tmux send failed: ${errStr(err)}`);
+          }
+        }
+      }
+    } catch (err) {
+      log(`curtain: sync error (retry in ${Math.round(retryDelay / 1000)}s): ${errStr(err)}`);
+      await sleep(retryDelay);
+      retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
+    }
+  }
+}
+
 // ── Sync loop per room ─────────────────────────────────────────────
 
 async function connectRoom(conn: RoomConn): Promise<void> {
@@ -2732,6 +2822,7 @@ async function main(): Promise<void> {
   relayTasksLoop(conns).catch((err) => log(`relay tasks loop fatal: ${errStr(err)}`));
   secretsSyncLoop(conns).catch((err) => log(`secrets sync loop fatal: ${errStr(err)}`));
   heartbeatLoop(conns).catch((err) => log(`heartbeat loop fatal: ${errStr(err)}`));
+  curtainLoop(captainUserId).catch((err) => log(`curtain loop fatal: ${errStr(err)}`));
 
   await Promise.all(loops);
 }
