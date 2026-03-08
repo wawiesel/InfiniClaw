@@ -12,7 +12,7 @@ Host machine (macOS / Linux)
 ├── service.ts          → Deploy, start, stop bots via pm2
 ├── relay.ts            → Supervisor relay: Matrix watcher for bot lifecycle and operator commands
 ├── main.ts             → Message loop, indicators, container lifecycle
-├── container-spawn.ts  → Build podman args, delegate to upstream runContainer()
+├── container-spawn.ts  → Build podman args, inject git identity, delegate to upstream runContainer()
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)
 ├── container-secrets.ts→ Normalize provider secrets for containers
 ├── run-container.ts    → Container run loop (extracted from NanoClaw for composability)

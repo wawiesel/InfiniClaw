@@ -79,6 +79,10 @@ const ALLOWED_ENV_VARS = [
   'CURL_CA_BUNDLE',
   'GIT_SSL_CAINFO',
   'NODE_TLS_REJECT_UNAUTHORIZED',
+  'GIT_AUTHOR_NAME',
+  'GIT_AUTHOR_EMAIL',
+  'GIT_COMMITTER_NAME',
+  'GIT_COMMITTER_EMAIL',
 ];
 const SAFE_CONTAINER_NAME_TAG = /^[a-zA-Z0-9_.-]{1,32}$/;
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -105,6 +109,19 @@ function collectContainerSecrets(projectRoot: string): Record<string, string> {
         secrets[key] = value;
       }
     }
+  }
+
+  // Auto-inject git identity from Matrix username so commits are attributed to the bot
+  const botName = secrets['ASSISTANT_NAME'];
+  const matrixUser = process.env['MATRIX_USERNAME'];
+  const matrixServer = process.env['MATRIX_HOMESERVER']?.replace(/^https?:\/\//, '') || 'a-gis.org';
+  if (botName) {
+    const displayName = botName.charAt(0).toUpperCase() + botName.slice(1).toLowerCase();
+    const email = matrixUser ? `${matrixUser}@${matrixServer}` : `${botName.toLowerCase()}@infiniclaw.local`;
+    if (!secrets['GIT_AUTHOR_NAME']) secrets['GIT_AUTHOR_NAME'] = displayName;
+    if (!secrets['GIT_AUTHOR_EMAIL']) secrets['GIT_AUTHOR_EMAIL'] = email;
+    if (!secrets['GIT_COMMITTER_NAME']) secrets['GIT_COMMITTER_NAME'] = displayName;
+    if (!secrets['GIT_COMMITTER_EMAIL']) secrets['GIT_COMMITTER_EMAIL'] = email;
   }
 
   return secrets;
