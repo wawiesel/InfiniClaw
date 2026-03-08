@@ -4,6 +4,17 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-14: Thread Brain dies on container restart — branch_to_thread unreliable
+
+**Reported:** 2026-03-08
+**Status:** open
+**Component:** delegate-runner.ts / branch_to_thread / container lifecycle
+**Symptom:** Main brain calls `branch_to_thread`, dispatches correctly, says "Thread brain spawned." But the Thread Brain never posts because the bot's container restarts (triggered by git sync detecting new commits), killing the Thread Brain child process inside the old container.
+**Root cause:** `branch_to_thread` spawns the Thread Brain as a child process INSIDE the bot's container with `detached: true`. When the container is killed and replaced (by relay's git sync → refreshBot, or by `!refresh`), all child processes inside the old container die. The Thread Brain has no way to survive a container restart.
+**Fix:** Per design (02-threading.md), Thread Brains should be host-managed processes — the host creates the thread, spawns the Thread Brain as a separate container, and wires its output to the Matrix thread. The current `branch_to_thread` implementation is a placeholder (see `TODO(phase2)` comment). Fix: move Thread Brain spawn to host side (relay.ts or new thread-manager.ts), receiving spawn requests via IPC from the bot container.
+
+---
+
 ### BUG-13: branch_to_thread Thread Brain posts nowhere (no set_thread in objective)
 
 **Reported:** 2026-03-08
