@@ -4,6 +4,17 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-7: Brain thread branching not visible in Engineering
+
+**Reported:** 2026-03-08
+**Status:** open
+**Component:** main.ts / thread display
+**Symptom:** In Engineering, threads appear with names like "🔧 TodoWrite" — raw tool names with no context. The lobe delegation and brain branching system is not apparent to the Captain. Work threads should communicate what work is being done, not what tool was called.
+**Root cause:** Thread anchor uses the last tool progress text (tool name) rather than a meaningful description of the work being done.
+**Fix:** Thread titles should reflect the actual work objective, not the tool name. Lobe delegations should create recognizable, descriptive threads.
+
+---
+
 ### BUG-1: Restart has no visible indicator / doesn't happen in a thread
 
 **Reported:** 2026-03-08
