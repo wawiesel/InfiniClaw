@@ -548,6 +548,19 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
   registeredGroups = groups;
 }
 
+/** @internal - exported for testing */
+export function _setBotMatrixUserIds(ids: Set<string>): void {
+  botMatrixUserIds = ids;
+}
+
+/** @internal - exported for testing */
+export function _resolveReplyThread(
+  chatJid: string,
+  messages: NewMessage[],
+): string | undefined {
+  return resolveReplyThread(chatJid, messages);
+}
+
 // ── Output handler context ──────────────────────────────────────────────
 
 interface OutputHandlerContext {

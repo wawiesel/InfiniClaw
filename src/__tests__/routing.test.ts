@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import { _initTestDatabase, getAllChats, storeChatMetadata } from 'nanoclaw/db.js';
-import { getAvailableGroups, _setRegisteredGroups } from '../main.js';
+import { TRIGGER_PATTERN, ASSISTANT_NAME } from 'nanoclaw/config.js';
+import { NewMessage } from 'nanoclaw/types.js';
+import { getAvailableGroups, _setRegisteredGroups, _resolveReplyThread, _setBotMatrixUserIds } from '../main.js';
 
 beforeEach(() => {
   _initTestDatabase();
   _setRegisteredGroups({});
+  _setBotMatrixUserIds(new Set());
 });
 
 // --- JID ownership patterns ---
@@ -96,5 +99,85 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
+  });
+});
+
+// --- resolveReplyThread (BUG-21: isRoutableHuman) ---
+
+function makeMsg(overrides: Partial<NewMessage> & { content: string; sender: string }): NewMessage {
+  return {
+    id: 'msg-' + Math.random().toString(36).slice(2),
+    chat_jid: 'room:test',
+    sender_name: 'Test',
+    timestamp: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+const TRIGGER = `@${ASSISTANT_NAME}`;
+
+describe('resolveReplyThread — BUG-21 isRoutableHuman', () => {
+  it('routes to thread when human triggers bot in thread', () => {
+    const msgs = [
+      makeMsg({ sender: '@human:server', content: TRIGGER, thread_id: 'thread-1' }),
+    ];
+    expect(_resolveReplyThread('room:test', msgs)).toBe('thread-1');
+  });
+
+  it('does NOT route to thread when intercom sender triggers bot in thread', () => {
+    // BUG-21: relay notifications like "⛔ !refresh Cid — fetch failed" must not
+    // cause thread routing even though they match TRIGGER_PATTERN.
+    const msgs = [
+      makeMsg({ sender: '@cid-intercom:a-gis.org', content: TRIGGER, thread_id: 'thread-1' }),
+    ];
+    expect(_resolveReplyThread('room:test', msgs)).toBeUndefined();
+  });
+
+  it('does NOT route to thread when known bot sender triggers bot in thread', () => {
+    _setBotMatrixUserIds(new Set(['@bot:server']));
+    const msgs = [
+      makeMsg({ sender: '@bot:server', content: TRIGGER, thread_id: 'thread-1' }),
+    ];
+    expect(_resolveReplyThread('room:test', msgs)).toBeUndefined();
+  });
+
+  it('routes to thread for human last message (CO fallback, no explicit trigger)', () => {
+    // CO mode: last human message in thread → reply in that thread
+    const msgs = [
+      makeMsg({ sender: '@human:server', content: 'hey everyone', thread_id: 'thread-2' }),
+    ];
+    expect(_resolveReplyThread('room:test', msgs)).toBe('thread-2');
+  });
+
+  it('does NOT route to thread for intercom last message (CO fallback)', () => {
+    // BUG-21: intercom last message must not trigger CO thread routing
+    const msgs = [
+      makeMsg({ sender: '@cid-intercom:a-gis.org', content: '⛔ !refresh Cid — fetch failed', thread_id: 'thread-2' }),
+    ];
+    expect(_resolveReplyThread('room:test', msgs)).toBeUndefined();
+  });
+
+  it('returns undefined when no messages have thread_id', () => {
+    const msgs = [
+      makeMsg({ sender: '@human:server', content: TRIGGER }),
+    ];
+    expect(_resolveReplyThread('room:test', msgs)).toBeUndefined();
+  });
+
+  it('prefers the most recent human trigger in thread over earlier ones', () => {
+    const msgs = [
+      makeMsg({ sender: '@human:server', content: TRIGGER, thread_id: 'thread-old' }),
+      makeMsg({ sender: '@human:server', content: TRIGGER, thread_id: 'thread-new' }),
+    ];
+    expect(_resolveReplyThread('room:test', msgs)).toBe('thread-new');
+  });
+
+  it('skips intercom trigger and falls back to earlier human trigger', () => {
+    const msgs = [
+      makeMsg({ sender: '@human:server', content: TRIGGER, thread_id: 'thread-human' }),
+      makeMsg({ sender: '@cid-intercom:a-gis.org', content: TRIGGER, thread_id: 'thread-intercom' }),
+    ];
+    // Intercom is last — should be ignored; human trigger earlier should win
+    expect(_resolveReplyThread('room:test', msgs)).toBe('thread-human');
   });
 });
