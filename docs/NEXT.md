@@ -159,7 +159,7 @@ Each bot already has its own `messages.db`. Since each bot runs on exactly one m
 
 The bots already communicate through Matrix rooms. The IPC filesystem (`data/ipc/<group>/messages/*.json` + 500ms polling) duplicates what Matrix already does. Eliminating filesystem IPC removes the biggest single-machine assumption.
 
-**How:** IPC commands (restart_bot, set_brain_mode, holodeck_*, git_push) become Matrix messages with a structured prefix (e.g., `!ipc restart_bot engineer`). The host process on each machine watches its bots' rooms for IPC commands and executes locally. This is already how the `!restart` command works.
+**How:** IPC commands (restart_bot, set_brain_mode, holodeck_*, git_push) become Matrix messages with a structured prefix (e.g., `!ipc restart_bot engineer`). The host process on each machine watches its bots' rooms for IPC commands and executes locally. This is already how the `!refresh` command works.
 
 **Benefits:**
 - No shared filesystem needed for IPC

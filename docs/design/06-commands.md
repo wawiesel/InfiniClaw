@@ -12,7 +12,7 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 | `!todo <bot>` | Only that bot replies with its task list. |
 | `!dismiss <bot>` | Stop bot, update fleet.json. |
 | `!join <bot>` | Start bot, update fleet.json. |
-| `!restart <bot>` | Full stop + redeploy + start. |
+| `!refresh <bot>` | Dismiss + join (full restart cycle). |
 | `!transport <bot> <ship>` | Beam bot to another ship (dematerialize/materialize). |
 | `!promote <target>` | Raise rank (bot within role, or ship). |
 | `!demote <target>` | Lower rank (bot within role, or ship). |
@@ -48,7 +48,7 @@ A lightweight always-on process, one per ship (`src/relay.ts`). The relay connec
 
 **The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't start bots. This ensures every ship stays reachable for commands like `!commission`, `!fleet`, and `!health`. Decommissioning (`!decommission`) stops all bots but leaves the relay listening.
 
-When a command arrives (e.g. `!restart cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
+When a command arrives (e.g. `!refresh cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
 
 Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay`.
 

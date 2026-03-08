@@ -34,7 +34,7 @@ Relays reply to commands via the same intercom account they poll on. All replies
 
 The relay on each ship connects to Matrix as the intercom accounts (same credentials as `send`). Messages starting with `!` are always processed, even from self. This is how operator-sent `!` commands reach all relays:
 
-1. Operator sends `!restart cid` via `send bridge`
+1. Operator sends `!refresh cid` via `send bridge`
 2. Message arrives in Bridge room from `bridge-intercom`
 3. Every ship's relay polls Bridge as `bridge-intercom` (different device IDs)
 4. All relays see the `!` message and process it

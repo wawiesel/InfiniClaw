@@ -2,7 +2,7 @@
  * Supervisor relay — lightweight Matrix watcher for fleet lifecycle.
  *
  * Connects to each room via its intercom account (from intercom.json),
- * watches for operator commands (!join, !dismiss, !restart), and manages
+ * watches for operator commands (!join, !dismiss, !refresh), and manages
  * bots via pm2 — no CLI needed.
  *
  * Run: node dist/relay.js
@@ -655,11 +655,11 @@ function resolveShipName(input: string, ships: Record<string, unknown>): string 
 /**
  * Resolve which local bots a command applies to.
  *
- * - Targeted (`!restart parker`): returns [parker] ONLY if parker is in
+ * - Targeted (`!refresh parker`): returns [parker] ONLY if parker is in
  *   this ship. Returns. Returns [] if not local (silent ignore —
  *   another ship.s relay handles it).
  *
- * - Untargeted (`!restart` in Engineering): returns local bots whose
+ * - Untargeted (`!refresh` in Engineering): returns local bots whose
  *   MAIN_GROUP_NAME matches the room the command arrived in.
  */
 function resolveBots(target: string | undefined, roomName: string, action?: string): string[] {
@@ -1046,13 +1046,19 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
         } else {
           await reportRecovery('code build', conns);
           // Restart running bots so they pick up new code (skip dismissed)
+          const engConn = findEngConn(conns);
+          const threadRoot = engConn
+            ? await reply(engConn, `🔄 git sync: ${result.newCommits} new commit(s) — restarting fleet`)
+            : undefined;
           for (const bot of getActiveBots()) {
             if (liveFleet[bot]?.status !== 'onduty') continue;
             try {
               bootstrapBot(resolveRoot(), bot);
               log(`git sync: restarted ${bot}`);
+              if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${bot} restarted${botVersion(resolveRoot(), bot)}`);
             } catch (err) {
               log(`git sync: failed to restart ${bot}: ${errStr(err)}`);
+              if (engConn && threadRoot) await threadReply(engConn, threadRoot, `⛔ ${bot} restart failed: ${errStr(err).slice(0, 100)}`);
             }
           }
           // Restart relay itself to pick up new relay code
@@ -1408,7 +1414,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
 // ── Command handling ───────────────────────────────────────────────
 
 async function handleLifecycleCommand(
-  action: 'join' | 'dismiss' | 'restart' | 'sleep' | 'wake',
+  action: 'join' | 'dismiss' | 'refresh' | 'sleep' | 'wake',
   target: string | undefined,
   conn: RoomConn,
 ): Promise<void> {
@@ -1522,41 +1528,33 @@ async function handleLifecycleCommand(
         await reply(conn, fail);
       }
     } else {
-      // Join/restart are slow (build) — use a thread
+      // Join is slow (build) — use a thread
       const startedAt = Date.now();
-      const emoji = action === 'join' ? '🟢' : '🔄';
       const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-      const threadRoot = await reply(conn, `${emoji} ${name} ${action === 'join' ? 'joining' : 'restarting'}`);
+      const threadRoot = await reply(conn, `🟢 ${name} joining`);
       if (!threadRoot) continue;
       const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
       try {
-        if (action === 'restart') {
-          await step('stopping...');
-          stopBot(bot);
-          killStaleContainers(bot);
-        }
-        if (action === 'join') {
-          // Restore brain model and enable lobes
-          const config = loadShipConfig();
-          const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
-          const savedModel = liveFleet[bot]?.activeBrainModel;
-          if (savedModel) {
-            try {
-              upsertEnvLine(envFile, 'BRAIN_MODEL', savedModel);
-              upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
-              log(`${name}: brain restored to ${savedModel}, lobes enabled`);
-            } catch (envErr) {
-              log(`${name}: env restore failed (non-fatal): ${errStr(envErr)}`);
-            }
-          } else {
-            try {
-              upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
-            } catch { /* ignore */ }
+        // Restore brain model and enable lobes
+        const config = loadShipConfig();
+        const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
+        const savedModel = liveFleet[bot]?.activeBrainModel;
+        if (savedModel) {
+          try {
+            upsertEnvLine(envFile, 'BRAIN_MODEL', savedModel);
+            upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
+            log(`${name}: brain restored to ${savedModel}, lobes enabled`);
+          } catch (envErr) {
+            log(`${name}: env restore failed (non-fatal): ${errStr(envErr)}`);
           }
-          fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME });
-          writeFleet(liveFleet);
-          clearShipConfigCache();
+        } else {
+          try {
+            upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
+          } catch { /* ignore */ }
         }
+        fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME });
+        writeFleet(liveFleet);
+        clearShipConfigCache();
         // Move bot: leave lounge → join duty room
         try {
           const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
@@ -1566,6 +1564,15 @@ async function handleLifecycleCommand(
         } catch (roomErr) {
           log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
           await step(`room move failed: ${errStr(roomErr)}`);
+        }
+        // Sync latest code before starting
+        const syncResult = gitSync();
+        if (!syncResult.ok) {
+          await step(`⚠️ code sync failed — ${syncResult.output.slice(0, 100)}`);
+        } else if (syncResult.newCommits > 0) {
+          await step(`pulled ${syncResult.newCommits} commit(s), rebuilding...`);
+          const buildResult = rebuildInfiniClaw();
+          if (buildResult.includes('FAILED')) await step(`⚠️ rebuild failed — bot starting on previous build`);
         }
         await step('building...');
         bootstrapBot(root, bot);
@@ -1577,8 +1584,8 @@ async function handleLifecycleCommand(
         // Trigger the bot to acknowledge in the thread
         await threadReply(conn, threadRoot, `${name}, reporting for duty!`);
       } catch (err) {
-        log(`!${action} ${name} failed: ${errStr(err)}`);
-        const fail = `⛔ !${action} ${name} — ${errStr(err)}`;
+        log(`!join ${name} failed: ${errStr(err)}`);
+        const fail = `⛔ !join ${name} — ${errStr(err)}`;
         await step(fail);
         await reply(conn, fail);
       }
@@ -1599,9 +1606,12 @@ function registerRelayCommands(): void {
       const parsed = parseTarget(cmd, '!dismiss');
       if (parsed.matched) await handleLifecycleCommand('dismiss', parsed.target, conn);
     },
-    restart: async (cmd, conn) => {
-      const parsed = parseTarget(cmd, '!restart');
-      if (parsed.matched) await handleLifecycleCommand('restart', parsed.target, conn);
+    refresh: async (cmd, conn) => {
+      const parsed = parseTarget(cmd, '!refresh');
+      if (parsed.matched) {
+        await handleLifecycleCommand('dismiss', parsed.target, conn);
+        await handleLifecycleCommand('join', parsed.target, conn);
+      }
     },
     sleep: async (cmd, conn) => {
       const parsed = parseTarget(cmd, '!sleep');
@@ -1981,7 +1991,7 @@ function registerRelayCommands(): void {
             else if (isCO) badge = '⭐';
             else badge = '🟢';
 
-            const prefix = isLast ? '  └' : '  ├';
+            const prefix = isLast ? '\u00A0\u00A0└' : '\u00A0\u00A0├';
             lines.push(`${prefix} ${entry.name} ${badge} · ${entry.role}[${entry.rank}]${entry.gitVersion}`);
           }
         }
@@ -1998,6 +2008,8 @@ function registerRelayCommands(): void {
       const local = getActiveBots();
       const bots = target ? local.filter(b => b === target) : local;
       if (bots.length === 0) return; // not on this ship
+      const threadRoot = await reply(conn, `📋 Todo${target ? ` — ${target}` : ''}`);
+      if (!threadRoot) return;
       const lines: string[] = [];
       for (const bot of bots) {
         const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
@@ -2013,7 +2025,7 @@ function registerRelayCommands(): void {
         } catch { lines.push('Currently: unknown'); }
         lines.push('');
       }
-      await reply(conn, lines.join('\n').trim());
+      await threadReply(conn, threadRoot, lines.join('\n').trim());
     },
 
     allow: async (cmd, conn) => {
