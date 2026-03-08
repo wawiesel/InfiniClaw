@@ -17,6 +17,7 @@ import {
 import { sendViaIntercom } from './intercom-relay.js';
 import { logger } from 'nanoclaw/logger.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
+import { isRecord } from './utils.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
@@ -61,10 +62,6 @@ interface TextMessageData {
   threadId?: string;
   crossRoom?: boolean;
   senderName?: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function readValidatedIpcJson(filePath: string, maxBytes: number): Record<string, unknown> {

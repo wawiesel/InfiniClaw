@@ -125,31 +125,30 @@ export function markRunEnded(chatJid: string): void {
   persistChatActivity(chatJid);
 }
 
-export function markProgress(chatJid: string, progress: string): void {
-  const compact = compactMessage(progress);
+function markField(
+  chatJid: string,
+  text: string,
+  field: 'lastProgress' | 'lastCompletion' | 'lastError',
+  atField: 'lastProgressAt' | 'lastCompletionAt' | 'lastErrorAt',
+): void {
+  const compact = compactMessage(text);
   if (!compact) return;
   const activity = ensureChatActivity(chatJid);
-  activity.lastProgress = compact;
-  activity.lastProgressAt = Date.now();
+  activity[field] = compact;
+  activity[atField] = Date.now();
   persistChatActivity(chatJid);
+}
+
+export function markProgress(chatJid: string, progress: string): void {
+  markField(chatJid, progress, 'lastProgress', 'lastProgressAt');
 }
 
 export function markCompletion(chatJid: string, completion: string): void {
-  const compact = compactMessage(completion);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.lastCompletion = compact;
-  activity.lastCompletionAt = Date.now();
-  persistChatActivity(chatJid);
+  markField(chatJid, completion, 'lastCompletion', 'lastCompletionAt');
 }
 
 export function markError(chatJid: string, error: string): void {
-  const compact = compactMessage(error);
-  if (!compact) return;
-  const activity = ensureChatActivity(chatJid);
-  activity.lastError = compact;
-  activity.lastErrorAt = Date.now();
-  persistChatActivity(chatJid);
+  markField(chatJid, error, 'lastError', 'lastErrorAt');
 }
 
 export function buildMainMissionContext(chatJid: string): string | undefined {

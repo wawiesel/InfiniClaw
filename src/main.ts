@@ -103,26 +103,7 @@ import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { uploadContent, uploadHtml, getPublicS3Url } from './s3-sync.js';
 import { exportHistoryToS3 } from './history-export.js';
 
-// ── Git version info (resolved once at module load) ────────────────────────
-import { execSync as gitExecSync } from 'child_process';
-
-const GIT_VERSION = (() => {
-  const root = process.env.INFINICLAW_ROOT || process.cwd();
-  // Prefer stamped file written by deployBot() — always reflects deployed commit
-  try {
-    const stamped = fs.readFileSync(path.join(root, 'GIT_VERSION'), 'utf-8').trim();
-    if (stamped) return stamped;
-  } catch { /* fall through to live git */ }
-  // Fallback: live git query
-  try {
-    const hash = gitExecSync('git rev-parse --short HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    const date = gitExecSync('git log -1 --format=%ci HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().slice(0, 10);
-    const subject = gitExecSync('git log -1 --format=%s HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    return `${hash} (${date}) ${subject}`;
-  } catch {
-    return 'unknown';
-  }
-})();
+import { GIT_VERSION } from './version.js';
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';

@@ -8,6 +8,7 @@ import path from 'path';
 
 import { ASSISTANT_NAME, CONTAINER_IMAGE } from 'nanoclaw/config.js';
 import { logger } from 'nanoclaw/logger.js';
+import { sleep } from './utils.js';
 
 type PodmanMachineListEntry = {
   Name: string;
@@ -15,10 +16,6 @@ type PodmanMachineListEntry = {
   Running?: boolean;
   Starting?: boolean;
 };
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function isSafePodmanArg(value: string): boolean {
   return value.length > 0 && !value.startsWith('-') && !/[\s\x00-\x1f\x7f]/.test(value);

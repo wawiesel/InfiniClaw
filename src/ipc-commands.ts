@@ -15,24 +15,8 @@ import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
 import { loadShipConfig } from './ship-config.js';
 import { logger } from 'nanoclaw/logger.js';
-
-const GIT_VERSION = (() => {
-  const root = process.env.INFINICLAW_ROOT || process.cwd();
-  // Prefer stamped file written by deployBot() — always reflects deployed commit
-  try {
-    const stamped = fs.readFileSync(path.join(root, 'GIT_VERSION'), 'utf-8').trim();
-    if (stamped) return stamped;
-  } catch { /* fall through to live git */ }
-  // Fallback: live git query
-  try {
-    const hash = execSync('git rev-parse --short HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    const date = execSync('git log -1 --format=%ci HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().slice(0, 10);
-    const subject = execSync('git log -1 --format=%s HEAD', { cwd: root, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    return `${hash} (${date}) ${subject}`;
-  } catch {
-    return 'unknown';
-  }
-})();
+import { errStr } from './utils.js';
+import { GIT_VERSION } from './version.js';
 import {
   getActiveBots,
   bootstrapBot as serviceBootstrapBot,
@@ -109,10 +93,6 @@ interface CommandData {
 
 function trySync<T>(fn: () => T, fallback: (err: unknown) => T): T {
   try { return fn(); } catch (err) { return fallback(err); }
-}
-
-function errStr(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 function getMainRoomJid(ctx: InfiniClawIpcContext): string | null {

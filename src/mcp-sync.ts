@@ -7,6 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { logger } from 'nanoclaw/logger.js';
+import { isRecord } from './utils.js';
 
 interface McpServerConfig {
   command?: string;
@@ -19,16 +20,12 @@ interface McpServerConfig {
 const SAFE_SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 function validateManifest(
   manifest: unknown,
   manifestPath: string,
   server: string,
 ): McpServerConfig | null {
-  if (!isPlainObject(manifest)) {
+  if (!isRecord(manifest)) {
     logger.warn(
       { manifestPath, server },
       'Invalid mcp.json: manifest must be an object; skipping MCP server',
@@ -75,7 +72,7 @@ function validateManifest(
     return null;
   }
   if (cfg.env !== undefined) {
-    if (!isPlainObject(cfg.env)) {
+    if (!isRecord(cfg.env)) {
       logger.warn(
         { manifestPath, server },
         'Invalid mcp.json: "env" must be an object; skipping MCP server',
@@ -176,7 +173,7 @@ export function loadMcpServersToSettings(
   // Merge MCP servers into settings (preserve existing non-persona servers)
   const existingRaw = settings.mcpServers;
   const existing =
-    isPlainObject(existingRaw)
+    isRecord(existingRaw)
       ? (existingRaw as Record<string, unknown>)
       : (Object.create(null) as Record<string, unknown>);
   const merged: Record<string, unknown> = Object.create(null) as Record<string, unknown>;

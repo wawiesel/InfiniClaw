@@ -37,6 +37,7 @@ import {
   loadProfileEnv,
   removeStaleProcesses,
 } from './service.js';
+import { sleep, shellQuote, errStr } from './utils.js';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -66,18 +67,13 @@ interface SyncResponse {
   };
 }
 
-// RoomConn imported from command-registry.ts
-
 // ── Config ─────────────────────────────────────────────────────────
 
 const HOSTNAME = os.hostname();
 const SYNC_TIMEOUT = 30_000;
 
-function shellQuote(s: string): string {
-  return "'" + s.replace(/'/g, "'\\''") + "'";
-}
 const RETRY_DELAY_BASE = 10_000;
-const RETRY_DELAY_MAX = 5 * 60_000; // cap at 5 minutes
+const RETRY_DELAY_MAX = 5 * 60_000;
 const STARTUP_SYNC_DELAY = 3_000;
 
 // Configurable intervals (env vars in milliseconds, or use defaults)
@@ -2162,20 +2158,12 @@ function log(msg: string): void {
   console.error(`[${ts}] relay: ${msg}`);
 }
 
-function errStr(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 function execErrOutput(err: unknown): string {
   if (!err || typeof err !== 'object') return '';
   const maybe = err as { stdout?: unknown; stderr?: unknown };
   const stdout = typeof maybe.stdout === 'string' ? maybe.stdout.trim() : '';
   const stderr = typeof maybe.stderr === 'string' ? maybe.stderr.trim() : '';
   return [stdout, stderr].filter(Boolean).join('\n').trim();
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 // ── Main ───────────────────────────────────────────────────────────

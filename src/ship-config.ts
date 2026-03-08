@@ -7,6 +7,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { isRecord } from './utils.js';
 
 export interface S3Config {
   endpoint: string;
@@ -37,10 +38,6 @@ const SHIPS_PATH = path.join(SECRETS_PATH, 'operator', 'ships.json');
 const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 let cached: ShipConfig | null = null;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;

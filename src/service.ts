@@ -15,6 +15,7 @@ import { parseEnvFile } from 'nanoclaw/env-utils.js';
 import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
 
 import { loadShipConfig, loadFleet } from './ship-config.js';
+import { shellQuote } from './utils.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -40,11 +41,6 @@ function assertValidBotName(bot: string): void {
   if (!BOT_NAME_PATTERN.test(bot) || bot.includes('..')) {
     throw new Error(`Invalid bot name: ${bot}`);
   }
-}
-
-/** Single-quote a value for safe embedding in a bash script. */
-function shellQuote(s: string): string {
-  return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
 // ── Path helpers ───────────────────────────────────────────────────────

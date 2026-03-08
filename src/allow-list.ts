@@ -7,6 +7,7 @@ import os from 'os';
 import path from 'path';
 import { createHash } from 'crypto';
 import { logger } from 'nanoclaw/logger.js';
+import { isRecord } from './utils.js';
 
 interface AllowEntry {
   path: string;
@@ -39,10 +40,6 @@ const DOTFILE_ALLOWLIST = new Set(['.wks', '.config']);
 
 function hasDotfileSegment(p: string): boolean {
   return p.split(path.sep).some(seg => seg.startsWith('.') && seg !== '.' && seg !== '..' && !DOTFILE_ALLOWLIST.has(seg));
-}
-
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 function normalizeBotName(bot: string): string {
@@ -83,12 +80,12 @@ function safeMountName(realHostPath: string): string {
 }
 
 function normalizeAllowList(parsed: unknown): AllowList {
-  if (!isObject(parsed) || !isObject(parsed.mounts)) return { mounts: {} };
+  if (!isRecord(parsed) || !isRecord(parsed.mounts)) return { mounts: {} };
   const mounts: Record<string, AllowEntry[]> = {};
   for (const [bot, entries] of Object.entries(parsed.mounts)) {
     if (!Array.isArray(entries)) continue;
     mounts[bot] = entries
-      .filter((e): e is Record<string, unknown> => isObject(e))
+      .filter((e): e is Record<string, unknown> => isRecord(e))
       .map((e) => {
         const p = typeof e.path === 'string' ? e.path : '';
         if (!p) return null;
@@ -105,7 +102,7 @@ export function loadAllowList(): AllowList {
     if (fs.existsSync(ALLOW_LIST_PATH)) {
       const parsed: unknown = JSON.parse(fs.readFileSync(ALLOW_LIST_PATH, 'utf-8'));
       const normalized = normalizeAllowList(parsed);
-      if (!isObject(parsed) || !isObject(parsed.mounts)) logger.warn('Invalid allow-list schema, using empty default');
+      if (!isRecord(parsed) || !isRecord(parsed.mounts)) logger.warn('Invalid allow-list schema, using empty default');
       return normalized;
     }
   } catch (err) {

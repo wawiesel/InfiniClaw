@@ -2,7 +2,7 @@
  * Shared formatting utilities for chat messages.
  */
 
-function escapeHtml(input: string): string {
+export function escapeHtml(input: string): string {
   return input
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
