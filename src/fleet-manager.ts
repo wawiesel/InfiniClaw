@@ -121,6 +121,45 @@ export class FleetManager {
   getLiveFleet(): Record<string, FleetEntry> {
     return this.liveFleet;
   }
+
+  determineInitialCO(registeredGroups: Record<string, any>, assistantName: string): { initialBadge: string; roomRoster: Record<string, Map<string, number>>; roomCO: Record<string, string | undefined> } {
+    const roomRoster: Record<string, Map<string, number>> = {};
+    const roomCO: Record<string, string | undefined> = {};
+    let initialBadge = '🟢';
+    try {
+      const fleet = loadFleet();
+      const root = resolveRoot();
+      const roomNameToJid: Record<string, string> = {};
+      for (const [jid, group] of Object.entries(registeredGroups)) {
+        roomNameToJid[group.name.toLowerCase()] = jid;
+      }
+      for (const [botId, entry] of Object.entries(fleet)) {
+        if (entry.status !== 'onduty') continue;
+        const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
+        const room = (env?.MAIN_GROUP_NAME || '').toLowerCase();
+        const jid = roomNameToJid[room];
+        if (!jid) continue;
+        const name = env?.ASSISTANT_NAME || botId;
+        if (!roomRoster[jid]) roomRoster[jid] = new Map();
+        roomRoster[jid].set(name, entry.rank ?? 99);
+      }
+      for (const [jid, roster] of Object.entries(roomRoster)) {
+        let coBotName: string | undefined;
+        let coRank = Infinity;
+        for (const [name, rank] of roster) {
+          if (rank < coRank) { coBotName = name; coRank = rank; }
+        }
+        roomCO[jid] = coBotName;
+        if (coBotName === assistantName) {
+          initialBadge = '⭐';
+          process.env.IS_CO = 'true';
+        }
+      }
+    } catch { }
+    this.roomRoster = roomRoster;
+    this.roomCO = roomCO;
+    return { initialBadge, roomRoster, roomCO };
+  }
 }
 
 export const fleetManager = new FleetManager();
