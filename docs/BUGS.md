@@ -4,6 +4,19 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-13: branch_to_thread Thread Brain posts nowhere (no set_thread in objective)
+
+**Reported:** 2026-03-08
+**Status:** fixed (1486a9c)
+**Component:** delegate-runner.ts / branch_to_thread tool
+**Symptom:** Main brain calls `branch_to_thread(objective, thread_id)`, returns immediately, says "Branching to...". Thread Brain spawns but never posts anything in the Matrix thread. Thread is silent.
+**Root cause:** Two issues:
+1. The tool description says "Target thread ID to resume/anchor" but gives no instruction to call `set_thread` first. The spawned Claude process gets the objective via stdin but has no automatic Matrix thread context — it posts wherever the default send_message would go (or nowhere if no active thread).
+2. The `--thread-id` arg passed to `claude --resume --thread-id $matrix_event_id` is a Claude Code session concept, not a Matrix thread ID. It will fail or be ignored, causing fallback to no-resume mode.
+**Fix:** Two options: (a) Update the tool description to require bots include "First: call set_thread with {thread_id}. Post opening goal. Then do the work. Then post one-line summary on main timeline." explicitly in every objective. Or (b) Auto-inject a system prefix into the spawned process stdin that calls set_thread automatically before passing the objective. Option (b) is better — no bot should have to remember this boilerplate.
+
+---
+
 ### BUG-12: Lobes use send_message/intercom tools, routing output to wrong channel
 
 **Reported:** 2026-03-08
