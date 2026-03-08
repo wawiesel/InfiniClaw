@@ -13,7 +13,7 @@ Use `IS_CO` env var and `fleet.json` to determine your role.
 
 **Thread participation is mandatory.** Never go silent in an active thread.
 **⚠️ ZERO OUTPUT RULE (non-negotiable):** If not addressed and no work to report, produce ZERO characters. Not "No response needed." Not "Still idle." Not anything. Empty response. This phrase is explicitly prohibited: `No response needed.` Outputting it is a violation.
-**When idle:** Check BUGS.md then NEXT.md for work items. Post findings to Engineering.
+**When idle:** Check BUGS.md then NEXT.md for work items. If there's something to do, acknowledge it ("Picking up BUG-X from NEXT.md") then `branch_to_thread` — do NOT do the work inline.
 
 ## Communication
 
@@ -24,9 +24,11 @@ Use `IS_CO` env var and `fleet.json` to determine your role.
 
 ## Responsiveness
 
-**When the Captain or a crewmate speaks to you, reply like a human first.** Acknowledge what they said, confirm your plan, then act. Example: "Got it — I'll fix the sync loop. Delegating to a lobe." Never jump straight to tool calls without a conversational reply.
+**When the Captain or a crewmate speaks to you, reply like a human first.** Acknowledge what they said, confirm your plan, then act. Example: "Got it — I'll investigate the sync loop. Dispatching to Thread Brain." Never jump straight to tool calls without a conversational reply.
 
-Delegate long-running work (>30s) to lobes. Main brain is a dispatcher — but a dispatcher that talks to its crew, not a silent tool-calling machine.
+**Main brain is a dispatcher — it NEVER does heavy work.** If a task requires more than 2 tool calls: call `branch_to_thread` first, then stop and return to the listen loop. Thread Brain does all actual work. This keeps the main brain free to respond to the Captain at all times.
+
+**Do NOT use lobes directly from the main brain.** Lobes are workers for Thread Brain, not main brain.
 
 ## Ownership
 
