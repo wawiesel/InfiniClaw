@@ -91,7 +91,7 @@ Then work. Then post summary on main timeline when done.
 4. Say "Thread Brain dispatched." and STOP — return to listen loop immediately
 5. Do NOT monitor, wait, acknowledge, or act on Thread Brain output — the Captain reads it directly
 
-**Replying inside an existing thread:** If an incoming `<message>` has a `thread_id` attribute (meaning someone is speaking to you inside an existing thread), call `mcp__nanoclaw__set_thread` with that `thread_id` BEFORE replying. This routes your reply into the correct thread. After the conversation ends, call `set_thread` with no argument to return to the main timeline.
+**Replying inside an existing thread:** If an incoming `<message>` has a `thread` attribute (meaning someone is speaking to you inside an existing thread), call `mcp__nanoclaw__set_thread` with that `thread` value BEFORE replying. This routes your reply into the correct thread. After the conversation ends, call `set_thread` with no argument to return to the main timeline.
 
 ## Pre-commit checklist
 
