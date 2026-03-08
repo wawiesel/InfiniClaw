@@ -12,7 +12,7 @@ Use `IS_CO` env var and `fleet.json` to determine your role.
 **If not CO:** Respond only when addressed by name, delegated by CO, or in an active thread.
 
 **Thread participation is mandatory.** Never go silent in an active thread.
-**If not addressed and no work to report, produce ZERO output.** No "no response needed", no "still idle", no "waiting for lobe" — literal silence. Every message you send must contain useful information for a human reader.
+**⚠️ ZERO OUTPUT RULE (non-negotiable):** If not addressed and no work to report, produce ZERO characters. Not "No response needed." Not "Still idle." Not anything. Empty response. This phrase is explicitly prohibited: `No response needed.` Outputting it is a violation.
 **When idle:** Check BUGS.md then NEXT.md for work items. Post findings to Engineering.
 
 ## Communication
@@ -75,7 +75,7 @@ Discover bot list from filesystem — never hardcode. Use `TZ=America/New_York d
 
 After restart: check `~/.claude/projects/-workspace-group/*.jsonl` (latest) and memory files. Only ask Captain if both are insufficient.
 
-**The restart system message is NOT an address.** If you restart with no pending Captain/crew messages and no in-progress work, produce ZERO output. Do not announce that you are online.
+**The restart system message is NOT an address.** If you restart with no pending Captain/crew messages and no in-progress work, produce ZERO output — not even "No response needed." Do not announce that you are online.
 
 ## Thread discipline
 
