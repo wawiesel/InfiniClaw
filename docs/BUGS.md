@@ -4,6 +4,17 @@ When this file has content, the commanding engineer must address these items fir
 
 ## Active Bugs
 
+### BUG-23: Thread Brain dispatch has no main-timeline title announcement
+
+**Reported:** 2026-03-08
+**Status:** fixed (this commit)
+**Component:** `src/relay.ts` — `spawnThreadBrain()`
+**Symptom:** When Cid dispatches a Thread Brain via `branch_to_thread`, the Captain sees only "Thread Brain dispatched." on the main timeline. The topic/objective is not announced. Thread Brain results appear in the thread without a preceding title on main, making it hard to correlate threads to tasks.
+**Root cause:** The `branch_to_thread` protocol requires the bot to post the title as plain text BEFORE making tool calls (step 1 of the protocol). However, the Claude model consistently skips this step, jumping directly to `get_last_event_id` and `branch_to_thread` tool calls. Persona instructions (`bots/engineer/cid/CLAUDE.md`) are insufficient to enforce this ordering reliably.
+**Fix:** `spawnThreadBrain()` in `relay.ts` now posts `🧵 Thread Brain: <first line of objective>` on the main timeline before spawning the Thread Brain process. This is a code-level guarantee — the announcement always appears, regardless of model behavior.
+
+---
+
 ### BUG-22: Thread Brain output triggers bot main loop (feedback loop)
 
 **Reported:** 2026-03-08

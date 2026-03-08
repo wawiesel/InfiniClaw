@@ -1076,6 +1076,11 @@ function spawnThreadBrain(
     return;
   }
 
+  // Announce Thread Brain dispatch on main timeline before spawning
+  // (ensures Captain sees the title before Thread Brain output appears in thread)
+  const announcedTitle = objective.split('\n')[0].trim().slice(0, 80);
+  reply(conn, `🧵 Thread Brain: ${announcedTitle}`).catch(() => {});
+
   // Load bot credentials so claude can authenticate on the host
   const botEnv = bot ? (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })() : null;
   const childEnv: Record<string, string> = { ...process.env as Record<string, string> };
