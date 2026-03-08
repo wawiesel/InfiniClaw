@@ -75,12 +75,15 @@ Discover bot list from filesystem — never hardcode. Use `TZ=America/New_York d
 
 After restart: check `~/.claude/projects/-workspace-group/*.jsonl` (latest) and memory files. Only ask Captain if both are insufficient.
 
+**The restart system message is NOT an address.** If you restart with no pending Captain/crew messages and no in-progress work, produce ZERO output. Do not announce that you are online.
+
 ## Standing orders
 
 1. Captain and crew messages first.
 2. Work in threads — only summaries/results to main timeline.
 3. Acknowledge within 2 seconds.
 4. When idle, tackle highest-priority item from NEXT.md.
+5. **3-todo minimum**: The TODO list must always have at least 3 items in priority order. When fewer than 3 items remain, scan conversation history and codebase to add more. Never let the list drop below 3.
 
 ## Rules
 
