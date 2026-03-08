@@ -1274,24 +1274,36 @@ async function injectResumeMessage(): Promise<void> {
 
 // ── Session cleanup ─────────────────────────────────────────────────────
 
-/** Delete stale Claude session JSONL files (>200KB, not the most recent). */
+/** Delete stale JSONL files in a directory: keep the newest, delete older ones over sizeThreshold. */
+function pruneJsonlDir(dir: string, sizeThreshold: number): number {
+  if (!fs.existsSync(dir)) return 0;
+  const files = fs.readdirSync(dir)
+    .filter(f => f.endsWith('.jsonl'))
+    .map(f => ({ name: f, mtime: fs.statSync(path.join(dir, f)).mtimeMs, size: fs.statSync(path.join(dir, f)).size }))
+    .sort((a, b) => b.mtime - a.mtime);
+  let pruned = 0;
+  for (const f of files.slice(1)) {
+    if (f.size > sizeThreshold) {
+      fs.unlinkSync(path.join(dir, f.name));
+      pruned++;
+    }
+  }
+  return pruned;
+}
+
+/** Delete stale Claude session JSONL files across all project dirs (>200KB, not the most recent). */
 function pruneOldSessions(): void {
   try {
-    const cwd = process.cwd();
-    const projectSlug = cwd.replace(/\//g, '-');
-    const projectDir = path.join(os.homedir(), '.claude', 'projects', projectSlug);
-    if (!fs.existsSync(projectDir)) return;
-    const files = fs.readdirSync(projectDir)
-      .filter(f => f.endsWith('.jsonl'))
-      .map(f => ({ name: f, mtime: fs.statSync(path.join(projectDir, f)).mtimeMs, size: fs.statSync(path.join(projectDir, f)).size }))
-      .sort((a, b) => b.mtime - a.mtime);
-    // Keep the newest; delete older ones over 200KB
+    const claudeProjects = path.join(os.homedir(), '.claude', 'projects');
+    if (!fs.existsSync(claudeProjects)) return;
     let pruned = 0;
-    for (const f of files.slice(1)) {
-      if (f.size > 200_000) {
-        fs.unlinkSync(path.join(projectDir, f.name));
-        pruned++;
-      }
+    for (const proj of fs.readdirSync(claudeProjects)) {
+      const projDir = path.join(claudeProjects, proj);
+      if (!fs.statSync(projDir).isDirectory()) continue;
+      // Top-level JSONL files
+      pruned += pruneJsonlDir(projDir, 200_000);
+      // archive subdir (contains moved-away old sessions)
+      pruned += pruneJsonlDir(path.join(projDir, 'archive'), 0);
     }
     if (pruned > 0) logger.info({ pruned }, 'Pruned old session JSONL files');
   } catch (err) {
