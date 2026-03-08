@@ -860,12 +860,16 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
     lines.push(`**${ship}** (${ts})`);
     lines.push(`  Active: ${active.length > 0 ? active.join(', ') : 'none'}`);
 
+    const trends = (data.trends_24h || {}) as Record<string, { sigkills: number; oom_kills: number }>;
     for (const [name, b] of Object.entries(bots)) {
       const oom = Number(b.oom_kills || 0);
+      const sk = Number(b.sigkills || 0);
       totalOom += oom;
-      if (b.status === 'ACTIVE' || oom > 0) {
+      if (b.status === 'ACTIVE' || oom > 0 || sk > 0) {
         const mem = b.rss_mb != null ? `RSS=${b.rss_mb}/${b.limit_mb}MB` : '';
-        lines.push(`  ${name}: ${b.status} ${mem} OOM=${oom}`);
+        const t = trends[name];
+        const trend = t ? ` Δ24h: SK+${t.sigkills} OOM+${t.oom_kills}` : '';
+        lines.push(`  ${name}: ${b.status} ${mem} SK=${sk} OOM=${oom}${trend}`);
       }
     }
     const sess = Number(data.session_total_mb || 0);
@@ -1274,6 +1278,38 @@ function appendHealthHistory(report: string): void {
   }
 }
 
+/**
+ * Read health-history.jsonl and compute per-bot sigkill/oom deltas over the past `hours` hours.
+ * Returns a map of bot name → { sigkills: delta, oom_kills: delta }.
+ */
+function computeHealthDeltas(historyFile: string, currentBots: Record<string, Record<string, unknown>>, hours: number): Record<string, { sigkills: number; oom_kills: number }> {
+  if (!fs.existsSync(historyFile)) return {};
+  const cutoff = new Date(Date.now() - hours * 3600_000).toISOString();
+  let oldest: Record<string, Record<string, unknown>> | null = null;
+  try {
+    const lines = fs.readFileSync(historyFile, 'utf-8').trim().split('\n');
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as { ts?: string; bots?: Record<string, Record<string, unknown>> };
+        if (!entry.ts || !entry.bots) continue;
+        if (entry.ts < cutoff) { oldest = entry.bots; continue; }
+        break; // first entry after cutoff — stop
+      } catch { /* skip */ }
+    }
+  } catch { return {}; }
+  if (!oldest) return {};
+  const result: Record<string, { sigkills: number; oom_kills: number }> = {};
+  for (const [bot, cur] of Object.entries(currentBots)) {
+    const old = oldest[bot];
+    if (!old) continue;
+    result[bot] = {
+      sigkills: Number(cur.sigkills || 0) - Number(old.sigkills || 0),
+      oom_kills: Number(cur.oom_kills || 0) - Number(old.oom_kills || 0),
+    };
+  }
+  return result;
+}
+
 /** Run session cleanup to prune old JSONL files and telemetry. */
 function runSessionCleanup(): void {
   const root = resolveRoot();
@@ -1300,7 +1336,17 @@ async function healthLoop(): Promise<void> {
       const report = runHealthCheck();
       if (report) {
         appendHealthHistory(report);
-        const uploaded = await uploadHealthToS3(report);
+        // Enrich upload with 24h trend deltas
+        let uploadPayload = report;
+        try {
+          const parsed = JSON.parse(report) as { bots?: Record<string, Record<string, unknown>> };
+          if (parsed.bots) {
+            const historyFile = path.join(resolveRoot(), '_runtime', 'data', 'health-history.jsonl');
+            const deltas = computeHealthDeltas(historyFile, parsed.bots, 24);
+            uploadPayload = JSON.stringify({ ...parsed, trends_24h: deltas });
+          }
+        } catch { /* upload unmodified if parse fails */ }
+        const uploaded = await uploadHealthToS3(uploadPayload);
         log(`health check: ${uploaded ? 'uploaded to S3' : 'S3 unavailable, local only'}`);
       }
     } catch (err) {
