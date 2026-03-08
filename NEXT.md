@@ -43,7 +43,7 @@ Updated 2026-03-08 EST.
 ## LOW — Reliability
 
 - ~~Pre-commit hook for dist/~~ — installed on both HERACLES and Poseidon.
-- **Brain model change refactor** — Changing brain model requires editing secrets env file directly (`/Users/ww5/.config/infiniclaw/secrets/bots/<bot>/env`, `BRAIN_MODEL=`). Should be streamlined: either a CLI command or IPC task that edits the env and restarts. Priority: LOW.
+- ~~**Brain model change refactor**~~ — `c619bcb`: `set_brain_mode` IPC now auto-restarts after updating env. No manual restart needed.
 - ~~**Session OOM still possible**~~ — `997fb21`: pruneOldSessions now covers all project dirs + archive/ subdirs (was only cwd dir). Cleared 26MB of stale JSONL on next restart.
 
 ## VERY LOW — Deferred
