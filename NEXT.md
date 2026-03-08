@@ -30,6 +30,7 @@ Updated 2026-03-08 EST.
 
 
 
+- **MAX_THREAD_BRAINS_PER_BOT limit** — Currently no cap on concurrent Thread Brains per bot. Captain spec: max 3, configurable via env var `MAX_THREAD_BRAINS_PER_BOT=3`. Relay should reject new `branch_to_thread` calls when limit is reached and notify the bot.
 - **Concurrency ceiling starvation** — FIFO `waitingGroups` drain in `group-queue.ts` (upstream nanoclaw). Fix = priority-aware `drainWaiting()`. Needs Captain approval before touching upstream.
 - ~~**Cid SIGKILL death spirals**~~ — stable at 614 for 4h+ as of 2026-03-08T04:21 UTC. Session OOM addressed by `997fb21`. Monitor.
 

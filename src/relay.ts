@@ -273,12 +273,16 @@ function resolveCaptainUserId(): string {
   return '';
 }
 
-function resolveOperatorUserId(): string {
+function resolveOperatorConfig(): { userId: string; accessToken: string } {
   try {
     const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
     const config = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
-    return config.userId || '';
-  } catch { return ''; }
+    return { userId: config.userId || '', accessToken: config.accessToken || '' };
+  } catch { return { userId: '', accessToken: '' }; }
+}
+
+function resolveOperatorUserId(): string {
+  return resolveOperatorConfig().userId;
 }
 
 /** Captain and operator are both fully trusted. */
@@ -581,12 +585,13 @@ async function botMatrixLogin(root: string, bot: string): Promise<{ token: strin
 const MATRIX_OP_TIMEOUT_MS = 15_000; // 15s for invite/join/leave ops
 
 /** Invite a bot to a room using the intercom account, then join as the bot. */
-async function botJoinRoom(botToken: string, homeserver: string, roomId: string, conn: RoomConn, botUserId: string): Promise<void> {
-  // Invite via intercom (bot can't self-join after leaving)
-  if (conn.accessToken) {
+async function botJoinRoom(botToken: string, homeserver: string, roomId: string, _conn: RoomConn, botUserId: string): Promise<void> {
+  // Invite via operator account (intercom accounts are write-only and can't invite)
+  const { accessToken: operatorToken } = resolveOperatorConfig();
+  if (operatorToken) {
     const invResp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${conn.accessToken}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${operatorToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: botUserId }),
       signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS),
     });
@@ -1076,7 +1081,9 @@ const RELAY_TASKS_POLL_INTERVAL = 2_000;
 // ── Thread Brain task registry ──────────────────────────────────────────
 
 const THREAD_BRAIN_RESTART_DELAY = 30_000; // wait 30s after last TB exit before restarting bot
+const MAX_THREAD_BRAINS_PER_BOT = parseInt(process.env.MAX_THREAD_BRAINS_PER_BOT || '3', 10);
 const threadBrainRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const activeThreadBrainCount = new Map<string, number>(); // bot → active TB count
 
 interface ThreadTaskEntry {
   objective: string;
@@ -1216,10 +1223,20 @@ async function spawnThreadBrain(
       stdoutBuf = stdoutBuf.slice(idx + 1);
       if (!line) continue;
       try {
-        const event = JSON.parse(line) as { type?: string; content?: string; result?: string };
-        if (event.type === 'assistant' && typeof event.content === 'string' && event.content.trim()) {
-          postedCount++;
-          threadReply(conn, replyThreadId, event.content.trim()).catch((err) => log(`threadBrain: stream post failed: ${errStr(err)}`));
+        const event = JSON.parse(line) as {
+          type?: string;
+          result?: string;
+          message?: { content?: Array<{ type: string; text?: string }> };
+        };
+        if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
+          const text = event.message.content
+            .filter(b => b.type === 'text')
+            .map(b => b.text ?? '')
+            .join('');
+          if (text.trim()) {
+            postedCount++;
+            threadReply(conn, replyThreadId, text.trim()).catch((err) => log(`threadBrain: stream post failed: ${errStr(err)}`));
+          }
         } else if (event.type === 'result' && typeof event.result === 'string' && event.result.trim() && postedCount === 0) {
           postedCount++;
           threadReply(conn, replyThreadId, event.result.trim()).catch((err) => log(`threadBrain: result post failed: ${errStr(err)}`));
@@ -1301,7 +1318,18 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
               const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
               const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
               if (thread_id && objective) {
-                void spawnThreadBrain({ thread_id, objective, chat_jid, bot }, conns);
+                const botKey = bot ?? '__relay__';
+                const count = activeThreadBrainCount.get(botKey) ?? 0;
+                if (count >= MAX_THREAD_BRAINS_PER_BOT) {
+                  log(`relayTasks: thread_brain rejected — ${botKey} already at limit (${MAX_THREAD_BRAINS_PER_BOT})`);
+                } else {
+                  activeThreadBrainCount.set(botKey, count + 1);
+                  void spawnThreadBrain({ thread_id, objective, chat_jid, bot }, conns).finally(() => {
+                    const n = activeThreadBrainCount.get(botKey) ?? 1;
+                    if (n <= 1) activeThreadBrainCount.delete(botKey);
+                    else activeThreadBrainCount.set(botKey, n - 1);
+                  });
+                }
               } else {
                 log(`relayTasks: thread_brain missing required fields (thread_id or objective)`);
               }
