@@ -24,6 +24,64 @@ Updated 2026-03-08 EST.
 
 - **Gemini lobe delegation** — needs `GOOGLE_API_KEY` in bot env files at `~/.config/infiniclaw/secrets/bots/{bot}/env`. Captain must provide the key.
 
+## LOW — Code Quality
+
+### Reduce code duplication in src/
+
+Detailed audit complete (2026-03-08). Key findings below. Tackle in order.
+
+#### 1. Git sync — extract shared `gitSyncRepo()` helper (HIGH)
+`relay.ts:946-1024` (`gitSync`) and `relay.ts:1122-1182` (`secretsGitSync`) and `ipc-commands.ts:602-665` (`handleGitPull`) are three near-identical stash→rebase→pop implementations. Differences are only CWD and log prefix. Extract one function to `src/git-utils.ts`:
+```ts
+function gitSyncRepo(cwd: string, label: string): { pulled: number; changed: boolean }
+```
+Covers: rebase-abort guard, stash/pop, commit count, conflict fallback to hard reset.
+
+#### 2. JSON I/O — add `readJson` / `writeJson` to utils.ts (HIGH)
+`JSON.parse(fs.readFileSync(path, 'utf-8'))` appears 30+ times (ship-config, relay, ipc-commands, allow-list, main, mcp-sync, history-export, skill-sync, container-spawn, intercom-relay). `writeFileSync(path, JSON.stringify(data, null, 2) + '\n')` appears 14 times with inconsistent trailing newline. Add to utils.ts:
+```ts
+function readJson<T>(path: string, fallback?: T): T          // throws or returns fallback
+function writeJson(path: string, data: unknown): void         // atomic .tmp + rename, always + '\n'
+```
+
+#### 3. Error string conversion — use `errStr()` everywhere (MEDIUM)
+`errStr()` is already defined in `utils.ts:16-18` but not imported in `ship-config.ts`, `cli.ts` (4 inline occurrences), `run-container.ts`, `ipc-commands.ts` (2). Replace all inline `err instanceof Error ? err.message : String(err)` with `errStr(err)`.
+
+#### 4. Regex escape — consolidate to `utils.ts` (MEDIUM)
+Three independent implementations of `/[.*+?^${}()|[\]\\]/g`:
+- `infini-config.ts:33-35` `escapeRegex()` — move to utils.ts and export
+- `channels/matrix.ts:152` — inline, replace with import
+- `main.ts:207` — inline, replace with import
+
+#### 5. Git exec options — factory function (MEDIUM)
+`{ cwd, encoding: 'utf-8', timeout: N, stdio: 'pipe' }` is redefined 8+ times in relay.ts alone (lines 299, 310, 318, 351, 948, 1093, 1124, 1765). Add to `git-utils.ts`:
+```ts
+function gitOpts(cwd: string, timeoutMs = 15_000): ExecSyncOptions
+```
+
+#### 6. Env var parsing — add `envInt()` / `envMs()` to utils.ts (MEDIUM)
+`parseInt(process.env.VAR || '', 10) || default` appears 12+ times in infini-config.ts, relay.ts, main.ts, container-spawn.ts with varying radix usage. Add:
+```ts
+function envInt(name: string, defaultVal: number): number
+function envMs(name: string, defaultVal: number): number  // same but documents unit intent
+```
+
+#### 7. Git version extraction — consolidate to version.ts (MEDIUM)
+Three separate implementations calling `git rev-parse --short HEAD`, `git log -1 --format=%ci`, `git log -1 --format=%s` in service.ts, version.ts, relay.ts. `version.ts` should own this; other files should import from it.
+
+#### 8. Safe name validation — one regex in ship-config.ts or utils.ts (LOW)
+Four similar but slightly different regexes for "safe identifier" checking:
+- `ship-config.ts:38` `SAFE_BOT_NAME`
+- `container-spawn.ts:83` `SAFE_CONTAINER_NAME_TAG`
+- `allow-list.ts:48` inline
+- `channels/matrix.ts:188` inline
+Consolidate to a single `SAFE_NAME_RE` in utils.ts, document the differences where stricter validation is intentional.
+
+#### 9. `isNonEmptyString` — export from utils.ts (LOW)
+Locally defined in `ship-config.ts:42-44`. Move to utils.ts and import everywhere.
+
+---
+
 ## LOW — Design
 
 - **Help account for relay output** — Commands like `!` (help), `!fleet`, `!health` produce output that bots should ignore. Create a dedicated "help" Matrix account for relay responses. Add it to every bot's `IGNORE_SENDERS` so relay output never triggers bot processing. Currently relay sends via intercom accounts, which bots already watch — separating help output from intercom commands would be cleaner.
