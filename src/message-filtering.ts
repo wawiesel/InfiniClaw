@@ -29,5 +29,6 @@ export function isIgnoredTrigger(text: string): boolean {
 export function shouldIgnoreMessage(msg: NewMessage): boolean {
   if (typeof msg.content !== 'string') return isIgnoredSender(msg.sender);
   const content = msg.content.trimStart();
+  if (content.startsWith('@')) return true; // operator callout — not for bots
   return isIgnoredSender(msg.sender) || isIgnoredTrigger(content);
 }
