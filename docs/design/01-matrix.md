@@ -9,7 +9,7 @@ Matrix is the communication backbone. Every message, command, and status update 
 | Captain (`@wawiesel:a-gis.org`) | Human operator. Admin in all rooms. |
 | Operator (`@operator:a-gis.org`) | Automated operator. Admin in all rooms. Used for room management, invites, power levels. |
 | Loudspeaker (`@loudspeaker:a-gis.org`) | Fleet-wide announcements from the relay. Member of all rooms. Delivers status information (repo versions, fleet health, lifecycle changes). |
-| Bot accounts (`@cid-bot:a-gis.org`, etc.) | One per bot. Joins rooms based on status. |
+| Bot accounts (e.g. `@norm-bot:a-gis.org`) | One per bot. Joins rooms based on status. |
 | Intercom (`@engineering-intercom:a-gis.org`) | Write-only broadcast channel for Engineering. Used by operators and relays. Additional intercom accounts (bridge, astrometrics) added as rooms are introduced. |
 
 ## Room Structure
@@ -30,9 +30,7 @@ Each ship is a Matrix space containing its local rooms:
 HERACLES (space)
   Lounge          — all ship bots + captain + operator + loudspeaker (always)
   Quarters (space)
-    Cid's Room    — cid + captain + operator + loudspeaker (always)
-    Johnny5's Room
-    Albert's Room
+    Norm's Room   — norm + captain + operator + loudspeaker (always)
 ```
 
 ### Permissions
@@ -43,21 +41,29 @@ HERACLES (space)
 
 ## Room Setup
 
-All rooms are created by the operator account. Assumes: Matrix server running, captain/operator/loudspeaker accounts registered, one ship identified by hostname.
+All rooms are created by the operator account. This example sets up a single ship (HERACLES) with one normie bot (Norm).
 
-### 1. Create fleet-wide duty rooms
+Assumes: Matrix server running, these accounts registered: captain, operator, loudspeaker, norm-bot.
+
+### Helper: invite and join
+
+After inviting an account to a room, accept the invite on their behalf:
 
 ```bash
-# For each duty room (Bridge, Engineering, Astrometrics):
-ROOM_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
+# Invite
+curl -s -X POST "$HOMESERVER/_matrix/client/v3/rooms/$ROOM_ID/invite" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Engineering", "visibility": "private"}' | jq -r '.room_id')
+  -d "{\"user_id\": \"$USER_ID\"}"
+
+# Accept (using the invited account's token)
+curl -s -X POST "$HOMESERVER/_matrix/client/v3/rooms/$ROOM_ID/join" \
+  -H "Authorization: Bearer $INVITED_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
 
-Invite and join: captain, loudspeaker, and the room's intercom account.
-
-### 2. Create ship space
+### 1. Create ship space
 
 ```bash
 SPACE_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
@@ -67,7 +73,7 @@ SPACE_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
   | jq -r '.room_id')
 ```
 
-### 3. Create Lounge (child of ship space)
+### 2. Create Lounge (child of ship space)
 
 ```bash
 LOUNGE_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
@@ -76,9 +82,9 @@ LOUNGE_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
   -d '{"name": "Lounge", "visibility": "private"}' | jq -r '.room_id')
 ```
 
-Add as child of ship space. Invite: captain, loudspeaker.
+Invite and join: captain, loudspeaker, norm-bot.
 
-### 4. Create Quarters space (child of ship space)
+### 3. Create Quarters space (child of ship space)
 
 ```bash
 QUARTERS_SPACE_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
@@ -88,34 +94,45 @@ QUARTERS_SPACE_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
   | jq -r '.room_id')
 ```
 
-### 5. Create per-bot quarters rooms (children of Quarters space)
-
-For each bot:
+### 4. Create Norm's quarters room (child of Quarters space)
 
 ```bash
-BOT_ROOM_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
+NORM_ROOM_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Cid'\''s Room", "visibility": "private"}' | jq -r '.room_id')
+  -d '{"name": "Norm'\''s Room", "visibility": "private"}' | jq -r '.room_id')
 ```
 
-Invite: the bot, captain, loudspeaker.
+Invite and join: norm-bot, captain, loudspeaker.
 
-### 6. Add space children
+### 5. Add space children
 
 Link rooms to their parent spaces via `m.space.child` state events:
 
 ```bash
 # URL-encode the child room ID (! → %21, : → %3A)
-curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$CHILD_ROOM_ID" \
+# Lounge → ship space
+curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$LOUNGE_ID" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"via": ["a-gis.org"]}'
+
+# Quarters space → ship space
+curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$QUARTERS_SPACE_ID" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"via": ["a-gis.org"]}'
+
+# Norm's Room → Quarters space
+curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$QUARTERS_SPACE_ID/state/m.space.child/$NORM_ROOM_ID" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"via": ["a-gis.org"]}'
 ```
 
-### 7. Set power levels
+### 6. Set power levels
 
-Captain and operator get admin (power 100) in every room:
+Captain and operator get admin (power 100) in every room (Lounge, Norm's Room):
 
 ```bash
 curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/" \
@@ -124,9 +141,9 @@ curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_
   -d '{"users": {"@wawiesel:a-gis.org": 100, "@operator:a-gis.org": 100}}'
 ```
 
-### 8. Save room IDs
+### 7. Save room IDs
 
-Store duty room IDs in `operator/intercom.json`, ship space/lounge/quarters IDs in `ships.json`, and per-bot quarters room IDs in `fleet.json`. Commit and push secrets.
+Store ship space/lounge/quarters IDs in `ships.json`, and per-bot quarters room IDs in `fleet.json`. Commit and push secrets.
 
 ## Message Format
 
@@ -134,20 +151,27 @@ Messages use Matrix's `org.matrix.custom.html` format with `formatted_body` for 
 
 ## Verification
 
-1. **Server reachable** — `curl https://matrix.a-gis.org/_matrix/client/versions` returns supported versions.
+The room setup procedure also verifies credentials — each step exercises an account's token, so a failure pinpoints which secret is wrong.
+
+All checks use stored tokens from the secrets repo. No login needed if accounts are already set up.
+
+1. **Server reachable** — `curl https://matrix.a-gis.org/_matrix/client/versions`
    *Check:* HTTP 200 with version list.
 
-2. **Accounts login** — `POST /_matrix/client/v3/login` with operator, loudspeaker, and intercom credentials.
-   *Check:* Each returns `access_token`, `user_id`, `device_id`.
+2. **Tokens valid** — `GET /_matrix/client/v3/account/whoami` with each stored token (operator, loudspeaker, norm-bot).
+   *Check:* Each returns the expected `user_id`.
 
-3. **Rooms exist** — Duty rooms, ship space, lounge, quarters space, and per-bot rooms all created.
-   *Check:* Operator's `GET /_matrix/client/v3/joined_rooms` includes all expected room IDs.
+3. **Rooms exist** — `GET /_matrix/client/v3/joined_rooms` with operator token.
+   *Check:* Response includes ship space, lounge, quarters space, and Norm's Room IDs.
 
-4. **Space hierarchy** — Lounge and quarters space are children of ship space.
-   *Check:* `GET /_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$CHILD_ID` returns `{"via": ["a-gis.org"]}`.
+4. **Memberships correct** — `GET /_matrix/client/v3/rooms/$ROOM_ID/members` for Lounge and Norm's Room.
+   *Check:* Each room includes norm-bot, captain, operator, loudspeaker.
 
-5. **Power levels** — Captain and operator are admin in every room.
-   *Check:* `GET /_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/` shows both at power 100.
+5. **Space hierarchy** — `GET /_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$CHILD_ID` for each parent→child link.
+   *Check:* Returns `{"via": ["a-gis.org"]}`.
 
-6. **Message round-trip** — Operator posts a message, reads it back.
-   *Check:* `POST /_matrix/client/v3/rooms/$ROOM_ID/send/m.room.message` succeeds, message appears via `/messages` endpoint.
+6. **Power levels** — `GET /_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/` for each room.
+   *Check:* Captain and operator at power 100.
+
+7. **Message round-trip** — Operator posts to Lounge, reads back via `/messages`.
+   *Check:* Posted message appears in timeline.
