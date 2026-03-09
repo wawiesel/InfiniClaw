@@ -8,4 +8,3 @@ Project documentation. Not executable, not imported — reference only.
 - `assets/` — Images, banners, static media
 - `BUGS.md` — Known issues with priority and status
 - `NEXT.md` — Roadmap, Captain directives, planned work
-- `LESSONS_LEARNED.md` — Retrospective insights from operations
