@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-NANOCLAW_CONTAINER="${ROOT_DIR}/external/nanoclaw/container"
+CONTAINER_CONTEXT="${SCRIPT_DIR}/container"
 
 if ! command -v podman >/dev/null 2>&1; then
   echo "podman not found in PATH" >&2
@@ -25,8 +25,8 @@ build_image() {
   fi
 
   echo "Building ${image_name} (${dockerfile#"${ROOT_DIR}/"})"
-  # Build context is nanoclaw/container/ so COPY agent-runner/ works
-  podman build --network host -t "${image_name}" -f "${dockerfile}" "${NANOCLAW_CONTAINER}"
+  # Build context is bots/container/ so COPY agent-runner/ works
+  podman build --network host -t "${image_name}" -f "${dockerfile}" "${CONTAINER_CONTEXT}"
   echo "${image_name}: done"
 }
 
