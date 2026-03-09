@@ -12,12 +12,7 @@ import { loadSkillsToSession } from './skill-sync.js';
 import { mountsForBot } from './allow-list.js';
 import { loadShipConfig } from './ship-config.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
-
-interface VolumeMount {
-  hostPath: string;
-  containerPath: string;
-  readonly: boolean;
-}
+import type { VolumeMount } from './run-container.js';
 
 export interface InfiniClawMountOptions {
   group: RegisteredGroup;

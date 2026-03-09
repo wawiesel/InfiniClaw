@@ -8,6 +8,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { logger } from 'nanoclaw/logger.js';
 import { isRecord } from './utils.js';
+import type { VolumeMount } from './run-container.js';
 
 interface AllowEntry {
   path: string;
@@ -16,12 +17,6 @@ interface AllowEntry {
 
 interface AllowList {
   mounts: Record<string, AllowEntry[]>;
-}
-
-interface VolumeMount {
-  hostPath: string;
-  containerPath: string;
-  readonly: boolean;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'infiniclaw');
