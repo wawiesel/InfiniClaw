@@ -40,7 +40,7 @@ Duty rooms (Engineering, Bridge, Astrometrics) are fleet-wide — they are NOT c
 
 ### Threading by Room
 
-Threads (Thread Brains, branch/merge) are only available in duty rooms. Quarters and lounge do not support threading — bots in those rooms respond directly on the room timeline. This keeps non-duty rooms simple and conversational.
+Thread Brains (branch/merge, `branch_to_thread`) are only available in duty rooms. In quarters and lounge, bots cannot create threads or spawn Thread Brains — the host rejects `branch_to_thread` IPC commands from non-duty rooms. However, bots still follow basic Matrix conversation norms: if addressed in a thread (e.g. Captain replies in-thread), the bot responds in that thread. If addressed on the timeline, it responds on the timeline.
 
 ### Permissions
 
