@@ -6,21 +6,23 @@ Matrix is the communication backbone. Every message, command, and status update 
 
 | Account | Purpose |
 |---------|---------|
-| Captain (`@wawiesel:a-gis.org`) | Human operator. Admin in all rooms. |
-| Operator (`@operator:a-gis.org`) | Automated operator. Admin in all rooms. Used for room management, invites, power levels. |
-| Loudspeaker (`@loudspeaker:a-gis.org`) | Fleet-wide announcements from the relay. Member of all rooms. Delivers status information (repo versions, fleet health, lifecycle changes). |
-| Bot accounts (e.g. `@norm-bot:a-gis.org`) | One per bot. Joins rooms based on status. |
-| Intercom (`@engineering-intercom:a-gis.org`) | Write-only broadcast channel for Engineering. Used by operators and relays. Additional intercom accounts (bridge, astrometrics) added as rooms are introduced. |
+| Captain | Human. Admin in all rooms. Identity in `secrets/captain`. |
+| Operator (`@operator`) | Operator's direct Matrix presence. Admin in all rooms. Used for direct messages, BehindTheCurtain, and room management. |
+| Loudspeaker (`@loudspeaker`) | Relay's reply voice. Member of all rooms. Delivers `!` command responses prefixed `[SHIPNAME]`. Bots should ignore it. |
+| Bot accounts | One per bot. Joins rooms based on lifecycle status. |
+| Intercom accounts | Write-only broadcast channels, one per duty room. The relay polls these for incoming `!` commands. Not present in ship rooms. |
+
+Account credentials are in `secrets/operator/`. See `operator/intercom.json` for intercom accounts.
 
 ## Room Structure
 
-### Fleet-wide Rooms (Duty Rooms)
+### Duty Rooms
 
-Duty rooms are shared across all ships. Bots join/leave based on lifecycle status.
+Shared across all ships. Bots join/leave based on lifecycle status. Rooms and their IDs are in `operator/intercom.json`.
 
-- **Engineering** — Captain + engineers + loudspeaker + intercom
+### BehindTheCurtain
 
-Additional duty rooms (Bridge, Astrometrics) are added as roles are introduced.
+Private room between Captain and operator. Room ID in `operator/operator-matrix.json`. Not in intercom — operator account polls it directly.
 
 ### Ship Spaces
 
@@ -33,6 +35,8 @@ HERACLES (space)
     Norm's Room   — norm + captain + operator + loudspeaker (always)
 ```
 
+Ship space and lounge IDs are in `ships.json`. Per-bot quarters room IDs are in `fleet.json`.
+
 ### Permissions
 
 - **Captain** and **Operator** are admin (power 100) in all rooms.
@@ -41,16 +45,12 @@ HERACLES (space)
 
 ## Room Setup
 
-All rooms are created by the operator account. This example sets up a single ship (HERACLES) with one normie bot (Norm).
-
-Assumes: Matrix server running, these accounts registered: captain, operator, loudspeaker, norm-bot.
+All rooms are created by the operator account. This example sets up a single ship with one bot. Assumes: Matrix server running, accounts already registered (see `docs/solutions/matrix.md`).
 
 ### Helper: invite and join
 
-After inviting an account to a room, accept the invite on their behalf:
-
 ```bash
-# Invite
+# Invite (operator must already be in the room)
 curl -s -X POST "$HOMESERVER/_matrix/client/v3/rooms/$ROOM_ID/invite" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
@@ -63,13 +63,15 @@ curl -s -X POST "$HOMESERVER/_matrix/client/v3/rooms/$ROOM_ID/join" \
   -d '{}'
 ```
 
+Room IDs must be URL-encoded in the path (`!` → `%21`, `:` → `%3A`).
+
 ### 1. Create ship space
 
 ```bash
 SPACE_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "HERACLES", "creation_content": {"type": "m.space"}, "visibility": "private"}' \
+  -d '{"name": "SHIPNAME", "creation_content": {"type": "m.space"}, "visibility": "private"}' \
   | jq -r '.room_id')
 ```
 
@@ -82,7 +84,7 @@ LOUNGE_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
   -d '{"name": "Lounge", "visibility": "private"}' | jq -r '.room_id')
 ```
 
-Invite and join: captain, loudspeaker, norm-bot.
+Invite and join: captain, loudspeaker, all ship bots.
 
 ### 3. Create Quarters space (child of ship space)
 
@@ -94,23 +96,22 @@ QUARTERS_SPACE_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
   | jq -r '.room_id')
 ```
 
-### 4. Create Norm's quarters room (child of Quarters space)
+### 4. Create per-bot quarters room (child of Quarters space)
 
 ```bash
-NORM_ROOM_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
+BOT_ROOM_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Norm'\''s Room", "visibility": "private"}' | jq -r '.room_id')
+  -d '{"name": "Bot'\''s Room", "visibility": "private"}' | jq -r '.room_id')
 ```
 
-Invite and join: norm-bot, captain, loudspeaker.
+Invite and join: bot account, captain, loudspeaker.
 
 ### 5. Add space children
 
 Link rooms to their parent spaces via `m.space.child` state events:
 
 ```bash
-# URL-encode the child room ID (! → %21, : → %3A)
 # Lounge → ship space
 curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$LOUNGE_ID" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
@@ -123,8 +124,8 @@ curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$SPACE_ID/state/m.space.chil
   -H "Content-Type: application/json" \
   -d '{"via": ["a-gis.org"]}'
 
-# Norm's Room → Quarters space
-curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$QUARTERS_SPACE_ID/state/m.space.child/$NORM_ROOM_ID" \
+# Bot's Room → Quarters space
+curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$QUARTERS_SPACE_ID/state/m.space.child/$BOT_ROOM_ID" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"via": ["a-gis.org"]}'
@@ -132,13 +133,13 @@ curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$QUARTERS_SPACE_ID/state/m.s
 
 ### 6. Set power levels
 
-Captain and operator get admin (power 100) in every room (Lounge, Norm's Room):
+Captain and operator get admin (power 100) in every room:
 
 ```bash
 curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"users": {"@wawiesel:a-gis.org": 100, "@operator:a-gis.org": 100}}'
+  -d "{\"users\": {\"$CAPTAIN_USER_ID\": 100, \"$OPERATOR_USER_ID\": 100}}"
 ```
 
 ### 7. Save room IDs
@@ -153,46 +154,14 @@ All messages use `org.matrix.custom.html` format with `formatted_body` for rich 
 - **Math** — LaTeX via `data-mx-maths` attribute (MSC2191): `$x^2$` for inline, `$$\sum_{i=1}^n$$` for display
 - **Collapsible sections** — `<details>` blocks for tool call output
 
-Bot outgoing messages are converted by `renderMarkdownForMatrix()` in `src/channels/matrix.ts`, which extracts math before markdown processing and wraps it in `<span data-mx-maths="...">` / `<div data-mx-maths="...">`.
-
-### Client Setup
-
-Element Desktop requires a config override to render math. Add to `~/Library/Application Support/Element/config.json` (macOS):
-
-```json
-{
-  "show_labs_settings": true,
-  "features": {
-    "feature_latex_maths": true
-  }
-}
-```
-
-Restart Element. This enables both rendering of incoming `data-mx-maths` and LaTeX input in the composer (`$...$` and `$$...$$`).
+Bot outgoing messages are converted by `renderMarkdownForMatrix()` in `src/channels/matrix.ts`.
 
 ## Verification
 
-The room setup procedure also verifies credentials — each step exercises an account's token, so a failure pinpoints which secret is wrong.
-
-All checks use stored tokens from the secrets repo. No login needed if accounts are already set up.
-
-1. **Server reachable** — `curl https://matrix.a-gis.org/_matrix/client/versions`
-   *Check:* HTTP 200 with version list.
-
-2. **Tokens valid** — `GET /_matrix/client/v3/account/whoami` with each stored token (operator, loudspeaker, norm-bot).
-   *Check:* Each returns the expected `user_id`.
-
-3. **Rooms exist** — `GET /_matrix/client/v3/joined_rooms` with operator token.
-   *Check:* Response includes ship space, lounge, quarters space, and Norm's Room IDs.
-
-4. **Memberships correct** — `GET /_matrix/client/v3/rooms/$ROOM_ID/members` for Lounge and Norm's Room.
-   *Check:* Each room includes norm-bot, captain, operator, loudspeaker.
-
-5. **Space hierarchy** — `GET /_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$CHILD_ID` for each parent→child link.
-   *Check:* Returns `{"via": ["a-gis.org"]}`.
-
-6. **Power levels** — `GET /_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/` for each room.
-   *Check:* Captain and operator at power 100.
-
-7. **Message round-trip** — Operator posts to Norm's Room, reads back via `/messages`.
-   *Check:* Posted message appears in timeline.
+1. **Server reachable** — `curl $HOMESERVER/_matrix/client/versions` → HTTP 200
+2. **Tokens valid** — `GET /_matrix/client/v3/account/whoami` with each stored token → expected `user_id`
+3. **Rooms exist** — `GET /_matrix/client/v3/joined_rooms` with operator token → includes all expected room IDs
+4. **Memberships correct** — `GET /_matrix/client/v3/rooms/$ROOM_ID/members` → correct accounts in each room
+5. **Space hierarchy** — `GET /_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$CHILD_ID` → `{"via": [...]}`
+6. **Power levels** — `GET /_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/` → captain and operator at 100
+7. **Message round-trip** — Operator posts to a room, reads back via `/messages` → posted message appears

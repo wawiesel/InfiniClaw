@@ -9,5 +9,5 @@ Format: each file covers one domain. Each entry has **Problem**, **Cause**, **Fi
 - `conduwuit.md` — Matrix homeserver (Conduwuit/Continuwuity)
 - `containers.md` — Podman, pm2, process management
 - `git.md` — Git sync and secrets repo issues
-- `matrix.md` — Matrix API and account management
+- `matrix.md` — Matrix API, account management, Element Desktop setup
 - `relay.md` — InfiniClaw relay process

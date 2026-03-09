@@ -46,6 +46,25 @@ curl -s -X POST "https://matrix.a-gis.org/_matrix/client/v3/rooms/<encoded-room-
 
 Use intercom account tokens (from `operator/intercom.json`) to invite into rooms they already occupy.
 
+## Element Desktop doesn't render math
+
+**Problem:** LaTeX / math expressions in bot messages don't render in Element Desktop.
+
+**Cause:** The `feature_latex_maths` lab is disabled by default.
+
+**Fix:** Add to Element's config file (location varies by OS — check Element docs or `--help`):
+```json
+{
+  "show_labs_settings": true,
+  "features": {
+    "feature_latex_maths": true
+  }
+}
+```
+Restart Element. Enables rendering of incoming `data-mx-maths` and LaTeX input in the composer (`$...$` and `$$...$$`).
+
+---
+
 ## Invite fails: "You must be joined in the room you are trying to invite from"
 
 **Cause:** The account you're using to invite is not a member of that room.

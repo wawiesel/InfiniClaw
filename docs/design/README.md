@@ -5,7 +5,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 ## Foundation
 
 - `00-overview.md` — Core principles, code structure
-- `01-matrix.md` — Matrix server, accounts, room setup, message format, math rendering, verification
+- `01-matrix.md` — Matrix server, accounts, room setup, message format, verification
 - `02-containers.md` — Podman isolation, image builds, mount table, secrets flow, credential proxy
 
 ## Bot Runtime
@@ -38,4 +38,4 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
 
-See `01-matrix.md` for Element Desktop math rendering setup.
+See `docs/solutions/matrix.md` for Element Desktop math rendering setup.
