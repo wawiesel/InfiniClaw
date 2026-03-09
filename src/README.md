@@ -42,8 +42,7 @@ Host machine (macOS / Linux)
 ├── container-secrets.ts→ Normalize provider secrets for containers
 ├── run-container.ts    → Container run loop (extracted from NanoClaw for composability)
 ├── channels/
-│   ├── matrix.ts       → Matrix SDK: connect, send, edit, react, sync
-│   └── local-cli.ts    → Terminal channel for `npm run cli chat`
+│   └── matrix.ts       → Matrix SDK: connect, send, edit, react, sync, mention pills
 ├── infini-config.ts    → InfiniClaw-specific env config (removed from upstream)
 ├── ship-config.ts      → Fleet/ship config, shared constants (SAFE_BOT_NAME, isValidBotName, RUNNING_STATUSES, BotStatus)
 ├── allow-list.ts       → Validate mounts against host-side allowlist (~/.config/infiniclaw/allow-list.json)

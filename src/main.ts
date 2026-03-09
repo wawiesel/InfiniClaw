@@ -24,8 +24,6 @@ import {
   ASSISTANT_ROLE,
   CAPTAIN_USER_ID,
   HEAP_LIMIT_MB,
-  LOCAL_CHANNEL_ENABLED,
-  LOCAL_MIRROR_MATRIX_JID,
   MAIN_GROUP_FOLDER,
   MAIN_BRAIN_TURN_TIMEOUT_MS,
   MAIN_BRAIN_TOOL_LIMIT,
@@ -76,7 +74,6 @@ import {
 } from './composables.js';
 import { pruneExpired } from './allow-list.js';
 import { MatrixChannel } from './channels/matrix.js';
-import { LocalCliChannel } from './channels/local-cli.js';
 import { findChannel, formatMessages, stripInternalTags } from 'nanoclaw/router.js';
 import { formatThreadContext } from './router-ext.js';
 import { collectBotMatrixUserIds } from './service.js';
@@ -1580,43 +1577,11 @@ async function main(): Promise<void> {
     matrixRef = matrix;
   }
 
-  let localCli: LocalCliChannel | null = null;
-  if (LOCAL_CHANNEL_ENABLED) {
-    localCli = new LocalCliChannel({
-      onMessage: (_chatJid, msg) => {
-        const safeMsg = normalizeInboundMessage(msg);
-        if (!safeMsg) {
-          logger.warn({ chatJid: msg.chat_jid, sender: msg.sender, id: msg.id }, 'Dropped invalid inbound local message');
-          return;
-        }
-        if (safeMsg.content.trim().startsWith('!')) return; // operator commands — relay handles via intercom
-        storeMessage(safeMsg);
-      },
-      onChatMetadata: (chatJid, timestamp, name) =>
-        storeChatMetadata(chatJid, timestamp, name),
-      mirrorToMatrix: LOCAL_MIRROR_MATRIX_JID
-        ? async (text: string) => {
-          if (!matrix || !matrix.isConnected()) return;
-          await matrix.sendMessage(LOCAL_MIRROR_MATRIX_JID, text);
-        }
-        : undefined,
-    });
-  }
-
   // Build channels array
-  const allChannels: (Channel | null)[] = [localCli, matrix];
+  const allChannels: (Channel | null)[] = [matrix];
   const refreshConnectedChannels = () => {
     channels = allChannels.filter((ch): ch is Channel => ch != null && ch.isConnected());
   };
-
-  if (localCli) {
-    try {
-      await localCli.connect();
-    } catch (err) {
-      logger.error({ err }, 'Local CLI channel connect failed');
-    }
-    refreshConnectedChannels();
-  }
 
   if (matrix) {
     try {

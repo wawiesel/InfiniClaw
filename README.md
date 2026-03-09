@@ -42,13 +42,6 @@ npm run cli start
 npm run cli stop
 ```
 
-6. Terminal chat (direct conversation with a bot):
-
-```bash
-npm run cli chat cid
-npm run cli chat johnny5
-```
-
 ### What start/stop do
 
 **`start`** — For each bot in `fleet.json` assigned to this ship:

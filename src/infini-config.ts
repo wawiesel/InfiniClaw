@@ -25,15 +25,6 @@ export const MATRIX_RECONNECT_INTERVAL = parseInt(process.env.MATRIX_RECONNECT_I
 export const MATRIX_DEVICE_NAME = process.env.MATRIX_DEVICE_NAME || '';
 export const MATRIX_USER_ID = process.env.MATRIX_USER_ID || '';
 
-// Local CLI channel
-export const LOCAL_CHAT_JID = 'local:cli';
-export const LOCAL_CHAT_NAME = 'Local CLI';
-export const LOCAL_CHAT_SENDER_NAME = process.env.LOCAL_CHAT_SENDER_NAME || 'God';
-
-// Local channel config
-export const LOCAL_CHANNEL_ENABLED = process.env.LOCAL_CHANNEL_ENABLED === '1' || process.env.LOCAL_CHANNEL_ENABLED === 'true';
-export const LOCAL_MIRROR_MATRIX_JID = process.env.LOCAL_MIRROR_MATRIX_JID || '';
-
 // Message filtering
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -56,7 +47,7 @@ export const IGNORE_SENDERS: Set<string> = new Set(
 export function validateConfig(): string[] {
   const warnings: string[] = [];
   if (!CAPTAIN_USER_ID) warnings.push('CAPTAIN_USER_ID is empty — operator commands will be unrestricted');
-  if (!MATRIX_HOMESERVER && !LOCAL_CHANNEL_ENABLED) warnings.push('No channel configured: MATRIX_HOMESERVER empty and LOCAL_CHANNEL_ENABLED off');
+  if (!MATRIX_HOMESERVER) warnings.push('MATRIX_HOMESERVER is empty — Matrix channel will not connect');
   if (MATRIX_HOMESERVER && !MATRIX_USERNAME && !MATRIX_ACCESS_TOKEN) warnings.push('MATRIX_HOMESERVER set but no MATRIX_USERNAME or MATRIX_ACCESS_TOKEN');
   if (HEAP_LIMIT_MB < 0) warnings.push(`HEAP_LIMIT_MB is negative (${HEAP_LIMIT_MB})`);
   if (MEMORY_CHECK_INTERVAL < 10_000) warnings.push(`MEMORY_CHECK_INTERVAL too low (${MEMORY_CHECK_INTERVAL}ms) — may cause excessive logging`);

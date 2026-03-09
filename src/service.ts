@@ -753,19 +753,9 @@ export function holodeckCreate(bot: string, branch: string): void {
   const hdProfileDir = path.join(config.secretsPath, 'bots', hdBot);
   fs.mkdirSync(hdProfileDir, { recursive: true });
   fs.copyFileSync(profileEnvPath(root, bot), profileEnvPath(root, hdBot));
-  fs.appendFileSync(profileEnvPath(root, hdBot), [
-    '',
-    '# Holodeck overrides — terminal only, no Matrix',
-    'LOCAL_CHANNEL_ENABLED=1',
-    'MATRIX_HOMESERVER=',
-    'MATRIX_USERNAME=',
-    'MATRIX_PASSWORD=',
-    '',
-  ].join('\n'));
-
   // 6. Seed main room registration
   const profileEnv = loadProfileEnv(root, hdBot);
-  const mainJid = profileEnv.LOCAL_CHAT_JID || profileEnv.LOCAL_MIRROR_MATRIX_JID;
+  const mainJid = profileEnv.MAIN_GROUP_JID || '';
   const mainGroupName = profileEnv.MAIN_GROUP_NAME;
   const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
 
