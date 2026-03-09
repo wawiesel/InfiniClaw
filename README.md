@@ -90,3 +90,4 @@ See [`docs/design/README.md`](docs/design/README.md) for the architecture docume
 
 - Container images are per-persona: `nanoclaw-cid`, `nanoclaw-johnny5`, `nanoclaw-nora`, `nanoclaw-parker`, `nanoclaw-albert`.
 - Cross-bot communication: `@BotName message` in any room auto-forwards to the target bot's room.
+- NanoClaw dependency: `external/nanoclaw/` tracks upstream. InfiniClaw extensions in `src/nanoclaw-ext.d.ts` and friends.
