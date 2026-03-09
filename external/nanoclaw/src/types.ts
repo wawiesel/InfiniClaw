@@ -49,7 +49,6 @@ export interface NewMessage {
   sender_name: string;
   content: string;
   timestamp: string;
-  thread_id?: string; // [InfiniClaw] Matrix thread support
   is_from_me?: boolean;
   is_bot_message?: boolean;
 }
@@ -83,7 +82,7 @@ export interface TaskRunLog {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string, threadId?: string): Promise<void>;
+  sendMessage(jid: string, text: string): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
@@ -91,14 +90,6 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
-  // [InfiniClaw] Matrix extensions
-  sendMessageReturningId?(jid: string, text: string, threadId?: string): Promise<string | undefined>;
-  editMessage?(jid: string, eventId: string, newText: string): Promise<void>;
-  setPresenceStatus?(status: string, statusMsg?: string): Promise<void>;
-  setStatusPip?(jid: string, emoji: string): Promise<void>;
-  sendReaction?(jid: string, eventId: string, emoji: string): Promise<void>;
-  sendImage?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
-  sendFile?(jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

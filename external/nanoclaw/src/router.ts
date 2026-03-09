@@ -1,4 +1,5 @@
 import { Channel, NewMessage } from './types.js';
+import { formatLocalTime } from './timezone.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -9,12 +10,18 @@ export function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function formatMessages(messages: NewMessage[]): string {
+export function formatMessages(
+  messages: NewMessage[],
+  timezone: string,
+): string {
   const lines = messages.map((m) => {
-    const threadAttr = m.thread_id ? ` thread="${escapeXml(m.thread_id)}"` : '';
-    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${threadAttr}>${escapeXml(m.content)}</message>`;
+    const displayTime = formatLocalTime(m.timestamp, timezone);
+    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
   });
-  return `<messages>\n${lines.join('\n')}\n</messages>`;
+
+  const header = `<context timezone="${escapeXml(timezone)}" />\n`;
+
+  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {
@@ -42,15 +49,4 @@ export function findChannel(
   jid: string,
 ): Channel | undefined {
   return channels.find((c) => c.ownsJid(jid));
-}
-
-// [InfiniClaw] formatThreadContext removed upstream in v1.2.2
-export function formatThreadContext(threadMessages: NewMessage[], newMessageIds: Set<string>): string {
-  const contextOnly = threadMessages.filter(m => m.id && !newMessageIds.has(m.id));
-  if (contextOnly.length === 0) return '';
-  const lines = contextOnly.map(m => {
-    const content = m.content.length > 500 ? m.content.slice(0, 500) + '...' : m.content;
-    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(content)}</message>`;
-  });
-  return `<thread_context>\n${lines.join('\n')}\n</thread_context>`;
 }

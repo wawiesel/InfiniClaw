@@ -28,3 +28,9 @@ git checkout HEAD -- external/nanoclaw/.gitignore external/nanoclaw/tsconfig.jso
 ```
 
 Only merge `src/` and `package.json`. Discard everything else. The fork should never re-accumulate non-library files.
+
+**After pulling upstream:**
+1. Rebuild dist: `cd external/nanoclaw && npx tsc`
+2. Check InfiniClaw build: `npx tsc --noEmit` from repo root
+3. If upstream removed functions InfiniClaw uses, move them into `src/` (see `nanoclaw-ext.d.ts`, `db-ext.ts`, etc.)
+4. Run tests: `npx vitest run`
