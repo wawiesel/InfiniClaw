@@ -21,6 +21,7 @@ Host machine (macOS / Linux)
 │── Orchestrator ─────────────────────────────────────────────
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2
+├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave)
 ├── relay.ts            → Supervisor relay: Matrix watcher for bot lifecycle and operator commands
 ├── main.ts             → Message loop, indicators, container lifecycle
 ├── container-spawn.ts  → Build podman args, inject git identity (@a-gis.org), delegate to upstream runContainer()

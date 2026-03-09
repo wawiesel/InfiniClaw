@@ -2,49 +2,8 @@
  * Intercom relay — sends messages to Matrix rooms via per-room intercom accounts.
  * Used for cross-room bot-to-bot messaging.
  */
-import fs from 'fs';
-import path from 'path';
-
 import { logger } from 'nanoclaw/logger.js';
-import { loadShipConfig } from './ship-config.js';
-
-interface IntercomRoom {
-  roomId: string;
-  username: string;
-  password: string;
-}
-
-interface IntercomConfig {
-  homeserver: string;
-  rooms: Record<string, IntercomRoom>;
-}
-
-let cachedConfig: IntercomConfig | null = null;
-
-function loadIntercomConfig(): IntercomConfig | null {
-  if (cachedConfig) return cachedConfig;
-  try {
-    const secretsPath = loadShipConfig().secretsPath;
-    const configPath = path.join(secretsPath, 'operator', 'intercom.json');
-    if (!fs.existsSync(configPath)) return null;
-    cachedConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    return cachedConfig;
-  } catch {
-    return null;
-  }
-}
-
-/** Find the intercom room config for a given Matrix room ID. */
-function findIntercomForRoom(matrixRoomId: string): { name: string; room: IntercomRoom; homeserver: string } | null {
-  const config = loadIntercomConfig();
-  if (!config) return null;
-  for (const [name, room] of Object.entries(config.rooms)) {
-    if (room.roomId === matrixRoomId) {
-      return { name, room, homeserver: config.homeserver };
-    }
-  }
-  return null;
-}
+import { loadIntercomConfig, matrixLogin, matrixLogout, matrixSend } from './matrix-api.js';
 
 /** Strip 'matrix:' prefix from a JID to get the raw Matrix room ID. */
 function jidToRoomId(jid: string): string {
@@ -57,59 +16,44 @@ function jidToRoomId(jid: string): string {
  */
 export async function sendViaIntercom(targetJid: string, text: string): Promise<boolean> {
   const roomId = jidToRoomId(targetJid);
-  const intercom = findIntercomForRoom(roomId);
-  if (!intercom) {
+  const config = loadIntercomConfig();
+  if (!config) {
+    logger.warn({ targetJid, roomId }, 'No intercom config found');
+    return false;
+  }
+
+  // Find the intercom room entry matching this room ID
+  let roomEntry: { username: string; password: string } | null = null;
+  for (const room of Object.values(config.rooms)) {
+    if (room.roomId === roomId) { roomEntry = room; break; }
+  }
+  if (!roomEntry) {
     logger.warn({ targetJid, roomId }, 'No intercom account found for target room');
     return false;
   }
 
-  const { homeserver, room } = intercom;
+  const { homeserver } = config;
 
   try {
-    // Login
-    const loginResp = await fetch(`${homeserver}/_matrix/client/v3/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'm.login.password',
-        user: room.username,
-        password: room.password,
-      }),
+    const { accessToken } = await matrixLogin(homeserver, roomEntry.username, roomEntry.password);
+
+    const eventId = await matrixSend({
+      homeserver,
+      token: accessToken,
+      roomId,
+      text,
+      plain: true,
     });
-    if (!loginResp.ok) {
-      logger.error({ status: loginResp.status, intercom: room.username }, 'Intercom login failed');
-      return false;
-    }
-    const { access_token } = (await loginResp.json()) as { access_token: string };
 
-    // Send message
-    const txnId = `xroom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const encodedRoom = encodeURIComponent(roomId);
-    const sendResp = await fetch(
-      `${homeserver}/_matrix/client/v3/rooms/${encodedRoom}/send/m.room.message/${txnId}`,
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ msgtype: 'm.text', body: text }),
-      },
-    );
+    // Logout best-effort
+    matrixLogout(homeserver, accessToken);
 
-    // Logout (best effort)
-    fetch(`${homeserver}/_matrix/client/v3/logout`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' },
-      body: '{}',
-    }).catch(() => {});
-
-    if (!sendResp.ok) {
-      logger.error({ status: sendResp.status, intercom: room.username }, 'Intercom send failed');
+    if (!eventId) {
+      logger.error({ intercom: roomEntry.username }, 'Intercom send failed');
       return false;
     }
 
-    logger.info({ targetJid, intercom: room.username }, 'Cross-room message sent via intercom');
+    logger.info({ targetJid, intercom: roomEntry.username }, 'Cross-room message sent via intercom');
     return true;
   } catch (err) {
     logger.error({ err, targetJid }, 'Intercom relay error');
