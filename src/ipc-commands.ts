@@ -856,7 +856,7 @@ async function handleFleetStatus(data: CommandData, ctx: InfiniClawIpcContext): 
       lines.push(`**${role}:**`);
       for (const [name, entry] of entries.sort((a, b) => a[1].rank - b[1].rank)) {
         const s = entry.status as string;
-        const status = s === 'onduty' || s === 'active' ? 'ON ' : s === 'transit' ? 'TRN' : s === 'sleep' ? 'ZZZ' : s === 'lounge' ? 'LNG' : s === 'quarters' ? 'QTR' : 'OFF';
+        const status = s === 'onduty' || s === 'active' ? 'ON ' : s === 'transit' ? 'TRN' : s === 'sleep' ? 'ZZZ' : s === 'quarters' ? 'QTR' : 'OFF';
         lines.push(`  ${status} #${entry.rank} ${name} → ${entry.ship || 'unassigned'}`);
       }
     }

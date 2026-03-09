@@ -2,7 +2,7 @@
  * Supervisor relay — lightweight Matrix watcher for fleet lifecycle.
  *
  * Connects to each room via its intercom account (from intercom.json),
- * watches for operator commands (!join, !dismiss, !refresh), and manages
+ * watches for operator commands (!report, !dismiss, !refresh), and manages
  * bots via pm2 — no CLI needed.
  *
  * Run: node dist/relay.js
@@ -29,6 +29,7 @@ import {
   matrixInvite,
   matrixJoin,
   matrixLeave,
+  matrixSetDisplayName,
   markdownToHtml,
   loadIntercomConfig,
   clearIntercomConfigCache,
@@ -516,6 +517,18 @@ async function botLeaveRoom(token: string, homeserver: string, roomId: string): 
   await matrixLeave(homeserver, token, roomId);
 }
 
+/** Update a bot's Matrix display name pip during boot stages. */
+async function setBotPip(root: string, bot: string, pip: string): Promise<void> {
+  try {
+    const { token, homeserver, userId } = await botMatrixLogin(root, bot);
+    const name = bot.charAt(0).toUpperCase() + bot.slice(1);
+    const displayName = `${name} ${pip} (${HOSTNAME})`;
+    await matrixSetDisplayName(homeserver, token, userId, displayName);
+  } catch (err) {
+    log(`setBotPip ${bot} ${pip}: ${errStr(err)}`);
+  }
+}
+
 // ── Bot resolution (multi-ship aware) ───────────────────────────
 
 /** Map local bot name → room name (lowercased) from MAIN_GROUP_NAME in env. */
@@ -562,8 +575,8 @@ function resolveBots(target: string | undefined, roomName: string, action?: stri
   const local = getActiveBots();
   if (target) {
     if (local.includes(target)) return [target];
-    // For join/sleep/wake, also match inactive/sleeping bots assigned to this ship
-    if ((action === 'join' || action === 'sleep' || action === 'wake') && liveFleet[target]?.ship === HOSTNAME) return [target];
+    // For report/sleep/wake, also match inactive/sleeping bots assigned to this ship
+    if ((action === 'report' || action === 'sleep' || action === 'wake') && liveFleet[target]?.ship === HOSTNAME) return [target];
     return [];
   }
   // No target — scope to bots in this room on this ship
@@ -1571,7 +1584,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
 // ── Command handling ───────────────────────────────────────────────
 
 async function handleLifecycleCommand(
-  action: 'join' | 'dismiss' | 'refresh' | 'sleep' | 'wake',
+  action: 'report' | 'dismiss' | 'refresh' | 'sleep' | 'wake',
   target: string | undefined,
   conn: RoomConn,
 ): Promise<void> {
@@ -1605,48 +1618,43 @@ async function handleLifecycleCommand(
     const dutyRoomId = conn.roomId;
 
     if (action === 'dismiss') {
-      // Dismiss: stop bot, downgrade brain to sonnet, disable lobes, move to lounge
+      // Dismiss: leave duty room, disable lobes. Bot keeps running in quarters.
       try {
-        stopBot(bot);
-        killStaleContainers(bot);
-        // Save current brain model and downgrade to sonnet
+        // Disable lobes
         const config = loadShipConfig();
         const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
-        if (env?.BRAIN_MODEL && env.BRAIN_MODEL !== 'claude-sonnet-4-6') {
-          fleetUpdate(bot, { activeBrainModel: env.BRAIN_MODEL });
-        }
         try {
-          upsertEnvLine(envFile, 'BRAIN_MODEL', 'claude-sonnet-4-6');
           upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '1');
-          log(`${name}: brain downgraded to sonnet, lobes disabled`);
+          log(`${name}: lobes disabled`);
         } catch (envErr) {
           log(`${name}: env update failed (non-fatal): ${errStr(envErr)}`);
         }
-        // Move bot: leave duty room → join lounge
+        // Leave duty room (bot stays running in quarters)
         try {
-          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
+          const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
           await botLeaveRoom(botToken, homeserver, dutyRoomId);
-          if (loungeId) await botJoinRoom(botToken, homeserver, loungeId, conn, botUserId);
-          log(`${name}: moved to lounge`);
+          if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
+          log(`${name}: returned to quarters`);
         } catch (roomErr) {
-          log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
+          log(`${name}: room leave failed (non-fatal): ${errStr(roomErr)}`);
         }
-        fleetUpdate(bot, { status: 'lounge' });
-        await reply(conn, `🔴 ${name} dismissed → lounge (sonnet, no lobes)`);
+        fleetUpdate(bot, { status: 'quarters' });
+        writeFleet(liveFleet);
+        await reply(conn, `📢 ${name} dismissed`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!dismiss ${name} failed: ${errStr(err)}`);
         await reply(conn, `⛔ !dismiss ${name} — ${errStr(err)}`);
       }
     } else if (action === 'sleep') {
-      // Sleep: hard stop — move to quarters, stop container
+      // Sleep: hard stop — leave all rooms except quarters, stop container
       try {
         stopBot(bot);
         killStaleContainers(bot);
-        const quartersRoomId = liveFleet[bot]?.quartersRoom;
-        // Move bot: leave current room (duty or lounge) → quarters only
+        await setBotPip(root, bot, '💤');
+        // Move bot: leave all non-quarters rooms
         try {
-          const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
+          const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
           await botLeaveRoom(botToken, homeserver, dutyRoomId);
           if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
           log(`${name}: moved to quarters (sleeping)`);
@@ -1654,112 +1662,144 @@ async function handleLifecycleCommand(
           log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
         }
         fleetUpdate(bot, { status: 'sleep' });
-        await reply(conn, `😴 ${name} sleeping (quarters, container stopped)`);
+        writeFleet(liveFleet);
+        await reply(conn, `😴 ${name} sleeping`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!sleep ${name} failed: ${errStr(err)}`);
         await reply(conn, `⛔ !sleep ${name} — ${errStr(err)}`);
       }
     } else if (action === 'wake') {
-      // Wake: restart in quarters (bot stays in quarters room, not duty room)
+      // Wake: start container in quarters
       const startedAt = Date.now();
       const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
       const threadRoot = await reply(conn, `☀️ ${name} waking`);
       if (!threadRoot) continue;
       const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
       try {
-        await step('building...');
+        await setBotPip(root, bot, '🔄');
+        await step('🔄 building');
         fleetUpdate(bot, { status: 'quarters' }); // awake but not on duty
         writeFleet(liveFleet);
         clearShipConfigCache();
+        await setBotPip(root, bot, '🚀');
+        await step('🚀 starting');
         bootstrapBot(root, bot);
+        await setBotPip(root, bot, '🟡');
+        await step('🟡 waiting for first output');
         const model = env?.BRAIN_MODEL || '?';
         const ver = botVersion(root, bot);
-        await step(`✅ awake · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+        await setBotPip(root, bot, '🟢');
+        await step(`🟢 online · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
         await reply(conn, `☀️ ${name} awake (quarters)`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
+        await setBotPip(root, bot, '💤');
         const fail = `⛔ !wake ${name} — ${errStr(err)}`;
         await step(fail);
         await reply(conn, fail);
       }
     } else {
-      // Join: no-op if already onduty
-      if (action === 'join' && liveFleet[bot]?.status === 'onduty') {
+      // Report: move awake bot to duty room. Skip sleeping bots. No restart needed.
+      if (liveFleet[bot]?.status === 'sleep') {
+        log(`!report ${name}: skipping (sleeping)`);
+        continue;
+      }
+      if (liveFleet[bot]?.status === 'onduty') {
         await reply(conn, `${name} is already on duty`);
         continue;
       }
-      // Join is slow (build) — use a thread
-      const startedAt = Date.now();
-      const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-      const threadRoot = await reply(conn, `🟢 ${name} joining`);
-      if (!threadRoot) continue;
-      const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
       try {
-        // Restore brain model and enable lobes
+        // Enable lobes
         const config = loadShipConfig();
         const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
-        const savedModel = liveFleet[bot]?.activeBrainModel;
-        if (savedModel) {
-          try {
-            upsertEnvLine(envFile, 'BRAIN_MODEL', savedModel);
-            upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
-            log(`${name}: brain restored to ${savedModel}, lobes enabled`);
-          } catch (envErr) {
-            log(`${name}: env restore failed (non-fatal): ${errStr(envErr)}`);
-          }
-        } else {
-          try {
-            upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
-          } catch { /* ignore */ }
+        try {
+          upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
+          log(`${name}: lobes enabled`);
+        } catch (envErr) {
+          log(`${name}: env update failed (non-fatal): ${errStr(envErr)}`);
         }
-        fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME });
-        writeFleet(liveFleet);
-        clearShipConfigCache();
-        // Move bot: leave lounge → join duty room
+        // Move bot: leave any non-quarters room → join duty room
         try {
           const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
           if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
           await botJoinRoom(botToken, homeserver, dutyRoomId, conn, botUserId);
-          await step('room joined');
         } catch (roomErr) {
-          log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
-          await step(`room move failed: ${errStr(roomErr)}`);
+          log(`${name}: room move failed: ${errStr(roomErr)}`);
+          await reply(conn, `📢 ${name} failed to report — ${errStr(roomErr)}`);
+          continue;
         }
-        // Sync latest code before starting
-        const syncResult = gitSync();
-        if (!syncResult.ok) {
-          await step(`⚠️ code sync failed — ${syncResult.output.slice(0, 100)}`);
-        } else if (syncResult.newCommits > 0) {
-          await step(`pulled ${syncResult.newCommits} commit(s), rebuilding...`);
-          const buildResult = rebuildInfiniClaw();
-          if (buildResult.includes('FAILED')) await step(`⚠️ rebuild failed — bot starting on previous build`);
-        }
-        await step('building...');
-        bootstrapBot(root, bot);
-        const model = env?.BRAIN_MODEL || '?';
-        const ver = botVersion(root, bot);
-        await step(`✅ online · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
-        await reply(conn, `✅ ${name} online`);
+        fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME });
+        writeFleet(liveFleet);
+        await reply(conn, `📢 ${name} reporting for duty`);
         publishFleetReport().catch(() => {});
-        // Trigger the bot to acknowledge in the thread
-        await threadReply(conn, threadRoot, `${name}, reporting for duty!`);
       } catch (err) {
-        log(`!join ${name} failed: ${errStr(err)}`);
-        const fail = `⛔ !join ${name} — ${errStr(err)}`;
-        await step(fail);
-        await reply(conn, fail);
+        log(`!report ${name} failed: ${errStr(err)}`);
+        await reply(conn, `📢 ${name} failed to report — returned to quarters`);
       }
     }
   }
 
 }
 
+/** Send bot to a non-quarters, non-duty room. No args = list available rooms. */
+async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
+  const root = resolveRoot();
+  const ships = safeLoadShips();
+  const loungeId = ships[HOSTNAME]?.loungeId as string | undefined;
+
+  // Build available room map
+  const rooms: Record<string, string> = {};
+  if (loungeId) rooms['lounge'] = loungeId;
+
+  const args = cmd.slice('!go'.length).trim().split(/\s+/).filter(Boolean);
+
+  // No args — list available rooms
+  if (args.length === 0) {
+    if (Object.keys(rooms).length === 0) {
+      await reply(conn, 'No available rooms');
+      return;
+    }
+    const list = Object.keys(rooms).map(r => `  • ${r}`).join('\n');
+    await reply(conn, `Available rooms:\n${list}\n\nUsage: \`!go <room> [bot]\``);
+    return;
+  }
+
+  const roomName = args[0].toLowerCase();
+  const targetBot = args[1]?.toLowerCase();
+
+  const roomId = rooms[roomName];
+  if (!roomId) {
+    await reply(conn, `Unknown room: ${roomName}. Available: ${Object.keys(rooms).join(', ')}`);
+    return;
+  }
+
+  const bots = resolveBots(targetBot, conn.name, 'go');
+  if (bots.length === 0) {
+    if (targetBot) await reply(conn, `No local bot: ${targetBot}`);
+    return;
+  }
+
+  for (const bot of bots) {
+    const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+    const name = env?.ASSISTANT_NAME || bot;
+    log(`!go ${roomName} ${name}`);
+    try {
+      const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
+      await botJoinRoom(botToken, homeserver, roomId, conn, botUserId);
+      await reply(conn, `${name} → ${roomName}`);
+    } catch (err) {
+      log(`!go ${roomName} ${name} failed: ${errStr(err)}`);
+      await reply(conn, `⛔ !go ${roomName} ${name} — ${errStr(err)}`);
+    }
+  }
+}
+
 /** Lightweight refresh: stop → rebuild → start. No brain/lobe/room changes. */
 async function handleRefresh(target: string | undefined, conn: RoomConn): Promise<void> {
   const root = resolveRoot();
-  const bots = resolveBots(target, conn.name, 'join');
+  const bots = resolveBots(target, conn.name, 'report');
   if (bots.length === 0) return;
 
   if (!isShipActive()) {
@@ -1804,19 +1844,22 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
 
 function registerRelayCommands(): void {
   registerHandlers({
-    join: async (cmd, conn) => {
-      const parsed = parseTarget(cmd, '!join');
-      if (parsed.matched) await handleLifecycleCommand('join', parsed.target, conn);
+    report: async (cmd, conn) => {
+      const parsed = parseTarget(cmd, '!report');
+      if (parsed.matched) await handleLifecycleCommand('report', parsed.target, conn);
     },
     dismiss: async (cmd, conn) => {
       const parsed = parseTarget(cmd, '!dismiss');
       if (parsed.matched) await handleLifecycleCommand('dismiss', parsed.target, conn);
     },
+    go: async (cmd, conn) => {
+      await handleGoCommand(cmd, conn);
+    },
     rejoin: async (cmd, conn) => {
       const parsed = parseTarget(cmd, '!rejoin');
       if (parsed.matched) {
         await handleLifecycleCommand('dismiss', parsed.target, conn);
-        await handleLifecycleCommand('join', parsed.target, conn);
+        await handleLifecycleCommand('report', parsed.target, conn);
       }
     },
     refresh: async (cmd, conn) => {
@@ -2223,11 +2266,9 @@ function registerRelayCommands(): void {
             if (entry.localStatus === 'transit') badge = '🚀';
             else if (entry.localStatus === 'sleep') badge = '💤';
             else if (entry.localStatus === 'warn') badge = '⚠️';
-            else if (entry.localStatus === 'lounge') badge = '🍸';
-            else if (entry.localStatus === 'quarters') badge = '🏠';
-            else if (entry.localStatus !== 'onduty') badge = '❓';
             else if (isCO) badge = '⭐';
-            else badge = '🟢';
+            else if (entry.localStatus === 'onduty' || entry.localStatus === 'quarters') badge = '🟢';
+            else badge = '❓';
 
             const prefix = isLast ? '\u00A0\u00A0└' : '\u00A0\u00A0├';
             lines.push(`${prefix} ${entry.name} ${badge} · ${entry.role}[${entry.rank}]${entry.gitVersion}`);
@@ -2506,14 +2547,41 @@ async function curtainLoop(captainUserId: string): Promise<void> {
       if (!joinedRooms) continue;
 
       for (const [rid, roomData] of Object.entries(joinedRooms)) {
-        if (rid !== roomId) continue;
         for (const event of (roomData as any).timeline?.events || []) {
           if (event.type !== 'm.room.message') continue;
           if (event.content?.msgtype !== 'm.text') continue;
           if (event.sender === userId) continue; // skip own messages
-          if (captainUserId && event.sender !== captainUserId) continue; // Captain only
           const body = event.content.body?.trim();
           if (!body) continue;
+
+          // Mention-wake: mention of a sleeping bot in any room wakes it.
+          // Matches: <m>Name</m> in body, @Name in body, or mention pill in formatted_body.
+          const formattedBody = event.content.formatted_body as string || '';
+          for (const [bot, entry] of Object.entries(liveFleet)) {
+            if (entry.status !== 'sleep' || entry.ship !== HOSTNAME) continue;
+            const name = bot.charAt(0).toUpperCase() + bot.slice(1);
+            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const mentioned =
+              new RegExp(`<m>${escaped}</m>`, 'i').test(body) ||
+              new RegExp(`@${escaped}\\b`, 'i').test(body) ||
+              new RegExp(`matrix\\.to/#/@${bot}[^"]*">${escaped}`, 'i').test(formattedBody);
+            if (mentioned) {
+              log(`mention-wake: ${name} triggered by ${event.sender} in ${rid}`);
+              const wakeConn: RoomConn = {
+                name: 'mention-wake', roomId: rid, homeserver,
+                username: '', password: '', accessToken, syncToken, filterId, userId,
+              };
+              try {
+                await handleLifecycleCommand('wake', bot, wakeConn);
+              } catch (err) {
+                log(`mention-wake: ${name} failed: ${errStr(err)}`);
+              }
+            }
+          }
+
+          // BehindTheCurtain-specific handling
+          if (rid !== roomId) continue;
+          if (captainUserId && event.sender !== captainUserId) continue; // Captain only
 
           const curtainConn: RoomConn = {
             name: 'BehindTheCurtain', roomId, homeserver,

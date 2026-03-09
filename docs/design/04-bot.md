@@ -31,11 +31,11 @@ Role is resolved from the fleet state held in memory by the relay (persisted to 
 
 ## Trigger Pattern
 
-The trigger pattern is `^@<name>\b` (case-insensitive, anchored to message start).
+The trigger pattern is `<m>name</m>` (case-insensitive, matches anywhere in the message). The `<m>` marker is the canonical mention format — bots read and write it.
 
-**Matrix mention pill handling:** Matrix clients strip the `@` prefix from mention pills in the plaintext body. The host restores it before trigger testing — see [01-matrix](01-matrix.md) for details on mention pill symmetry.
+**Matrix mention pill handling:** When a user mentions a bot in Matrix (via a mention pill), the host converts it to `<m>Name</m>` in the plaintext body before storing or trigger-testing. See [01-matrix](01-matrix.md) for details on mention pill symmetry.
 
-In **resume context** (bot restart), the `@Name` prefix is replaced with `[callout]` to prevent the resume message from falsely re-triggering the bot. The original `@` is preserved in the SQLite message store and in normal conversation flow.
+In **resume context** (bot restart), `<m>Name</m>` markers are replaced with `[callout]` to prevent the resume message from falsely re-triggering the bot.
 
 ## Response Rules
 
@@ -43,7 +43,7 @@ Four conditions trigger a bot response:
 
 | Condition | Description |
 |-----------|-------------|
-| **Callout** | Message matches `^@<name>\b` (the trigger pattern) |
+| **Callout** | Message contains `<m>name</m>` (the trigger pattern) |
 | **Participating thread** | Message is in a thread where the bot previously responded |
 | **CO main timeline** | Bot is Commanding Officer and message is unaddressed (no bot mentioned) on main timeline |
 | **Quarters** | Any message in the bot's quarters room |
@@ -67,7 +67,40 @@ Bots set their Matrix display name to show status at a glance:
 
 Examples: `Cid 🟢 (HERACLES)`, `Parker ⭐ (HERACLES)`, `Nora 💤 (POSEIDON)`
 
-The pip (status icon) is updated dynamically. See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status/pip table.
+The pip reflects **operational status**, not which room the bot is in. See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status model.
+
+| Pip | Status |
+|-----|--------|
+| 💤 | Sleep — container stopped |
+| 🔄 | Building — transient boot stage |
+| 🚀 | Starting — transient boot stage |
+| 🟡 | Waiting — transient boot stage |
+| 🟢 | Online — running, responding |
+| ⭐ | CO — commanding officer |
+
+During boot, the pip changes through 🔄 → 🚀 → 🟡 → 🟢 so the current stage is visible at a glance.
+
+### Boot Progress Messages
+
+`!wake` posts a thread with staged progress. The ship name appears once in the summary, not on every step:
+
+```
+☀️ Norm waking
+├ [3s] 🔄 building
+├ [8s] 🚀 starting
+├ [15s] 🟡 waiting for first output
+└ [18s] 🟢 online · normie[1] · haiku · HERACLES · v1a2b3c (2m)
+☀️ Norm awake (quarters)
+```
+
+Each step updates the bot's display name pip to match the current stage.
+
+`!report` and `!dismiss` are **instant** — just room moves on a running bot:
+
+```
+📢 Cid reporting for duty
+📢 Cid dismissed
+```
 
 ## Message Flow
 
@@ -82,6 +115,10 @@ User message → Matrix → host message loop → SQLite → trigger check
     → [IF SIMPLE] Main Brain replies directly
   → [NOT TRIGGERED] message stored as context, no response
 ```
+
+## Mention-Wake
+
+A sleeping bot can be woken by an explicit `<m>name</m>` callout in any room where the bot has membership. The relay monitors for trigger-pattern matches against sleeping bots and auto-wakes them — equivalent to `!wake <bot>` but driven by a mention instead of an operator command. The bot resumes in the room where the callout occurred.
 
 ## Resume Behavior
 
@@ -112,7 +149,7 @@ Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
 3. **Hears messages** — Send a message in the room, bot's log shows it received.
    *Check:* Log contains the message content.
 
-4. **Trigger works** — Send `@Cid hello` in the room.
+4. **Trigger works** — Send `<m>Cid</m> hello` (via mention pill) in the room.
    *Check:* Bot processes the message and responds.
 
 5. **Non-trigger adds context** — Send a message without the bot's name.
@@ -126,3 +163,15 @@ Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
 
 8. **Resume works** — Restart the bot, verify it injects context and responds.
    *Check:* Log shows "Injected resume message with context" with recent message count.
+
+9. **Reaction: context delivery** — Send a message the bot hears.
+   *Check:* Bot reacts with 👀 (message entered context window).
+
+10. **Reaction: trigger** — Send a `<m>Name</m>` callout.
+    *Check:* Bot reacts with both 👀 and 🔔 (triggered response).
+
+11. **No reactions when asleep** — `!sleep` the bot, send messages.
+    *Check:* No 👀 or 🔔 reactions appear on messages sent while sleeping.
+
+12. **Mention-wake** — With bot sleeping, send `<m>Name</m>` callout.
+    *Check:* Bot wakes, 👀 propagates retroactively to missed messages, 🔔 on the callout message.

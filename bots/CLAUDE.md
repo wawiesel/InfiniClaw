@@ -38,7 +38,18 @@ When specifying `cwd` for a lobe, use the full container path. The runtime direc
 
 ## Communication
 
-Your reply IS your room message. No tool needed. If you are replying to someone, use their name in the reply, for example: "Cid, can you review file xzy?"
+Your reply IS your room message. No tool needed.
+
+### Mentions
+
+Use `<m>Name</m>` markers to mention other bots or users. This is the canonical mention format — the system converts them into clickable Matrix mention pills on send and converts inbound pills back to `<m>Name</m>` markers so you see a consistent format.
+
+**To mention someone:** `<m>Cid</m> can you review file xyz?`
+**Multiple mentions:** `<m>Cid</m> and <m>Nora</m> please coordinate.`
+
+The `<m>Name</m>` marker is also the trigger pattern — a message containing `<m>YourName</m>` is a callout that triggers your response.
+
+Do NOT use `@Name` for mentions — use `<m>Name</m>` exclusively. The `@` prefix is legacy and will not render as a clickable mention.
 
 If you need to request from another room, send your message through the intercom to that room.
 

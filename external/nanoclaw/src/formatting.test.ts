@@ -130,34 +130,30 @@ describe('TRIGGER_PATTERN', () => {
   const lower = name.toLowerCase();
   const upper = name.toUpperCase();
 
-  it('matches @name at start of message', () => {
-    expect(TRIGGER_PATTERN.test(`@${name} hello`)).toBe(true);
+  it('matches <m>name</m> at start of message', () => {
+    expect(TRIGGER_PATTERN.test(`<m>${name}</m> hello`)).toBe(true);
+  });
+
+  it('matches <m>name</m> anywhere in message', () => {
+    expect(TRIGGER_PATTERN.test(`hello <m>${name}</m>`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`Will you look at this <m>${name}</m>`)).toBe(true);
   });
 
   it('matches case-insensitively', () => {
-    expect(TRIGGER_PATTERN.test(`@${lower} hello`)).toBe(true);
-    expect(TRIGGER_PATTERN.test(`@${upper} hello`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`<m>${lower}</m> hello`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`<m>${upper}</m> hello`)).toBe(true);
   });
 
-  it('does not match when not at start of message', () => {
-    expect(TRIGGER_PATTERN.test(`hello @${name}`)).toBe(false);
+  it('matches <m>name</m> alone', () => {
+    expect(TRIGGER_PATTERN.test(`<m>${name}</m>`)).toBe(true);
   });
 
-  it('does not match partial name like @NameExtra (word boundary)', () => {
-    expect(TRIGGER_PATTERN.test(`@${name}extra hello`)).toBe(false);
+  it('does not match @name (legacy format is not a trigger)', () => {
+    expect(TRIGGER_PATTERN.test(`@${name} hello`)).toBe(false);
   });
 
-  it('matches with word boundary before apostrophe', () => {
-    expect(TRIGGER_PATTERN.test(`@${name}'s thing`)).toBe(true);
-  });
-
-  it('matches @name alone (end of string is a word boundary)', () => {
-    expect(TRIGGER_PATTERN.test(`@${name}`)).toBe(true);
-  });
-
-  it('matches with leading whitespace after trim', () => {
-    // The actual usage trims before testing: TRIGGER_PATTERN.test(m.content.trim())
-    expect(TRIGGER_PATTERN.test(`@${name} hey`.trim())).toBe(true);
+  it('does not match bare name without markers', () => {
+    expect(TRIGGER_PATTERN.test(`${name} hello`)).toBe(false);
   });
 });
 
@@ -245,7 +241,7 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   });
 
   it('non-main group with requiresTrigger=true processes when trigger present', () => {
-    const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
+    const msgs = [makeMsg({ content: `<m>${ASSISTANT_NAME}</m> do something` })];
     expect(shouldProcess(false, true, msgs)).toBe(true);
   });
 

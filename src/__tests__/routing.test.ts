@@ -114,7 +114,7 @@ function makeMsg(overrides: Partial<NewMessage> & { content: string; sender: str
   };
 }
 
-const TRIGGER = `@${ASSISTANT_NAME}`;
+const TRIGGER = `<m>${ASSISTANT_NAME}</m>`;
 
 describe('resolveReplyThread — BUG-21 isRoutableHuman', () => {
   it('routes to thread when human triggers bot in thread', () => {

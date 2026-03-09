@@ -8,12 +8,14 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 
 | Command | Effect |
 |---------|--------|
-| `!todo` | All bots reply with their task list. |
-| `!todo <bot>` | Only that bot replies with its task list. |
-| `!dismiss <bot>` | Stop bot, update fleet.json. |
-| `!join <bot>` | Start bot, update fleet.json. |
-| `!rejoin <bot>` | Dismiss + join (full lifecycle reset). |
-| `!refresh <bot>` | Rebuild + restart (pick up new code, no brain/room changes). |
+| `!todo [bot]` | Show bot's active tasks. No arg = all bots. |
+| `!report [bot]` | Send awake bot(s) to duty room. Skips sleeping bots. |
+| `!dismiss [bot]` | Remove from duty, downgrade brain, back to quarters. |
+| `!go [room] [bot]` | Send bot to a non-duty room (e.g. lounge). No args = list rooms. |
+| `!wake [bot]` | Start container in quarters (sonnet brain). |
+| `!sleep [bot]` | Stop container, leave all rooms except quarters. |
+| `!rejoin [bot]` | Dismiss + report (full lifecycle reset). |
+| `!refresh [bot]` | Rebuild + restart (pick up new code, no brain/room changes). |
 | `!transport <bot> <ship>` | Beam bot to another ship (dematerialize/materialize). |
 | `!promote <target>` | Raise rank (bot within role, or ship). |
 | `!demote <target>` | Lower rank (bot within role, or ship). |
@@ -62,7 +64,7 @@ Examples:
 ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
 ```
 
-Implemented by `statusLine()` in `src/relay.ts`.
+Implemented by `statusLine()` in the relay module.
 
 ## Version String Format
 
@@ -92,7 +94,7 @@ Examples:
 · f814482 (10m) ↑1      ← commit is 10m old, 1 unpushed commit
 ```
 
-Implemented by `gitVersionStr()`, `repoVersion()`, `relayVersion()`, `botVersion()` in `src/relay.ts`.
+Implemented by `gitVersionStr()`, `repoVersion()`, `relayVersion()`, `botVersion()` in the relay module.
 
 ## Status Threads
 
@@ -142,8 +144,8 @@ Main:   ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
 1. **Command reaches relay** — Send `!fleet` in a duty room.
    *Check:* Relay log shows command received and processed.
 
-2. **Bot command works** — `!dismiss cid` stops the bot.
-   *Check:* Bot leaves duty room, fleet.json updated, pip changes.
+2. **Bot command works** — `!dismiss cid` removes bot from duty.
+   *Check:* Bot leaves duty room, fleet.json updated to `quarters`, brain downgraded.
 
 3. **Ship command works** — `!refit heracles` triggers full overhaul.
    *Check:* Refit thread appears with numbered steps, all stages complete.

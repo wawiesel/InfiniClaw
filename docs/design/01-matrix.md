@@ -163,6 +163,18 @@ Mention pills must be consistent in both directions:
 - **Inbound:** Matrix clients convert `@Name` into HTML mention pills, which strip the `@` prefix from the plaintext `body`. The host restores it by parsing `formatted_body` to find `<a href="https://matrix.to/#/@...">Name</a>` tags and re-adding the `@` prefix before storing or trigger-testing.
 - **Outbound:** Bots mark mentions using `<m>Name</m>` markers in their output (e.g., `<m>Cid</m> can you review this?`). The send pipeline converts these to proper Matrix mention pills: `<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a>`. The `<m>` marker is stripped from the plaintext body. Unknown names are passed through as plain text. This explicit marker avoids false matches on email addresses, code snippets, and other `@` patterns.
 
+## Reactions
+
+Bots use emoji reactions to signal message processing status at a glance:
+
+| Emoji | Meaning | When applied |
+|-------|---------|--------------|
+| 📡 | Relay received | Each relay that syncs the message reacts |
+| 👀 | Delivered to context | Message stored in bot's conversation context |
+| 🔔 | Triggered | Bot will respond to this message |
+
+Reactions accumulate — a message that triggers a bot will have all three. A message the bot heard but didn't respond to will have 📡 and 👀 but no 🔔.
+
 ## Special Mentions
 
 Certain `@` mentions trigger system-level behaviors handled by the relay, not by individual bots.

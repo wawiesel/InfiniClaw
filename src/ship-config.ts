@@ -16,7 +16,7 @@ export interface S3Config {
   secretKey: string;
 }
 
-export type BotStatus = 'onduty' | 'lounge' | 'quarters' | 'sleep' | 'transit';
+export type BotStatus = 'onduty' | 'quarters' | 'sleep' | 'transit';
 
 export interface BotEntry {
   role: string;
@@ -40,12 +40,13 @@ const SHIPS_PATH = path.join(SECRETS_PATH, 'operator', 'ships.json');
 export const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** Statuses that mean the bot should be running on its assigned ship. */
-export const RUNNING_STATUSES: readonly BotStatus[] = ['onduty', 'quarters', 'lounge'] as const;
+export const RUNNING_STATUSES: readonly BotStatus[] = ['onduty', 'quarters'] as const;
 
 /** Normalize legacy status names to current values. */
 function migrateStatus(s: string): string {
   if (s === 'active') return 'onduty';
-  if (s === 'dismissed') return 'lounge';
+  if (s === 'dismissed') return 'quarters';
+  if (s === 'lounge') return 'quarters';
   if (s === 'sleeping') return 'sleep';
   return s;
 }
@@ -138,7 +139,7 @@ export function loadFleet(): Record<string, BotEntry> {
   // Migrate legacy statuses
   for (const entry of Object.values(bots)) {
     if (!entry.status && 'active' in entry) {
-      entry.status = (entry as any).active ? 'onduty' : 'lounge';
+      entry.status = (entry as any).active ? 'onduty' : 'quarters';
       delete (entry as any).active;
     }
     entry.status = migrateStatus(entry.status as string) as BotStatus;

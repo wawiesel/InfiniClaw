@@ -63,7 +63,7 @@ function escapeRegex(str: string): string {
 }
 
 export const TRIGGER_PATTERN = new RegExp(
-  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
+  `<m>${escapeRegex(ASSISTANT_NAME)}</m>`,
   'i',
 );
 

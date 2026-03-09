@@ -296,7 +296,12 @@ function sendTriggerAck(chatJid: string, messages: NewMessage[]): void {
     const key = `${chatJid}:${m.id}`;
     if (triggerAckByMessageKey[key]) continue;
     triggerAckByMessageKey[key] = Date.now();
-    void ch.sendReaction(chatJid, m.id, '👀').catch((err) => { logger.debug({ chatJid, msgId: m.id, err }, 'Trigger ack reaction failed'); });
+    // 🔔 — message triggered a bot response (fires first)
+    if (TRIGGER_PATTERN.test(m.content.trim())) {
+      void ch.sendReaction(chatJid, m.id, '🔔').catch((err) => { logger.debug({ chatJid, msgId: m.id, err }, 'Trigger ack failed'); });
+    }
+    // 👀 — message entered bot's context window
+    void ch.sendReaction(chatJid, m.id, '👀').catch((err) => { logger.debug({ chatJid, msgId: m.id, err }, 'Context ack failed'); });
   }
 }
 

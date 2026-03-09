@@ -257,6 +257,24 @@ export async function matrixLeave(
   return true;
 }
 
+export async function matrixSetDisplayName(
+  homeserver: string,
+  token: string,
+  userId: string,
+  displayName: string,
+): Promise<boolean> {
+  const resp = await fetch(
+    `${homeserver}${MATRIX_API}/profile/${encodeURIComponent(userId)}/displayname`,
+    {
+      method: 'PUT',
+      headers: matrixHeaders(token),
+      body: JSON.stringify({ displayname: displayName }),
+      signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS),
+    },
+  );
+  return resp.ok;
+}
+
 // ── Intercom config ──────────────────────────────────────────────────
 
 let cachedIntercomConfig: IntercomConfig | null = null;

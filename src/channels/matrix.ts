@@ -132,8 +132,9 @@ async function withTimeout<T>(
  * display name ("Nora") but in `formatted_body` as an HTML link:
  *   <a href="https://matrix.to/#/@nora-bot:matrix.org">Nora</a>
  *
- * This function restores the `@` prefix on mentioned display names so that
- * trigger patterns like `@Nora\b` can match them.
+ * This function wraps mentioned display names in `<m>Name</m>` markers so that
+ * the trigger pattern `^<m>Name</m>` can match them, and bots see a consistent
+ * mention format in their context.
  */
 export function restoreMentionPrefixes(body: string, formattedBody: string): string {
   // Extract display names from Matrix mention pill links
@@ -147,10 +148,43 @@ export function restoreMentionPrefixes(body: string, formattedBody: string): str
 
   let result = body;
   for (const name of displayNames) {
-    // Only prefix if the name appears without @ already
-    // Use word boundary to avoid partial replacements
-    const re = new RegExp(`(?<!@)\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
-    result = result.replace(re, `@${name}`);
+    // Wrap bare name in <m> markers. Skip if already wrapped or @-prefixed.
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?<!@)(?<!<m>)\\b${escaped}\\b(?!</m>)`, 'g');
+    result = result.replace(re, `<m>${name}</m>`);
+  }
+  return result;
+}
+
+/**
+ * Convert raw `@Name` mentions in text to `<m>Name</m>` markers using a
+ * cache of known Matrix display names. This catches mentions typed without
+ * a Matrix mention pill (e.g. plain "@Cid" in body text). The match is
+ * case-insensitive and uses word boundaries to avoid false matches on
+ * emails (user@example.com) or code (@decorator).
+ */
+export function convertRawMentions(
+  text: string,
+  nameCache: ReadonlyMap<string, string>,
+): string {
+  if (!text.includes('@')) return text;
+
+  // Build a map of lowercase base-name → display name for matching
+  const baseNames: { pattern: RegExp; displayName: string }[] = [];
+  for (const [, displayName] of nameCache) {
+    const baseName = displayName.split(/\s/)[0];
+    if (!baseName) continue;
+    const escaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Match @Name with word boundary, but not if already inside <m> markers
+    baseNames.push({
+      pattern: new RegExp(`(?<!<m>)@${escaped}\\b`, 'gi'),
+      displayName: baseName,
+    });
+  }
+
+  let result = text;
+  for (const { pattern, displayName } of baseNames) {
+    result = result.replace(pattern, `<m>${displayName}</m>`);
   }
   return result;
 }
@@ -517,7 +551,7 @@ export class MatrixChannel implements Channel {
   private client: MatrixClient | null = null;
   private _connected = false;
   private _connecting = false;
-  private botUserId = MATRIX_USER_ID;
+  botUserId = MATRIX_USER_ID;
   private opts: MatrixChannelOpts;
   private lastMessageEventId = new Map<string, string>();
   private recentBotEventIds = new Map<string, string[]>();
@@ -924,12 +958,14 @@ export class MatrixChannel implements Channel {
 
       if (msgtype === 'm.text') {
         messageContent = content.body as string;
-        // Matrix mention pills strip the @ prefix from display names in body.
-        // Restore it using formatted_body so trigger patterns can match @Name.
+        // Matrix mention pills appear as bare names in body text.
+        // Wrap them in <m>Name</m> markers using formatted_body so trigger patterns match.
         const formattedBody = content.formatted_body as string | undefined;
         if (formattedBody) {
           messageContent = restoreMentionPrefixes(messageContent, formattedBody);
         }
+        // Also convert raw @Name mentions (typed without pill) to <m>Name</m>
+        messageContent = convertRawMentions(messageContent, this.senderNameCache);
       } else {
         // Media message — download and save to IPC media dir
         const group = groups[matrixJid];

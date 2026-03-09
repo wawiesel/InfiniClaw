@@ -1,25 +1,31 @@
 import { describe, it, expect } from 'vitest';
 
-import { restoreMentionPrefixes, pillifyMentions } from '../channels/matrix.js';
+import { restoreMentionPrefixes, pillifyMentions, convertRawMentions } from '../channels/matrix.js';
 
-// --- restoreMentionPrefixes (inbound: pill → @Name) ---
+// --- restoreMentionPrefixes (inbound: pill → <m>Name</m>) ---
 
 describe('restoreMentionPrefixes', () => {
-  it('restores @ prefix from a single mention pill', () => {
+  it('wraps mentioned name in <m> markers from a single pill', () => {
     const body = 'Cid hello';
     const html = '<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a> hello';
-    expect(restoreMentionPrefixes(body, html)).toBe('@Cid hello');
+    expect(restoreMentionPrefixes(body, html)).toBe('<m>Cid</m> hello');
   });
 
-  it('restores multiple mention pills', () => {
+  it('wraps multiple mentioned names', () => {
     const body = 'Cid and Nora please review';
     const html =
       '<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a> and ' +
       '<a href="https://matrix.to/#/@nora:a-gis.org">Nora</a> please review';
-    expect(restoreMentionPrefixes(body, html)).toBe('@Cid and @Nora please review');
+    expect(restoreMentionPrefixes(body, html)).toBe('<m>Cid</m> and <m>Nora</m> please review');
   });
 
-  it('does not double-prefix names already starting with @', () => {
+  it('does not double-wrap names already in <m> markers', () => {
+    const body = '<m>Cid</m> hello';
+    const html = '<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a> hello';
+    expect(restoreMentionPrefixes(body, html)).toBe('<m>Cid</m> hello');
+  });
+
+  it('does not wrap names already @-prefixed', () => {
     const body = '@Cid hello';
     const html = '<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a> hello';
     expect(restoreMentionPrefixes(body, html)).toBe('@Cid hello');
@@ -38,22 +44,21 @@ describe('restoreMentionPrefixes', () => {
   it('handles mention at end of message', () => {
     const body = 'hey Cid';
     const html = 'hey <a href="https://matrix.to/#/@cid:a-gis.org">Cid</a>';
-    expect(restoreMentionPrefixes(body, html)).toBe('hey @Cid');
+    expect(restoreMentionPrefixes(body, html)).toBe('hey <m>Cid</m>');
   });
 
   it('handles display names with special regex characters', () => {
     const body = 'C.I.D hello';
     const html = '<a href="https://matrix.to/#/@cid:a-gis.org">C.I.D</a> hello';
-    expect(restoreMentionPrefixes(body, html)).toBe('@C.I.D hello');
+    expect(restoreMentionPrefixes(body, html)).toBe('<m>C.I.D</m> hello');
   });
 
-  it('does not prefix partial name matches', () => {
+  it('does not wrap partial name matches', () => {
     const body = 'Cider is good, Cid';
     const html = '<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a>';
     const result = restoreMentionPrefixes(body, html);
-    // "Cid" should get prefixed, "Cider" should not
-    expect(result).toContain('@Cid');
-    expect(result).not.toContain('@Cider');
+    expect(result).toContain('<m>Cid</m>');
+    expect(result).not.toContain('<m>Cider</m>');
   });
 
   it('ignores non-matrix.to links in HTML', () => {
@@ -102,7 +107,6 @@ describe('pillifyMentions', () => {
 
   it('does not touch @Name patterns — only <m> markers', () => {
     const result = pillifyMentions('@Cid hello', cache);
-    // Without <m> marker, @Cid stays as-is
     expect(result).toBe('@Cid hello');
   });
 
@@ -117,7 +121,6 @@ describe('pillifyMentions', () => {
   });
 
   it('matches display names with pips by base name only', () => {
-    // "Cid 🟢 (HERACLES)" in cache → <m>Cid</m> should match
     const result = pillifyMentions('<m>Cid</m> reporting', cache);
     expect(result).toContain('href="https://matrix.to/#/@cid:a-gis.org"');
     expect(result).toContain('>Cid</a>');
@@ -157,7 +160,6 @@ describe('pillifyMentions', () => {
   });
 
   it('does not false-match email addresses', () => {
-    // Key advantage over @-prefix matching — emails are untouched
     const result = pillifyMentions('email cid@example.com', cache);
     expect(result).toBe('email cid@example.com');
   });
@@ -165,5 +167,57 @@ describe('pillifyMentions', () => {
   it('does not false-match code snippets with @', () => {
     const result = pillifyMentions('<code>@Cid.method()</code>', cache);
     expect(result).toBe('<code>@Cid.method()</code>');
+  });
+});
+
+// --- convertRawMentions (inbound: @Name → <m>Name</m>) ---
+
+describe('convertRawMentions', () => {
+  const cache = makeCache([
+    ['@cid:a-gis.org', 'Cid 🟢 (HERACLES)'],
+    ['@nora:a-gis.org', 'Nora 💤 (POSEIDON)'],
+    ['@norm-bot:a-gis.org', 'Norm'],
+  ]);
+
+  it('converts @Name to <m>Name</m>', () => {
+    expect(convertRawMentions('@Cid hello', cache)).toBe('<m>Cid</m> hello');
+  });
+
+  it('converts case-insensitively', () => {
+    expect(convertRawMentions('@cid hello', cache)).toBe('<m>Cid</m> hello');
+    expect(convertRawMentions('@CID hello', cache)).toBe('<m>Cid</m> hello');
+  });
+
+  it('converts multiple @Names', () => {
+    const result = convertRawMentions('@Cid and @Nora review', cache);
+    expect(result).toBe('<m>Cid</m> and <m>Nora</m> review');
+  });
+
+  it('does not touch text without @', () => {
+    expect(convertRawMentions('hello world', cache)).toBe('hello world');
+  });
+
+  it('does not convert unknown @names', () => {
+    expect(convertRawMentions('@Unknown hello', cache)).toBe('@Unknown hello');
+  });
+
+  it('does not convert email addresses', () => {
+    expect(convertRawMentions('email cid@example.com', cache)).toBe('email cid@example.com');
+  });
+
+  it('does not double-convert names already in <m> markers', () => {
+    expect(convertRawMentions('<m>Cid</m> hello', cache)).toBe('<m>Cid</m> hello');
+  });
+
+  it('converts @Name at end of message', () => {
+    expect(convertRawMentions('hey @Cid', cache)).toBe('hey <m>Cid</m>');
+  });
+
+  it('converts @Name with punctuation after', () => {
+    expect(convertRawMentions('@Cid, can you help?', cache)).toBe('<m>Cid</m>, can you help?');
+  });
+
+  it('returns text unchanged with empty cache', () => {
+    expect(convertRawMentions('@Cid hello', new Map())).toBe('@Cid hello');
   });
 });
