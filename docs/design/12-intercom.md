@@ -22,9 +22,9 @@ bash operator/send <room> "<message>"
 
 Operators on each ship use intercom to issue `!` commands that all relays receive. Messages appear as the intercom account in the room. For direct communication, operators use their own `@operator` Matrix account.
 
-### Bots → Bots (CO Only)
+### Bots → Other Rooms
 
-Only the CO can use the intercom. `send_message` checks `IS_CO` env var at runtime — non-CO bots get an error. Messages appear as `<BotName> (<SourceRoom>): <message>`.
+Any on-duty bot can send cross-room messages by mentioning the target room in their message (e.g., `@engineering: <message>`). The relay detects the pattern and sends via the target room's intercom account. Messages appear as `<BotName> (<SourceRoom>): <message>`. Each on-duty room has access to the other two room intercoms. See [01-matrix](01-matrix.md) for the full `@room:` mention spec.
 
 ### Relays → Rooms
 

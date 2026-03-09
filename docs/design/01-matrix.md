@@ -7,8 +7,8 @@ Matrix is the communication backbone. Every message, command, and status update 
 | Account | Purpose |
 |---------|---------|
 | Captain | Human. Admin in all rooms. Identity in `secrets/captain`. |
-| Operator (`@operator`) | Operator's direct Matrix presence. Admin in all rooms. Used for direct messages, BehindTheCurtain, and room management. |
-| Loudspeaker (`@loudspeaker`) | Relay's reply voice. Member of all rooms. Delivers `!` command responses prefixed `[SHIPNAME]`. Bots should ignore it. |
+| Operator (`@operator`) | Operator's direct Matrix presence. Admin in all rooms. Used for direct messages, BehindTheCurtain, and room management. Mentionable by bots to request operator assistance (see Special Mentions). |
+| Loudspeaker (`@loudspeaker`) | Relay's reply voice. Member of all rooms. Delivers `!` command responses prefixed `[SHIPNAME]`. Mentionable by on-duty bots for fleet status or broadcast (see Special Mentions). Bots should ignore loudspeaker messages. |
 | Bot accounts | One per bot. Joins rooms based on lifecycle status. |
 | Intercom accounts | Write-only broadcast channels, one per duty room. The relay polls these for incoming `!` commands. Not present in ship rooms. |
 
@@ -163,6 +163,39 @@ Mention pills must be consistent in both directions:
 - **Inbound:** Matrix clients convert `@Name` into HTML mention pills, which strip the `@` prefix from the plaintext `body`. The host restores it by parsing `formatted_body` to find `<a href="https://matrix.to/#/@...">Name</a>` tags and re-adding the `@` prefix before storing or trigger-testing.
 - **Outbound:** Bot responses containing `@Name` patterns are converted to proper Matrix mention pills in `formatted_body` before sending. Known display names (from previously seen message senders) are matched by base name and wrapped in `<a href="https://matrix.to/#/@userid:server">Name</a>` links. This ensures bot mentions render identically to human mentions — clickable, highlighted, and visually consistent.
 
+## Special Mentions
+
+Certain `@` mentions trigger system-level behaviors handled by the relay, not by individual bots.
+
+### @operator
+
+Mentioning `@operator` requests operator assistance. The relay wakes the operator's tmux session and delivers the full request context (bot name, room, ship, message content).
+
+**Routing:** If the mention comes from a bot, only the operator on that bot's ship responds. Operators on other ships stay silent in the thread but log the request to their BehindTheCurtain room for awareness. If the mention comes from the Captain, all operators see it. Only requires the relay to be running — no bot needs to be active.
+
+### @loudspeaker
+
+Two behaviors depending on message format:
+
+| Pattern | Who can use | Behavior |
+|---------|-------------|----------|
+| `@loudspeaker` (mention only) | Any on-duty bot | Relay responds with fleet status in the room |
+| `@loudspeaker: <message>` (callout + text) | Any on-duty bot | Relay broadcasts `<message>` to all duty rooms via the loudspeaker account, prefixed with the bot name and source room |
+
+Off-duty bots (lounge, quarters, sleep) cannot use the loudspeaker. The relay silently ignores their mentions.
+
+### @room intercom
+
+On-duty bots can send messages across rooms by mentioning the target room name:
+
+| Pattern | Example | Behavior |
+|---------|---------|----------|
+| `@engineering: <message>` | From Bridge | Relay sends `<message>` to Engineering via engineering-intercom |
+| `@bridge: <message>` | From Engineering | Relay sends `<message>` to Bridge via bridge-intercom |
+| `@astrometrics: <message>` | From Bridge | Relay sends `<message>` to Astrometrics via astrometrics-intercom |
+
+Each on-duty room has access to the other two room intercoms. Messages appear as `<BotName> (<SourceRoom>): <message>` in the target room. See [12-intercom](12-intercom.md) for intercom account details.
+
 ## Verification
 
 1. **Server reachable** — `curl $HOMESERVER/_matrix/client/versions` → HTTP 200
@@ -172,3 +205,15 @@ Mention pills must be consistent in both directions:
 5. **Space hierarchy** — `GET /_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$CHILD_ID` → `{"via": [...]}`
 6. **Power levels** — `GET /_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/` → captain and operator at 100
 7. **Message round-trip** — Operator posts to a room, reads back via `/messages` → posted message appears
+8. **Inbound pill restoration** — Send a mention pill (`@BotName`) in Matrix. Bot log shows the message with `@` prefix restored in body.
+   *Check:* Trigger pattern matches despite Matrix stripping the `@` from plaintext.
+9. **Outbound pill conversion** — Bot sends a message containing `@Name` for a known room member. Matrix client shows it as a clickable mention pill.
+   *Check:* `formatted_body` contains `<a href="https://matrix.to/#/@...">Name</a>`.
+10. **@operator wakes operator** — Bot or Captain mentions `@operator` in a room. Operator tmux session receives the request with context.
+    *Check:* Operator session shows the message; only the bot's ship's operator responds.
+11. **@loudspeaker fleet status** — On-duty bot mentions `@loudspeaker` in a room.
+    *Check:* Relay responds with fleet status in the same room.
+12. **@loudspeaker broadcast** — On-duty bot sends `@loudspeaker: test message` in Engineering.
+    *Check:* Message appears in Bridge and Astrometrics via loudspeaker, prefixed with bot name and source room.
+13. **@room intercom** — On-duty bot sends `@engineering: hello` from Bridge.
+    *Check:* Message appears in Engineering via engineering-intercom with `BotName (Bridge):` prefix.

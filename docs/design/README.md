@@ -5,7 +5,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 ## Foundation
 
 - `00-overview.md` — Core principles, code structure
-- `01-matrix.md` — Matrix server, accounts, room setup, message format, mention pill symmetry, verification
+- `01-matrix.md` — Matrix server, accounts, room setup, message format, mention pill symmetry, special mentions, verification
 - `02-containers.md` — Podman isolation, image builds, mount table, secrets flow, credential proxy
 
 ## Bot Runtime
@@ -22,7 +22,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `09-fleet.md` — fleet.json, transport protocol, S3 coordination
 - `10-commands.md` — Operator `!` commands, status formats, alert threads
 - `11-co.md` — Commanding Officer election and delegation
-- `12-intercom.md` — Intercom broadcast accounts, loudspeaker replies, operator account
+- `12-intercom.md` — Intercom broadcast accounts, loudspeaker replies, @room cross-room mentions
 
 ## Resilience
 
