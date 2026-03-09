@@ -467,6 +467,7 @@ function storeOutgoing(chatJid: string, text: string, threadId?: string): void {
     content: text,
     timestamp: new Date().toISOString(),
     is_from_me: true,
+    is_bot_message: true,
     thread_id: threadId,
   });
 }
@@ -1199,7 +1200,8 @@ async function handleGroupMessagesInLoop(
   if (groupStatus.active) {
     // Keep active-container IPC as a high-priority lane for captain/operator messages.
     // Bot-to-bot traffic should queue normally to avoid starvation/loop churn.
-    const shouldPrioritizeToActiveContainer = messagesToSend.some((m) => {
+    const isQuartersRoom = quartersJid !== null && chatJid === quartersJid;
+    const shouldPrioritizeToActiveContainer = isQuartersRoom || messagesToSend.some((m) => {
       if (botMatrixUserIds.has(m.sender)) return false;
       const isCaptain = Boolean(CAPTAIN_USER_ID) && m.sender === CAPTAIN_USER_ID;
       const isOperatorTrigger = TRIGGER_PATTERN.test(m.content.trim());

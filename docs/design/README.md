@@ -18,7 +18,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 ## Organization
 
-- `08-roles-and-rooms.md` — Roles, room topology, bot statuses, lifecycle, threading rules
+- `08-roles-and-rooms.md` — Roles, room topology, bot statuses, lifecycle, quarters trigger rules, threading rules
 - `09-fleet.md` — fleet.json, transport protocol, S3 coordination
 - `10-commands.md` — Operator `!` commands, status formats, alert threads
 - `11-co.md` — Commanding Officer election and delegation

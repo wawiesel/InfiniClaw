@@ -38,6 +38,19 @@ HERACLES (space)
 
 Duty rooms (Engineering, Bridge, Astrometrics) are fleet-wide — they are NOT children of ship spaces. A bot is either in its duty room or in the Lounge, never both.
 
+### Quarters Trigger Rules
+
+A bot in its quarters room is a **primary** — it owns the room. Trigger behavior depends on the bot's status:
+
+| Status | Responds to | Trigger needed? |
+|--------|------------|-----------------|
+| `quarters` (awake) | Anyone | No — every message is for the bot |
+| `sleep` (asleep) | Captain and Operator only | No — still a primary, but only wakes for authority |
+
+When a sleeping bot receives a captain/operator message in quarters, the relay auto-wakes it (transitions `sleep` → `quarters`), delivers the message, then the bot stays awake until explicitly put back to sleep.
+
+In all other rooms (duty rooms, lounge), the bot requires an explicit callout (`@BotName`) or must be participating in the thread.
+
 ### Threading by Room
 
 Thread Brains (branch/merge, `branch_to_thread`) are only available in duty rooms. In quarters and lounge, bots cannot create threads or spawn Thread Brains — the host rejects `branch_to_thread` IPC commands from non-duty rooms. However, bots still follow basic Matrix conversation norms: if addressed in a thread (e.g. Captain replies in-thread), the bot responds in that thread. If addressed on the timeline, it responds on the timeline.

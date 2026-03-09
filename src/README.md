@@ -84,3 +84,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`machine-config.ts` removed**: Split into `infini-config.ts` (env-based config) and `ship-config.ts` (fleet.json loader).
 - **`get_message` tool bug**: Fails on event IDs containing `$` due to shell variable interpolation in the node -e command. Unfixed as of session 8.
 - **`resolveReplyThread`**: Scans messages in reverse for `thread_id` from non-bot senders. Returns `workThreadIds` override if set. Cleared after each response turn.
+- **`storeOutgoing`**: Must set `is_bot_message: true` — otherwise outgoing messages are re-detected as new human messages by `getNewMessages`, causing echo loops in quarters rooms.
