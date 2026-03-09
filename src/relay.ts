@@ -674,7 +674,7 @@ async function publishFleetReport(): Promise<FleetReport> {
       status: entry.status,
       gitVersion: botVersion(root, botId),
     };
-    if (entry.status === 'onduty' && !running) {
+    if ((RUNNING_STATUSES as readonly string[]).includes(entry.status) && !running) {
       botReports[botId].status = 'warn';
     }
   }
@@ -1969,7 +1969,7 @@ function registerRelayCommands(): void {
         ensurePodmanReady();
         const started: string[] = [];
         for (const [name, entry] of Object.entries(fleet)) {
-          if (entry.ship === HOSTNAME && entry.status === 'onduty') {
+          if (entry.ship === HOSTNAME && (RUNNING_STATUSES as readonly string[]).includes(entry.status)) {
             bootstrapBot(root, name);
             started.push(name);
           }
@@ -2812,10 +2812,10 @@ async function main(): Promise<void> {
       removeStaleProcesses();
       killStaleContainers();
       for (const [bot, entry] of Object.entries(liveFleet)) {
-        if (entry.ship === HOSTNAME && entry.status === 'onduty') {
+        if (entry.ship === HOSTNAME && (RUNNING_STATUSES as readonly string[]).includes(entry.status)) {
           try {
             bootstrapBot(root, bot);
-            log(`bootstrap: ${bot} started`);
+            log(`bootstrap: ${bot} started (${entry.status})`);
           } catch (err) {
             log(`bootstrap: ${bot} failed — ${errStr(err)}`);
           }
