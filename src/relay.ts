@@ -34,7 +34,8 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadShips, writeShips, isShipActive, clearShipConfigCache } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipActive, clearShipConfigCache, RUNNING_STATUSES } from './ship-config.js';
+import type { BotStatus as BotStatusType } from './ship-config.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
 import type { RoomConn } from './command-registry.js';
@@ -157,12 +158,11 @@ async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> 
 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
-type BotStatus = 'onduty' | 'lounge' | 'quarters' | 'sleep' | 'transit';
-type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatus; title?: string; quartersRoom?: string; activeBrainModel?: string };
+type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; title?: string; quartersRoom?: string; activeBrainModel?: string };
 let liveFleet: Record<string, FleetEntry> = {};
 /** Read this ship's operatorRelay flag from ships.json (default: true). */
 function isOperatorRelayEnabled(): boolean {
-  try { return loadShips()[HOSTNAME]?.operatorRelay !== false; } catch { return true; }
+  return safeLoadShips()[HOSTNAME]?.operatorRelay !== false;
 }
 let fleetDirty = false;
 
@@ -1588,7 +1588,7 @@ async function handleLifecycleCommand(
     log(`!${action} ${name}`);
 
     // Resolve ship room IDs for room management
-    const ships = (() => { try { return loadShips(); } catch { return {}; } })();
+    const ships = safeLoadShips();
     const loungeId = ships[HOSTNAME]?.loungeId as string | undefined;
     const dutyRoomId = conn.roomId;
 
@@ -2115,7 +2115,7 @@ function registerRelayCommands(): void {
 
         if (!await electSpeaker()) return;
 
-        const ships = (() => { try { return loadShips(); } catch { return {}; } })();
+        const ships = safeLoadShips();
         const allShipNames = Object.keys(ships);
         const s3 = getS3Client();
 
@@ -2353,9 +2353,9 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const rawTarget = cmd.slice(isPromote ? '!promote '.length : '!demote '.length).trim();
 
   // Try ship name first (case-insensitive)
-  const ships = (() => { try { return loadShips(); } catch { return null; } })();
-  const shipName = ships ? resolveShipName(rawTarget, ships) : null;
-  if (ships && shipName) {
+  const ships = safeLoadShips();
+  const shipName = Object.keys(ships).length > 0 ? resolveShipName(rawTarget, ships) : null;
+  if (shipName) {
     const target = shipName;
     if (!isSpeaker()) return;
     const result = rankSwap(Object.entries(ships), target, direction);
