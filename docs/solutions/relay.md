@@ -34,6 +34,26 @@ Look for: crash loops, Matrix 502 errors, "initial sync done" (means connected).
 
 ---
 
+## !relay status only shows for the speaker ship
+
+**Problem:** Sending `!relay` reports status from one ship but other ships are silent.
+
+**Cause:** Status handler was gated on `isSpeaker()`, so only the lowest-rank active ship replied. Non-speaker ships ignored the command entirely.
+
+**Fix:** Each ship reports its own state via `shipReport()` (not `speakerReport()`). The `!relay` handler should never be gated on speaker status — every ship should respond for itself.
+
+---
+
+## Relay forwards curtain ! commands to tmux instead of executing
+
+**Problem:** Captain sends `!fleet` from BehindTheCurtain. It appears in the operator tmux instead of executing fleet command.
+
+**Cause:** curtainLoop forwarded all messages to tmux without checking if they were `!` commands first.
+
+**Fix:** In curtainLoop, check `body.startsWith('!')` before the tmux forward branch and dispatch via `handleCommand()` instead.
+
+---
+
 ## Secrets sync push fails: "incorrect old value provided"
 
 **Problem:** Relay logs `secrets sync FAILED: 1 unpushed commit(s), push failed: incorrect old value provided`.

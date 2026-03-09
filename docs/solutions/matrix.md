@@ -51,3 +51,24 @@ Use intercom account tokens (from `operator/intercom.json`) to invite into rooms
 **Cause:** The account you're using to invite is not a member of that room.
 
 **Fix:** Use a different account that is already in the room. Intercom accounts are each in one room — use the right one, or use the operator/captain account if they're in all rooms.
+
+---
+
+## Setting up a loudspeaker account for fleet command output
+
+**Problem:** All ships reply to `!` commands using their own per-room intercom accounts. When multiple ships reply, each uses a different sender — messy and inconsistent.
+
+**Solution:** Create a single `@loudspeaker` Matrix account. All ships authenticate as loudspeaker and prefix replies with `[SHIPNAME]`. This gives a uniform sender for all fleet command output.
+
+**Steps:**
+1. Register `@loudspeaker` on the homeserver (see registration steps above)
+2. Invite and join it to all intercom rooms (bridge, engineering, astrometrics)
+3. Save credentials to `secrets/operator/loudspeaker-matrix.json`:
+   ```json
+   { "homeserver": "https://matrix.a-gis.org", "username": "@loudspeaker:a-gis.org", "password": "...", "accessToken": "...", "deviceId": "..." }
+   ```
+4. Push. Relay loads loudspeaker on startup via `loadLoudspeakerConfig()` and uses it in `reply()` and `threadReply()`.
+
+**Notes:**
+- Loudspeaker credentials are shared fleet-wide. All ships use the same account simultaneously — this is intentional.
+- Intercom accounts remain for sending `!` commands into rooms; loudspeaker is for replies only.
