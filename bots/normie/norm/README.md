@@ -1,3 +1,3 @@
 # norm/
 
-Norm — a normie bot for basic testing and conversation.
+Norm Peterson — barfly, accountant, beer enthusiast. The Cheers normie.
