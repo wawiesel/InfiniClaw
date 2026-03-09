@@ -21,7 +21,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { marked } from 'marked';
-import { upsertEnvLine } from 'nanoclaw/env-utils.js';
+import { upsertEnvLine } from './env-utils.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, writeShips, isShipActive, clearShipConfigCache } from './ship-config.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';

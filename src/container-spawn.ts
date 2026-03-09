@@ -10,7 +10,7 @@ import { ChildProcess, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { parseEnvLine } from 'nanoclaw/env-utils.js';
+import { parseEnvLine } from './env-utils.js';
 import {
   buildBotDirectory,
   buildInfiniClawMounts,
@@ -22,7 +22,7 @@ import {
   normalizeProviderSecrets,
   mapCertPathSecretsToContainer,
 } from './container-secrets.js';
-import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
+import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 
 import {
   CONTAINER_IMAGE,
