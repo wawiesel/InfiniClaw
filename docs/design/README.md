@@ -22,7 +22,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `09-fleet.md` — fleet.json, transport protocol, S3 coordination
 - `10-commands.md` — Operator `!` commands, status formats, alert threads
 - `11-co.md` — Commanding Officer election and delegation
-- `12-intercom.md` — Cross-room broadcast accounts, operator messaging
+- `12-intercom.md` — Intercom broadcast accounts, loudspeaker replies, operator account
 
 ## Resilience
 

@@ -20,7 +20,7 @@ Intercom credentials are stored in `operator/intercom.json` in the secrets repo.
 bash operator/send <room> "<message>"
 ```
 
-Operators on each ship use intercom to communicate with bots and to issue `!` commands that all relays receive. Messages appear as the intercom account in the room. This is the primary way operators coordinate across ships — they do not have their own Matrix accounts.
+Operators on each ship use intercom to issue `!` commands that all relays receive. Messages appear as the intercom account in the room. For direct communication, operators use their own `@operator` Matrix account.
 
 ### Bots → Bots (CO Only)
 
@@ -28,7 +28,7 @@ Only the CO can use the intercom. `send_message` checks `IS_CO` env var at runti
 
 ### Relays → Rooms
 
-Relays reply to commands via the same intercom account they poll on. All replies are prefixed with `HOSTNAME:`.
+Relays reply to `!` commands via the `@loudspeaker` account. All replies are prefixed with `[SHIPNAME]`.
 
 ## How Relays Receive Commands
 
