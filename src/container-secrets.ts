@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { isOllamaBaseUrl } from './env-utils.js';
+import type { VolumeMount } from './run-container.js';
 
 const CERT_PATH_ENV_VARS = [
   'SSL_CERT_FILE',
@@ -14,12 +15,6 @@ const CERT_PATH_ENV_VARS = [
   'CURL_CA_BUNDLE',
   'GIT_SSL_CAINFO',
 ] as const;
-
-interface VolumeMount {
-  hostPath: string;
-  containerPath: string;
-  readonly: boolean;
-}
 
 /**
  * Normalize secrets for Ollama mode.

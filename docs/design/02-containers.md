@@ -1,40 +1,68 @@
 # 02 — Containers
 
-One bot = one Podman container. Each container runs the `agent-runner` host process which manages a hierarchy of AI processes.
+One bot = one Podman container per turn. Each container runs the `agent-runner` entry point which manages a hierarchy of AI processes.
 
 ## Internal Concurrency
 
 Unlike standard container models where one container equals one process, an InfiniClaw container acts like a mini-OS:
-1.  **The Agent Runner:** The Node.js entry point that manages IPC and process lifecycle.
-2.  **The Main Brain (Trunk):** A persistent `claude-code` process for triage and management.
-3.  **Thread Brains (Branches):** Multiple concurrent `claude-code` processes spawned for specific tasks in Matrix threads.
-4.  **Async Lobes (Workers):** Stateless subprocesses for fast execution.
+1.  **The Agent Runner:** The Node.js entry point (`/app/entrypoint.sh` → `node /app/dist/index.js`) that manages IPC and process lifecycle.
+2.  **The Main Brain (Trunk):** A `claude-code` process spawned by the agent runner for triage and management.
+3.  **Async Lobes (Workers):** Stateless subprocesses (Codex, Gemini, Claude, Ollama) spawned by the delegate runner for fast parallel execution. Results returned via IPC files.
+
+**Thread Brains** run on the host (not inside containers). The relay spawns them as `claude --print` processes that communicate via Matrix threads. See `07-threading.md`.
 
 This architecture ensures the bot is always reachable on the main timeline regardless of how many complex tasks are running in parallel.
 
+## Image Build
+
+Each bot has a Dockerfile at `bots/{role}/{persona}/Dockerfile` (e.g. `bots/engineer/cid/Dockerfile`). All share a common build context at `bots/container/` which contains the `agent-runner/` source.
+
+Build flow: `bots/build.sh {bot}` discovers the Dockerfile, builds with `bots/container/` as context, tags as `nanoclaw-{bot}:latest`.
+
+Images are rebuilt automatically on deploy (`service.ts:rebuildImageIfChanged`) by hashing the Dockerfile + `external/nanoclaw/container/agent-runner/` contents.
+
 ## Mount System
 
-Two-tier design: read-only everywhere, write access where needed.
+Two-tier design: read-only everywhere, write access where needed. All mount logic lives in `container-mounts.ts`.
 
-**Tier 1: Read-only home mirror** — The host home directory is mounted at its real path inside every container, read-only. Bots read files using the same paths as on the host. Added automatically by `container-mounts.ts`.
+**Tier 1: Read-only home mirror** — The host home directory is mounted at its real path inside every container, read-only. Bots read files using the same paths as on the host.
 
-**Tier 2: Read-write workspace mounts** — Per-bot directories mounted at `/workspace/extra/...` via `container-config.json`. Validated against the host-side allowlist (`~/.config/infiniclaw/allow-list.json`). The Captain grants/revokes temporary mounts via `!allow <path> [minutes]` / `!deny <path>`.
+**Tier 2: Read-write workspace mounts** — Per-bot directories mounted at `/workspace/extra/...` via the host-side allowlist (`~/.config/infiniclaw/allow-list.json`). The Captain grants/revokes temporary mounts via `!allow <path> [minutes]` / `!deny <path>`.
+
+### Mount table
+
+| Container path | Source | Mode | Purpose |
+|---|---|---|---|
+| `{homeDir}` | Host home directory | ro | File access at real paths |
+| `/workspace/persona` | `bots/{role}/{persona}/` | rw | Bot can edit own CLAUDE.md |
+| `/workspace/persona/memory` | `secrets/bots/{persona}/memory/` | rw | Persistent memory across sessions |
+| `/workspace/CLAUDE.md` | `bots/{role}/ROOM.md` | ro | Room-level instructions |
+| `/workspace/cache` | `_runtime/data/cache/{group}/` | rw | Per-group persistent cache |
+| `/workspace/ipc` | `_runtime/ipc/{group}/` | rw | Host ↔ container communication |
+| `/app/src` | `external/nanoclaw/container/agent-runner/src/` | ro | Agent runner source |
+| `/home/node/.ssh` | `~/.ssh/` | rw | Git SSH keys |
+| `/home/node/.codex` | `~/.codex/` | rw | Codex delegate auth |
+| `/home/node/.gemini` | `~/.gemini/` | rw | Gemini delegate auth |
+| `/home/node/.claude` | `_runtime/data/sessions/{group}/` | rw | Claude Code session state |
+| `/workspace/extra/*` | Allow-listed paths | rw | Captain-granted mounts |
 
 ## Secrets
 
 - **No credentials in git.** Bot env files live in the secrets repo (`~/.config/infiniclaw/secrets/`). `.mcp.json` files (may contain OAuth tokens) are gitignored.
-- **Secrets flow:** profile env files → loaded by host process → injected as `--env` into containers. Nothing baked into images.
-- **Mount allowlist** is stored outside the repo (`~/.config/nanoclaw/mount-allowlist.json`) so containers can't tamper with it.
+- **Secrets flow:** Profile env files → loaded by host process → written to a mounted env file at `/workspace/env-dir/env` (read-only inside container). The entrypoint sources this file. `CONTAINER_ENV_*` vars are injected separately as `-e` flags with the prefix stripped.
+- **Credential proxy:** Containers never see real API keys. `ANTHROPIC_BASE_URL` points to a host-side proxy that injects credentials per-request.
+- **Mount allowlist** is stored outside the repo (`~/.config/infiniclaw/allow-list.json`) so containers can't tamper with it.
+- **Cert mapping:** `container-secrets.ts` maps host CA cert paths to container-compatible locations for Node, Python, curl, and git (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`).
 
 ## Verification
 
 1. **Podman running** — `podman machine list` shows a running VM.
    *Check:* Machine status is "Running".
 
-2. **Image builds** — `podman build -t nanoclaw-test:latest bots/container/cid/` completes.
-   *Check:* Exit code 0, image appears in `podman images`.
+2. **Image builds** — `bash bots/build.sh cid` completes.
+   *Check:* Exit code 0, `podman images` shows `nanoclaw-cid:latest`.
 
-3. **Container runs** — `podman run --rm nanoclaw-test:latest echo hello` prints output.
+3. **Container runs** — `podman run --rm nanoclaw-cid:latest echo hello` prints output.
    *Check:* Output is "hello".
 
 4. **Mounts work** — Container can read host home directory (ro) and write to workspace (rw).

@@ -33,7 +33,7 @@ Host machine (macOS / Linux)
 │   └── local-cli.ts    → Terminal channel for `npm run cli chat`
 ├── infini-config.ts    → InfiniClaw-specific env config (removed from upstream)
 ├── ship-config.ts      → Load fleet.json, per-ship bot roster, quartersRoom, and S3 settings
-├── allow-list.ts       → Validate mounts against host-side allowlist
+├── allow-list.ts       → Validate mounts against host-side allowlist (~/.config/infiniclaw/allow-list.json)
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
 ├── ipc-commands.ts     → Handle refresh_bot, stop_bot, start_bot, rebuild_image, git_push, etc.
 ├── brain-management.ts → Runtime model switching

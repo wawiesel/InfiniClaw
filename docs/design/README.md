@@ -6,7 +6,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 - `00-overview.md` — Core principles, code structure
 - `01-matrix.md` — Matrix server, accounts, room setup, message format, math rendering, verification
-- `02-containers.md` — Podman isolation, images, mounts, secrets
+- `02-containers.md` — Podman isolation, image builds, mount table, secrets flow, credential proxy
 
 ## Bot Runtime
 
