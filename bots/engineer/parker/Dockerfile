@@ -7,6 +7,7 @@ FROM node:22-slim
 # Minimal system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
+    gh \
     git \
     ripgrep \
     python3 \
