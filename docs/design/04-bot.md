@@ -33,7 +33,7 @@ Role is resolved from `fleet.json` entry for the bot. A base `bots/CLAUDE.md` pr
 
 The trigger pattern is `^@<name>\b` (case-insensitive, anchored to message start).
 
-**Matrix mention pill handling:** Matrix clients convert `@Name` into mention pills, which strip the `@` prefix from the plaintext `body`. The host restores it by parsing the HTML `formatted_body` to find mentioned display names (via `<a href="https://matrix.to/#/@...">Name</a>` tags) and re-adding the `@` prefix before the message is stored or trigger-tested.
+**Matrix mention pill handling:** Matrix clients strip the `@` prefix from mention pills in the plaintext body. The host restores it before trigger testing — see [01-matrix](01-matrix.md) for details on mention pill symmetry.
 
 In **resume context** (bot restart), the `@Name` prefix is replaced with `[callout]` to prevent the resume message from falsely re-triggering the bot. The original `@` is preserved in the SQLite message store and in normal conversation flow.
 

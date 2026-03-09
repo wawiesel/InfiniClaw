@@ -990,6 +990,8 @@ export class MatrixChannel implements Channel {
       html = await renderMarkdownForMatrix(normalizedText);
     }
 
+    html = this.pillifyMentions(html);
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const msgContent: Record<string, any> = {
       msgtype: 'm.text',
@@ -1375,6 +1377,53 @@ export class MatrixChannel implements Channel {
     } catch {
       return userId.split(':')[0].slice(1);
     }
+  }
+
+  /**
+   * Convert @Name patterns in outgoing HTML to Matrix mention pills.
+   * Matches display names from the senderNameCache (populated from incoming
+   * messages). Display names with pips like "Cid 🟢 (HERACLES)" are matched
+   * by their base name portion (first word).
+   */
+  private pillifyMentions(html: string): string {
+    if (!html.includes('@')) return html;
+
+    // Build reverse map: lowercase base name → { userId, displayName }
+    const nameToUser = new Map<string, { userId: string; displayName: string }>();
+    for (const [userId, displayName] of this.senderNameCache) {
+      // Extract base name: first word before any pip/status suffix
+      const baseName = displayName.split(/\s/)[0];
+      if (baseName) {
+        nameToUser.set(baseName.toLowerCase(), { userId, displayName: baseName });
+      }
+    }
+    if (nameToUser.size === 0) return html;
+
+    // Replace @Name in text nodes only — skip content inside HTML tags and <a> elements.
+    // Split on tags, only transform segments outside of tags and anchor elements.
+    const mentionRe = /@([A-Za-z][A-Za-z0-9._-]*)\b/g;
+    let result = '';
+    let inAnchor = false;
+    // Split into [text, tag, text, tag, ...] segments
+    const parts = html.split(/(<[^>]+>)/);
+    for (const part of parts) {
+      if (part.startsWith('<')) {
+        if (/^<a[\s>]/i.test(part)) inAnchor = true;
+        else if (/^<\/a>/i.test(part)) inAnchor = false;
+        result += part;
+      } else if (inAnchor) {
+        result += part;
+      } else {
+        result += part.replace(mentionRe, (full, name: string) => {
+          const entry = nameToUser.get(name.toLowerCase());
+          if (!entry) return full;
+          const safeUserId = escapeHtml(entry.userId);
+          const safeName = escapeHtml(entry.displayName);
+          return `<a href="https://matrix.to/#/${safeUserId}">${safeName}</a>`;
+        });
+      }
+    }
+    return result;
   }
 
   private async getRoomName(roomId: string): Promise<string> {

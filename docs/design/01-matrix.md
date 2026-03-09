@@ -156,6 +156,13 @@ All messages use `org.matrix.custom.html` format with `formatted_body` for rich 
 
 Bot outgoing messages are converted from Markdown to Matrix HTML before sending.
 
+### Mention Pill Symmetry
+
+Mention pills must be consistent in both directions:
+
+- **Inbound:** Matrix clients convert `@Name` into HTML mention pills, which strip the `@` prefix from the plaintext `body`. The host restores it by parsing `formatted_body` to find `<a href="https://matrix.to/#/@...">Name</a>` tags and re-adding the `@` prefix before storing or trigger-testing.
+- **Outbound:** Bot responses containing `@Name` patterns are converted to proper Matrix mention pills in `formatted_body` before sending. Known display names (from previously seen message senders) are matched by base name and wrapped in `<a href="https://matrix.to/#/@userid:server">Name</a>` links. This ensures bot mentions render identically to human mentions — clickable, highlighted, and visually consistent.
+
 ## Verification
 
 1. **Server reachable** — `curl $HOMESERVER/_matrix/client/versions` → HTTP 200
