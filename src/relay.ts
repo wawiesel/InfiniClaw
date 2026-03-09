@@ -529,6 +529,32 @@ async function setBotPip(root: string, bot: string, pip: string): Promise<void> 
   }
 }
 
+/**
+ * Restart all running bots on this ship into quarters.
+ * Onduty bots are moved to quarters status. Sleeping bots are skipped.
+ * Returns { started, failed } counts.
+ */
+function restartBotsToQuarters(root: string): { started: string[]; failed: string[] } {
+  const started: string[] = [];
+  const failed: string[] = [];
+  for (const [bot, entry] of Object.entries(liveFleet)) {
+    if (entry.ship !== HOSTNAME) continue;
+    if (!(RUNNING_STATUSES as readonly string[]).includes(entry.status)) continue;
+    try {
+      stopBot(bot);
+      killStaleContainers(bot);
+      if (entry.status === 'onduty') fleetUpdate(bot, { status: 'quarters' });
+      bootstrapBot(root, bot);
+      started.push(bot);
+    } catch (err) {
+      log(`restartBotsToQuarters: ${bot} failed — ${errStr(err)}`);
+      failed.push(bot);
+    }
+  }
+  if (started.length > 0 || failed.length > 0) writeFleet(liveFleet);
+  return { started, failed };
+}
+
 // ── Bot resolution (multi-ship aware) ───────────────────────────
 
 /** Map local bot name → room name (lowercased) from MAIN_GROUP_NAME in env. */
@@ -1964,16 +1990,8 @@ function registerRelayCommands(): void {
         ships[HOSTNAME].active = true;
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `commission ${HOSTNAME}`);
-        const fleet = loadFleet();
-        const root = resolveRoot();
         ensurePodmanReady();
-        const started: string[] = [];
-        for (const [name, entry] of Object.entries(fleet)) {
-          if (entry.ship === HOSTNAME && (RUNNING_STATUSES as readonly string[]).includes(entry.status)) {
-            bootstrapBot(root, name);
-            started.push(name);
-          }
-        }
+        const { started } = restartBotsToQuarters(resolveRoot());
         await reply(conn, `commissioned — started ${started.join(', ') || 'no bots assigned'}`);
       } catch (err) {
         await reply(conn, `commission failed — ${errStr(err)}`);
@@ -2089,17 +2107,24 @@ function registerRelayCommands(): void {
         await s(stageOk('relay + dist rebuilt', relayVersion(root)));
 
         ensurePodmanReady();
+        removeStaleProcesses();
 
-        // Restart active bots via lightweight refresh (stop+kill+start, no room/brain changes)
-        for (const bot of activeBots) {
+        // Refit returns all bots to quarters
+        const result = restartBotsToQuarters(root);
+        for (const bot of result.started) {
           const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-          const bName = bEnv?.ASSISTANT_NAME || bot;
-          try {
-            refreshBot(root, bot);
-            await s(stageOk(`${bName} restarted`));
-          } catch (err) {
-            errors++;
-            await s(stageFail(`${bName} restart`, ` — ${errStr(err)}`));
+          await s(stageOk(`${bEnv?.ASSISTANT_NAME || bot} restarted (quarters)`));
+        }
+        for (const bot of result.failed) {
+          errors++;
+          const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+          await s(stageFail(`${bEnv?.ASSISTANT_NAME || bot} restart`, ''));
+        }
+        // Report sleeping bots
+        for (const bot of activeBots) {
+          if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status) && liveFleet[bot]?.status !== 'transit') {
+            const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+            await s(stageOk(`${bEnv?.ASSISTANT_NAME || bot} stays ${liveFleet[bot]?.status}`));
           }
         }
 
@@ -2804,23 +2829,14 @@ async function main(): Promise<void> {
   log('warming up — syncing Matrix for 30s before bootstrap...');
   await sleep(30_000);
 
-  // Bootstrap all bots assigned to this ship
+  // Bootstrap all bots to quarters
   if (isShipActive()) {
     try {
       ensurePodmanReady();
       const root = resolveRoot();
       removeStaleProcesses();
-      killStaleContainers();
-      for (const [bot, entry] of Object.entries(liveFleet)) {
-        if (entry.ship === HOSTNAME && (RUNNING_STATUSES as readonly string[]).includes(entry.status)) {
-          try {
-            bootstrapBot(root, bot);
-            log(`bootstrap: ${bot} started (${entry.status})`);
-          } catch (err) {
-            log(`bootstrap: ${bot} failed — ${errStr(err)}`);
-          }
-        }
-      }
+      const { started, failed } = restartBotsToQuarters(root);
+      log(`bootstrap: ${started.length} started, ${failed.length} failed`);
     } catch (err) {
       log(`bootstrap failed: ${errStr(err)}`);
     }
