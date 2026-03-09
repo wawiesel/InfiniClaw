@@ -147,7 +147,23 @@ Store ship space/lounge/quarters IDs in `ships.json`, and per-bot quarters room 
 
 ## Message Format
 
-Messages use Matrix's `org.matrix.custom.html` format with `formatted_body` for rich content (links, tables, collapsible sections).
+All messages use `org.matrix.custom.html` format with `formatted_body` for rich rendering:
+
+- **Markdown** — headings, bold, italic, lists, code blocks, links, tables
+- **Math** — LaTeX via `data-mx-maths` attribute (MSC2191): `$x^2$` for inline, `$$\sum_{i=1}^n$$` for display
+- **Collapsible sections** — `<details>` blocks for tool call output
+
+Bot outgoing messages are converted by `renderMarkdownForMatrix()` in `src/channels/matrix.ts`, which extracts math before markdown processing and wraps it in `<span data-mx-maths="...">` / `<div data-mx-maths="...">`.
+
+### Client Setup
+
+Element Desktop requires a Labs feature to render math:
+
+1. Ensure `"showLabsSettings": true` in Element's config (platform-dependent location)
+2. **Settings → Labs → "Render LaTeX maths in messages"**
+3. Restart Element
+
+This enables both rendering of incoming math and LaTeX input in the composer (`$...$` and `$$...$$`).
 
 ## Verification
 
@@ -173,5 +189,5 @@ All checks use stored tokens from the secrets repo. No login needed if accounts 
 6. **Power levels** — `GET /_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/` for each room.
    *Check:* Captain and operator at power 100.
 
-7. **Message round-trip** — Operator posts to Lounge, reads back via `/messages`.
+7. **Message round-trip** — Operator posts to Norm's Room, reads back via `/messages`.
    *Check:* Posted message appears in timeline.
