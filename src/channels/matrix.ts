@@ -478,51 +478,36 @@ function matrixErrCode(err: unknown): string | undefined {
 }
 
 /**
- * Convert @Name patterns in HTML to Matrix mention pills.
- * Only processes text nodes — skips content inside HTML tags and anchor elements.
- * The nameCache maps userId → displayName (may include pips like "Cid 🟢 (HERACLES)");
- * matching uses only the base name (first word).
+ * Convert <m>Name</m> markers in text/HTML to Matrix mention pills.
+ * Bots emit <m>Cid</m> to explicitly mark a mention. This avoids false matches
+ * that @-prefix scanning would produce on emails, code, or other @ patterns.
+ * The nameCache maps userId → displayName (may include pips); matching uses
+ * only the base name (first word), case-insensitive.
+ *
+ * Any <m>Name</m> that doesn't match a known user is stripped to just "Name".
  */
 export function pillifyMentions(
-  html: string,
+  text: string,
   nameCache: ReadonlyMap<string, string>,
 ): string {
-  if (!html.includes('@')) return html;
+  if (!text.includes('<m>')) return text;
 
-  // Build reverse map: lowercase base name → { userId, displayName }
+  // Build reverse map: lowercase base name → userId
   const nameToUser = new Map<string, { userId: string; displayName: string }>();
   for (const [userId, displayName] of nameCache) {
-    // Extract base name: first word before any pip/status suffix
     const baseName = displayName.split(/\s/)[0];
     if (baseName) {
       nameToUser.set(baseName.toLowerCase(), { userId, displayName: baseName });
     }
   }
-  if (nameToUser.size === 0) return html;
 
-  // Replace @Name in text nodes only — skip content inside HTML tags and <a> elements.
-  const mentionRe = /@([A-Za-z][A-Za-z0-9._-]*)\b/g;
-  let result = '';
-  let inAnchor = false;
-  const parts = html.split(/(<[^>]+>)/);
-  for (const part of parts) {
-    if (part.startsWith('<')) {
-      if (/^<a[\s>]/i.test(part)) inAnchor = true;
-      else if (/^<\/a>/i.test(part)) inAnchor = false;
-      result += part;
-    } else if (inAnchor) {
-      result += part;
-    } else {
-      result += part.replace(mentionRe, (full, name: string) => {
-        const entry = nameToUser.get(name.toLowerCase());
-        if (!entry) return full;
-        const safeUserId = escapeHtml(entry.userId);
-        const safeName = escapeHtml(entry.displayName);
-        return `<a href="https://matrix.to/#/${safeUserId}">${safeName}</a>`;
-      });
-    }
-  }
-  return result;
+  return text.replace(/<m>([^<]+)<\/m>/gi, (_full, name: string) => {
+    const entry = nameToUser.get(name.trim().toLowerCase());
+    if (!entry) return name; // Strip marker, keep name as plain text
+    const safeUserId = escapeHtml(entry.userId);
+    const safeName = escapeHtml(entry.displayName);
+    return `<a href="https://matrix.to/#/${safeUserId}">${safeName}</a>`;
+  });
 }
 
 export class MatrixChannel implements Channel {
@@ -1040,10 +1025,13 @@ export class MatrixChannel implements Channel {
 
     html = this.pillifyMentions(html);
 
+    // Strip <m>Name</m> markers from plaintext body (pills are in formatted_body)
+    const plainBody = normalizedText.replace(/<m>([^<]+)<\/m>/gi, '$1');
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const msgContent: Record<string, any> = {
       msgtype: 'm.text',
-      body: normalizedText,
+      body: plainBody,
       format: 'org.matrix.custom.html',
       formatted_body: html.trim(),
     };
