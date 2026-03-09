@@ -56,7 +56,7 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function isValidBotName(name: string): boolean {
+export function isValidBotName(name: string): boolean {
   return SAFE_BOT_NAME.test(name) && name !== '.' && name !== '..';
 }
 

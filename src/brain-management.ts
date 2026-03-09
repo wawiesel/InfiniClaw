@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from './env-utils.js';
-import { loadShipConfig } from './ship-config.js';
+import { loadShipConfig, SAFE_BOT_NAME } from './ship-config.js';
 import { ASSISTANT_NAME, DATA_DIR } from 'nanoclaw/config.js';
 import { MAIN_GROUP_FOLDER } from './infini-config.js';
 import { logger } from 'nanoclaw/logger.js';
@@ -15,7 +15,6 @@ import { escapeHtml } from './formatting.js';
 const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');
 const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
 const AUTO_BRAIN_SWITCH_COOLDOWN_MS = 10 * 60 * 1000;
-const BOT_NAME_PATTERN = /^[a-zA-Z0-9._-]+$/;
 const MAX_MODEL_NAME_LENGTH = 200;
 
 let lastAutoBrainSwitchAt = 0;
@@ -213,7 +212,7 @@ export async function maybeAutoSwitchBrainsOnQuotaError(
   const switched: string[] = [];
   for (const rawBot of config.bots) {
     const trimmed = rawBot.trim();
-    const bot = trimmed && BOT_NAME_PATTERN.test(trimmed) ? trimmed : undefined;
+    const bot = trimmed && SAFE_BOT_NAME.test(trimmed) ? trimmed : undefined;
     if (!bot) {
       logger.warn({ bot: rawBot }, 'Skipping invalid bot name in machine config');
       continue;

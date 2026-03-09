@@ -2,61 +2,110 @@
 
 A bot is a Matrix account backed by a container running on a ship. It listens to room messages, responds when triggered, and accumulates context from everything it hears.
 
+## Identity
+
+Each bot has a secrets env file (`secrets/bots/{name}/env`) and a persona directory (`bots/{role}/{name}/`).
+
+**Required env keys:**
+- `ASSISTANT_NAME` — Display name, used in trigger pattern
+- `MATRIX_HOMESERVER`, `MATRIX_USERNAME`, `MATRIX_PASSWORD` — Matrix auth (or `MATRIX_ACCESS_TOKEN`)
+- `BRAIN_OAUTH_TOKEN` or `BRAIN_API_KEY` — LLM credentials
+
+**Optional env keys:**
+- `ASSISTANT_ROLE` — Role category for persona lookup
+- `MAIN_GROUP_NAME` — Primary duty room name
+- `BRAIN_MODEL` — Override LLM model
+- `IGNORE_TRIGGERS` — Comma-separated bot names to skip
+- `IGNORE_SENDERS` — Comma-separated sender IDs to skip
+
+See `src/infini-config.ts` for all config loading.
+
+**Persona directory:**
+```
+bots/{role}/{name}/
+  CLAUDE.md              # System prompt (personality, instructions)
+  Dockerfile             # Custom container image (optional)
+  container-config.json  # MCP server config (optional)
+  skills/                # Custom skills (optional)
+```
+
+Role is resolved from `fleet.json` entry for the bot. A base `bots/CLAUDE.md` provides shared instructions across all bots.
+
 ## Trigger Pattern
 
-The trigger pattern is `\b<bot>\b` (case-insensitive). A bot responds when its name appears as a whole word anywhere in a message.
+The trigger pattern is `^@<name>\b` (case-insensitive, anchored to message start). A bot responds when its name appears as `@Name` at the beginning of a message.
 
-### Response Rules
+Examples for bot "Cid":
+- `@Cid hello` — triggers
+- `@cid status` — triggers (case-insensitive)
+- `hello @Cid` — does NOT trigger (not at start)
+- `@Cidextra` — does NOT trigger (word boundary)
 
-- **Main timeline + trigger match** → bot responds in a **new thread**.
-- **In-thread + trigger match** → bot responds in that thread.
-- **Any message without trigger** → bot does NOT respond, but the message IS added to context. The bot "hears" everything.
-- **Bot's own messages** → ignored (echo prevention).
+See `external/nanoclaw/src/config.ts` for the `TRIGGER_PATTERN` definition.
 
-Filtering is about **what triggers a response**, not about **what enters context**. Everything enters context. The trigger just determines whether the bot takes a turn.
+## Response Rules
+
+Four conditions trigger a bot response (see `src/main.ts`):
+
+| Condition | Description |
+|-----------|-------------|
+| **Callout** | Message matches `^@<name>\b` (the trigger pattern) |
+| **Participating thread** | Message is in a thread where the bot previously responded |
+| **CO main timeline** | Bot is Commanding Officer and message is unaddressed (no bot mentioned) on main timeline |
+| **Quarters** | Any message in the bot's quarters room |
+
+If none of these conditions are met, the bot does NOT respond — but the message IS added to context. The bot "hears" everything. Filtering is about what triggers a response, not what enters context.
 
 ### Additional Filters
 
-Before routing, messages pass through filtering (`message-filtering.ts`):
-- **Self-echo:** bots ignore their own messages.
-- **Pattern filtering:** messages matching `IGNORE_PATTERNS` (status messages) are skipped from context.
+Before routing, messages pass through filtering (`src/message-filtering.ts`):
+- **Self-echo:** Bots ignore their own messages (tracked via `botMatrixUserIds` set)
+- **Pattern filtering:** Messages matching `IGNORE_PATTERNS` (from `IGNORE_TRIGGERS` env) are skipped
+- **Operator callouts:** Messages starting with `@` from the Captain are filtered (operator-to-bot addressing)
 
 ## Display Name
 
 Bots set their Matrix display name to show status at a glance:
 
 ```
-<name> <pip> [<ship>]
+<name> <pip> (<ship>)
 ```
 
-Examples: `Cid 🟢 [HERACLES]`, `Parker ⭐ [HERACLES]`, `Nora 💤 [Poseidon]`
+Examples: `Cid 🟢 (HERACLES)`, `Parker ⭐ (HERACLES)`, `Nora 💤 (POSEIDON)`
 
-See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status/pip table.
+The pip (status icon) is updated dynamically. See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status/pip table. Implementation in `src/main.ts` `botDisplayName()`.
 
 ## Message Flow
 
 ```
-User message → Matrix → host message loop → SQLite → IPC to container
-  → Main Brain reads new message as part of ongoing conversation
+User message → Matrix → host message loop → SQLite → trigger check
+  → [TRIGGERED] container spawns → Main Brain processes conversation
     → [IF COMPLEX] Main Brain calls branch_to_thread(objective)
-      → Host creates visible thread on main timeline: "🧵 Working on: X"
-      → Host spawns Thread Brain container wired to post into that thread
-      → Thread Brain works, posts progress/results into thread (visible)
-      → Thread Brain completes, posts summary to main timeline
+      → Host creates thread: "🧵 Thread Brain: <title>"
+      → Host spawns Thread Brain (claude --print on host, not container)
+      → Thread Brain works, posts progress into thread
       → Main Brain continues listening — never blocked
-    → [IF SIMPLE] Main Brain replies directly on main timeline
+    → [IF SIMPLE] Main Brain replies directly
+  → [NOT TRIGGERED] message stored as context, no response
 ```
 
-## Message Routing
+## Resume Behavior
 
-Bots see all room messages as context but only **respond** when it's their job.
+When a bot restarts (crash, deploy, or manual restart):
 
-**Response triggers:**
-- **Main Timeline (CO Only):** The Commanding Officer responds to any unaddressed human message on the main timeline.
-- **Callout:** Any message containing `\b<bot>\b` (case-insensitive) triggers that bot.
-- **Participating thread:** Posting in a thread where a bot's Thread Brain is active (or previously participated) triggers a response in that thread.
+1. Synthetic resume message injected into SQLite with last 10 messages as context
+2. Active todos included if available
+3. Trigger patterns stripped from context to prevent false activation
+4. Container spawns to process the resume message
+5. Bot picks up where it left off with full conversation context
 
-**Bot-to-bot communication:** The CO delegates tasks by tagging other bots in a thread. This triggers the other bot's Main Brain to spawn its own Thread Brain for the task.
+See `injectResumeMessage()` in `src/main.ts`. Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
+
+## Crash Recovery
+
+- pm2 auto-restarts on crash (2s delay, max 100 restarts)
+- Exit code 137 (SIGKILL/OOM) triggers backoff cooldown (60s, after 3 consecutive crashes)
+- Session state persisted in SQLite survives restarts
 
 ## Verification
 
@@ -70,7 +119,7 @@ Bots see all room messages as context but only **respond** when it's their job.
    *Check:* Log contains the message content.
 
 4. **Trigger works** — Send `@Cid hello` in the room.
-   *Check:* Bot processes the message and responds in a thread.
+   *Check:* Bot processes the message and responds.
 
 5. **Non-trigger adds context** — Send a message without the bot's name.
    *Check:* Bot does NOT respond, but the message appears in its conversation context.
@@ -78,5 +127,8 @@ Bots see all room messages as context but only **respond** when it's their job.
 6. **Self-echo prevented** — Bot does not process its own messages.
    *Check:* Bot's log shows its own messages filtered out.
 
-7. **Display name correct** — Bot's display name shows `<name> <pip> [<ship>]`.
+7. **Display name correct** — Bot's display name shows `<name> <pip> (<ship>)`.
    *Check:* Matrix profile API returns the expected display name format.
+
+8. **Resume works** — Restart the bot, verify it injects context and responds.
+   *Check:* Log shows "Injected resume message with context" with recent message count.

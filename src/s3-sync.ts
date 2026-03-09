@@ -17,7 +17,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { logger } from 'nanoclaw/logger.js';
-import { loadShipConfig } from './ship-config.js';
+import { loadShipConfig, isValidBotName } from './ship-config.js';
 import { instanceDir } from './service.js';
 
 // Files/dirs to sync per bot, relative to instance dir
@@ -27,13 +27,8 @@ const SYNC_PATHS = [
   'data/sessions',       // recursive
 ];
 const RECURSIVE_SYNC_PATHS = new Set(['data/sessions']);
-const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SAFE_BUCKET_NAME = /^(?!\d+\.\d+\.\d+\.\d+$)[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$/;
 const SAFE_S3_KEY = /^[A-Za-z0-9][A-Za-z0-9_./-]{0,1023}$/;
-
-function isValidBotName(bot: string): boolean {
-  return SAFE_BOT_NAME.test(bot) && bot !== '.' && bot !== '..';
-}
 
 function isValidBucketName(bucket: string): boolean {
   return SAFE_BUCKET_NAME.test(bucket) && !bucket.includes('..');
