@@ -40,20 +40,15 @@ Duty rooms (Engineering, Bridge, Astrometrics) are fleet-wide — they are NOT c
 
 ### Quarters Trigger Rules
 
-A bot in its quarters room is a **primary** — it owns the room. Trigger behavior depends on the bot's status:
+A bot in its quarters room is a **primary** — it owns the room. Trigger behavior is determined by `triggerType` (see [04-bot](04-bot.md)):
 
-| Status | Responds to | Trigger needed? |
-|--------|------------|-----------------|
-| `quarters` (awake) | Anyone | No — every message is for the bot |
-| `sleep` (asleep) | Captain and Operator only | No — still a primary, but only wakes for authority |
+| Status | triggerType | Responds to |
+|--------|------------|-------------|
+| `quarters` (awake) | `always` | Anyone — every message triggers |
+| `onduty` | `callout` | Explicit `<m>Name</m>`, participating thread, or CO |
+| `sleep` | `never` | Nothing — but captain/operator mentions auto-wake |
 
-When a sleeping bot receives a captain/operator message in quarters, the relay auto-wakes it (transitions `sleep` → `quarters`), delivers the message, then the bot stays awake until explicitly put back to sleep.
-
-In all other rooms (duty rooms, lounge), the bot requires an explicit callout (`@BotName`) or must be participating in the thread.
-
-### Threading by Room
-
-Thread Brains (branch/merge, `branch_to_thread`) are only available in duty rooms. In quarters and lounge, bots cannot create threads or spawn Thread Brains — the host rejects `branch_to_thread` IPC commands from non-duty rooms. However, bots still follow basic Matrix conversation norms: if addressed in a thread (e.g. Captain replies in-thread), the bot responds in that thread. If addressed on the timeline, it responds on the timeline.
+When a sleeping bot receives a captain/operator mention, the relay auto-wakes it (transitions `sleep` → `quarters`, `triggerType` → `always`), delivers the message, then the bot stays awake until explicitly put back to sleep.
 
 ### Permissions
 
@@ -82,14 +77,14 @@ Display name format: `<name> <pip> (<ship>)`. CO is elected automatically — lo
 
 A bot is **always** in its quarters room. It can be in at most one additional room:
 
-| fleet.json status | Rooms | Brain | Lobes/Threads | Container |
-|-------------------|-------|-------|---------------|-----------|
-| `onduty` | Quarters + duty room | Full model | Yes | Running |
-| `quarters` | Quarters only | Full model | No | Running |
-| `sleep` | Quarters only | — | — | Stopped |
-| `transit` | — | — | — | Stopped |
+| fleet.json status | Rooms | Brain | triggerType | Container |
+|-------------------|-------|-------|-------------|-----------|
+| `onduty` | Quarters + duty room | Full model | `callout` | Running |
+| `quarters` | Quarters only | Full model | `always` | Running |
+| `sleep` | Quarters only | — | `never` | Stopped |
+| `transit` | — | — | `never` | Stopped |
 
-Bots use their full brain model in both `onduty` and `quarters`. The only difference is that lobes and threading (Branch Brain protocol) are only available when `onduty`. A bot in quarters is transferrable to another ship without reboot.
+Quarters and onduty are functionally identical environments — same brain, same lobes, same thread brains. The only differences are which rooms the bot is in and `triggerType`. A bot in quarters is transferrable to another ship without reboot.
 
 A bot cannot be `onduty` on a decommissioned ship, but can be awake in `quarters`.
 
@@ -98,18 +93,18 @@ A bot cannot be `onduty` on a decommissioned ship, but can be awake in `quarters
 Three clean axes: **lifecycle** (`!wake`/`!sleep`), **duty** (`!report`/`!dismiss`), **roaming** (`!go`).
 
 ```
-!wake cid      → sleep → quarters (start container in quarters, full brain)
-!sleep cid     → any → sleep (stop container, leave all rooms except quarters)
-!report cid    → quarters → onduty (enable lobes, join duty room)
-!dismiss cid   → onduty → quarters (disable lobes, leave duty room)
-!go lounge cid → move to lounge (no status or brain change)
+!wake cid      → sleep → quarters (start container, triggerType=always)
+!sleep cid     → any → sleep (stop container, triggerType=never)
+!report cid    → quarters → onduty (join duty room, triggerType=callout)
+!dismiss cid   → onduty → quarters (leave duty room, triggerType=always)
+!go lounge cid → move to lounge (no attribute change)
 !rejoin cid    → dismiss + report (full lifecycle reset)
-!refresh cid   → onduty → onduty (stop + rebuild + start, no brain/room changes)
+!refresh cid   → same status (stop + rebuild + start, no attribute changes)
 ```
 
 ### !wake
 
-1. Update fleet.json status to `quarters`
+1. Update fleet.json: `status=quarters`, `triggerType=always`
 2. Build and start the bot process (in quarters, full brain)
 3. Pip stages: 💤 → 🔄 → 🚀 → 🟡 → 🟢
 
@@ -117,28 +112,26 @@ Three clean axes: **lifecycle** (`!wake`/`!sleep`), **duty** (`!report`/`!dismis
 
 1. Stop the bot process, kill containers
 2. Login as bot, leave all rooms except quarters
-3. Update fleet.json status to `sleep`, pip → 💤
+3. Update fleet.json: `status=sleep`, `triggerType=never`, pip → 💤
 
 ### !report
 
-Sends awake bot(s) to their duty room. Skips sleeping bots. **Instant** — no rebuild or restart. The bot is already running in quarters with full brain.
+Sends awake bot(s) to their duty room. Skips sleeping bots. **Instant** — no rebuild or restart.
 
 From a duty room: pull bot(s) into THIS duty room.
 From a non-duty room: send bot(s) to their RESPECTIVE duty rooms.
 
-1. Clear `LOBES_DISABLED`
-2. Leave any non-quarters room, join duty room
-3. Update fleet.json status to `onduty`
-4. `📢 <Name> reporting for duty` or `📢 <Name> failed to report`
+1. Leave any non-quarters room, join duty room
+2. Update fleet.json: `status=onduty`, `triggerType=callout`
+3. `📢 <Name> reporting for duty` or `📢 <Name> failed to report`
 
 ### !dismiss
 
-**Instant** — bot keeps running in quarters. No stop or restart.
+**Instant** — bot keeps running in quarters with full capabilities.
 
-1. Set `LOBES_DISABLED=1`
-2. Leave duty room (bot stays running in quarters)
-3. Update fleet.json status to `quarters`
-4. `📢 <Name> dismissed`
+1. Leave duty room
+2. Update fleet.json: `status=quarters`, `triggerType=always`
+3. `📢 <Name> dismissed`
 
 ### !go
 
@@ -207,8 +200,8 @@ Ship space IDs in `ships.json`:
 2. **Status transition** — `!dismiss cid` moves Cid from duty room to quarters.
    *Check:* Cid leaves Engineering. Pip stays 🟢 (still online). fleet.json status → `quarters`.
 
-3. **Lobes disabled on dismiss** — Dismissed bot cannot use threads or lobes.
-   *Check:* Bot's env shows `LOBES_DISABLED=1` after dismiss. Brain model unchanged.
+3. **triggerType on dismiss** — Dismissed bot switches to `always` trigger.
+   *Check:* fleet.json shows `triggerType: "always"` after dismiss. Brain model unchanged.
 
 4. **CO election** — Two bots in Engineering, lowest rank gets ⭐.
    *Check:* Lower-ranked bot's display name shows ⭐. Higher-ranked shows 🟢.
@@ -217,7 +210,7 @@ Ship space IDs in `ships.json`:
    *Check:* Message appears in bot's private room, visible to Captain.
 
 6. **Lifecycle round-trip** — `!dismiss cid` then `!report cid`.
-   *Check:* Cid ends up back in Engineering with original brain model restored.
+   *Check:* Cid ends up back in Engineering. `triggerType` back to `callout`.
 
 7. **Report skips sleeping** — `!report` with a sleeping bot.
    *Check:* Sleeping bot is skipped, awake bots report for duty.

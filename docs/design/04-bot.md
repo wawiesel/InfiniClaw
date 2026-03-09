@@ -29,33 +29,124 @@ bots/{role}/{name}/
 
 Role is resolved from the fleet state held in memory by the relay (persisted to `fleet.json` on disk). A base `bots/CLAUDE.md` provides shared instructions across all bots.
 
-## Trigger Pattern
+## Bot Attributes
 
-The trigger pattern is `<m>name</m>` (case-insensitive, matches anywhere in the message). The `<m>` marker is the canonical mention format — bots read and write it.
+Every bot has runtime attributes that determine its behavior. Commands and events toggle these attributes — the bot itself doesn't need to know why, it just reads its current state.
 
-**Matrix mention pill handling:** When a user mentions a bot in Matrix (via a mention pill), the host converts it to `<m>Name</m>` in the plaintext body before storing or trigger-testing. See [01-matrix](01-matrix.md) for details on mention pill symmetry.
+| Attribute | Type | Set by | Stored in |
+|-----------|------|--------|-----------|
+| `status` | `onduty` · `quarters` · `sleep` · `transit` | Relay commands | `fleet.json` |
+| `triggerType` | `always` · `callout` · `never` | Relay on room moves | `fleet.json` |
+| `rank` | number | `!promote` / `!demote` | `fleet.json` |
+| `ship` | hostname | `!transport` | `fleet.json` |
+| `activeBrainModel` | model ID | `!wake` / `!report` | `fleet.json` |
+
+### triggerType
+
+Controls when the bot responds to messages:
+
+| Value | Behavior |
+|-------|----------|
+| `always` | Every message triggers a response (no callout needed) |
+| `callout` | Requires explicit `<m>name</m>` mention, participating thread, or CO main timeline |
+| `never` | Bot is stopped — no responses |
+
+The relay sets `triggerType` on status transitions:
+
+| Event | triggerType becomes |
+|-------|---------------------|
+| `!wake` | `always` (bot starts in quarters, responds to everything) |
+| `!report` | `callout` (bot joins shared duty room, needs explicit addressing) |
+| `!dismiss` | `always` (bot returns to quarters, sole occupant) |
+| `!sleep` | `never` (bot stopped) |
+| `!go <room>` | unchanged |
+
+### Attribute events
+
+Commands only toggle attributes — they don't encode room-specific logic:
+
+```
+!wake    → status=quarters,  triggerType=always, container=start
+!sleep   → status=sleep,     triggerType=never,  container=stop
+!report  → status=onduty,    triggerType=callout, rooms=+duty
+!dismiss → status=quarters,  triggerType=always,  rooms=-duty
+!go room → rooms=+room,      (no attribute change)
+```
+
+The bot reads `triggerType` from fleet.json at startup and re-reads it periodically. This replaces hardcoded room-ID checks.
+
+## Mentions and Callouts
+
+`<m>Name</m>` is the canonical mention format inside the system. Bots read and write it. The trigger pattern matches `<m>name</m>` case-insensitively anywhere in the message.
+
+### How mentions flow
+
+```
+Matrix user types @Cid (TAB-completes to a mention pill)
+  → Matrix sends: body="Cid", formatted_body="<a href='.../@cid:...'>Cid</a>"
+  → Host parses formatted_body, wraps bare name in body → "<m>Cid</m>"
+  → Bot sees: "<m>Cid</m> can you look at this?"
+  → Trigger pattern matches → bot responds
+
+Bot emits: "<m>Norm</m> what do you think?"
+  → Host converts <m>Norm</m> → Matrix mention pill in formatted_body
+  → Host strips <m> markers from plaintext body → "Norm what do you think?"
+  → Matrix client shows: clickable "Norm" pill
+
+Captain types raw @cid (no pill, no TAB)
+  → Host detects @cid via \b@name\b (case-insensitive)
+  → Converts in-place to <m>Cid</m>
+  → Bot sees it the same as a pill mention
+
+Bot emits: @someone (raw, no <m> markers)
+  → NOT converted — passes through as literal text
+  → Use <m>Name</m> to create a pill
+```
+
+### Conversion rules
+
+| Source | Input | Conversion | Output |
+|--------|-------|------------|--------|
+| Matrix pill (any user) | `<a href=".../@cid:...">Cid</a>` | `restoreMentionPrefixes` | `<m>Cid</m>` |
+| Raw `@Name` (Captain only) | `@Cid` in body | `convertRawMentions` | `<m>Cid</m>` |
+| Raw `@Name` (bot or other) | `@Cid` in body | no conversion | `@Cid` (literal) |
+| Bot output `<m>Name</m>` | `<m>Cid</m>` | `pillifyMentions` | Matrix mention pill |
+| Bot output `@Name` | `@Cid` | no conversion | `@Cid` (literal) |
+
+`convertRawMentions` uses `\b@name\b` (case-insensitive) against all known display names. It skips text already inside `<m>` markers. It must only run on Captain messages — bots that emit raw `@Name` (e.g. in code output) should not have it rewritten.
+
+### Resume context
 
 In **resume context** (bot restart), `<m>Name</m>` markers are replaced with `[callout]` to prevent the resume message from falsely re-triggering the bot.
 
 ## Response Rules
 
-Four conditions trigger a bot response:
+When `triggerType` is `callout`, three conditions can trigger a response:
 
 | Condition | Description |
 |-----------|-------------|
 | **Callout** | Message contains `<m>name</m>` (the trigger pattern) |
 | **Participating thread** | Message is in a thread where the bot previously responded |
-| **CO main timeline** | Bot is Commanding Officer and message is unaddressed (no bot mentioned) on main timeline |
-| **Quarters** | Any message in the bot's quarters room |
+| **CO main timeline** | Bot is CO and message doesn't mention any known bot (checked via `\b<name>\b` word-boundary against roster) |
 
-If none of these conditions are met, the bot does NOT respond — but the message IS added to context. The bot "hears" everything. Filtering is about what triggers a response, not what enters context.
+When `triggerType` is `always`, every message triggers a response — no conditions needed.
+
+If none of the conditions are met, the bot does NOT respond — but the message IS added to context. The bot "hears" everything. Filtering is about what triggers a response, not what enters context.
+
+### Reaction acks
+
+| Emoji | Meaning |
+|-------|---------|
+| 🔔 | Message triggered a bot response |
+| 👀 | Message entered bot's context window |
+
+Both fire together on triggering messages. Non-triggering messages get 👀 only.
 
 ### Additional Filters
 
 Before routing, messages pass through filtering:
 - **Self-echo:** Bots ignore their own messages (tracked via `botMatrixUserIds` set)
-- **Pattern filtering:** Messages matching `IGNORE_PATTERNS` (from `IGNORE_TRIGGERS` env) are skipped
-- **Operator callouts:** Messages starting with `@` from the Captain are filtered (operator-to-bot addressing)
+- **Pattern filtering:** Messages matching `IGNORE_PATTERNS` (from `IGNORE_TRIGGERS` env, uses `\b<name>\b` word-boundary) are skipped
 
 ## Display Name
 

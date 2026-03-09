@@ -8,7 +8,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { logger } from 'nanoclaw/logger.js';
 import { isRecord } from './utils.js';
-import { SAFE_BOT_NAME } from './ship-config.js';
+import { isValidBotName } from './ship-config.js';
 import type { VolumeMount } from './run-container.js';
 
 interface AllowEntry {
@@ -41,7 +41,7 @@ function hasDotfileSegment(p: string): boolean {
 function normalizeBotName(bot: string): string {
   const normalized = bot.trim();
   if (!normalized) throw new Error('Bot name cannot be empty');
-  if (!SAFE_BOT_NAME.test(normalized)) throw new Error(`Invalid bot name: ${bot}`);
+  if (!isValidBotName(normalized)) throw new Error(`Invalid bot name: ${bot}`);
   return normalized;
 }
 
@@ -79,7 +79,7 @@ function normalizeAllowList(parsed: unknown): AllowList {
   if (!isRecord(parsed) || !isRecord(parsed.mounts)) return { mounts: {} };
   const mounts: Record<string, AllowEntry[]> = {};
   for (const [bot, entries] of Object.entries(parsed.mounts)) {
-    if (!SAFE_BOT_NAME.test(bot)) continue;
+    if (!isValidBotName(bot)) continue;
     if (!Array.isArray(entries)) continue;
     mounts[bot] = entries
       .filter((e): e is Record<string, unknown> => isRecord(e))

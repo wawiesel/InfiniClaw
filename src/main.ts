@@ -154,8 +154,28 @@ let isResuming = false;
 const roomRoster: Record<string, Map<string, number>> = {};
 const roomCO: Record<string, string | undefined> = {};
 let matrixRef: MatrixChannel | null = null;
-// Quarters room JID — in this room, every message is for the bot (no trigger needed)
-let quartersJid: string | null = null;
+// Trigger type — read from fleet.json, re-read periodically.
+// 'always' = respond to every message (quarters), 'callout' = need @mention (duty), 'never' = stopped.
+let triggerType: 'always' | 'callout' | 'never' = 'callout';
+let triggerTypeLastRead = 0;
+const TRIGGER_TYPE_TTL = 5_000; // re-read fleet.json at most every 5s
+
+function refreshTriggerType(): 'always' | 'callout' | 'never' {
+  const now = Date.now();
+  if (now - triggerTypeLastRead < TRIGGER_TYPE_TTL) return triggerType;
+  triggerTypeLastRead = now;
+  try {
+    const fleet = loadFleet();
+    const myEntry = Object.entries(fleet).find(([id]) => {
+      try { return loadProfileEnv(resolveRoot(), id)?.ASSISTANT_NAME === ASSISTANT_NAME; } catch { return false; }
+    });
+    if (myEntry) {
+      const entry = myEntry[1];
+      triggerType = entry.triggerType || (entry.status === 'quarters' ? 'always' : entry.status === 'onduty' ? 'callout' : 'never');
+    }
+  } catch { /* keep current value */ }
+  return triggerType;
+}
 
 /** Parse relay lifecycle messages to update CO roster at runtime. */
 function handleLifecycleMessage(msg: { content: string; chat_jid: string; sender: string }): boolean {
@@ -290,6 +310,7 @@ function sendTriggerAck(chatJid: string, messages: NewMessage[]): void {
   }
 
   if (!ch.sendReaction) return;
+  const alwaysTriggered = refreshTriggerType() === 'always';
   for (const m of messages) {
     if (!m.id) continue;
     if (/^(resume|out|system|op)-/.test(m.id)) continue;
@@ -297,7 +318,7 @@ function sendTriggerAck(chatJid: string, messages: NewMessage[]): void {
     if (triggerAckByMessageKey[key]) continue;
     triggerAckByMessageKey[key] = Date.now();
     // 🔔 — message triggered a bot response (fires first)
-    if (TRIGGER_PATTERN.test(m.content.trim())) {
+    if (alwaysTriggered || TRIGGER_PATTERN.test(m.content.trim())) {
       void ch.sendReaction(chatJid, m.id, '🔔').catch((err) => { logger.debug({ chatJid, msgId: m.id, err }, 'Trigger ack failed'); });
     }
     // 👀 — message entered bot's context window
@@ -842,10 +863,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
   const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
-  // In quarters, every message is for the bot
-  const isQuarters = quartersJid !== null && chatJid === quartersJid;
-  // Need explicit callout, participating thread, CO main timeline duty, or quarters
-  if (!isQuarters && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
+  // triggerType=always: every message triggers. triggerType=callout: need explicit trigger.
+  const alwaysTriggered = refreshTriggerType() === 'always';
+  if (!alwaysTriggered && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
     saveState();
     return true;
@@ -1160,10 +1180,8 @@ async function handleGroupMessagesInLoop(
   );
   const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
-  // In quarters, every message is for the bot
-  const isQuarters = quartersJid !== null && chatJid === quartersJid;
-  // Need explicit callout, participating thread, CO main timeline duty, or quarters
-  if (!isQuarters && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
+  const alwaysTriggered = refreshTriggerType() === 'always';
+  if (!alwaysTriggered && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
     saveState();
     return;
@@ -1210,8 +1228,7 @@ async function handleGroupMessagesInLoop(
   if (groupStatus.active) {
     // Keep active-container IPC as a high-priority lane for captain/operator messages.
     // Bot-to-bot traffic should queue normally to avoid starvation/loop churn.
-    const isQuartersRoom = quartersJid !== null && chatJid === quartersJid;
-    const shouldPrioritizeToActiveContainer = isQuartersRoom || messagesToSend.some((m) => {
+    const shouldPrioritizeToActiveContainer = alwaysTriggered || messagesToSend.some((m) => {
       if (botMatrixUserIds.has(m.sender)) return false;
       const isCaptain = Boolean(CAPTAIN_USER_ID) && m.sender === CAPTAIN_USER_ID;
       const isOperatorTrigger = TRIGGER_PATTERN.test(m.content.trim());
@@ -1516,13 +1533,15 @@ async function main(): Promise<void> {
     for (const [jid, group] of Object.entries(registeredGroups)) {
       roomNameToJid[group.name.toLowerCase()] = jid;
     }
-    // Set quarters JID for this bot (if it has one)
+    // Set initial triggerType from fleet.json
     const myBotId = Object.keys(fleet).find(id => {
       const env = (() => { try { return loadProfileEnv(root, id); } catch { return null; } })();
       return env?.ASSISTANT_NAME === ASSISTANT_NAME;
     });
-    if (myBotId && fleet[myBotId]?.quartersRoom) {
-      quartersJid = `matrix:${fleet[myBotId].quartersRoom}`;
+    if (myBotId && fleet[myBotId]) {
+      const entry = fleet[myBotId];
+      triggerType = entry.triggerType || (entry.status === 'quarters' ? 'always' : entry.status === 'onduty' ? 'callout' : 'never');
+      triggerTypeLastRead = Date.now();
     }
     // Build roster from active bots in fleet.json
     for (const [botId, entry] of Object.entries(fleet)) {

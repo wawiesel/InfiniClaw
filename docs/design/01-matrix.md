@@ -158,10 +158,13 @@ Bot outgoing messages are converted from Markdown to Matrix HTML before sending.
 
 ### Mention Pill Symmetry
 
-Mention pills must be consistent in both directions:
+`<m>Name</m>` is the canonical internal mention format. Conversions are symmetric:
 
-- **Inbound:** Matrix clients convert `@Name` into HTML mention pills, which strip the `@` prefix from the plaintext `body`. The host restores it by parsing `formatted_body` to find `<a href="https://matrix.to/#/@...">Name</a>` tags and re-adding the `@` prefix before storing or trigger-testing.
-- **Outbound:** Bots mark mentions using `<m>Name</m>` markers in their output (e.g., `<m>Cid</m> can you review this?`). The send pipeline converts these to proper Matrix mention pills: `<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a>`. The `<m>` marker is stripped from the plaintext body. Unknown names are passed through as plain text. This explicit marker avoids false matches on email addresses, code snippets, and other `@` patterns.
+- **Inbound (pill → marker):** Matrix mention pills (`<a href=".../@cid:...">Cid</a>` in `formatted_body`) appear as bare `Cid` in `body`. The host wraps them in `<m>Cid</m>` markers via `restoreMentionPrefixes` so the trigger pattern can match.
+- **Inbound (raw @ → marker, Captain only):** When the Captain types `@Cid` without TAB-completing to a pill, the host converts it via `convertRawMentions` using `\b@name\b` (case-insensitive). Raw `@Name` from bots is NOT converted — it passes through as literal text.
+- **Outbound (marker → pill):** Bots emit `<m>Cid</m>` to request a mention pill. The send pipeline converts it to `<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a>` in `formatted_body` via `pillifyMentions`. Unknown names are stripped to plain text. Raw `@Name` in bot output is left as-is.
+
+Full conversion rules are in [04-bot](04-bot.md#mentions-and-callouts).
 
 ## Reactions
 

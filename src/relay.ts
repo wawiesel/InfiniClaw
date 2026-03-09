@@ -168,7 +168,7 @@ function loadGitHubBotToken(): string {
 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
-type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; title?: string; quartersRoom?: string; activeBrainModel?: string };
+type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; triggerType?: 'always' | 'callout' | 'never'; title?: string; quartersRoom?: string; activeBrainModel?: string };
 let liveFleet: Record<string, FleetEntry> = {};
 /** Read this ship's operatorRelay flag from ships.json (default: true). */
 function isOperatorRelayEnabled(): boolean {
@@ -543,7 +543,7 @@ function restartBotsToQuarters(root: string): { started: string[]; failed: strin
     try {
       stopBot(bot);
       killStaleContainers(bot);
-      if (entry.status === 'onduty') fleetUpdate(bot, { status: 'quarters' });
+      if (entry.status === 'onduty') fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
       bootstrapBot(root, bot);
       started.push(bot);
     } catch (err) {
@@ -1402,9 +1402,9 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
           for (const [bot, entry] of Object.entries(liveFleet)) {
             if (entry.ship === HOSTNAME && entry.status === 'transit') {
               log(`transport: materializing ${bot}`);
-              fleetUpdate(bot, { status: 'onduty' });
+              fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
               writeFleet(liveFleet);
-              clearShipConfigCache(); // so bootstrapBot sees updated onduty state
+              clearShipConfigCache();
               secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${HOSTNAME}`);
               fleetDirty = false;
               const root = resolveRoot();
@@ -1644,18 +1644,8 @@ async function handleLifecycleCommand(
     const dutyRoomId = conn.roomId;
 
     if (action === 'dismiss') {
-      // Dismiss: leave duty room, disable lobes. Bot keeps running in quarters.
+      // Dismiss: leave duty room. Bot keeps running in quarters with full capabilities.
       try {
-        // Disable lobes
-        const config = loadShipConfig();
-        const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
-        try {
-          upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '1');
-          log(`${name}: lobes disabled`);
-        } catch (envErr) {
-          log(`${name}: env update failed (non-fatal): ${errStr(envErr)}`);
-        }
-        // Leave duty room (bot stays running in quarters)
         try {
           const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
           await botLeaveRoom(botToken, homeserver, dutyRoomId);
@@ -1664,7 +1654,7 @@ async function handleLifecycleCommand(
         } catch (roomErr) {
           log(`${name}: room leave failed (non-fatal): ${errStr(roomErr)}`);
         }
-        fleetUpdate(bot, { status: 'quarters' });
+        fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
         writeFleet(liveFleet);
         await reply(conn, `📢 ${name} dismissed`);
         publishFleetReport().catch(() => {});
@@ -1687,7 +1677,7 @@ async function handleLifecycleCommand(
         } catch (roomErr) {
           log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
         }
-        fleetUpdate(bot, { status: 'sleep' });
+        fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         writeFleet(liveFleet);
         await reply(conn, `😴 ${name} sleeping`);
         publishFleetReport().catch(() => {});
@@ -1705,7 +1695,7 @@ async function handleLifecycleCommand(
       try {
         await setBotPip(root, bot, '🔄');
         await step('🔄 building');
-        fleetUpdate(bot, { status: 'quarters' }); // awake but not on duty
+        fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
         writeFleet(liveFleet);
         clearShipConfigCache();
         await setBotPip(root, bot, '🚀');
@@ -1737,15 +1727,6 @@ async function handleLifecycleCommand(
         continue;
       }
       try {
-        // Enable lobes
-        const config = loadShipConfig();
-        const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
-        try {
-          upsertEnvLine(envFile, 'CONTAINER_ENV_LOBES_DISABLED', '');
-          log(`${name}: lobes enabled`);
-        } catch (envErr) {
-          log(`${name}: env update failed (non-fatal): ${errStr(envErr)}`);
-        }
         // Move bot: leave any non-quarters room → join duty room
         try {
           const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
@@ -1756,7 +1737,7 @@ async function handleLifecycleCommand(
           await reply(conn, `📢 ${name} failed to report — ${errStr(roomErr)}`);
           continue;
         }
-        fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME });
+        fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME });
         writeFleet(liveFleet);
         await reply(conn, `📢 ${name} reporting for duty`);
         publishFleetReport().catch(() => {});
@@ -1970,7 +1951,7 @@ function registerRelayCommands(): void {
         for (const bot of getActiveBots()) {
           stopBot(bot);
           killStaleContainers(bot);
-          fleetUpdate(bot, { status: 'sleep' });
+          fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         }
         ships[HOSTNAME].active = false;
         writeShips(ships);
@@ -2167,7 +2148,7 @@ function registerRelayCommands(): void {
         stopBot(bot);
         killStaleContainers(bot);
         removeBotMounts(bot);
-        fleetUpdate(bot, { status: 'transit', ship: targetShip });
+        fleetUpdate(bot, { status: 'transit', triggerType: 'never', ship: targetShip });
         writeFleet(liveFleet);
         const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetShip}`);
         fleetDirty = false;

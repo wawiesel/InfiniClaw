@@ -10,9 +10,9 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 |---------|--------|
 | `!todo [bot]` | Show bot's active tasks. No arg = all bots. |
 | `!report [bot]` | Send awake bot(s) to duty room. Skips sleeping bots. |
-| `!dismiss [bot]` | Remove from duty, downgrade brain, back to quarters. |
+| `!dismiss [bot]` | Remove from duty, back to quarters. |
 | `!go [room] [bot]` | Send bot to a non-duty room (e.g. lounge). No args = list rooms. |
-| `!wake [bot]` | Start container in quarters (sonnet brain). |
+| `!wake [bot]` | Start container in quarters (full brain). |
 | `!sleep [bot]` | Stop container, leave all rooms except quarters. |
 | `!rejoin [bot]` | Dismiss + report (full lifecycle reset). |
 | `!refresh [bot]` | Rebuild + restart (pick up new code, no brain/room changes). |
@@ -145,7 +145,7 @@ Main:   ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
    *Check:* Relay log shows command received and processed.
 
 2. **Bot command works** — `!dismiss cid` removes bot from duty.
-   *Check:* Bot leaves duty room, fleet.json updated to `quarters`, brain downgraded.
+   *Check:* Bot leaves duty room, fleet.json updated to `quarters`, `triggerType` to `always`.
 
 3. **Ship command works** — `!refit heracles` triggers full overhaul.
    *Check:* Refit thread appears with numbered steps, all stages complete.

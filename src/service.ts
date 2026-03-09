@@ -14,7 +14,7 @@ import Database from 'better-sqlite3';
 import { parseEnvFile } from './env-utils.js';
 import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 
-import { loadShipConfig, loadFleet, SAFE_BOT_NAME } from './ship-config.js';
+import { loadShipConfig, loadFleet, isValidBotName } from './ship-config.js';
 import { shellQuote } from './utils.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ const RSYNC_EXCLUDES = [
 const ROLE_PATTERN = /^[A-Za-z0-9._-]*$/;
 
 function assertValidBotName(bot: string): void {
-  if (!SAFE_BOT_NAME.test(bot) || bot.includes('..')) {
+  if (!isValidBotName(bot)) {
     throw new Error(`Invalid bot name: ${bot}`);
   }
 }

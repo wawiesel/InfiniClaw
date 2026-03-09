@@ -44,7 +44,7 @@ Host machine (macOS / Linux)
 ├── channels/
 │   └── matrix.ts       → Matrix SDK: connect, send, edit, react, sync, mention pills
 ├── infini-config.ts    → InfiniClaw-specific env config (removed from upstream)
-├── ship-config.ts      → Fleet/ship config, shared constants (SAFE_BOT_NAME, isValidBotName, RUNNING_STATUSES, BotStatus)
+├── ship-config.ts      → Fleet/ship config, shared constants (SAFE_BOT_NAME, isValidBotName, RUNNING_STATUSES, BotStatus, TriggerType, defaultTriggerType)
 ├── allow-list.ts       → Validate mounts against host-side allowlist (~/.config/infiniclaw/allow-list.json)
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
 ├── ipc-commands.ts     → Handle refresh_bot, stop_bot, start_bot, rebuild_image, git_push, etc.

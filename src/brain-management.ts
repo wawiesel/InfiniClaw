@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { isOllamaBaseUrl, parseEnvLine, upsertEnvLine } from './env-utils.js';
-import { loadShipConfig, SAFE_BOT_NAME } from './ship-config.js';
+import { loadShipConfig, isValidBotName } from './ship-config.js';
 import { ASSISTANT_NAME, DATA_DIR } from 'nanoclaw/config.js';
 import { MAIN_GROUP_FOLDER } from './infini-config.js';
 import { logger } from 'nanoclaw/logger.js';
@@ -212,7 +212,7 @@ export async function maybeAutoSwitchBrainsOnQuotaError(
   const switched: string[] = [];
   for (const rawBot of config.bots) {
     const trimmed = rawBot.trim();
-    const bot = trimmed && SAFE_BOT_NAME.test(trimmed) ? trimmed : undefined;
+    const bot = trimmed && isValidBotName(trimmed) ? trimmed : undefined;
     if (!bot) {
       logger.warn({ bot: rawBot }, 'Skipping invalid bot name in machine config');
       continue;
