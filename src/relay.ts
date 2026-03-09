@@ -285,6 +285,33 @@ function resolveOperatorConfig(): { userId: string; accessToken: string } {
   } catch { return { userId: '', accessToken: '' }; }
 }
 
+function loadLoudspeakerConfig(): { homeserver: string; username: string; password: string; accessToken: string } | null {
+  try {
+    const lsFile = path.join(secretsRepoPath(), 'operator', 'loudspeaker-matrix.json');
+    const config = JSON.parse(fs.readFileSync(lsFile, 'utf-8'));
+    return {
+      homeserver: config.homeserver || '',
+      username: config.username || '',
+      password: config.password || '',
+      accessToken: config.accessToken || '',
+    };
+  } catch { return null; }
+}
+
+let loudspeakerToken: string | null = null;
+
+async function getLoudspeakerToken(homeserver: string, username: string, password: string): Promise<string | null> {
+  if (loudspeakerToken) return loudspeakerToken;
+  try {
+    const { accessToken } = await matrixLogin(homeserver, username, password);
+    loudspeakerToken = accessToken;
+    return loudspeakerToken;
+  } catch (err) {
+    log(`loudspeaker login failed: ${errStr(err)}`);
+    return null;
+  }
+}
+
 function resolveOperatorUserId(): string {
   return resolveOperatorConfig().userId;
 }
@@ -2552,8 +2579,14 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
 }
 
 async function reply(conn: RoomConn, text: string): Promise<string | undefined> {
+  const ls = loadLoudspeakerConfig();
+  if (ls) {
+    const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
+    if (token) return matrixSend(ls.homeserver, token, conn.roomId, `[${HOSTNAME}] ${text}`);
+  }
+  // Fallback to conn account if loudspeaker unavailable
   if (!conn.accessToken) return undefined;
-  return matrixSend(conn.homeserver, conn.accessToken, conn.roomId, text);
+  return matrixSend(conn.homeserver, conn.accessToken, conn.roomId, `[${HOSTNAME}] ${text}`);
 }
 
 /** Ship report — every ship that receives the command replies with its own data. */
@@ -2568,8 +2601,13 @@ async function speakerReport(conn: RoomConn, text: string): Promise<string | und
 }
 
 async function threadReply(conn: RoomConn, threadRootId: string, text: string): Promise<string | undefined> {
+  const ls = loadLoudspeakerConfig();
+  if (ls) {
+    const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
+    if (token) return matrixSendThread(ls.homeserver, token, conn.roomId, threadRootId, `[${HOSTNAME}] ${text}`);
+  }
   if (!conn.accessToken) return undefined;
-  return matrixSendThread(conn.homeserver, conn.accessToken, conn.roomId, threadRootId, text);
+  return matrixSendThread(conn.homeserver, conn.accessToken, conn.roomId, threadRootId, `[${HOSTNAME}] ${text}`);
 }
 
 // ── BehindTheCurtain — direct operator chat ────────────────────────
