@@ -279,15 +279,27 @@ export function deployBot(root: string, bot: string): void {
   console.log(`${bot}: building...`);
   execSync('npm run build', { cwd: instance, stdio: 'inherit', timeout: 120_000 });
 
-  // Pre-register main room from profile env
+  // Pre-register room: quarters room when status is 'quarters', duty room otherwise
   const profileEnv = loadProfileEnv(root, bot);
-  const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
-  const mainGroupName = profileEnv.MAIN_GROUP_NAME;
-  const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+  const fleet = loadFleet();
+  const botStatus = fleet[bot]?.status;
+  const quartersRoom = fleet[bot]?.quartersRoom;
 
-  if (mainJid && mainGroupName) {
-    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
-    console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
+  if (botStatus === 'quarters' && quartersRoom) {
+    // Bot is in quarters — seed quarters room as main
+    const quartersJid = `matrix:${quartersRoom}`;
+    const quartersName = `${profileEnv.ASSISTANT_NAME || bot}'s Quarters`;
+    seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
+    console.log(`${bot}: pre-registered quarters (${quartersName})`);
+  } else {
+    // Bot is on duty or other — seed duty room
+    const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
+    const mainGroupName = profileEnv.MAIN_GROUP_NAME;
+    const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+    if (mainJid && mainGroupName) {
+      seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
+      console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
+    }
   }
 
   const dataDir = path.join(instance, 'data');

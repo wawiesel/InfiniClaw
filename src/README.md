@@ -33,7 +33,7 @@ Host machine (macOS / Linux)
 │
 │── Orchestrator ─────────────────────────────────────────────
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
-├── service.ts          → Deploy, start, stop bots via pm2
+├── service.ts          → Deploy, start, stop bots via pm2; seeds quarters or duty room based on fleet status
 ├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave, setDisplayName)
 ├── relay.ts            → Supervisor relay: Matrix watcher for bot lifecycle and operator commands
 ├── main.ts             → Message loop, indicators, reaction acks (👀/🔔), container lifecycle
