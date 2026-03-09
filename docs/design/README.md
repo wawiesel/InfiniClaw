@@ -2,7 +2,7 @@
 
 Architecture and design specifications for InfiniClaw. Each numbered document covers one subsystem. Read `00-overview.md` first for context.
 
-- `00-overview.md` — System overview, principles, architecture
+- `00-overview.md` — System overview: core principles and code structure
 - `01-messaging.md` — Matrix messaging layer, routing, filtering
 - `02-threading.md` — Branch and Merge model, Thread Brains, lobes
 - `03-ipc.md` — Inter-process communication (container to host)

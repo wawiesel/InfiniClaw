@@ -8,28 +8,11 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 - **No destructive interrupts.** We do not use `SIGTERM` to kill active processes. New requests are fielded instantly by the Main Brain, which spins up concurrent Thread Brains without destroying existing task contexts.
 - **Autonomous Fleet Management.** Bots manage their own lifecycles: rebuilding images, fixing configuration, monitoring health, and migrating between machines without human intervention.
 - **Matrix as State Engine.** Matrix threads provide the permanent, immutable history of every task. While the AI processes (Thread Brains) are ephemeral, the conversation context is immortal and can be hydrated into new processes on-demand.
-- **No status message spam.** Bots do not post working/idle/resuming indicators. Presence is shown via a single pip emoji on the display name: 🟢 alive, 💤 idle, 🔴 offline.
+- **No status message spam.** Bots do not post working/idle/resuming indicators. Presence is shown via a single pip emoji on the display name: onduty 🟢, CO ⭐, lounge 🍸, quarters 🏠, sleep 💤, transit 🚀. Display format: `<name> <pip> [<ship>]`. CO is a status, not a separate badge.
 - **System actions get an emoji prefix.** Any message that isn't a direct conversation response (restarts, working indicator, brain reload, startup) must start with an emoji.
-- **Git SHAs use a standard format.** Every git SHA displayed in Matrix must use: `📦 [\`sha\`](https://github.com/wawiesel/InfiniClaw/commit/sha) (Xh) ↑N` — SHA in a backtick code box (for visibility), hyperlinked to the GitHub commit, with 2-character age and up/down relation. Always include the 📦 box so version strings are noticeable everywhere.
+- **Git SHAs use a standard format.** Every git SHA displayed in Matrix must use: 📦 [sha](link) (age) ↑N — SHA hyperlinked to the GitHub commit, with age and up/down relation. Always include the 📦 box so version strings are noticeable everywhere.
 - **Fix code and process, not behavior.** When a bot behaves incorrectly, fix the underlying system — the code, the IPC flow, the routing logic — not the bot's in-context behavior. Workarounds that patch behavior without addressing root cause accumulate debt and mask real problems.
-
-## Design Documents
-
-Feature docs, ordered from foundational to high-level:
-
-| # | Feature | Description |
-|---|---------|-------------|
-| [01](01-messaging.md) | Messaging | Message flow, routing, filtering, queue |
-| [02](02-threading.md) | Threading | Thread Brains, lobes, branch and merge, status indicators |
-| [03](03-ipc.md) | IPC | Container ↔ host communication, namespaces, cooldowns |
-| [04](04-fleet.md) | Fleet | Rooms, machines, roles, rank |
-| [05](05-commanding-officer.md) | Commanding Officer | CO election, badges, fleet.json |
-| [06](06-commands.md) | Commands | Operator `!` commands, relay process, IPC |
-| [07](07-intercom.md) | Intercom | Cross-room relay accounts, operator messaging |
-| [08](08-autonomy.md) | Autonomy | Self-healing, image rebuilds, IPC tasks, holodeck |
-| [09](09-configuration.md) | Configuration | CLAUDE.md layers, MCP, brain, sessions, startup |
-| [10](10-safety.md) | Safety | OOM, memory architecture, cooldowns, security |
-| [11](11-containers.md) | Containers | Podman isolation, mounts, secrets |
+- **Status is system telemetry, not conversation.** Status messages are delivered via the loudspeaker (`@loudspeaker`) from the relay — repo versions, fleet health, lifecycle changes. Distinct from conversation. Example: 📦 [sha](link) (age) ↑N.
 
 ## Code Structure
 
@@ -39,6 +22,6 @@ InfiniClaw utilizes the `nanoclaw` core library for low-level container and IPC 
 |-------|----------|---------|
 | InfiniClaw host | `src/` | Orchestrator, Matrix channel, routing, IPC, CLI |
 | Core Library | `external/nanoclaw/src/` | Lifecycle, SQLite, queuing, scheduling |
-| Container agent | `external/nanoclaw/container/agent-runner/` | Runs inside containers: Claude CLI, MCP tools, IPC |
+| Container agent | `bots/container/agent-runner/` | Runs inside containers: Claude CLI, MCP tools, IPC |
 | Bot definitions | `bots/` | Personas, roles, Dockerfiles, skills |
 
