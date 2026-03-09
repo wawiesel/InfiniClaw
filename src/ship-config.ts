@@ -36,7 +36,19 @@ export interface ShipConfig {
 const SECRETS_PATH = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets');
 const FLEET_PATH = path.join(SECRETS_PATH, 'bots', 'fleet.json');
 const SHIPS_PATH = path.join(SECRETS_PATH, 'operator', 'ships.json');
-const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** Bot names must start with alphanumeric, then alphanumeric/dot/dash/underscore. */
+export const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** Statuses that mean the bot should be running on its assigned ship. */
+export const RUNNING_STATUSES: readonly BotStatus[] = ['onduty', 'quarters', 'lounge'] as const;
+
+/** Normalize legacy status names to current values. */
+function migrateStatus(s: string): string {
+  if (s === 'active') return 'onduty';
+  if (s === 'dismissed') return 'lounge';
+  if (s === 'sleeping') return 'sleep';
+  return s;
+}
 
 let cached: ShipConfig | null = null;
 
@@ -80,8 +92,9 @@ export function loadShipConfig(): ShipConfig {
     if (!isValidBotName(name)) {
       throw new Error(`fleet.json: invalid bot name "${name}"`);
     }
-    const runningStatuses = ['onduty', 'active', 'quarters', 'lounge'];
-    if (entry.ship === hostname && runningStatuses.includes(entry.status as string)) {
+    // Normalize legacy status names before checking
+    const status = migrateStatus(entry.status as string);
+    if (entry.ship === hostname && (RUNNING_STATUSES as readonly string[]).includes(status)) {
       bots.push(name);
     }
   }
@@ -128,11 +141,7 @@ export function loadFleet(): Record<string, BotEntry> {
       entry.status = (entry as any).active ? 'onduty' : 'lounge';
       delete (entry as any).active;
     }
-    // Migrate old status names
-    const s = entry.status as string;
-    if (s === 'active') entry.status = 'onduty';
-    else if (s === 'dismissed') entry.status = 'lounge';
-    else if (s === 'sleeping') entry.status = 'sleep';
+    entry.status = migrateStatus(entry.status as string) as BotStatus;
   }
   return bots;
 }
@@ -166,15 +175,16 @@ export function writeShips(ships: Record<string, ShipEntry>): void {
   writeJson(SHIPS_PATH, ships);
 }
 
+/** Load ships, returning empty object on error. */
+export function safeLoadShips(): Record<string, ShipEntry> {
+  try { return loadShips(); } catch { return {}; }
+}
+
 /** Check if this ship is active. */
 export function isShipActive(): boolean {
-  try {
-    const ships = loadShips();
-    const hostname = os.hostname();
-    return ships[hostname]?.active !== false;
-  } catch {
-    return true; // default to active if ships.json missing
-  }
+  const ships = safeLoadShips();
+  const hostname = os.hostname();
+  return ships[hostname]?.active !== false;
 }
 
 /** Clear cached config (for testing or reload). */

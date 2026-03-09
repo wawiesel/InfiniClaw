@@ -4,7 +4,7 @@ A ship is a machine running a relay. The relay is the always-on process that con
 
 ## Ship Registry
 
-Ships are registered in `ships.json` in the secrets repo:
+Ships are registered in `operator/ships.json` in the secrets repo. See `src/ship-config.ts` for the `ShipEntry` interface.
 
 ```json
 {
@@ -12,13 +12,24 @@ Ships are registered in `ships.json` in the secrets repo:
 }
 ```
 
-Ships are ranked. The lowest-rank **active** ship is the "speaker" — it replies for aggregate commands like `!health` that would otherwise produce duplicate responses from every relay.
+Fields:
+- `ip` — IP address (nullable, informational)
+- `os` — Operating system identifier
+- `user` — Login username (nullable)
+- `active` — Whether the ship is commissioned
+- `rank` — Speaker election tiebreaker (lower wins)
+- `spaceId` — Matrix space for this ship's bots (optional)
+- `loungeId` — Lounge room ID (optional)
+- `quartersSpaceId` — Quarters space ID (optional)
+- `operatorRelay` — Whether `@` messages forward to this ship's operator tmux (optional, default true)
+
+Ships are ranked. The lowest-rank **active** ship is the default tiebreaker for speaker election (see below).
 
 A decommissioned ship (`active: false`) keeps its relay running and listening for commands but does not start bots. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
 
 ## The Relay
 
-A lightweight always-on process, one per ship (`src/relay.ts`). The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or intercom senders. It manages bot lifecycle by calling service functions directly.
+A single always-on process per ship (`src/relay.ts`). The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or operator. It manages bot lifecycle by calling service functions directly.
 
 **The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't start bots.
 
@@ -26,37 +37,79 @@ When a command arrives (e.g. `!rejoin cid`), every ship's relay sees it. Each ch
 
 Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay`.
 
-### Auto-sync Loops
+### Startup Sequence
 
-- **InfiniClaw repo**: Pull on interval (`GIT_SYNC_INTERVAL`), rebuild on new commits, redeploy all dist files to bot instances and restart them.
-- **Secrets repo**: Pull on interval (`SECRETS_SYNC_INTERVAL`). On new commits, check for transport materializations (bots assigned to this ship but inactive → activate and start).
-- **Health**: Run `health-check.sh` on interval (`HEALTH_INTERVAL`), upload to S3.
+1. Identify ship via `os.hostname()`
+2. Load fleet state from `fleet.json`
+3. Resolve Captain and operator user IDs from secrets
+4. Load intercom config (per-room Matrix credentials)
+5. Connect to Matrix rooms with staggered sync (one per room)
+6. Wait for Matrix warmup before bootstrapping bots
+7. If ship is active, start all `onduty` bots via `bootstrapBot()`
+8. Launch background loops
 
-See `src/relay.ts` for defaults.
+### Background Loops
+
+| Loop | Env var | Default | Purpose |
+|------|---------|---------|---------|
+| InfiniClaw repo sync | `GIT_SYNC_INTERVAL` | 3 min | Pull, rebuild on new commits, redeploy dist, restart bots |
+| Secrets repo sync | `SECRETS_SYNC_INTERVAL` | 30s | Pull, detect transport materializations, check inbox |
+| Health check | `HEALTH_INTERVAL` | 30 min | Run `health-check.sh`, upload to S3 |
+| Heartbeat | — | built-in | Publish relay liveness |
+| Relay tasks | — | built-in | Poll `_runtime/relay-tasks/` for host-side operations |
+| Curtain | — | built-in | Watch BehindTheCurtain room, forward to operator tmux |
+
+See `src/relay.ts` for all interval defaults and loop implementations.
+
+**InfiniClaw sync** detects source changes (TypeScript, package.json, Dockerfiles, tsconfig) and triggers `scripts/rebuild.sh` → deploy dist → restart bots → restart relay.
+
+**Secrets sync** handles fleet.json conflict resolution (accepts upstream on rebase conflicts). On new commits, checks for transport materializations — bots assigned to this ship with `status: 'transit'` get activated and started. Also scans `operator/inbox.md` for pending items targeting this ship.
 
 ### Speaker Election
 
-Every relay publishes its InfiniClaw HEAD commit epoch to S3 (`relay/<ship>.json`) at startup and after rebuilds. The **speaker** is the active ship running the newest code; ties are broken by ship rank (lowest wins). This ensures the most up-to-date relay formats aggregate responses.
+Every relay publishes its InfiniClaw HEAD commit epoch to S3 (`relay/<hostname>.json`) at startup and after rebuilds. The **speaker** is the active ship running the newest code; ties are broken by ship rank (lowest wins). This ensures the most up-to-date relay formats aggregate responses.
 
-Speaker election runs before any aggregate command (`!fleet`, `!health`). Non-speakers silently return.
+Election algorithm (see `electSpeaker()` in `src/relay.ts`):
+1. Fetch commit epochs from S3 for all active ships
+2. Find the maximum epoch across active ships
+3. If local epoch is older, defer (not speaker)
+4. Among ships at max epoch, lowest rank wins
+
+`isSpeaker()` returns a cached result and triggers async re-election in the background. Speaker election runs before aggregate commands (`!fleet`, `!health`, `!promote`/`!demote` for ships).
+
+## Ship Commands
+
+| Command | Scope | Behavior |
+|---------|-------|----------|
+| `!commission [ship]` | Target ship | Set `active: true`, reload fleet, start onduty bots |
+| `!decommission [ship]` | Target ship | Stop all bots, set statuses to `sleep`, set `active: false`. Relay keeps running. |
+| `!transport <bot> <ship>` | Source ship | Two-phase: dematerialize on source → materialize on destination via secrets sync |
+| `!refit [target]` | Target ship/bot | Sync repos, rebuild, redeploy, restart target bots |
+
+**Transport protocol:**
+1. Source ship stops bot, kills containers, removes mounts
+2. Source ship sets `status: 'transit'`, `ship: <destination>` in fleet.json, commits
+3. Destination ship's secrets sync loop pulls fleet.json, sees `transit` bot assigned to it
+4. Destination calls `bootstrapBot()`, sets `status: 'onduty'`, commits
 
 ## Per-Machine Configuration
 
-### paths.json (NOT in git)
+These files live at `~/.config/infiniclaw/` and are **not** in git. See `docs/design/13-configuration.md` for full details.
 
-Maps logical names to local paths. Used by role-based mounts.
+### paths.json
+
+Maps logical names to local paths. Used by role-based mounts (fleet.json `roles[role].rw` → paths.json lookups).
 
 ```json
 {
   "infiniclaw": "~/2026-Nanoclaw/InfiniClaw",
-  "aegis": "~/2025-AEGIS",
-  "vault": "~/_vault"
+  "aegis": "~/2025-AEGIS"
 }
 ```
 
-### allow-list.json (NOT in git)
+### allow-list.json
 
-Per-bot rw mount overrides, managed via `!allow`/`!deny`.
+Per-bot rw mount overrides with optional expiry. Managed via `!allow`/`!deny` commands. See `src/allow-list.ts`.
 
 ## Verification
 
@@ -77,3 +130,9 @@ Per-bot rw mount overrides, managed via `!allow`/`!deny`.
 
 6. **Fleet visible** — `!fleet` in any room produces a response from this ship.
    *Check:* Response includes this ship's hostname and bot list.
+
+7. **Speaker election works** — After verifying both ships are active, run `!fleet` and confirm only one ship responds.
+   *Check:* Single aggregate response from the speaker ship.
+
+8. **Transport works** — `!transport <bot> <ship>` dematerializes locally, materializes on destination within one secrets sync interval.
+   *Check:* Bot appears on destination ship's `pm2 status` and responds to messages.

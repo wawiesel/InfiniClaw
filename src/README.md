@@ -32,7 +32,7 @@ Host machine (macOS / Linux)
 │   ├── matrix.ts       → Matrix SDK: connect, send, edit, react, sync
 │   └── local-cli.ts    → Terminal channel for `npm run cli chat`
 ├── infini-config.ts    → InfiniClaw-specific env config (removed from upstream)
-├── ship-config.ts      → Load fleet.json, per-ship bot roster, quartersRoom, and S3 settings
+├── ship-config.ts      → Fleet/ship config, shared constants (SAFE_BOT_NAME, RUNNING_STATUSES, BotStatus)
 ├── allow-list.ts       → Validate mounts against host-side allowlist (~/.config/infiniclaw/allow-list.json)
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
 ├── ipc-commands.ts     → Handle refresh_bot, stop_bot, start_bot, rebuild_image, git_push, etc.
@@ -87,3 +87,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`resolveReplyThread`**: Scans messages in reverse for `thread_id` from non-bot senders. Returns `workThreadIds` override if set. Cleared after each response turn.
 - **`storeOutgoing`**: Must set `is_bot_message: true` — otherwise outgoing messages are re-detected as new human messages by `getNewMessages`, causing echo loops in quarters rooms.
 - **Turn timeout kill**: Must use `podman stop` (not `proc.kill('SIGTERM')`) — podman does not relay SIGTERM to the container process. Without this, containers survive the kill and run for minutes/hours.
+- **Thread Brain GitHub auth**: `GH_TOKEN` injected from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account, not the host user.
