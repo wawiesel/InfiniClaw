@@ -1,4 +1,4 @@
-# 08 — Autonomy
+# 15 — Autonomy
 
 ## Bot Capabilities
 
@@ -27,12 +27,25 @@ Bot detects problem (MCP down, health check fails, OOM)
 
 **Operator (escape hatch only):** Cross-machine coordination when Matrix is down, OS-level fixes (pm2, podman, network), secret rotation requiring human auth, emergency intervention for restart loops.
 
-## Presence
-
-Bots do not post status messages (working, idle, resuming). Silence means idle — like a human. The only presence signal is the pip on the display name: 🟢 alive, 💤 idle (after `IDLE_PIP_THRESHOLD_MS`, default 5 min), 🔴 offline. The pip resets to 🟢 on any message processing.
-
 ## Holodeck
 
 Architects can test changes in isolation before deploying to production. The holodeck creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), and runs as its own pm2 process in terminal-only mode (no Matrix). CLI commands: `holodeck create|chat|teardown|promote`.
 
-Engineers must use the holodeck as part of the deployment chain — code cannot merge to main until it passes a full end-to-end simulation with a fake crew. See `12-deployment-chain.md` for the full spec.
+Engineers must use the holodeck as part of the deployment chain — code cannot merge to main until it passes a full end-to-end simulation with a fake crew. See [17-deployment](17-deployment.md) for the full spec.
+
+## Verification
+
+1. **Self-restart** — Bot detects a problem and requests restart via IPC.
+   *Check:* IPC command processed, bot restarts, reports resolution in Matrix.
+
+2. **Image rebuild** — Bot triggers `rebuild_image` IPC task.
+   *Check:* New container image built, bot restarted with new image.
+
+3. **MCP self-fix** — Break a bot's MCP config, let it detect and fix.
+   *Check:* Bot edits `.mcp.json`, requests restart, MCP connects on next spawn.
+
+4. **Operator only intervenes when necessary** — Bot handles routine failures autonomously.
+   *Check:* No operator action needed for MCP failures, OOM recovery, config fixes.
+
+5. **Holodeck isolation** — Create a holodeck instance.
+   *Check:* Separate pm2 process, no Matrix connection, isolated worktree.

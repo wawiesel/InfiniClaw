@@ -1,4 +1,4 @@
-# 10 — Safety and Security
+# 14 — Safety and Security
 
 ## OOM Handling
 
@@ -43,3 +43,20 @@ Podman containers with memory caps, optional CPU limits. No network egress to ar
 ## MCP Preflight
 
 Agent-runner runs a 5-second check on every remote MCP server at startup. Unreachable servers are dropped. Failure reports go to Engineering automatically.
+
+## Verification
+
+1. **OOM recovery** — Simulate an OOM (kill container with code 137).
+   *Check:* Host clears toxic session, tracks OOM count, bot restarts cleanly.
+
+2. **Cooldown enforced** — Trigger 3 consecutive OOMs.
+   *Check:* 60-second cooldown applied before next spawn attempt.
+
+3. **Session rotation** — Session file exceeds 2MB.
+   *Check:* New session created with summary, old session archived.
+
+4. **Rate limit backoff** — Matrix returns 429.
+   *Check:* Send queue backs off, retries after delay.
+
+5. **MCP preflight** — Start bot with an unreachable MCP server.
+   *Check:* Server dropped within 5 seconds, failure reported to Engineering.

@@ -1,4 +1,4 @@
-# 06 — Commands
+# 10 — Commands
 
 The Captain controls the fleet via `!` commands typed in Matrix. Commands are processed by a lightweight **relay** process (one per ship), not by each bot's host process. Each ship's relay only acts on its local bots. Untargeted commands (e.g. `!dismiss` with no bot name) are scoped to the room — only bots whose `MAIN_GROUP_NAME` matches the room are affected on each ship.
 
@@ -42,40 +42,6 @@ The Captain controls the fleet via `!` commands typed in Matrix. Commands are pr
 | Command | Effect |
 |---------|--------|
 | `!relay <text>` | Send text to operator tmux session on each ship. |
-
-## Relay
-
-A lightweight always-on process, one per ship (`src/relay.ts`). The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or intercom senders. It manages bot lifecycle by calling service functions directly.
-
-**The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't start bots. This ensures every ship stays reachable for commands like `!commission`, `!fleet`, and `!health`. Decommissioning (`!decommission`) stops all bots but leaves the relay listening.
-
-When a command arrives (e.g. `!rejoin cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
-
-Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay`.
-
-### Auto-sync loops
-
-- **InfiniClaw repo**: Pull on interval (`GIT_SYNC_INTERVAL`), rebuild on new commits, redeploy all dist files to bot instances and restart them.
-- **Secrets repo**: Pull on interval (`SECRETS_SYNC_INTERVAL`). On new commits, check for transport materializations (bots assigned to this ship but inactive → activate and start).
-- **Health**: Run `health-check.sh` on interval (`HEALTH_INTERVAL`), upload to S3.
-
-See `src/relay.ts` for defaults.
-
-### Speaker election
-
-Every relay publishes its InfiniClaw HEAD commit epoch to S3 (`relay/<ship>.json`) at startup and after rebuilds. The **speaker** is the active ship running the newest code; ties are broken by ship rank (lowest wins). This ensures the most up-to-date relay formats aggregate responses.
-
-Speaker election runs before any aggregate command (`!fleet`, `!health`). Non-speakers silently return.
-
-### Fleet command protocol
-
-`!fleet` uses a two-phase S3 protocol so the speaker can assemble data from all ships:
-
-1. **Every ship** publishes its local fleet data to `fleet-report/<ship>.json` — relay version, per-bot status (including live process checks), names, and git versions.
-2. **The speaker** polls S3 for up to 5s, waiting for all active ships to report. Reports older than 10s are ignored (stale from a previous invocation).
-3. **Assembly**: The speaker merges all ship reports with its in-memory `liveFleet` as fallback for any ship that didn't report in time, then emits a single formatted response.
-
-This guarantees exactly one reply per `!fleet` command, with live process data from every reachable ship.
 
 ## Status Line Format
 
@@ -171,18 +137,19 @@ Thread: <error detail>
 Main:   ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
 ```
 
-## IPC Commands (bot → host)
+## Verification
 
-Engineers can trigger system operations from inside their containers via IPC:
+1. **Command reaches relay** — Send `!fleet` in a duty room.
+   *Check:* Relay log shows command received and processed.
 
-| IPC Type | Effect |
-|----------|--------|
-| `refresh_bot` | Restart self or another bot |
-| `stop_bot` | Stop another bot |
-| `rebuild_image` | Rebuild container image |
-| `health_check` | Run health check and return results |
-| `fleet_status` | Return fleet.json status |
-| `git_pull` | Pull InfiniClaw, rebuild, deploy to instances |
-| `git_push` | Push InfiniClaw repo |
-| `bot_status` | Get pm2 + error log status |
-| `send_to_room` | Send message to another room |
+2. **Bot command works** — `!dismiss cid` stops the bot.
+   *Check:* Bot leaves duty room, fleet.json updated, pip changes.
+
+3. **Ship command works** — `!refit heracles` triggers full overhaul.
+   *Check:* Refit thread appears with numbered steps, all stages complete.
+
+4. **Status line format** — Any relay output follows the standard format.
+   *Check:* Output matches `<emoji> <what> (<ship>) <status> (<timestamp> · <elapsed>)`.
+
+5. **Failure thread** — Simulate a sync failure.
+   *Check:* Alert thread created, backoff schedule observed, recovery posted to both thread and main timeline.

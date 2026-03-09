@@ -1,4 +1,4 @@
-# 11 — Containers
+# 02 — Containers
 
 One bot = one Podman container. Each container runs the `agent-runner` host process which manages a hierarchy of AI processes.
 
@@ -25,3 +25,17 @@ Two-tier design: read-only everywhere, write access where needed.
 - **No credentials in git.** Bot env files live in the secrets repo (`~/.config/infiniclaw/secrets/`). `.mcp.json` files (may contain OAuth tokens) are gitignored.
 - **Secrets flow:** profile env files → loaded by host process → injected as `--env` into containers. Nothing baked into images.
 - **Mount allowlist** is stored outside the repo (`~/.config/nanoclaw/mount-allowlist.json`) so containers can't tamper with it.
+
+## Verification
+
+1. **Podman running** — `podman machine list` shows a running VM.
+   *Check:* Machine status is "Running".
+
+2. **Image builds** — `podman build -t nanoclaw-test:latest bots/container/cid/` completes.
+   *Check:* Exit code 0, image appears in `podman images`.
+
+3. **Container runs** — `podman run --rm nanoclaw-test:latest echo hello` prints output.
+   *Check:* Output is "hello".
+
+4. **Mounts work** — Container can read host home directory (ro) and write to workspace (rw).
+   *Check:* `cat /home/user/somefile` succeeds (ro), `touch /workspace/persona/test` succeeds (rw).

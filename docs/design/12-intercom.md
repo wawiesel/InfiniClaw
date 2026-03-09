@@ -1,4 +1,4 @@
-# 07 — Intercom
+# 12 — Intercom
 
 Cross-room communication uses **intercom relay accounts** — dedicated Matrix accounts, one per room. Intercom accounts are **write-only broadcast channels**: operators and bots send messages through them, relays listen on them. They are not user identities.
 
@@ -12,7 +12,7 @@ Cross-room communication uses **intercom relay accounts** — dedicated Matrix a
 
 Intercom credentials are stored in `operator/intercom.json` in the secrets repo. Accounts must be joined to their respective rooms on the Matrix homeserver.
 
-## Who uses intercom
+## Who Uses Intercom
 
 ### Operators → Bots and Relays
 
@@ -30,7 +30,7 @@ Only the CO can use the intercom. `send_message` checks `IS_CO` env var at runti
 
 Relays reply to commands via the same intercom account they poll on. All replies are prefixed with `HOSTNAME:`.
 
-## How relays receive commands
+## How Relays Receive Commands
 
 The relay on each ship connects to Matrix as the intercom accounts (same credentials as `send`). Messages starting with `!` are always processed, even from self. This is how operator-sent `!` commands reach all relays:
 
@@ -42,7 +42,23 @@ The relay on each ship connects to Matrix as the intercom accounts (same credent
 
 Echo loops are impossible because the relay never sends `!`-prefixed messages itself.
 
-## Operator callout (`!relay`)
+## Operator Callout (`!relay`)
 
 The Captain can send commands to an operator's tmux session from any Matrix room by typing `!relay <text>`. The text is sent as keystrokes to the `operator` tmux session on each ship. If no session exists, one is created with `claude` as the initial command. Captain/intercom only.
 
+## Verification
+
+1. **Operator sends command** — `bash operator/send engineering "!fleet"`.
+   *Check:* Message appears in Engineering from intercom account. Relay processes it.
+
+2. **All relays receive** — Send `!fleet` via intercom.
+   *Check:* Every ship's relay log shows the command received.
+
+3. **CO cross-room messaging** — CO bot sends via intercom to another room.
+   *Check:* Message appears in target room with `BotName (SourceRoom):` prefix.
+
+4. **Non-CO blocked** — Non-CO bot tries to use intercom.
+   *Check:* Error returned, message not sent.
+
+5. **No echo loops** — Relay processes a `!` command and replies.
+   *Check:* Reply does not start with `!`, relay does not re-process its own reply.
