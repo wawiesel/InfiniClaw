@@ -156,6 +156,15 @@ async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> 
   await reply(conn, recoveryMsg);
 }
 
+/** Load GitHub bot token from secrets for PR reviews (returns empty string if unavailable). */
+function loadGitHubBotToken(): string {
+  try {
+    const p = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets', 'operator', 'github-bot.json');
+    const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    return typeof data?.token === 'string' ? data.token : '';
+  } catch { return ''; }
+}
+
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
 type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; title?: string; quartersRoom?: string; activeBrainModel?: string };
@@ -1047,6 +1056,9 @@ async function spawnThreadBrain(
   if (botEnv?.NODE_EXTRA_CA_CERTS) childEnv['NODE_EXTRA_CA_CERTS'] = botEnv.NODE_EXTRA_CA_CERTS;
   // Prevent nested Claude Code rejection
   delete childEnv['CLAUDECODE'];
+  // Use fleet GitHub bot for PR reviews so comments appear as the bot, not the Captain
+  const ghBotToken = loadGitHubBotToken();
+  if (ghBotToken) childEnv['GH_TOKEN'] = ghBotToken;
 
   // Notes file: Thread Brain can persist key findings here; relay injects as context on bot restart.
   const notesFile = path.join(resolveRoot(), '_runtime', 'data', 'thread-notes', `${replyThreadId.slice(0, 12)}.md`);
