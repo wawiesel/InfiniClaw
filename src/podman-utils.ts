@@ -1,26 +1,93 @@
 /**
  * Podman container utilities.
- * Moved from nanoclaw (upstream removed in v1.2.12).
+ * Single source of truth for podman recovery, container listing, and stop operations.
  */
 import { execSync, spawnSync } from 'child_process';
+import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { logger } from 'nanoclaw/logger.js';
 
-export function recoverPodman(): boolean {
-  logger.warn('Podman socket dead, attempting recovery...');
-  try { execSync('podman machine stop podman-machine-default', { stdio: 'pipe', timeout: 30_000 }); } catch { /* best effort */ }
-  try { execSync('podman machine start podman-machine-default', { stdio: 'pipe', timeout: 180_000 }); } catch { /* best effort */ }
-  for (let i = 0; i < 10; i++) {
-    try {
-      execSync('podman info', { stdio: 'pipe' });
-      logger.info('Podman recovered');
-      return true;
-    } catch {
-      spawnSync('sleep', ['1']);
-    }
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/** Check if podman API is reachable. */
+export function canReachPodmanApi(): boolean {
+  try {
+    execSync('podman info', { stdio: 'pipe', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
   }
-  logger.error('Podman recovery failed');
+}
+
+/** Sanitized bot name for use in container name prefixes. */
+export function botTag(): string {
+  return (ASSISTANT_NAME || 'bot').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// ── Recovery ────────────────────────────────────────────────────────
+
+type PodmanMachineEntry = { Name: string; Default?: boolean; Running?: boolean; Starting?: boolean };
+
+function getPodmanMachines(): PodmanMachineEntry[] {
+  try {
+    const result = spawnSync('podman', ['machine', 'list', '--format', 'json'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    });
+    if (result.status !== 0) return [];
+    const parsed: unknown = JSON.parse(result.stdout || '[]');
+    return Array.isArray(parsed) ? parsed.filter(
+      (item): item is PodmanMachineEntry =>
+        !!item && typeof item === 'object' && 'Name' in item && typeof (item as { Name: unknown }).Name === 'string',
+    ) : [];
+  } catch {
+    return [];
+  }
+}
+
+const SAFE_MACHINE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+/**
+ * Recover podman runtime. Detects machine name dynamically,
+ * handles stuck "Starting" state, polls until API is ready.
+ */
+export function recoverPodman(): boolean {
+  if (canReachPodmanApi()) return true;
+
+  logger.warn('Podman API unavailable, attempting recovery...');
+
+  let machineName = 'podman-machine-default';
+  try {
+    const machines = getPodmanMachines();
+    const machine = machines.find((m) => m.Default) || machines[0];
+    if (machine && SAFE_MACHINE_NAME.test(machine.Name)) {
+      machineName = machine.Name;
+      // Handle stuck "Starting" or unresponsive "Running" state
+      if (machine.Starting || machine.Running) {
+        logger.warn({ machineName, starting: machine.Starting, running: machine.Running },
+          'Podman machine in bad state, stopping first');
+        try { spawnSync('podman', ['machine', 'stop', machineName], { stdio: 'pipe', timeout: 30_000 }); } catch { /* best effort */ }
+      }
+    }
+  } catch { /* use default machine name */ }
+
+  try {
+    spawnSync('podman', ['machine', 'start', machineName], { stdio: 'pipe', timeout: 180_000 });
+  } catch { /* best effort */ }
+
+  // Poll for API readiness
+  for (let i = 0; i < 30; i++) {
+    if (canReachPodmanApi()) {
+      logger.info({ machineName }, 'Podman recovered');
+      return true;
+    }
+    spawnSync('sleep', ['1']);
+  }
+
+  logger.error({ machineName }, 'Podman recovery failed');
   return false;
 }
+
+// ── Container management ────────────────────────────────────────────
 
 export function getPodmanContainerNames(timeoutMs = 5000): string[] {
   try {

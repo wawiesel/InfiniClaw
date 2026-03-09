@@ -15,7 +15,7 @@ Host machine (macOS / Linux)
 ├── db-ext.ts           → Thread-aware DB functions via separate SQLite connection
 ├── env-utils.ts        → Env file parsing (upstream removed in v1.2.12)
 ├── composables.ts      → State loading/saving helpers (upstream removed in v1.2.12)
-├── podman-utils.ts     → Podman recovery/stop utilities (upstream removed in v1.2.12)
+├── podman-utils.ts     → Single source of truth for podman: recovery, container listing, stop ops
 ├── router-ext.ts       → formatThreadContext (upstream removed in v1.2.12)
 │
 │── Orchestrator ─────────────────────────────────────────────
@@ -24,7 +24,7 @@ Host machine (macOS / Linux)
 ├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave)
 ├── relay.ts            → Supervisor relay: Matrix watcher for bot lifecycle and operator commands
 ├── main.ts             → Message loop, indicators, container lifecycle
-├── container-spawn.ts  → Build podman args, inject git identity (@a-gis.org), delegate to upstream runContainer()
+├── container-spawn.ts  → Container orchestration: secrets, mounts, podman args, stale cleanup, IPC setup
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)
 ├── container-secrets.ts→ Normalize provider secrets for containers
 ├── run-container.ts    → Container run loop (extracted from NanoClaw for composability)
@@ -45,7 +45,7 @@ Host machine (macOS / Linux)
 ├── mcp-sync.ts         → Sync MCP server config (persona → session)
 ├── command-registry.ts → Single source of truth for ! command names
 ├── s3-sync.ts          → S3 backup/restore for cross-machine moves
-├── podman-bootstrap.ts → Ensure podman machine is running
+├── podman-bootstrap.ts → Image availability checks, orphan cleanup, delegates recovery to podman-utils
 ├── history-export.ts   → Periodic S3 export of conversation history (JSONL by date)
 ├── status.ts           → Bot status reporting
 ├── status-cli.ts       → Status display for CLI and MCP server
