@@ -5,6 +5,7 @@
  * Upstream files (index.ts, container-runner.ts, ipc.ts) are read-only
  * dependencies — never modified by InfiniClaw.
  */
+import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -1066,7 +1067,14 @@ async function runAgent(
         isMain,
       },
       (proc, containerName) => {
-        killProc = () => proc.kill('SIGTERM');
+        killProc = () => {
+          exec(`podman stop "${containerName}"`, { timeout: 15000 }, (err) => {
+            if (err) {
+              logger.warn({ containerName, err }, 'Graceful podman stop failed, force killing');
+              proc.kill('SIGKILL');
+            }
+          });
+        };
         queue.registerProcess(chatJid, proc, containerName, group.folder);
       },
       wrappedOnOutput,

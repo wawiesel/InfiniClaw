@@ -20,8 +20,20 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-import { marked } from 'marked';
 import { upsertEnvLine } from './env-utils.js';
+import {
+  matrixLogin,
+  matrixCreateFilter,
+  matrixSync,
+  matrixSend,
+  matrixInvite,
+  matrixJoin,
+  matrixLeave,
+  markdownToHtml,
+  loadIntercomConfig,
+  clearIntercomConfigCache,
+} from './matrix-api.js';
+import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, writeShips, isShipActive, clearShipConfigCache } from './ship-config.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
@@ -40,34 +52,6 @@ import {
 } from './service.js';
 import { sleep, shellQuote, errStr } from './utils.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
-
-// ── Types ──────────────────────────────────────────────────────────
-
-interface IntercomConfig {
-  homeserver: string;
-  rooms: Record<string, {
-    roomId: string;
-    username: string;
-    password: string;
-  }>;
-}
-
-interface SyncResponse {
-  next_batch: string;
-  rooms?: {
-    join?: Record<string, {
-      timeline?: {
-        events?: Array<{
-          type: string;
-          sender: string;
-          content?: { msgtype?: string; body?: string };
-          event_id: string;
-          origin_server_ts: number;
-        }>;
-      };
-    }>;
-  };
-}
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -259,12 +243,6 @@ function rebuildInfiniClaw(): string {
   }
 }
 
-function loadIntercomConfig(): IntercomConfig {
-  const config = loadShipConfig();
-  const configPath = path.join(config.secretsPath, 'operator', 'intercom.json');
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-}
-
 function resolveCaptainUserId(): string {
   try {
     const captainFile = path.join(secretsRepoPath(), 'captain');
@@ -303,7 +281,7 @@ let loudspeakerToken: string | null = null;
 async function getLoudspeakerToken(homeserver: string, username: string, password: string): Promise<string | null> {
   if (loudspeakerToken) return loudspeakerToken;
   try {
-    const { accessToken } = await matrixLogin(homeserver, username, password);
+    const { accessToken } = await relayMatrixLogin(homeserver, username, password);
     loudspeakerToken = accessToken;
     return loudspeakerToken;
   } catch (err) {
@@ -477,127 +455,16 @@ function isSpeaker(): boolean {
   return cachedIsSpeaker;
 }
 
-// ── Matrix API helpers ─────────────────────────────────────────────
+// ── Matrix API helpers (delegates to matrix-api.ts) ─────────────────
 
-async function matrixLogin(homeserver: string, username: string, password: string): Promise<{ accessToken: string; userId: string }> {
-  const resp = await fetch(`${homeserver}/_matrix/client/v3/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'm.login.password',
-      user: username,
-      password,
-      device_id: `relay-${HOSTNAME}`,
-    }),
-  });
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Login failed for ${username}: ${resp.status} ${body}`);
-  }
-  const data = await resp.json() as { access_token: string; user_id: string };
-  return { accessToken: data.access_token, userId: data.user_id };
+/** Relay-specific login: passes device_id for relay identification. */
+async function relayMatrixLogin(homeserver: string, username: string, password: string): Promise<{ accessToken: string; userId: string }> {
+  return matrixLogin(homeserver, username, password, `relay-${HOSTNAME}`);
 }
 
-async function matrixCreateFilter(homeserver: string, token: string, userId: string): Promise<string> {
-  const filter = {
-    room: {
-      timeline: { limit: 10, types: ['m.room.message'] },
-      state: { types: [] },
-      ephemeral: { types: [] },
-      account_data: { types: [] },
-    },
-    presence: { types: [] },
-    account_data: { types: [] },
-  };
-  const resp = await fetch(
-    `${homeserver}/_matrix/client/v3/user/${encodeURIComponent(userId)}/filter`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(filter),
-    },
-  );
-  if (!resp.ok) throw new Error(`Filter creation failed: ${resp.status}`);
-  const data = await resp.json() as { filter_id: string };
-  return data.filter_id;
-}
-
-async function matrixSync(
-  homeserver: string,
-  token: string,
-  since: string | null,
-  filterId: string | null,
-  timeout: number,
-): Promise<SyncResponse> {
-  const params = new URLSearchParams({ timeout: String(timeout) });
-  if (since) params.set('since', since);
-  if (filterId) params.set('filter', filterId);
-  const resp = await fetch(`${homeserver}/_matrix/client/v3/sync?${params}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(timeout + 15_000),
-  });
-  if (!resp.ok) throw new Error(`Sync failed: ${resp.status}`);
-  return resp.json() as Promise<SyncResponse>;
-}
-
-/** Convert markdown to HTML for Matrix formatted_body. */
-function markdownToHtml(text: string): string {
-  const html = (marked.parse(text, { async: false, breaks: true }) as string).trim();
-  // Preserve leading whitespace that HTML would collapse
-  return html.replace(/^ +/gm, (m) => '&nbsp;'.repeat(m.length));
-}
-
-async function matrixSend(homeserver: string, token: string, roomId: string, text: string): Promise<string | undefined> {
-  const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const content: Record<string, unknown> = {
-    msgtype: 'm.text',
-    body: text,
-    format: 'org.matrix.custom.html',
-    formatted_body: markdownToHtml(text),
-  };
-  const resp = await fetch(
-    `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
-    {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(content),
-    },
-  );
-  if (!resp.ok) {
-    const body = await resp.text();
-    log(`send failed to ${roomId}: ${resp.status} ${body}`);
-    return undefined;
-  }
-  const data = await resp.json() as { event_id?: string };
-  return data.event_id;
-}
-
-async function matrixSendThread(homeserver: string, token: string, roomId: string, threadRootId: string, text: string): Promise<string | undefined> {
-  const txnId = `sv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const resp = await fetch(
-    `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
-    {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        msgtype: 'm.text',
-        body: text,
-        format: 'org.matrix.custom.html',
-        formatted_body: markdownToHtml(text),
-        'm.relates_to': {
-          rel_type: 'm.thread',
-          event_id: threadRootId,
-        },
-      }),
-    },
-  );
-  if (!resp.ok) {
-    const body = await resp.text();
-    log(`thread send failed to ${roomId}: ${resp.status} ${body}`);
-    return undefined;
-  }
-  const data = await resp.json() as { event_id?: string };
-  return data.event_id;
+/** Send a message to a room (plain or threaded). */
+async function relaySend(homeserver: string, token: string, roomId: string, text: string, threadRootId?: string): Promise<string | undefined> {
+  return matrixSend({ homeserver, token, roomId, text, threadRootId, log });
 }
 
 // ── Bot Matrix room management ──────────────────────────────────
@@ -613,44 +480,20 @@ async function botMatrixLogin(root: string, bot: string): Promise<{ token: strin
   return { token: accessToken, homeserver, userId };
 }
 
-const MATRIX_OP_TIMEOUT_MS = 15_000; // 15s for invite/join/leave ops
-
-/** Invite a bot to a room using the intercom account, then join as the bot. */
+/** Invite a bot to a room using the operator account, then join as the bot. */
 async function botJoinRoom(botToken: string, homeserver: string, roomId: string, _conn: RoomConn, botUserId: string): Promise<void> {
-  // Invite via operator account (intercom accounts are write-only and can't invite)
   const { accessToken: operatorToken } = resolveOperatorConfig();
   if (operatorToken) {
-    const invResp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${operatorToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: botUserId }),
-      signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS),
-    });
-    if (!invResp.ok) {
-      const body = await invResp.text();
-      // Already in room is fine
-      if (!body.includes('already in the room') && !body.includes('already joined')) {
-        log(`invite failed: ${invResp.status} ${body}`);
-      }
-    }
+    const ok = await matrixInvite(homeserver, operatorToken, roomId, botUserId);
+    if (!ok) log(`invite failed for ${botUserId} to ${roomId}`);
   }
-  // Now join as the bot (retry once on timeout/transient failure)
+  // Join as the bot (retry once on transient failure)
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${botToken}`, 'Content-Type': 'application/json' },
-        body: '{}',
-        signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS),
-      });
-      if (!resp.ok) {
-        const body = await resp.text();
-        // Already in room is a success
-        if (body.includes('already in the room') || body.includes('already joined')) return;
-        throw new Error(`join room failed: ${resp.status} ${body}`);
-      }
-      return; // success
+      const ok = await matrixJoin(homeserver, botToken, roomId);
+      if (!ok) throw new Error(`join room failed for ${roomId}`);
+      return;
     } catch (err) {
       lastErr = err;
       if (attempt === 0) log(`botJoinRoom: attempt 1 failed (${errStr(err)}), retrying...`);
@@ -661,18 +504,7 @@ async function botJoinRoom(botToken: string, homeserver: string, roomId: string,
 
 /** Make a bot leave a Matrix room. Silently succeeds if bot isn't in the room. */
 async function botLeaveRoom(token: string, homeserver: string, roomId: string): Promise<void> {
-  const resp = await fetch(`${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: '{}',
-    signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS),
-  });
-  if (!resp.ok) {
-    const body = await resp.text();
-    // Not in room / forbidden (already left) is fine
-    if (resp.status === 403 || body.includes('not in room') || body.includes('not a member')) return;
-    throw new Error(`leave room failed: ${resp.status} ${body}`);
-  }
+  await matrixLeave(homeserver, token, roomId);
 }
 
 // ── Bot resolution (multi-ship aware) ───────────────────────────
@@ -1713,7 +1545,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         // Get the bot's display name for the trigger
         const env = loadProfileEnv(root, bot);
         const name = env?.ASSISTANT_NAME || bot;
-        await matrixSend(conn.homeserver, conn.accessToken, conn.roomId,
+        await relaySend(conn.homeserver, conn.accessToken, conn.roomId,
           `${name}, check NEXT.md and work on the highest priority item you can act on.`);
         log(`heartbeat: nudged ${name} in ${roomName}`);
       }
@@ -2578,15 +2410,20 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
   await dispatch(cmd, conn, allConns || []);
 }
 
-async function reply(conn: RoomConn, text: string): Promise<string | undefined> {
+async function reply(conn: RoomConn, text: string, threadRootId?: string): Promise<string | undefined> {
+  const tagged = `[${HOSTNAME}] ${text}`;
   const ls = loadLoudspeakerConfig();
   if (ls) {
     const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
-    if (token) return matrixSend(ls.homeserver, token, conn.roomId, `[${HOSTNAME}] ${text}`);
+    if (token) return relaySend(ls.homeserver, token, conn.roomId, tagged, threadRootId);
   }
-  // Fallback to conn account if loudspeaker unavailable
   if (!conn.accessToken) return undefined;
-  return matrixSend(conn.homeserver, conn.accessToken, conn.roomId, `[${HOSTNAME}] ${text}`);
+  return relaySend(conn.homeserver, conn.accessToken, conn.roomId, tagged, threadRootId);
+}
+
+/** Alias: reply in a thread. */
+async function threadReply(conn: RoomConn, threadRootId: string, text: string): Promise<string | undefined> {
+  return reply(conn, text, threadRootId);
 }
 
 /** Ship report — every ship that receives the command replies with its own data. */
@@ -2598,16 +2435,6 @@ async function shipReport(conn: RoomConn, text: string): Promise<string | undefi
 async function speakerReport(conn: RoomConn, text: string): Promise<string | undefined> {
   if (!isSpeaker()) return undefined;
   return reply(conn, text);
-}
-
-async function threadReply(conn: RoomConn, threadRootId: string, text: string): Promise<string | undefined> {
-  const ls = loadLoudspeakerConfig();
-  if (ls) {
-    const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
-    if (token) return matrixSendThread(ls.homeserver, token, conn.roomId, threadRootId, `[${HOSTNAME}] ${text}`);
-  }
-  if (!conn.accessToken) return undefined;
-  return matrixSendThread(conn.homeserver, conn.accessToken, conn.roomId, threadRootId, `[${HOSTNAME}] ${text}`);
 }
 
 // ── BehindTheCurtain — direct operator chat ────────────────────────
@@ -2834,6 +2661,10 @@ async function main(): Promise<void> {
   registerRelayCommands();
 
   const intercom = loadIntercomConfig();
+  if (!intercom) {
+    log('no intercom config found — exiting');
+    process.exit(1);
+  }
   const captainUserId = resolveCaptainUserId();
   const operatorUserId = resolveOperatorUserId();
   if (!captainUserId && !operatorUserId) {

@@ -21,6 +21,7 @@ Host machine (macOS / Linux)
 │── Orchestrator ─────────────────────────────────────────────
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2
+├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave)
 ├── relay.ts            → Supervisor relay: Matrix watcher for bot lifecycle and operator commands
 ├── main.ts             → Message loop, indicators, container lifecycle
 ├── container-spawn.ts  → Build podman args, inject git identity (@a-gis.org), delegate to upstream runContainer()
@@ -85,3 +86,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`get_message` tool bug**: Fails on event IDs containing `$` due to shell variable interpolation in the node -e command. Unfixed as of session 8.
 - **`resolveReplyThread`**: Scans messages in reverse for `thread_id` from non-bot senders. Returns `workThreadIds` override if set. Cleared after each response turn.
 - **`storeOutgoing`**: Must set `is_bot_message: true` — otherwise outgoing messages are re-detected as new human messages by `getNewMessages`, causing echo loops in quarters rooms.
+- **Turn timeout kill**: Must use `podman stop` (not `proc.kill('SIGTERM')`) — podman does not relay SIGTERM to the container process. Without this, containers survive the kill and run for minutes/hours.
