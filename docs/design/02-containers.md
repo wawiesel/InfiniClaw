@@ -15,15 +15,15 @@ This architecture ensures the bot is always reachable on the main timeline regar
 
 ## Image Build
 
-Each bot has a Dockerfile at `bots/{role}/{persona}/Dockerfile` (e.g. `bots/engineer/cid/Dockerfile`). All share a common build context at `bots/container/` which contains the `agent-runner/` source.
+Each bot has a Dockerfile at `bots/{role}/{persona}/Dockerfile` (e.g. `bots/engineer/cid/Dockerfile`). All share a common build context at `bots/container/` which contains the agent-runner source.
 
 Build flow: `bots/build.sh {bot}` discovers the Dockerfile, builds with `bots/container/` as context, tags as `nanoclaw-{bot}:latest`.
 
-Images are rebuilt automatically on deploy (`service.ts:rebuildImageIfChanged`) by hashing the Dockerfile + `external/nanoclaw/container/agent-runner/` contents.
+Images are rebuilt automatically on deploy by hashing the Dockerfile + agent-runner contents.
 
 ## Mount System
 
-Two-tier design: read-only everywhere, write access where needed. All mount logic lives in `container-mounts.ts`.
+Two-tier design: read-only everywhere, write access where needed.
 
 **Tier 1: Read-only home mirror** — The host home directory is mounted at its real path inside every container, read-only. Bots read files using the same paths as on the host.
 
@@ -39,7 +39,7 @@ Two-tier design: read-only everywhere, write access where needed. All mount logi
 | `/workspace/CLAUDE.md` | `bots/{role}/ROOM.md` | ro | Room-level instructions |
 | `/workspace/cache` | `_runtime/data/cache/{group}/` | rw | Per-group persistent cache |
 | `/workspace/ipc` | `_runtime/ipc/{group}/` | rw | Host ↔ container communication |
-| `/app/src` | `external/nanoclaw/container/agent-runner/src/` | ro | Agent runner source |
+| `/app/src` | NanoClaw agent-runner source | ro | Agent runner source |
 | `/home/node/.ssh` | `~/.ssh/` | rw | Git SSH keys |
 | `/home/node/.codex` | `~/.codex/` | rw | Codex delegate auth |
 | `/home/node/.gemini` | `~/.gemini/` | rw | Gemini delegate auth |
@@ -52,7 +52,7 @@ Two-tier design: read-only everywhere, write access where needed. All mount logi
 - **Secrets flow:** Profile env files → loaded by host process → written to a mounted env file at `/workspace/env-dir/env` (read-only inside container). The entrypoint sources this file. `CONTAINER_ENV_*` vars are injected separately as `-e` flags with the prefix stripped.
 - **Credential proxy:** Containers never see real API keys. `ANTHROPIC_BASE_URL` points to a host-side proxy that injects credentials per-request.
 - **Mount allowlist** is stored outside the repo (`~/.config/infiniclaw/allow-list.json`) so containers can't tamper with it.
-- **Cert mapping:** `container-secrets.ts` maps host CA cert paths to container-compatible locations for Node, Python, curl, and git (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`).
+- **Cert mapping:** Host CA cert paths are mapped to container-compatible locations for Node, Python, curl, and git (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`).
 
 ## Verification
 

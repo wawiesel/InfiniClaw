@@ -4,7 +4,7 @@ A ship is a machine running a relay. The relay is the always-on process that con
 
 ## Ship Registry
 
-Ships are registered in `operator/ships.json` in the secrets repo. See `src/ship-config.ts` for the `ShipEntry` interface.
+Ships are registered in `operator/ships.json` in the secrets repo.
 
 ```json
 {
@@ -29,7 +29,7 @@ A decommissioned ship (`active: false`) keeps its relay running and listening fo
 
 ## The Relay
 
-A single always-on process per ship (`src/relay.ts`). The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or operator. It manages bot lifecycle by calling service functions directly.
+A single always-on process per ship. The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or operator. It manages bot lifecycle by calling service functions directly.
 
 **The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't start bots.
 
@@ -45,7 +45,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 4. Load intercom config (per-room Matrix credentials)
 5. Connect to Matrix rooms with staggered sync (one per room)
 6. Wait for Matrix warmup before bootstrapping bots
-7. If ship is active, start all `onduty` bots via `bootstrapBot()`
+7. If ship is active, bootstrap and start all `onduty` bots
 8. Launch background loops
 
 ### Background Loops
@@ -59,9 +59,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 | Relay tasks | — | built-in | Poll `_runtime/relay-tasks/` for host-side operations |
 | Curtain | — | built-in | Watch BehindTheCurtain room, forward to operator tmux |
 
-See `src/relay.ts` for all interval defaults and loop implementations.
-
-**InfiniClaw sync** detects source changes (TypeScript, package.json, Dockerfiles, tsconfig) and triggers `scripts/rebuild.sh` → deploy dist → restart bots → restart relay.
+**InfiniClaw sync** detects source changes (TypeScript, package.json, Dockerfiles, tsconfig) and triggers a rebuild → deploy dist → restart bots → restart relay.
 
 **Secrets sync** handles fleet.json conflict resolution (accepts upstream on rebase conflicts). On new commits, checks for transport materializations — bots assigned to this ship with `status: 'transit'` get activated and started. Also scans `operator/inbox.md` for pending items targeting this ship.
 
@@ -69,13 +67,13 @@ See `src/relay.ts` for all interval defaults and loop implementations.
 
 Every relay publishes its InfiniClaw HEAD commit epoch to S3 (`relay/<hostname>.json`) at startup and after rebuilds. The **speaker** is the active ship running the newest code; ties are broken by ship rank (lowest wins). This ensures the most up-to-date relay formats aggregate responses.
 
-Election algorithm (see `electSpeaker()` in `src/relay.ts`):
+Election algorithm:
 1. Fetch commit epochs from S3 for all active ships
 2. Find the maximum epoch across active ships
 3. If local epoch is older, defer (not speaker)
 4. Among ships at max epoch, lowest rank wins
 
-`isSpeaker()` returns a cached result and triggers async re-election in the background. Speaker election runs before aggregate commands (`!fleet`, `!health`, `!promote`/`!demote` for ships).
+The speaker result is cached and triggers async re-election in the background. Speaker election runs before aggregate commands (`!fleet`, `!health`, `!promote`/`!demote` for ships).
 
 ## Ship Commands
 
@@ -90,7 +88,7 @@ Election algorithm (see `electSpeaker()` in `src/relay.ts`):
 1. Source ship stops bot, kills containers, removes mounts
 2. Source ship sets `status: 'transit'`, `ship: <destination>` in fleet.json, commits
 3. Destination ship's secrets sync loop pulls fleet.json, sees `transit` bot assigned to it
-4. Destination calls `bootstrapBot()`, sets `status: 'onduty'`, commits
+4. Destination bootstraps the bot, sets `status: 'onduty'`, commits
 
 ## Per-Machine Configuration
 
@@ -109,7 +107,7 @@ Maps logical names to local paths. Used by role-based mounts (fleet.json `roles[
 
 ### allow-list.json
 
-Per-bot rw mount overrides with optional expiry. Managed via `!allow`/`!deny` commands. See `src/allow-list.ts`.
+Per-bot rw mount overrides with optional expiry. Managed via `!allow`/`!deny` commands.
 
 ## Verification
 

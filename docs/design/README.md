@@ -38,4 +38,6 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
 
+**No source code references.** Design docs describe behavior and architecture, not implementation details. Source code paths and function names belong in the implementation README, which links back to each design doc. The pre-commit hook enforces this rule.
+
 See `docs/solutions/matrix.md` for Element Desktop math rendering setup.

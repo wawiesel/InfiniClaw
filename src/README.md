@@ -2,6 +2,19 @@
 
 The orchestrator that runs on the host machine (not in containers). Manages bot lifecycle, Matrix communication, and container spawning.
 
+Architecture and behavior are specified in `docs/design/` — this README documents the implementation that realizes those specs.
+
+| Design doc | Implementation area |
+|------------|-------------------|
+| [00-overview](../docs/design/00-overview.md) | Core principles, code structure |
+| [01-matrix](../docs/design/01-matrix.md) | `channels/matrix.ts`, `matrix-api.ts`, `intercom-relay.ts` |
+| [02-containers](../docs/design/02-containers.md) | `container-spawn.ts`, `container-mounts.ts`, `container-secrets.ts`, `run-container.ts` |
+| [03-ships](../docs/design/03-ships.md) | `ship-config.ts`, `relay.ts`, `s3-sync.ts` |
+| [04-bot](../docs/design/04-bot.md) | `main.ts`, `infini-config.ts`, `message-filtering.ts` |
+| [05-brain](../docs/design/05-brain.md) | `brain-management.ts`, `container-spawn.ts` |
+| [06-ipc](../docs/design/06-ipc.md) | `ipc-watcher.ts`, `ipc-commands.ts` |
+| [07-threading](../docs/design/07-threading.md) | `relay.ts` (Thread Brains), `container-spawn.ts` (lobes) |
+
 ## Architecture
 
 InfiniClaw wraps NanoClaw (`external/nanoclaw/`) with Matrix-specific logic. Each file here either wraps an upstream module or adds InfiniClaw-specific functionality.

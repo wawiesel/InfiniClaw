@@ -53,6 +53,27 @@ if [[ ${#readme_missing[@]} -gt 0 ]]; then
   exit 1
 fi
 
+# ── Design docs must not reference source code ──
+# Design documents describe behavior and architecture, not implementation.
+# Source code references belong in src/README.md, which links back to design docs.
+
+design_violations=()
+while IFS= read -r file; do
+  # Skip if not a design doc
+  [[ "$file" != docs/design/*.md ]] && continue
+  # Check full staged content for source code references
+  if git show ":$file" 2>/dev/null | grep -qE '(^|\s|`)(src/|external/nanoclaw/src/)[A-Za-z]'; then
+    design_violations+=("$file")
+  fi
+done <<< "$staged"
+
+if [[ ${#design_violations[@]} -gt 0 ]]; then
+  echo "ERROR: Design docs must not reference source code paths (src/, external/nanoclaw/src/)."
+  echo "Move implementation references to src/README.md instead."
+  printf "  %s\n" "${design_violations[@]}"
+  exit 1
+fi
+
 # ── Role-based restrictions (ASSISTANT_ROLE set inside containers) ──
 
 role="${ASSISTANT_ROLE:-}"

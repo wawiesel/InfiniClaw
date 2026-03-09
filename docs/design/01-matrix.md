@@ -154,7 +154,7 @@ All messages use `org.matrix.custom.html` format with `formatted_body` for rich 
 - **Math** — LaTeX via `data-mx-maths` attribute (MSC2191): `$x^2$` for inline, `$$\sum_{i=1}^n$$` for display
 - **Collapsible sections** — `<details>` blocks for tool call output
 
-Bot outgoing messages are converted by `renderMarkdownForMatrix()` in `src/channels/matrix.ts`.
+Bot outgoing messages are converted from Markdown to Matrix HTML before sending.
 
 ## Verification
 

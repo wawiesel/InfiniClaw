@@ -18,8 +18,6 @@ Each bot has a secrets env file (`secrets/bots/{name}/env`) and a persona direct
 - `IGNORE_TRIGGERS` — Comma-separated bot names to skip
 - `IGNORE_SENDERS` — Comma-separated sender IDs to skip
 
-See `src/infini-config.ts` for all config loading.
-
 **Persona directory:**
 ```
 bots/{role}/{name}/
@@ -33,19 +31,15 @@ Role is resolved from `fleet.json` entry for the bot. A base `bots/CLAUDE.md` pr
 
 ## Trigger Pattern
 
-The trigger pattern is `^@<name>\b` (case-insensitive, anchored to message start). A bot responds when its name appears as `@Name` at the beginning of a message.
+The trigger pattern is `^@<name>\b` (case-insensitive, anchored to message start).
 
-Examples for bot "Cid":
-- `@Cid hello` — triggers
-- `@cid status` — triggers (case-insensitive)
-- `hello @Cid` — does NOT trigger (not at start)
-- `@Cidextra` — does NOT trigger (word boundary)
+**Matrix mention pill handling:** Matrix clients convert `@Name` into mention pills, which strip the `@` prefix from the plaintext `body`. The host restores it by parsing the HTML `formatted_body` to find mentioned display names (via `<a href="https://matrix.to/#/@...">Name</a>` tags) and re-adding the `@` prefix before the message is stored or trigger-tested.
 
-See `external/nanoclaw/src/config.ts` for the `TRIGGER_PATTERN` definition.
+In **resume context** (bot restart), the `@Name` prefix is replaced with `[callout]` to prevent the resume message from falsely re-triggering the bot. The original `@` is preserved in the SQLite message store and in normal conversation flow.
 
 ## Response Rules
 
-Four conditions trigger a bot response (see `src/main.ts`):
+Four conditions trigger a bot response:
 
 | Condition | Description |
 |-----------|-------------|
@@ -58,7 +52,7 @@ If none of these conditions are met, the bot does NOT respond — but the messag
 
 ### Additional Filters
 
-Before routing, messages pass through filtering (`src/message-filtering.ts`):
+Before routing, messages pass through filtering:
 - **Self-echo:** Bots ignore their own messages (tracked via `botMatrixUserIds` set)
 - **Pattern filtering:** Messages matching `IGNORE_PATTERNS` (from `IGNORE_TRIGGERS` env) are skipped
 - **Operator callouts:** Messages starting with `@` from the Captain are filtered (operator-to-bot addressing)
@@ -73,7 +67,7 @@ Bots set their Matrix display name to show status at a glance:
 
 Examples: `Cid 🟢 (HERACLES)`, `Parker ⭐ (HERACLES)`, `Nora 💤 (POSEIDON)`
 
-The pip (status icon) is updated dynamically. See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status/pip table. Implementation in `src/main.ts` `botDisplayName()`.
+The pip (status icon) is updated dynamically. See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status/pip table.
 
 ## Message Flow
 
@@ -99,7 +93,7 @@ When a bot restarts (crash, deploy, or manual restart):
 4. Container spawns to process the resume message
 5. Bot picks up where it left off with full conversation context
 
-See `injectResumeMessage()` in `src/main.ts`. Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
+Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
 
 ## Crash Recovery
 

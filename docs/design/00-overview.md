@@ -16,12 +16,12 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 
 ## Code Structure
 
-InfiniClaw utilizes the `nanoclaw` core library for low-level container and IPC mechanics.
+InfiniClaw utilizes the NanoClaw core library for low-level container and IPC mechanics.
 
-| Layer | Location | Purpose |
-|-------|----------|---------|
-| InfiniClaw host | `src/` | Orchestrator, Matrix channel, routing, IPC, CLI |
-| Core Library | `external/nanoclaw/src/` | Lifecycle, SQLite, queuing, scheduling |
-| Container agent | `bots/container/agent-runner/` | Runs inside containers: Claude CLI, MCP tools, IPC |
-| Bot definitions | `bots/` | Personas, roles, Dockerfiles, skills |
+| Layer | Purpose |
+|-------|---------|
+| InfiniClaw host | Orchestrator, Matrix channel, routing, IPC, CLI |
+| NanoClaw core library | Lifecycle, SQLite, queuing, scheduling |
+| Container agent | Runs inside containers: Claude CLI, MCP tools, IPC |
+| Bot definitions | Personas, roles, Dockerfiles, skills |
 
