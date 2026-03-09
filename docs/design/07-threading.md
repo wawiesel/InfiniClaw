@@ -1,8 +1,8 @@
-# 02 — Threading and Lobes
-
-## The Branch and Merge Architecture
+# 07 — Threading and Lobes
 
 InfiniClaw uses a "Branch and Merge" threading model. The main brain stays responsive on the main timeline. Complex work happens in visible Matrix threads.
+
+## The Branch and Merge Architecture
 
 ### 1. The Main Brain (The Trunk)
 
@@ -29,7 +29,20 @@ Single-purpose worker processes spawned by a Thread Brain for heavy lifting (e.g
 - Results are written to a callback file. The Thread Brain picks them up and posts findings to the thread.
 - Lobes do NOT post to Matrix directly. The Thread Brain is responsible for reporting lobe results to the Captain.
 
-### The Merge
+## Branching Is Visible
+
+When the main brain decides to branch, the Captain must be able to see and follow the work:
+
+1. Main brain calls `branch_to_thread` with an objective
+2. The **host** creates a new thread on the main timeline with a clear subject (e.g. "🧵 Working on: V8 heap limits")
+3. The host spawns a Thread Brain — a separate container whose `send_message` output is wired to post **into that thread**
+4. Everything the Thread Brain does is visible in the thread: tool calls, progress updates, questions, results
+5. The Captain can click into the thread at any time to follow along or reply
+6. When the Thread Brain finishes, it posts a summary to both the thread and the main timeline
+
+A thread brain that runs invisibly in the background is broken. The whole point of threads is visibility — the Captain can ignore them if busy, or dive in if interested.
+
+## The Merge
 
 When a Thread Brain completes its task:
 
@@ -38,7 +51,7 @@ When a Thread Brain completes its task:
 3. **Main Timeline Summary:** Post a one-line summary to the main timeline so the Captain sees the outcome without clicking into the thread.
 4. **Termination:** Thread Brain exits. The thread remains in Matrix history permanently.
 
-### Thread Reactivation (Immortal Context)
+## Thread Reactivation (Immortal Context)
 
 Matrix thread history is permanent. Thread Brains are ephemeral — they exit after completing their task. But the thread context is immortal.
 
@@ -47,16 +60,22 @@ If the Captain asks a follow-up in a completed thread days later:
 2. The host spawns a new Thread Brain, hydrated with the thread's history from SQLite.
 3. The Thread Brain answers the question in the thread and exits.
 
-## Presence
+## Verification
 
-Bots feel like humans. Silence means idle. Messages mean working. No status indicator messages.
+1. **Branch creates thread** — Send a complex request to the bot.
+   *Check:* A new thread appears on the main timeline with "🧵 Working on: X".
 
-The only presence signal is the **pip** on the display name:
+2. **Thread Brain posts in thread** — Thread Brain works on the task.
+   *Check:* All progress and results appear inside the thread, not on main timeline.
 
-| Pip | Meaning |
-|-----|---------|
-| 🟢 | Alive — bot is running and responsive |
-| 💤 | Idle — no activity for `IDLE_PIP_THRESHOLD_MS` (default 5 min) |
-| 🔴 | Offline — bot is stopped or dismissed |
+3. **Main timeline stays responsive** — While a Thread Brain is working, send another message.
+   *Check:* Main Brain responds immediately without waiting for Thread Brain to finish.
 
-The pip resets to 🟢 on any message processing.
+4. **Merge posts summary** — Thread Brain completes.
+   *Check:* One-line summary appears on main timeline. Thread has completion message.
+
+5. **Thread reactivation** — Reply in a completed thread days later.
+   *Check:* New Thread Brain spawns, hydrated with old context, answers the question.
+
+6. **Lobe results** — Thread Brain spawns a lobe for heavy work.
+   *Check:* Lobe writes results to callback file. Thread Brain picks them up and reports in the thread.

@@ -24,6 +24,7 @@ export interface BotEntry {
   ship: string | null;
   status: BotStatus;
   title?: string;
+  quartersRoom?: string;
 }
 
 export interface ShipConfig {
@@ -79,7 +80,8 @@ export function loadShipConfig(): ShipConfig {
     if (!isValidBotName(name)) {
       throw new Error(`fleet.json: invalid bot name "${name}"`);
     }
-    if (entry.ship === hostname && (entry.status === 'onduty' || (entry.status as string) === 'active')) {
+    const runningStatuses = ['onduty', 'active', 'quarters', 'lounge'];
+    if (entry.ship === hostname && runningStatuses.includes(entry.status as string)) {
       bots.push(name);
     }
   }

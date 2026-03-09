@@ -1,4 +1,4 @@
-# 12 — Deployment Chain
+# 17 — Deployment Chain
 
 Engineers and architects work on git worktrees, never on main. Code does not merge to main until it passes a full deployment chain that proves it works end-to-end in a self-contained simulation.
 
@@ -78,3 +78,20 @@ If the holodeck simulation passes:
 Engineers and architects currently push directly to main. A bad commit breaks all ships simultaneously — there is no staging environment. The deployment chain creates a gate where code proves itself before it can affect production. The holodeck simulation catches integration bugs that unit tests miss: message routing, IPC flow, container lifecycle, multi-bot interactions.
 
 This was motivated by a real incident: an engineer's Phase 1 branch/merge commit added `onMergeRequest` to `IpcDeps` without updating test mocks or all call sites, breaking the build on main for every ship.
+
+## Verification
+
+1. **Build gate** — Submit code that fails `tsc`.
+   *Check:* Chain stops at Stage 1 with build error.
+
+2. **Test gate** — Submit code that fails a test.
+   *Check:* Chain stops at Stage 2 with test failure.
+
+3. **Holodeck creates** — Trigger holodeck simulation.
+   *Check:* Isolated ship with fake crew starts, runs exercises.
+
+4. **Holodeck isolation** — Verify holodeck cannot reach production.
+   *Check:* No access to production Matrix, secrets, or S3.
+
+5. **Merge after pass** — Holodeck simulation passes.
+   *Check:* Branch merged to main, relay auto-deploys via refit.

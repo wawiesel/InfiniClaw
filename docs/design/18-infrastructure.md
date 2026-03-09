@@ -1,4 +1,4 @@
-# 13 — Infrastructure Redundancy
+# 18 — Infrastructure Redundancy
 
 S3 (MinIO) and Gitea are single points of failure. This spec defines how to replicate both across multiple ships so the fleet survives a machine going down.
 
@@ -26,11 +26,11 @@ Physical Machine (host)
 - **Portability:** A ship can be migrated between physical machines (live migration, snapshot/restore, or cold move) without any config changes.
 - **Density:** Small ships (1-2 bots) can share hardware. Dedicated hardware is reserved for heavy workloads.
 - **Reproducibility:** Ship VMs can be provisioned from a base image. Spinning up a new ship is `create VM + bootstrap` rather than configuring bare metal.
-- **Holodeck:** Holodeck simulation ships (see `12-deployment-chain.md`) are natural fits for ephemeral VMs — create for the test, destroy after.
+- **Holodeck:** Holodeck simulation ships (see [17-deployment](17-deployment.md)) are natural fits for ephemeral VMs — create for the test, destroy after.
 
 ### Fleet Registry
 
-`machines.json` gains a `host` field to track physical placement:
+`ships.json` gains a `host` field to track physical placement:
 
 ```json
 {
@@ -128,3 +128,20 @@ The relay and bot code should try endpoint[0] first, fall back to endpoint[1] on
 ## Why
 
 Currently, if the machine hosting Gitea or MinIO goes down, the entire fleet loses access to code repos and shared state. Both git and MinIO are designed for replication — we just need a second instance of each on a different machine, with their native replication keeping them in sync. No external HA tooling required.
+
+## Verification
+
+1. **Multi-remote push** — Push to origin with two URLs configured.
+   *Check:* Both Gitea instances receive the push.
+
+2. **Gitea failover** — Take down primary Gitea, push from a ship.
+   *Check:* Push succeeds to secondary. Pull from another ship succeeds.
+
+3. **S3 replication** — Write to primary MinIO, read from secondary.
+   *Check:* Object appears on secondary within replication delay.
+
+4. **S3 failover** — Take down primary MinIO, write to fleet.
+   *Check:* Write succeeds to secondary. When primary recovers, object replicates.
+
+5. **Fleet config** — `fleet.json` has both endpoints.
+   *Check:* Code tries endpoint[0], falls back to endpoint[1] on failure.

@@ -1,23 +1,41 @@
 # docs/design/
 
-Architecture and design specifications for InfiniClaw. Each numbered document covers one subsystem. Read `00-overview.md` first for context.
+Architecture and design specifications for InfiniClaw. Documents are ordered by dependency — each layer builds on the ones before it. Read `00-overview.md` first for core principles.
 
-- `00-overview.md` — System overview: core principles and code structure
-- `01-messaging.md` — Matrix messaging layer, routing, filtering
-- `02-threading.md` — Branch and Merge model, Thread Brains, lobes
-- `03-ipc.md` — Inter-process communication (container to host)
-- `04-fleet.md` — Fleet architecture: rooms, ships, roles, ranks
-- `05-commanding-officer.md` — CO election and manager role
-- `06-commands.md` — Operator `!` commands and relay protocol
-- `07-intercom.md` — Cross-room relay accounts, operator messaging
-- `08-autonomy.md` — Bot self-healing, rebuilds, holodeck
-- `09-configuration.md` — CLAUDE.md layers (base from `bots/CLAUDE.md`), MCP, brain, session continuity
-- `10-safety.md` — OOM handling, rate limits, isolation, MCP preflight
-- `11-containers.md` — Podman isolation, mounts, secrets
-- `12-deployment-chain.md` — Worktree workflow, holodeck simulation, gates
-- `13-infrastructure-redundancy.md` — Ships as VMs, Gitea/MinIO redundancy
-- `14-quarters.md` — Ship spaces, bot rooms, lifecycle commands
-- `15-bartender.md` — Bartender skill
-- `IMPLEMENTATION_ROADMAP.md` — Feature roadmap with implementation status
+## Foundation
+
+- `00-overview.md` — Core principles, code structure
+- `01-matrix.md` — Matrix server, accounts, room setup, message format, math rendering, verification
+- `02-containers.md` — Podman isolation, images, mounts, secrets
+
+## Bot Runtime
+
+- `03-ships.md` — Machine registry, relay process, auto-sync
+- `04-bot.md` — Identity, trigger pattern, filtering, message routing
+- `05-brain.md` — LLM integration, session continuity, model management
+- `06-ipc.md` — Container ↔ host communication, namespaces, cooldowns
+- `07-threading.md` — Branch and Merge model, Thread Brains, lobes
+
+## Organization
+
+- `08-roles-and-rooms.md` — Roles, room topology, bot statuses, lifecycle, quarters trigger rules, threading rules
+- `09-fleet.md` — fleet.json, transport protocol, S3 coordination
+- `10-commands.md` — Operator `!` commands, status formats, alert threads
+- `11-co.md` — Commanding Officer election and delegation
+- `12-intercom.md` — Cross-room broadcast accounts, operator messaging
+
+## Resilience
+
+- `13-configuration.md` — CLAUDE.md layers, MCP, startup checklist
+- `14-safety.md` — OOM handling, memory limits, rate limiting
+- `15-autonomy.md` — Self-healing, auto-rebuild, holodeck
+
+## Higher Features
+
+- `16-skills.md` — Pooled capability modules per role
+- `17-deployment.md` — Code pipeline, holodeck simulation gates
+- `18-infrastructure.md` — Ships as VMs, Gitea/MinIO redundancy
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
+
+See `01-matrix.md` for Element Desktop math rendering setup.

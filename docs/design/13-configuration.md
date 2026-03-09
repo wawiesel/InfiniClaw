@@ -1,4 +1,4 @@
-# 09 — Configuration
+# 13 — Configuration
 
 ## CLAUDE.md Layers
 
@@ -25,16 +25,6 @@ bots/{role}/mcp.json (on disk)
   ↓ agent-runner passes to Claude SDK query()
   → Claude connects to MCP servers
 ```
-
-## Brain Management
-
-Each bot's LLM is configured via env (`BRAIN_MODEL`, `BRAIN_OAUTH_TOKEN` / `BRAIN_API_KEY`). Bots can switch models at runtime via the `set_brain_mode` MCP tool + restart.
-
-**Quota fallback:** When the primary provider returns a quota/credit error, the system automatically falls back to Ollama (local model), rewrites the bot's env file, and notifies the Captain. 10-minute cooldown prevents thrashing.
-
-## Session Continuity
-
-On restart, the agent-runner recovers the most recent session to avoid losing conversation context. The host injects a resume message that includes the bot's current todo list so it picks up where it left off without rediscovering tasks from conversation history.
 
 ## Chat Activity Tracking
 
@@ -75,3 +65,17 @@ Sent automatically to each bot's main room on every boot, wrapped in a collapsib
 
 </details>
 ```
+
+## Verification
+
+1. **CLAUDE.md layers loaded** — Bot starts with base + persona instructions.
+   *Check:* Bot's behavior reflects both base rules and persona-specific instructions.
+
+2. **Persona editable** — Bot modifies its own `CLAUDE.md` in the persona directory.
+   *Check:* Change persists across restarts (file written to rw mount).
+
+3. **MCP connected** — Bot has access to MCP tools defined in role's `mcp.json`.
+   *Check:* Startup log shows MCP servers connected (or dropped with preflight failure).
+
+4. **Startup checklist posted** — Bot posts collapsible checklist on boot.
+   *Check:* Message appears in bot's main room with correct role-specific sections.

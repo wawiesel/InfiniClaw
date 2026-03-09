@@ -156,6 +156,8 @@ let isResuming = false;
 const roomRoster: Record<string, Map<string, number>> = {};
 const roomCO: Record<string, string | undefined> = {};
 let matrixRef: MatrixChannel | null = null;
+// Quarters room JID — in this room, every message is for the bot (no trigger needed)
+let quartersJid: string | null = null;
 
 /** Parse relay lifecycle messages to update CO roster at runtime. */
 function handleLifecycleMessage(msg: { content: string; chat_jid: string; sender: string }): boolean {
@@ -465,6 +467,7 @@ function storeOutgoing(chatJid: string, text: string, threadId?: string): void {
     content: text,
     timestamp: new Date().toISOString(),
     is_from_me: true,
+    is_bot_message: true,
     thread_id: threadId,
   });
 }
@@ -836,8 +839,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
   const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
-  // Need explicit callout, participating thread, or CO main timeline duty
-  if (!hasTrigger && !hasParticipatingThread && !isCOTrigger) {
+  // In quarters, every message is for the bot
+  const isQuarters = quartersJid !== null && chatJid === quartersJid;
+  // Need explicit callout, participating thread, CO main timeline duty, or quarters
+  if (!isQuarters && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
     saveState();
     return true;
@@ -1145,8 +1150,10 @@ async function handleGroupMessagesInLoop(
   );
   const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
-  // Need explicit callout, participating thread, or CO main timeline duty
-  if (!hasTrigger && !hasParticipatingThread && !isCOTrigger) {
+  // In quarters, every message is for the bot
+  const isQuarters = quartersJid !== null && chatJid === quartersJid;
+  // Need explicit callout, participating thread, CO main timeline duty, or quarters
+  if (!isQuarters && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
     saveState();
     return;
@@ -1193,7 +1200,8 @@ async function handleGroupMessagesInLoop(
   if (groupStatus.active) {
     // Keep active-container IPC as a high-priority lane for captain/operator messages.
     // Bot-to-bot traffic should queue normally to avoid starvation/loop churn.
-    const shouldPrioritizeToActiveContainer = messagesToSend.some((m) => {
+    const isQuartersRoom = quartersJid !== null && chatJid === quartersJid;
+    const shouldPrioritizeToActiveContainer = isQuartersRoom || messagesToSend.some((m) => {
       if (botMatrixUserIds.has(m.sender)) return false;
       const isCaptain = Boolean(CAPTAIN_USER_ID) && m.sender === CAPTAIN_USER_ID;
       const isOperatorTrigger = TRIGGER_PATTERN.test(m.content.trim());
@@ -1497,6 +1505,14 @@ async function main(): Promise<void> {
     const roomNameToJid: Record<string, string> = {};
     for (const [jid, group] of Object.entries(registeredGroups)) {
       roomNameToJid[group.name.toLowerCase()] = jid;
+    }
+    // Set quarters JID for this bot (if it has one)
+    const myBotId = Object.keys(fleet).find(id => {
+      const env = (() => { try { return loadProfileEnv(root, id); } catch { return null; } })();
+      return env?.ASSISTANT_NAME === ASSISTANT_NAME;
+    });
+    if (myBotId && fleet[myBotId]?.quartersRoom) {
+      quartersJid = `matrix:${fleet[myBotId].quartersRoom}`;
     }
     // Build roster from active bots in fleet.json
     for (const [botId, entry] of Object.entries(fleet)) {
