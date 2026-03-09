@@ -27,7 +27,7 @@ bots/{role}/{name}/
   skills/                # Custom skills (optional)
 ```
 
-Role is resolved from `fleet.json` entry for the bot. A base `bots/CLAUDE.md` provides shared instructions across all bots.
+Role is resolved from the fleet state held in memory by the relay (persisted to `fleet.json` on disk). A base `bots/CLAUDE.md` provides shared instructions across all bots.
 
 ## Trigger Pattern
 

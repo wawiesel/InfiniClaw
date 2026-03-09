@@ -11,7 +11,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 ## Bot Runtime
 
 - `03-ship.md` — Machine registry, relay process, speaker election, auto-sync loops, transport
-- `04-bot.md` — Identity, trigger pattern, response rules, persona system, resume behavior
+- `04-bot.md` — Identity, trigger pattern, response rules, persona system, fleet state, resume behavior
 - `05-brain.md` — LLM integration, session continuity, model management
 - `06-ipc.md` — Container ↔ host communication, namespaces, cooldowns
 - `07-threading.md` — Branch and Merge model, Thread Brains, lobes
