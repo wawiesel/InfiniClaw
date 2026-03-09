@@ -8,6 +8,17 @@ InfiniClaw wraps NanoClaw (`external/nanoclaw/`) with Matrix-specific logic. Eac
 
 ```
 Host machine (macOS / Linux)
+│
+│── NanoClaw extension layer ─────────────────────────────────
+├── nanoclaw-ext.d.ts   → Type augmentations (thread_id, Channel methods, ContainerInput fields)
+├── nanoclaw-patches.ts → Runtime patches for GroupQueue (getGroupStatus, hooks)
+├── db-ext.ts           → Thread-aware DB functions via separate SQLite connection
+├── env-utils.ts        → Env file parsing (upstream removed in v1.2.12)
+├── composables.ts      → State loading/saving helpers (upstream removed in v1.2.12)
+├── podman-utils.ts     → Podman recovery/stop utilities (upstream removed in v1.2.12)
+├── router-ext.ts       → formatThreadContext (upstream removed in v1.2.12)
+│
+│── Orchestrator ─────────────────────────────────────────────
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2
 ├── relay.ts            → Supervisor relay: Matrix watcher for bot lifecycle and operator commands
@@ -42,6 +53,16 @@ Host machine (macOS / Linux)
 ├── utils.ts            → Shared utilities (isRecord, sleep, shellQuote, errStr)
 └── version.ts          → Git version resolution (prefers stamped GIT_VERSION file)
 ```
+
+## NanoClaw as a library
+
+NanoClaw (`external/nanoclaw/`) tracks [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) upstream. InfiniClaw imports it via npm workspaces (`import { X } from 'nanoclaw/module.js'`).
+
+Where InfiniClaw needs functionality that upstream doesn't provide:
+- **Type extensions** — `nanoclaw-ext.d.ts` uses declaration merging to augment upstream interfaces (e.g. `thread_id` on `NewMessage`, Matrix-specific methods on `Channel`)
+- **Runtime patches** — `nanoclaw-patches.ts` monkey-patches `GroupQueue` prototype for methods that need access to private state
+- **Moved modules** — Functions upstream removed are maintained in InfiniClaw's own `src/` (env-utils, composables, podman-utils, router-ext)
+- **DB extensions** — `db-ext.ts` opens a second SQLite connection to the same DB for thread-aware queries that upstream dropped
 
 ## Key flows
 
