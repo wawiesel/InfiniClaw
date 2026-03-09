@@ -6,11 +6,11 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 - `00-overview.md` — Core principles, code structure
 - `01-matrix.md` — Matrix server, accounts, room setup, message format, `<m>` mention pills, special mentions (@operator, @loudspeaker, @room), verification
-- `02-containers.md` — Podman isolation, image builds, mount table, secrets flow, credential proxy
+- `02-container.md` — Podman isolation, image builds, mount table, secrets flow, credential proxy
 
 ## Bot Runtime
 
-- `03-ships.md` — Machine registry, relay process, speaker election, auto-sync loops, transport
+- `03-ship.md` — Machine registry, relay process, speaker election, auto-sync loops, transport
 - `04-bot.md` — Identity, trigger pattern, response rules, persona system, resume behavior
 - `05-brain.md` — LLM integration, session continuity, model management
 - `06-ipc.md` — Container ↔ host communication, namespaces, cooldowns
