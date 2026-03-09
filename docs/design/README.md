@@ -36,8 +36,4 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `17-deployment.md` — Code pipeline, holodeck simulation gates
 - `18-infrastructure.md` — Ships as VMs, Gitea/MinIO redundancy
 
-## Other
-
-- `IMPLEMENTATION_ROADMAP.md` — Feature roadmap with implementation status
-
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
