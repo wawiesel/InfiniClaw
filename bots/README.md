@@ -5,7 +5,7 @@ Bot personas, roles, skills, and container definitions.
 - `CLAUDE.md` — Shared bot instructions (writable by bots)
 - `build.sh` — Container image build script (`./bots/build.sh all` or `./bots/build.sh <bot>`)
 - `container/agent-runner/` — In-container agent code (COPY'd into images at build time)
-- `{role}/` — One directory per role (navigator, engineer, architect)
+- `{role}/` — One directory per role (normie, navigator, engineer, architect)
 - `skills/` — Shared skill pool (see `skills/README.md`)
 
 ## Role directories
