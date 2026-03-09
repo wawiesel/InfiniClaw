@@ -76,7 +76,7 @@ Supports Anthropic (Claude), Ollama (local models), and any OpenAI-compatible AP
 
 Bot identity is defined in three layers of CLAUDE.md:
 
-1. **Base** (`external/nanoclaw/CLAUDE.md`) — framework behavior, shared by all bots
+1. **Base** (`bots/CLAUDE.md`) — shared bot instructions, fleet architecture
 2. **Persona** (`bots/{role}/{bot}/CLAUDE.md`) — identity, rules, style (writable by bot)
 3. **Room** (`bots/{role}/ROOM.md`) — room-specific context (read-only)
 
@@ -90,3 +90,4 @@ See [`docs/design/README.md`](docs/design/README.md) for the architecture docume
 
 - Container images are per-persona: `nanoclaw-cid`, `nanoclaw-johnny5`, `nanoclaw-nora`, `nanoclaw-parker`, `nanoclaw-albert`.
 - Cross-bot communication: `@BotName message` in any room auto-forwards to the target bot's room.
+- NanoClaw dependency: `external/nanoclaw/` tracks upstream. InfiniClaw extensions in `src/nanoclaw-ext.d.ts` and friends.

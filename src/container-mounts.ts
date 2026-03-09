@@ -6,7 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseEnvLine } from 'nanoclaw/env-utils.js';
+import { parseEnvLine } from './env-utils.js';
 import { logger } from 'nanoclaw/logger.js';
 import { loadSkillsToSession } from './skill-sync.js';
 import { mountsForBot } from './allow-list.js';

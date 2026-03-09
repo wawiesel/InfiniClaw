@@ -10,12 +10,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+import './nanoclaw-patches.js';
 import {
   ASSISTANT_NAME,
   DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
+  TIMEZONE,
 } from 'nanoclaw/config.js';
 import {
   ASSISTANT_ROLE,
@@ -37,23 +39,26 @@ import {
 } from './infini-config.js';
 import {
   getAllChats,
-  botParticipatesInThread,
   getMessagesSince,
   getNewMessages,
-  getRecentMessages,
-  getThreadMessages,
   getRouterState,
   getSession,
   initDatabase,
-  deleteRegisteredGroup,
-  deleteSession,
   setRegisteredGroup,
   setRouterState,
   setSession,
   storeChatMetadata,
-  storeMessage,
   updateChatName,
 } from 'nanoclaw/db.js';
+import {
+  botParticipatesInThread,
+  deleteRegisteredGroup,
+  deleteSession,
+  getRecentMessages,
+  getThreadMessages,
+  storeMessage,
+  initDatabaseExt,
+} from './db-ext.js';
 import { GroupQueue } from 'nanoclaw/group-queue.js';
 import {
   ContainerOutput,
@@ -67,11 +72,12 @@ import {
   recoverPendingMessages,
   writeAgentSnapshots,
   wrapOnOutputForSession,
-} from 'nanoclaw/composables.js';
+} from './composables.js';
 import { pruneExpired } from './allow-list.js';
 import { MatrixChannel } from './channels/matrix.js';
 import { LocalCliChannel } from './channels/local-cli.js';
-import { findChannel, formatMessages, formatThreadContext, stripInternalTags } from 'nanoclaw/router.js';
+import { findChannel, formatMessages, stripInternalTags } from 'nanoclaw/router.js';
+import { formatThreadContext } from './router-ext.js';
 import { collectBotMatrixUserIds } from './service.js';
 import { startSchedulerLoop } from 'nanoclaw/task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from 'nanoclaw/types.js';
@@ -862,7 +868,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Thread routing resolved',
   );
 
-  const basePrompt = formatMessages(contextMessages);
+  const basePrompt = formatMessages(contextMessages, TIMEZONE);
   const threadContext = buildThreadContextBlock(chatJid, contextMessages);
   const missionContext =
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
@@ -1167,7 +1173,7 @@ async function handleGroupMessagesInLoop(
 
   setObjectiveFromMessages(chatJid, messagesToSend);
   const threadCtx = buildThreadContextBlock(chatJid, messagesToSend);
-  const rawFormatted = formatMessages(messagesToSend);
+  const rawFormatted = formatMessages(messagesToSend, TIMEZONE);
 
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
   // BUG-16: auto-set work thread when piped message is in a thread.
@@ -1440,6 +1446,7 @@ async function main(): Promise<void> {
   }
   await ensureContainerSystemRunning();
   initDatabase();
+  initDatabaseExt();
   logger.info('Database initialized');
   pruneOldSessions();
 

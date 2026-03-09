@@ -27,6 +27,8 @@ while IFS= read -r file; do
   base=$(basename "$file")
   [[ "$base" == "README.md" ]] && continue
   readme="$dir/README.md"
+  # Normalize: strip leading ./ so "." dir produces "README.md" not "./README.md"
+  readme="${readme#./}"
   [[ ! -f "$readme" ]] && continue
   if ! echo "$staged" | grep -qF "$readme"; then
     readme_missing+=("$readme (changed $file)")

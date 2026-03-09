@@ -11,8 +11,8 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { parseEnvFile } from 'nanoclaw/env-utils.js';
-import { recoverPodman, stopContainersByPrefix } from 'nanoclaw/podman-utils.js';
+import { parseEnvFile } from './env-utils.js';
+import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 
 import { loadShipConfig, loadFleet } from './ship-config.js';
 import { shellQuote } from './utils.js';

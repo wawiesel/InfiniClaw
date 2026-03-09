@@ -9,7 +9,7 @@ import os from 'os';
 import path from 'path';
 
 import Database from 'better-sqlite3';
-import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from 'nanoclaw/env-utils.js';
+import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from './env-utils.js';
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';

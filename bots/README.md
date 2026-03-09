@@ -4,6 +4,7 @@ Bot personas, roles, skills, and container definitions.
 
 - `CLAUDE.md` — Shared bot instructions (writable by bots)
 - `build.sh` — Container image build script (`./bots/build.sh all` or `./bots/build.sh <bot>`)
+- `container/agent-runner/` — In-container agent code (COPY'd into images at build time)
 - `{role}/` — One directory per role (navigator, engineer, architect)
 - `skills/` — Shared skill pool (see `skills/README.md`)
 
@@ -22,7 +23,7 @@ Bots are assigned to roles via `fleet.json` in the secrets repo.
 
 ## CLAUDE.md layers
 
-1. **Base** (`external/nanoclaw/CLAUDE.md`) — framework behavior
+1. **Base** (`bots/CLAUDE.md`) — shared bot instructions, fleet architecture
 2. **Persona** (`bots/{role}/{bot}/CLAUDE.md`) — identity and rules, writable by bot
 3. **Room** (`bots/{role}/ROOM.md`) — room context, read-only
 

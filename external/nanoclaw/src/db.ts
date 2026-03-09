@@ -32,7 +32,6 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
-      thread_id TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -90,13 +89,6 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
     );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add thread_id column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(`ALTER TABLE messages ADD COLUMN thread_id TEXT`);
   } catch {
     /* column already exists */
   }
@@ -270,7 +262,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -280,7 +272,6 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
-    msg.thread_id ?? null,
   );
 }
 
@@ -296,10 +287,9 @@ export function storeMessageDirect(msg: {
   timestamp: string;
   is_from_me: boolean;
   is_bot_message?: boolean;
-  thread_id?: string;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -309,7 +299,6 @@ export function storeMessageDirect(msg: {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
-    msg.thread_id ?? null,
   );
 }
 
@@ -317,24 +306,29 @@ export function getNewMessages(
   jids: string[],
   lastTimestamp: string,
   botPrefix: string,
+  limit: number = 200,
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, thread_id
-    FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders})
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND content != '' AND content IS NOT NULL
-    ORDER BY timestamp
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE timestamp > ? AND chat_jid IN (${placeholders})
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
   `;
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -348,20 +342,25 @@ export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
+  limit: number = 200,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, thread_id
-    FROM messages
-    WHERE chat_jid = ? AND timestamp > ?
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND content != '' AND content IS NOT NULL
-    ORDER BY timestamp
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE chat_jid = ? AND timestamp > ?
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
   `;
   return db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
 export function createTask(
@@ -633,48 +632,6 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
-}
-
-// --- [InfiniClaw] Functions removed upstream in v1.2.2 but still needed ---
-
-export function getRecentMessages(
-  chatJid: string,
-  botPrefix: string,
-  limit = 25,
-): NewMessage[] {
-  const safeLimit = Math.max(1, Math.min(limit, 200));
-  return db
-    .prepare(`
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
-      FROM messages
-      WHERE chat_jid = ? AND content NOT LIKE ?
-      ORDER BY timestamp DESC
-      LIMIT ?
-    `)
-    .all(chatJid, `${botPrefix}:%`, safeLimit) as NewMessage[];
-}
-
-export function botParticipatesInThread(chatJid: string, threadId: string): boolean {
-  const row = db.prepare(
-    `SELECT 1 FROM messages WHERE chat_jid = ? AND thread_id = ? AND is_from_me = 1 LIMIT 1`,
-  ).get(chatJid, threadId);
-  return !!row;
-}
-
-export function getThreadMessages(chatJid: string, threadId: string, limit = 20): NewMessage[] {
-  return db.prepare(`
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_id
-    FROM messages WHERE chat_jid = ? AND (thread_id = ? OR id = ?)
-    ORDER BY timestamp ASC LIMIT ?
-  `).all(chatJid, threadId, threadId, Math.min(limit, 50)) as NewMessage[];
-}
-
-export function deleteSession(groupFolder: string): void {
-  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
-}
-
-export function deleteRegisteredGroup(jid: string): void {
-  db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
 }
 
 // --- JSON migration ---

@@ -4,9 +4,8 @@ import fs from 'fs';
 
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
-  ContainerInput,
   ContainerOutput,
-  runContainerAgent as defaultRunContainerAgent,
+  runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
@@ -67,13 +66,6 @@ export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  // [InfiniClaw] Injectable container runner — allows host to override with custom mounts/secrets
-  runContainerAgent?: (
-    group: RegisteredGroup,
-    input: ContainerInput,
-    onProcess: (proc: ChildProcess, containerName: string) => void,
-    onOutput?: (output: ContainerOutput) => Promise<void>,
-  ) => Promise<ContainerOutput>;
   onProcess: (
     groupJid: string,
     proc: ChildProcess,
@@ -177,8 +169,7 @@ async function runTask(
   };
 
   try {
-    const runAgent = deps.runContainerAgent ?? defaultRunContainerAgent;
-    const output = await runAgent(
+    const output = await runContainerAgent(
       group,
       {
         prompt: task.prompt,
@@ -200,6 +191,7 @@ async function runTask(
         }
         if (streamedOutput.status === 'success') {
           deps.queue.notifyIdle(task.chat_jid);
+          scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
@@ -212,7 +204,7 @@ async function runTask(
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
-      // Messages are sent via MCP tool (IPC), result text is just logged
+      // Result was already forwarded to the user via the streaming callback above
       result = output.result;
     }
 

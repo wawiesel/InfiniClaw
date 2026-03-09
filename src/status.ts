@@ -6,7 +6,7 @@ import { execSync } from 'child_process';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { parseEnvFile, isOllamaBaseUrl } from 'nanoclaw/env-utils.js';
+import { parseEnvFile, isOllamaBaseUrl } from './env-utils.js';
 import { getActiveBots } from './service.js';
 import { loadShipConfig } from './ship-config.js';
 

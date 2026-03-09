@@ -2,7 +2,7 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS, MAX_SESSION_AGE_MS } from './config.js';
+import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -25,7 +25,6 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
-  spawnedAt: number;
 }
 
 export class GroupQueue {
@@ -50,7 +49,6 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
-        spawnedAt: 0,
       };
       this.groups.set(groupJid, state);
     }
@@ -68,11 +66,7 @@ export class GroupQueue {
 
     if (state.active) {
       state.pendingMessages = true;
-      if (state.idleWaiting) {
-        // Container is alive but idle — close it so drainGroup re-processes messages
-        this.closeStdin(groupJid);
-      }
-      logger.debug({ groupJid, idle: state.idleWaiting }, 'Container active, message queued');
+      logger.debug({ groupJid }, 'Container active, message queued');
       return;
     }
 
@@ -149,21 +143,12 @@ export class GroupQueue {
 
   /**
    * Mark the container as idle-waiting (finished work, waiting for IPC input).
-   * If tasks or messages are pending, preempt the idle container immediately.
+   * If tasks are pending, preempt the idle container immediately.
    */
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
-
-    // Recycle container if it has exceeded max session age
-    if (state.spawnedAt > 0 && Date.now() - state.spawnedAt > MAX_SESSION_AGE_MS) {
-      const ageH = ((Date.now() - state.spawnedAt) / 3600000).toFixed(1);
-      logger.info({ groupJid, ageH }, 'Container exceeded max session age, recycling');
-      this.closeStdin(groupJid);
-      return;
-    }
-
-    if (state.pendingTasks.length > 0 || state.pendingMessages) {
+    if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
     }
   }
@@ -217,7 +202,6 @@ export class GroupQueue {
     state.idleWaiting = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
-    state.spawnedAt = Date.now();
     this.activeCount++;
 
     logger.debug(
@@ -253,7 +237,6 @@ export class GroupQueue {
     state.idleWaiting = false;
     state.isTaskContainer = true;
     state.runningTaskId = task.id;
-    state.spawnedAt = Date.now();
     this.activeCount++;
 
     logger.debug(
@@ -359,50 +342,6 @@ export class GroupQueue {
       }
       // If neither pending, skip this group
     }
-  }
-
-  // [InfiniClaw] Hook called before closing a container's stdin — allows injecting final messages
-  private preCloseHook: ((groupJid: string, inputDir: string) => void) | null = null;
-  setPreCloseHook(fn: (groupJid: string, inputDir: string) => void): void {
-    this.preCloseHook = fn;
-  }
-
-  // [InfiniClaw] Hook called during shutdown — allows custom cleanup
-  private shutdownHook: (() => Promise<void>) | null = null;
-  setShutdownHook(fn: () => Promise<void>): void {
-    this.shutdownHook = fn;
-  }
-
-  // [InfiniClaw] Get all group JIDs that have active containers
-  getActiveGroupJids(): string[] {
-    const result: string[] = [];
-    for (const [jid, state] of this.groups) {
-      if (state.active) result.push(jid);
-    }
-    return result;
-  }
-
-  // [InfiniClaw] Status accessor for presence/progress display
-  getGroupStatus(groupJid: string): {
-    active: boolean;
-    idleWaiting: boolean;
-    hasProcess: boolean;
-    containerName: string | null;
-    pendingMessages: boolean;
-    pendingTasks: number;
-  } {
-    const state = this.groups.get(groupJid);
-    if (!state) {
-      return { active: false, idleWaiting: false, hasProcess: false, containerName: null, pendingMessages: false, pendingTasks: 0 };
-    }
-    return {
-      active: state.active,
-      idleWaiting: state.idleWaiting,
-      hasProcess: state.process !== null,
-      containerName: state.containerName,
-      pendingMessages: state.pendingMessages,
-      pendingTasks: state.pendingTasks.length,
-    };
   }
 
   async shutdown(_gracePeriodMs: number): Promise<void> {

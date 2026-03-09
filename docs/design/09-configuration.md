@@ -6,7 +6,7 @@ Bots receive instructions from three CLAUDE.md files:
 
 | Layer | Source | Bot can edit? | Container path |
 |-------|--------|---------------|----------------|
-| Base | `external/nanoclaw/CLAUDE.md` | No | Concatenated into instance CLAUDE.md |
+| Base | `bots/CLAUDE.md` | No | Concatenated into instance CLAUDE.md |
 | Persona | `bots/{role}/{bot}/CLAUDE.md` | Yes | `/workspace/persona/CLAUDE.md` (rw) |
 | Room | `bots/{role}/ROOM.md` | No | `/workspace/CLAUDE.md` (ro) |
 
