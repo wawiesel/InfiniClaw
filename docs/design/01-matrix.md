@@ -157,13 +157,18 @@ Bot outgoing messages are converted by `renderMarkdownForMatrix()` in `src/chann
 
 ### Client Setup
 
-Element Desktop requires a Labs feature to render math:
+Element Desktop requires a config override to render math. Add to `~/Library/Application Support/Element/config.json` (macOS):
 
-1. Ensure `"showLabsSettings": true` in Element's config (platform-dependent location)
-2. **Settings → Labs → "Render LaTeX maths in messages"**
-3. Restart Element
+```json
+{
+  "show_labs_settings": true,
+  "features": {
+    "feature_latex_maths": true
+  }
+}
+```
 
-This enables both rendering of incoming math and LaTeX input in the composer (`$...$` and `$$...$$`).
+Restart Element. This enables both rendering of incoming `data-mx-maths` and LaTeX input in the composer (`$...$` and `$$...$$`).
 
 ## Verification
 

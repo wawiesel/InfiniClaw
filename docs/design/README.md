@@ -37,3 +37,5 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `18-infrastructure.md` — Ships as VMs, Gitea/MinIO redundancy
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
+
+See `01-matrix.md` for Element Desktop math rendering setup.
