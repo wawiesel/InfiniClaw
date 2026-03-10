@@ -625,17 +625,27 @@ function resolveShipName(input: string, ships: Record<string, unknown>): string 
  * - Untargeted (`!refresh` in Engineering): returns local bots whose
  *   MAIN_GROUP_NAME matches the room the command arrived in.
  */
-function resolveBots(target: string | undefined, roomName: string, action?: string): string[] {
+function resolveBots(target: string | undefined, roomName: string, action?: string, roomId?: string): string[] {
   const local = getActiveBots();
+  // Build the set of bots in THIS room (by name or room ID)
+  const botRooms = buildBotRoomMap();
+  const inRoom = new Set(local.filter((bot) => botRooms[bot] === roomName));
+  // Also match by room ID against quartersRoom in fleet (for curtainLoop commands)
+  if (roomId) {
+    const matrixJid = `matrix:${roomId}`;
+    for (const [bot, e] of Object.entries(liveFleet)) {
+      if (e.ship === HOSTNAME && e.quartersRoom === matrixJid) inRoom.add(bot);
+    }
+  }
+
   if (target) {
-    if (local.includes(target)) return [target];
-    // For report/sleep/wake, also match inactive/sleeping bots assigned to this ship
-    if ((action === 'report' || action === 'sleep' || action === 'wake') && liveFleet[target]?.ship === HOSTNAME) return [target];
+    // Targeted: bot must be in this room, OR for sleep/wake match any bot on this ship
+    if (inRoom.has(target)) return [target];
+    if ((action === 'sleep' || action === 'wake') && liveFleet[target]?.ship === HOSTNAME) return [target];
     return [];
   }
-  // No target — scope to bots in this room on this ship
-  const botRooms = buildBotRoomMap();
-  return local.filter((bot) => botRooms[bot] === roomName);
+  // Untargeted: all bots in this room
+  return [...inRoom];
 }
 
 // ── Health check + S3 ─────────────────────────────────────────
@@ -1648,7 +1658,7 @@ async function handleLifecycleCommand(
   conn: RoomConn,
 ): Promise<void> {
   const root = resolveRoot();
-  const bots = resolveBots(target, conn.name, action);
+  const bots = resolveBots(target, conn.name, action, conn.roomId);
 
   // No local bots matched — silently ignore. Another ship handles it,
   // or the room simply has no bots from this ship.
@@ -1699,19 +1709,24 @@ async function handleLifecycleCommand(
         await reply(conn, `⛔ !dismiss ${name} — ${errStr(err)}`);
       }
     } else if (action === 'sleep') {
-      // Sleep: hard stop — leave all rooms except quarters, stop container
+      // Sleep: leave duty/lounge (not quarters), stop container
       try {
         stopBot(bot);
         killStaleContainers(bot);
         await setBotPip(root, bot, '💤');
-        // Move bot: leave all non-quarters rooms
+        // Leave non-quarters rooms so bot ends up in quarters only
+        const quartersJid = liveFleet[bot]?.quartersRoom;
+        const quartersRoomId = quartersJid?.replace(/^matrix:/, '');
         try {
           const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
-          await botLeaveRoom(botToken, homeserver, dutyRoomId);
-          if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
-          log(`${name}: moved to quarters (sleeping)`);
+          if (dutyRoomId && dutyRoomId !== quartersRoomId) {
+            await botLeaveRoom(botToken, homeserver, dutyRoomId);
+          }
+          if (loungeId && loungeId !== quartersRoomId) {
+            await botLeaveRoom(botToken, homeserver, loungeId);
+          }
         } catch (roomErr) {
-          log(`${name}: room move failed (non-fatal): ${errStr(roomErr)}`);
+          log(`${name}: room leave failed (non-fatal): ${errStr(roomErr)}`);
         }
         fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         writeFleet(liveFleet);
@@ -1821,7 +1836,7 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
     return;
   }
 
-  const bots = resolveBots(targetBot, conn.name, 'go');
+  const bots = resolveBots(targetBot, conn.name, 'go', conn.roomId);
   if (bots.length === 0) {
     if (targetBot) await reply(conn, `No local bot: ${targetBot}`);
     return;
@@ -1845,7 +1860,7 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
 /** Lightweight refresh: stop → rebuild → start. No brain/lobe/room changes. */
 async function handleRefresh(target: string | undefined, conn: RoomConn): Promise<void> {
   const root = resolveRoot();
-  const bots = resolveBots(target, conn.name, 'report');
+  const bots = resolveBots(target, conn.name, 'report', conn.roomId);
   if (bots.length === 0) return;
 
   if (!isShipActive()) {
