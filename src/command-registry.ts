@@ -74,7 +74,8 @@ export const COMMANDS: CommandDef[] = [
 /** Register a handler for a command by name. */
 export function registerHandler(name: string, handler: RelayHandler): void {
   const cmd = COMMANDS.find(c => c.name === name);
-  if (!cmd) throw new Error(`Unknown command: ${name}`);
+  // Sanitize name before interpolating into error message to prevent log injection.
+  if (!cmd) throw new Error(`Unknown command: ${name.replace(/[^\w-]/g, '_')}`);
   cmd.handler = handler;
 }
 
@@ -85,12 +86,18 @@ export function registerHandlers(handlers: Record<string, RelayHandler>): void {
   }
 }
 
+/** Maximum length of a command string accepted by dispatch. Prevents DoS via long strings. */
+const MAX_CMD_LENGTH = 512;
+
 /** Find and execute the matching command handler. Returns true if matched. */
 export async function dispatch(cmd: string, conn: RoomConn, allConns: RoomConn[]): Promise<boolean> {
+  if (cmd.length > MAX_CMD_LENGTH) return false;
   for (const def of COMMANDS) {
     if (def.match(cmd)) {
       if (def.handler) {
         await def.handler(cmd, conn, allConns);
+      } else {
+        console.warn(`[command-registry] command '${def.name}' matched but has no registered handler`);
       }
       return true;
     }
