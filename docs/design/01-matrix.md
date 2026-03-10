@@ -13,7 +13,7 @@ Matrix is the communication backbone. Every message, command, and status update 
 | Bot accounts | One per bot. Joins rooms based on lifecycle status. |
 | Intercom accounts | Write-only broadcast channels, one per duty room. The relay polls these for incoming `!` commands. Not present in ship rooms. |
 
-Bots ignore all system accounts (intercom, loudspeaker, help) via `IGNORE_SENDERS` in their env files.
+Bots see loudspeaker and intercom messages in their context window (for situational awareness) but only ignore the help account via `IGNORE_SENDERS`. The trigger system controls whether bots respond — not whether they hear.
 
 Account credentials are in `secrets/operator/`. See `operator/intercom.json` for intercom accounts.
 

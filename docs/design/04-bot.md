@@ -149,7 +149,7 @@ Before routing, messages pass through filtering:
 - **Pattern filtering:** Messages matching `IGNORE_PATTERNS` (from `IGNORE_TRIGGERS` env, uses `\b<name>\b` word-boundary) are skipped
 - **Operator callout:** Captain messages starting with `@` are operator-directed — bots ignore them
 - **Operator pill:** Captain messages starting with `📞` are operator-directed — bots ignore them
-- **System accounts:** Bots ignore messages from system accounts (`IGNORE_SENDERS` env) — intercom, loudspeaker, and help accounts
+- **Help account:** Bots ignore messages from `@help` (`IGNORE_SENDERS` env) — help text is Captain-only feedback
 
 ## Display Name
 
