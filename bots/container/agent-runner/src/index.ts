@@ -459,6 +459,14 @@ function writeMcpConfig(containerInput: ContainerInput, env: Record<string, stri
   settings.mcpServers = mcpServers;
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  // Also write project-level .mcp.json so Claude Code picks up the latest
+  // chatJid even when enableAllProjectMcpServers is true (project-level
+  // overrides global settings.json).
+  const cwd = process.cwd();
+  const projectMcpPath = path.join(cwd, '.mcp.json');
+  fs.writeFileSync(projectMcpPath, JSON.stringify({ mcpServers }, null, 2));
+
   log(`Wrote MCP config with servers: ${Object.keys(mcpServers).join(', ')}`);
 }
 

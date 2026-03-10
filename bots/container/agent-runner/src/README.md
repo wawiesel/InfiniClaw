@@ -31,7 +31,7 @@ This is the **in-container agent runner**: the process that spawns inside each b
 | `model-selection.ts` | Resolves effective lobe model based on lobe type and env |
 | `ipc-mcp-stdio.ts` | Stdio MCP proxy for task containers — provides a limited tool subset for scheduled/IPC-spawned tasks |
 
-## Engineer observations (updated 2026-03-08)
+## Engineer observations (updated 2026-03-10)
 
 - **`delegate_to_lobe`**: Spawns codex/gemini/claude/ollama as a subprocess. Since `7c56ab7`, all lobes are prohibited from using `send_message`/`send_image`/intercom tools — output goes to delegate thread automatically.
 - **`delegatedObjective`**: The full objective passed to lobes. Includes execution constraints prepended (no venvs in /workspace/persona, no cache pollution, no communication tools).
@@ -40,3 +40,4 @@ This is the **in-container agent runner**: the process that spawns inside each b
 - **Claude CLI args**: `--print --verbose --output-format stream-json --dangerously-skip-permissions --model {model} --add-dir {cwd}`. Objective passed via stdin.
 - **Lobe result delivery**: On lobe exit, writes `result-{lobeId}.json` to IPC input dir. Main brain picks it up on next turn and posts it to the delegate thread.
 - **`ipc-mcp-stdio.ts`**: Task containers (IPC-spawned, not interactive) get a restricted MCP toolset. Used when `context_mode: "group"` injects a prompt into a running session.
+- **MCP config dual-write**: `writeMcpConfig` writes to both `~/.claude/settings.json` (global) and `.mcp.json` (project-level) because Claude Code's `enableAllProjectMcpServers` makes project-level configs override global ones. Without the `.mcp.json` write, a stale project config from a previous room (e.g. Engineering) would override the current chatJid (e.g. quarters).

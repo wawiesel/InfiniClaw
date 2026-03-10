@@ -532,6 +532,13 @@ function matrixErrCode(err: unknown): string | undefined {
   return undefined;
 }
 
+/** M_FORBIDDEN "Event is not authorized" — per-event auth (wrong room for event_id), not a token issue. */
+function isEventAuthError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const msg = (err as Record<string, unknown>).message;
+  return typeof msg === 'string' && msg.includes('Event is not authorized');
+}
+
 /**
  * Convert <m>Name</m> markers in text/HTML to Matrix mention pills.
  * Bots emit <m>Cid</m> to explicitly mark a mention. This avoids false matches
@@ -1162,10 +1169,12 @@ export class MatrixChannel implements Channel {
         'sendReaction',
       ));
     } catch (err) {
-      if (this.isAuthFailure(err)) {
+      // M_FORBIDDEN with "Event is not authorized" is a per-event issue (wrong room
+      // for the event_id), not a token failure — don't disconnect.
+      if (this.isAuthFailure(err) && !isEventAuthError(err)) {
         this.markDisconnected('Matrix auth failed while sending reaction', err);
       }
-      logger.warn({ jid, eventId, err }, 'Failed to send Matrix reaction');
+      logger.warn({ jid, eventId, emoji, err }, 'Failed to send Matrix reaction');
     }
   }
 
