@@ -164,6 +164,8 @@ export function writeFleet(fleet: Record<string, BotEntry>): void {
 }
 
 export interface ShipEntry {
+  hostname: string;
+  emoji?: string;
   ip: string | null;
   os: string;
   user: string | null;
@@ -190,11 +192,37 @@ export function safeLoadShips(): Record<string, ShipEntry> {
   try { return loadShips(); } catch { return {}; }
 }
 
+/** Find ship entry by hostname. Returns [name, entry] or undefined. */
+export function findShipByHostname(hostname?: string): [string, ShipEntry] | undefined {
+  const h = hostname ?? os.hostname();
+  const ships = safeLoadShips();
+  for (const [name, entry] of Object.entries(ships)) {
+    if (entry.hostname === h) return [name, entry];
+  }
+  return undefined;
+}
+
+/** Get this ship's entry, looking up by hostname. */
+export function thisShip(): ShipEntry | undefined {
+  return findShipByHostname()?.[1];
+}
+
+/** Get this ship's name (key in ships.json). Falls back to hostname. */
+export function thisShipName(): string {
+  return findShipByHostname()?.[0] ?? os.hostname();
+}
+
 /** Check if this ship is active. */
 export function isShipActive(): boolean {
-  const ships = safeLoadShips();
-  const hostname = os.hostname();
-  return ships[hostname]?.active !== false;
+  return thisShip()?.active !== false;
+}
+
+/** Short display tag: "🦁 Herc" or fallback to hostname. */
+export function shipTag(hostname?: string): string {
+  const found = findShipByHostname(hostname);
+  if (!found) return hostname ?? os.hostname();
+  const [name, entry] = found;
+  return entry.emoji ? `${entry.emoji} ${name}` : name;
 }
 
 /** Clear cached config (for testing or reload). */

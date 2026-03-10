@@ -35,7 +35,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipActive, clearShipConfigCache, RUNNING_STATUSES } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipActive, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
@@ -107,7 +107,7 @@ function statusLine(emoji: string, what: string, status: string, elapsedMs: numb
   const time = elapsedMs > 0
     ? `${formatTimestamp()} · ${formatDuration(elapsedMs)}`
     : formatTimestamp();
-  return `${emoji} ${what} (${HOSTNAME}) ${status} (${time})`;
+  return `${emoji} ${what} (${thisShipName()}) ${status} (${time})`;
 }
 
 /** Stage result: `✅ <what><suffix>` or `⛔ <what><suffix>` or `⚠️ <what><suffix>` */
@@ -173,7 +173,7 @@ type FleetEntry = { role: string; rank: number; ship: string | null; status: Bot
 let liveFleet: Record<string, FleetEntry> = {};
 /** Read this ship's operatorRelay flag from ships.json (default: true). */
 function isOperatorRelayEnabled(): boolean {
-  return safeLoadShips()[HOSTNAME]?.operatorRelay !== false;
+  return findShipByHostname()?.[1]?.operatorRelay !== false;
 }
 let fleetDirty = false;
 
@@ -458,30 +458,27 @@ let cachedIsSpeaker = true;
 async function electSpeaker(): Promise<boolean> {
   try {
     const ships = loadShips();
-    const active = Object.entries(ships).filter(([_, m]) => m.active);
+    const active = Object.entries(ships).filter(([, m]) => m.active);
     if (active.length === 0) return true;
-    if (!active.some(([name]) => name === HOSTNAME)) return false;
+    if (!active.some(([, e]) => e.hostname === HOSTNAME)) return false;
 
     const epochs = await fetchCommitEpochs();
-    // Find the newest commit epoch among active ships
     let maxEpoch = 0;
-    for (const [name] of active) {
-      const e = epochs[name] ?? 0;
+    for (const [, entry] of active) {
+      const e = epochs[entry.hostname] ?? 0;
       if (e > maxEpoch) maxEpoch = e;
     }
 
     const myEpoch = epochs[HOSTNAME] ?? localCommitEpoch;
-
     if (myEpoch < maxEpoch) {
       log(`speaker: deferring — local commit ${myEpoch} < newest ${maxEpoch}`);
       return false;
     }
 
-    // Tiebreak: among ships at maxEpoch, lowest rank wins
     const atMax = active
-      .filter(([name]) => (epochs[name] ?? 0) >= maxEpoch)
+      .filter(([, entry]) => (epochs[entry.hostname] ?? 0) >= maxEpoch)
       .sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
-    return atMax.length > 0 && atMax[0][0] === HOSTNAME;
+    return atMax.length > 0 && atMax[0][1].hostname === HOSTNAME;
   } catch {
     return true;
   }
@@ -550,7 +547,8 @@ async function setBotPip(root: string, bot: string, pip: string): Promise<void> 
   try {
     const { token, homeserver, userId } = await botMatrixLogin(root, bot);
     const name = bot.charAt(0).toUpperCase() + bot.slice(1);
-    const displayName = `${name} ${pip} (${HOSTNAME})`;
+    const shipEmoji = findShipByHostname()?.[1]?.emoji;
+    const displayName = shipEmoji ? `${name} ${pip} ${shipEmoji}` : `${name} ${pip}`;
     await matrixSetDisplayName(homeserver, token, userId, displayName);
   } catch (err) {
     log(`setBotPip ${bot} ${pip}: ${errStr(err)}`);
@@ -604,9 +602,10 @@ function parseTarget(cmd: string, prefix: string): { matched: boolean; target?: 
   return { matched: true, target };
 }
 
-/** Case-insensitive check: does the input match this ship? */
+/** Case-insensitive check: does the input match this ship by name or hostname? */
 function isThisShip(input: string): boolean {
-  return input.toLowerCase() === HOSTNAME.toLowerCase();
+  const lower = input.toLowerCase();
+  return lower === HOSTNAME.toLowerCase() || lower === thisShipName().toLowerCase();
 }
 
 /** Case-insensitive ship name lookup — returns canonical name from ships.json or null. */
@@ -721,7 +720,7 @@ async function publishFleetReport(): Promise<FleetReport> {
     }
   }
 
-  const report: FleetReport = { ship: HOSTNAME, ts: Date.now(), relayVersion: relayVer, bots: botReports };
+  const report: FleetReport = { ship: thisShipName(), ts: Date.now(), relayVersion: relayVer, bots: botReports };
 
   const s3 = getS3Client();
   if (s3) {
@@ -1426,7 +1425,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
               fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
               writeFleet(liveFleet);
               clearShipConfigCache();
-              secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${HOSTNAME}`);
+              secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${thisShipName()}`);
               fleetDirty = false;
               const root = resolveRoot();
               try {
@@ -1662,8 +1661,7 @@ async function handleLifecycleCommand(
     log(`!${action} ${name}`);
 
     // Resolve ship room IDs for room management
-    const ships = safeLoadShips();
-    const loungeId = ships[HOSTNAME]?.loungeId as string | undefined;
+    const loungeId = findShipByHostname()?.[1]?.loungeId as string | undefined;
     const dutyRoomId = conn.roomId;
 
     if (action === 'dismiss') {
@@ -1729,7 +1727,7 @@ async function handleLifecycleCommand(
         const model = env?.BRAIN_MODEL || '?';
         const ver = botVersion(root, bot);
         await setBotPip(root, bot, '🟢');
-        await step(`🟢 online · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+        await step(`🟢 online · ${role}[${rank}] · ${model} · ${thisShipName()}${ver}`);
         await reply(conn, `☀️ ${name} awake (quarters)`);
         publishFleetReport().catch(() => {});
       } catch (err) {
@@ -1779,8 +1777,7 @@ async function handleLifecycleCommand(
 /** Send bot to a non-quarters, non-duty room. No args = list available rooms. */
 async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
   const root = resolveRoot();
-  const ships = safeLoadShips();
-  const loungeId = ships[HOSTNAME]?.loungeId as string | undefined;
+  const loungeId = findShipByHostname()?.[1]?.loungeId as string | undefined;
 
   // Build available room map
   const rooms: Record<string, string> = {};
@@ -1861,7 +1858,7 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
       refreshBot(root, bot);
       const model = env?.BRAIN_MODEL || '?';
       const ver = botVersion(root, bot);
-      await step(`✅ refreshed · ${role}[${rank}] · ${model} · ${HOSTNAME}${ver}`);
+      await step(`✅ refreshed · ${role}[${rank}] · ${model} · ${thisShipName()}${ver}`);
       await reply(conn, `✅ ${name} refreshed`);
       publishFleetReport().catch(() => {});
     } catch (err) {
@@ -1927,12 +1924,13 @@ function registerRelayCommands(): void {
 
       try {
         const ships = loadShips();
-        if (!ships[HOSTNAME]) { await reply(conn, `${HOSTNAME} not in ships.json`); return; }
-        ships[HOSTNAME].operatorRelay = action === 'on';
+        const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
+        if (!me) { await reply(conn, `${HOSTNAME} not in ships.json`); return; }
+        me[1].operatorRelay = action === 'on';
         writeShips(ships);
-        secretsGitCommit(['operator/ships.json'], `relay ${action} ${HOSTNAME}`);
+        secretsGitCommit(['operator/ships.json'], `relay ${action} ${me[0]}`);
         log(`operator relay ${action}`);
-        await reply(conn, `${HOSTNAME}: operator relay ${action === 'on' ? 'on ✅' : 'off 🔇'}`);
+        await reply(conn, `operator relay ${action === 'on' ? 'on ✅' : 'off 🔇'}`);
       } catch (err) {
         await reply(conn, `!relay failed — ${errStr(err)}`);
       }
@@ -1973,15 +1971,16 @@ function registerRelayCommands(): void {
       if (targetShip && !isThisShip(targetShip)) return;
       try {
         const ships = loadShips();
-        if (!ships[HOSTNAME]) { await reply(conn, `not in ships.json`); return; }
+        const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
+        if (!me) { await reply(conn, `not in ships.json`); return; }
         for (const bot of getActiveBots()) {
           stopBot(bot);
           killStaleContainers(bot);
           fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         }
-        ships[HOSTNAME].active = false;
+        me[1].active = false;
         writeShips(ships);
-        secretsGitCommit(['operator/ships.json'], `decommission ${HOSTNAME}: bots stopped, relay only`);
+        secretsGitCommit(['operator/ships.json'], `decommission ${me[0]}`);
         await reply(conn, `decommissioned — all bots stopped, relay still running`);
       } catch (err) {
         await reply(conn, `decommission failed — ${errStr(err)}`);
@@ -1993,10 +1992,11 @@ function registerRelayCommands(): void {
       if (targetShip && !isThisShip(targetShip)) return;
       try {
         const ships = loadShips();
-        if (!ships[HOSTNAME]) { await reply(conn, `not in ships.json`); return; }
-        ships[HOSTNAME].active = true;
+        const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
+        if (!me) { await reply(conn, `not in ships.json`); return; }
+        me[1].active = true;
         writeShips(ships);
-        secretsGitCommit(['operator/ships.json'], `commission ${HOSTNAME}`);
+        secretsGitCommit(['operator/ships.json'], `commission ${me[0]}`);
         ensurePodmanReady();
         const { started } = restartBotsToQuarters(resolveRoot());
         await reply(conn, `commissioned — started ${started.join(', ') || 'no bots assigned'}`);
@@ -2161,14 +2161,16 @@ function registerRelayCommands(): void {
       const [botInput, shipInput] = parts;
       const bot = botInput.toLowerCase();
       if (!liveFleet[bot]) { await reply(conn, `Unknown bot: ${botInput}`); return; }
-      let targetShip: string;
+      let targetShip: string; // hostname for fleet.json
+      let targetName: string; // display name
       try {
         const ships = loadShips();
         const resolved = resolveShipName(shipInput, ships);
         if (!resolved) { await reply(conn, `Unknown ship: ${shipInput}`); return; }
-        targetShip = resolved;
-        if (!ships[targetShip].active) { await reply(conn, `${targetShip} is decommissioned`); return; }
-      } catch { targetShip = shipInput; /* ships.json missing — skip validation */ }
+        targetName = resolved;
+        targetShip = ships[resolved].hostname;
+        if (!ships[resolved].active) { await reply(conn, `${targetName} is decommissioned`); return; }
+      } catch { targetShip = shipInput; targetName = shipInput; }
       if (liveFleet[bot].ship !== HOSTNAME) return;
       try {
         stopBot(bot);
@@ -2176,10 +2178,10 @@ function registerRelayCommands(): void {
         removeBotMounts(bot);
         fleetUpdate(bot, { status: 'transit', triggerType: 'never', ship: targetShip });
         writeFleet(liveFleet);
-        const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetShip}`);
+        const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetName}`);
         fleetDirty = false;
         if (!result.ok) throw new Error(result.error);
-        await reply(conn, `${bot} dematerialized — awaiting materialization on ${targetShip}`);
+        await reply(conn, `${bot} dematerialized — awaiting materialization on ${targetName}`);
       } catch (err) {
         await reply(conn, `transport failed — ${errStr(err)}`);
       }
@@ -2207,7 +2209,7 @@ function registerRelayCommands(): void {
         const s3 = getS3Client();
 
         // Poll S3 for fresh reports (up to 5s), then read stale as fallback
-        const freshReports: Record<string, FleetReport> = { [HOSTNAME]: report };
+        const freshReports: Record<string, FleetReport> = { [thisShipName()]: report };
         const staleReports: Record<string, FleetReport> = {};
         if (s3 && allShipNames.length > 1) {
           const deadline = Date.now() + 5_000;
@@ -2501,7 +2503,7 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
 }
 
 async function reply(conn: RoomConn, text: string, threadRootId?: string): Promise<string | undefined> {
-  const tagged = `[${HOSTNAME}] ${text}`;
+  const tagged = `[${shipTag()}] ${text}`;
   const ls = loadLoudspeakerConfig();
   if (ls) {
     const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
@@ -2514,7 +2516,7 @@ async function reply(conn: RoomConn, text: string, threadRootId?: string): Promi
 /** Reply via the help account (for help text, unknown command errors).
  *  Falls back to loudspeaker if help account is not configured yet. */
 async function helpReply(conn: RoomConn, text: string): Promise<string | undefined> {
-  const tagged = `[${HOSTNAME}] ${text}`;
+  const tagged = `[${shipTag()}] ${text}`;
   const hc = loadHelpConfig();
   if (hc) {
     const token = await getHelpToken(hc.homeserver, hc.username, hc.password);
