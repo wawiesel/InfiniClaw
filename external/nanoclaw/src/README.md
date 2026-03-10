@@ -21,6 +21,7 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 | `channels/` | Channel implementations |
 | `index.ts` | Re-exports |
 | `config.ts` | `ASSISTANT_NAME`, `TRIGGER_PATTERN` (`<m>Name</m>` match), shared constants (trailing newline cleanup) |
+| `env-utils.ts` | Env file parsing: `parseEnvLine`, `parseEnvFile`, `upsertEnvLine`, `isOllamaBaseUrl` |
 | `logger.ts` | Pino logger setup |
 | `timezone.ts` | Timezone resolution |
 | `mount-security.ts` | Path traversal guards for container mounts |
