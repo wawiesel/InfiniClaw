@@ -2,6 +2,7 @@
 import {
   installRelay, startRelay, stopRelay, uninstallRelay,
 } from './service.js';
+import { errStr } from './utils.js';
 
 const [cmd, sub] = process.argv.slice(2);
 
@@ -16,16 +17,16 @@ if (cmd !== 'relay') {
 
 switch (sub) {
   case 'install':
-    installRelay().catch((err) => fail(err instanceof Error ? err.message : String(err)));
+    installRelay().catch((err) => fail(errStr(err)));
     break;
   case 'start':
-    try { startRelay(); } catch (err) { fail(err instanceof Error ? (err as Error).message : String(err)); }
+    try { startRelay(); } catch (err) { fail(errStr(err)); }
     break;
   case 'stop':
-    try { stopRelay(); } catch (err) { fail(err instanceof Error ? (err as Error).message : String(err)); }
+    try { stopRelay(); } catch (err) { fail(errStr(err)); }
     break;
   case 'uninstall':
-    try { uninstallRelay(); } catch (err) { fail(err instanceof Error ? (err as Error).message : String(err)); }
+    try { uninstallRelay(); } catch (err) { fail(errStr(err)); }
     break;
   default:
     fail('Usage: cli relay install|start|stop|uninstall');
