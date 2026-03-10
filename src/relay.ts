@@ -30,6 +30,7 @@ import {
   matrixJoin,
   matrixLeave,
   matrixSetDisplayName,
+  matrixSetRoomName,
   markdownToHtml,
   loadIntercomConfig,
   clearIntercomConfigCache,
@@ -37,6 +38,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipActive, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
+import { formatBotDisplayName } from './formatting.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
 import type { RoomConn } from './command-registry.js';
@@ -502,6 +504,28 @@ async function relaySend(homeserver: string, token: string, roomId: string, text
   return matrixSend({ homeserver, token, roomId, text, threadRootId, log });
 }
 
+/** Set the ship space name to "emoji shipName" using the operator account. */
+async function ensureShipSpaceNames(): Promise<void> {
+  const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
+  let opConfig: { homeserver: string; accessToken: string } | null = null;
+  try {
+    opConfig = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+  } catch { return; }
+  const { homeserver, accessToken } = opConfig ?? {};
+  if (!homeserver || !accessToken) return;
+
+  const found = findShipByHostname();
+  if (!found) return;
+  const [shipName, shipEntry] = found;
+  if (!shipEntry.emoji) return;
+
+  const spaceName = `${shipEntry.emoji} ${shipName}`;
+  if (shipEntry.spaceId) {
+    const ok = await matrixSetRoomName(homeserver, accessToken, shipEntry.spaceId, spaceName).catch(() => false);
+    log(`ensureShipSpaceNames: ${ok ? '✅' : '❌'} space (${shipEntry.spaceId}) → ${spaceName}`);
+  }
+}
+
 // ── Bot Matrix room management ──────────────────────────────────
 
 /** Login as a bot using its env file credentials. */
@@ -546,10 +570,7 @@ async function botLeaveRoom(token: string, homeserver: string, roomId: string): 
 async function setBotPip(root: string, bot: string, pip: string): Promise<void> {
   try {
     const { token, homeserver, userId } = await botMatrixLogin(root, bot);
-    const name = bot.charAt(0).toUpperCase() + bot.slice(1);
-    const shipEmoji = findShipByHostname()?.[1]?.emoji;
-    const displayName = shipEmoji ? `${name} ${pip} ${shipEmoji}` : `${name} ${pip}`;
-    await matrixSetDisplayName(homeserver, token, userId, displayName);
+    await matrixSetDisplayName(homeserver, token, userId, formatBotDisplayName(bot, pip));
   } catch (err) {
     log(`setBotPip ${bot} ${pip}: ${errStr(err)}`);
   }
@@ -2871,6 +2892,9 @@ async function main(): Promise<void> {
   } else {
     log('ship is decommissioned — skipping bot startup');
   }
+
+  // Ensure ship space has emoji prefix in its name
+  ensureShipSpaceNames().catch((err) => log(`ensureShipSpaceNames failed: ${errStr(err)}`));
 
   // Start background loops (non-blocking alongside room sync loops)
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));

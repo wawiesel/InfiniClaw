@@ -115,13 +115,13 @@ import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
+import { formatBotDisplayName } from './formatting.js';
 import { loadFleet } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
 
 // ── Display name helper ────────────────────────────────────────────────
-const BOT_LOCATION = os.hostname().toUpperCase();
 function botDisplayName(badge: string): string {
-  return `${ASSISTANT_NAME} ${badge} (${BOT_LOCATION})`;
+  return formatBotDisplayName(ASSISTANT_NAME, badge);
 }
 
 // ── Module-level state ─────────────────────────────────────────────────

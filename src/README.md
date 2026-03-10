@@ -34,8 +34,8 @@ Host machine (macOS / Linux)
 │── Orchestrator ─────────────────────────────────────────────
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2; seeds quarters or duty room based on fleet status; restartBotForRoom for lightweight room switches
-├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave, setDisplayName)
-├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, room transitions, help account. `resolveBots(target, conn)` finds bots in a room by MAIN_GROUP_NAME or quartersRoom. Operator `!` commands in curtainLoop are allowed (not filtered as own messages).
+├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave, setDisplayName, setRoomName)
+├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, room transitions, help account. `resolveBots(target, conn)` finds bots in a room by MAIN_GROUP_NAME or quartersRoom. Operator `!` commands in curtainLoop are allowed (not filtered as own messages). `ensureShipSpaceNames()` sets the ship's Matrix space name to "emoji shipName" on startup.
 ├── main.ts             → Message loop, indicators, reaction acks (👀/🔔), container lifecycle
 ├── container-spawn.ts  → Container orchestration: secrets, mounts, podman args, stale cleanup, IPC setup
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)
