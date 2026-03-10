@@ -4,11 +4,11 @@
 
 import { findShipByHostname } from './ship-config.js';
 
-/** Format bot display name: "Name pip shipEmoji". */
+/** Format bot display name: "pip Name shipEmoji". */
 export function formatBotDisplayName(bot: string, pip: string): string {
   const name = bot.charAt(0).toUpperCase() + bot.slice(1);
   const shipEmoji = findShipByHostname()?.[1]?.emoji;
-  return shipEmoji ? `${name} ${pip} ${shipEmoji}` : `${name} ${pip}`;
+  return shipEmoji ? `${pip} ${name} ${shipEmoji}` : `${pip} ${name}`;
 }
 
 export function escapeHtml(input: string): string {

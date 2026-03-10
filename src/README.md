@@ -106,6 +106,6 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Error strings**: Always use `errStr(err)` from `utils.ts` instead of inline `err instanceof Error ? err.message : String(err)`. Already imported in all source files.
 - **Regex escaping**: Use `escapeRegex(s)` from `utils.ts` instead of inline `/[.*+?^${}()|[\]\\]/g` patterns.
 - **Env var integers**: Use `envInt(name, default)` from `utils.ts` instead of `parseInt(process.env.VAR || 'X', 10)`.
-- **Bot display names**: Use `formatBotDisplayName(bot, pip)` from `formatting.ts` — single source of truth for the `Name pip shipEmoji` format. Both `relay.ts:setBotPip` and `main.ts:botDisplayName` use it.
+- **Bot display names**: Use `formatBotDisplayName(bot, pip)` from `formatting.ts` — single source of truth for the `pip Name shipEmoji` format. Both `relay.ts:setBotPip` and `main.ts:botDisplayName` use it.
 - **Ship names in user-visible output**: Use `shipTag()` or `thisShipName()` from `ship-config.ts`, never raw `os.hostname()`. S3 keys for fleet reports also use ship names.
 - **Display name sync**: `syncBotDisplayNames()` runs on relay startup to ensure ALL bots (including sleeping) have current format.
