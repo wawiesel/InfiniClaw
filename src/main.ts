@@ -107,7 +107,7 @@ import { appendConversationLog } from './conversation-log.js';
 import { statusMessage, escapeHtml } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { uploadContent, uploadHtml, getPresignedUrl } from './s3-sync.js';
-import { errStr } from './utils.js';
+import { errStr, escapeRegex } from './utils.js';
 import { exportHistoryToS3 } from './history-export.js';
 
 import { GIT_VERSION } from './version.js';
@@ -238,7 +238,7 @@ function isCOMainTimelineTrigger(chatJid: string, messages: NewMessage[]): boole
   const botNamePatterns: RegExp[] = [];
   if (roster) {
     for (const name of roster.keys()) {
-      botNamePatterns.push(new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'));
+      botNamePatterns.push(new RegExp(`\\b${escapeRegex(name)}\\b`, 'i'));
     }
   }
   return messages.some(m => {

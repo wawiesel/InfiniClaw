@@ -14,6 +14,11 @@ export function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
+/** Escape a string for use in a RegExp pattern. */
+export function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function errStr(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

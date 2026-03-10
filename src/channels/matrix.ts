@@ -30,6 +30,7 @@ import {
   RegisteredGroup,
 } from 'nanoclaw/types.js';
 import { escapeHtml } from '../formatting.js';
+import { escapeRegex } from '../utils.js';
 
 export interface MatrixChannelOpts {
   onMessage: OnInboundMessage;
@@ -151,7 +152,7 @@ export function restoreMentionPrefixes(body: string, formattedBody: string): str
   let result = body;
   for (const name of displayNames) {
     // Wrap bare name in <m> markers. Skip if already wrapped or @-prefixed.
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = escapeRegex(name);
     const re = new RegExp(`(?<!@)(?<!<m>)\\b${escaped}\\b(?!</m>)`, 'g');
     result = result.replace(re, `<m>${name}</m>`);
   }
@@ -176,7 +177,7 @@ export function convertRawMentions(
   for (const [, displayName] of nameCache) {
     const baseName = displayName.split(/\s/)[0];
     if (!baseName) continue;
-    const escaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = escapeRegex(baseName);
     // Match @Name with word boundary, but not if already inside <m> markers
     baseNames.push({
       pattern: new RegExp(`(?<!<m>)@${escaped}\\b`, 'gi'),

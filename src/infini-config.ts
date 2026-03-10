@@ -3,6 +3,7 @@
  * These were removed from upstream NanoClaw config in v1.2.2
  * (moved to channel modules or removed entirely).
  */
+import { escapeRegex } from './utils.js';
 
 export const ASSISTANT_ROLE = process.env.ASSISTANT_ROLE || '';
 export const CAPTAIN_USER_ID = process.env.CAPTAIN_USER_ID || '';
@@ -27,10 +28,6 @@ export const MATRIX_DEVICE_NAME = process.env.MATRIX_DEVICE_NAME || '';
 export const MATRIX_USER_ID = process.env.MATRIX_USER_ID || '';
 
 // Message filtering
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 const ignoreTriggerStr = (process.env.IGNORE_TRIGGERS || '').trim();
 export const IGNORE_PATTERNS: RegExp[] = ignoreTriggerStr
   ? ignoreTriggerStr.split(',').map((t) => {
