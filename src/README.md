@@ -103,3 +103,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Thread Brain limit**: `MAX_THREAD_BRAINS_PER_BOT` (default 3) caps concurrent Thread Brains per bot. Rejection posts a warning into the triggering Matrix thread so the bot knows to wait.
 - **Error strings**: Always use `errStr(err)` from `utils.ts` instead of inline `err instanceof Error ? err.message : String(err)`. Already imported in all source files.
 - **Regex escaping**: Use `escapeRegex(s)` from `utils.ts` instead of inline `/[.*+?^${}()|[\]\\]/g` patterns.
+- **Env var integers**: Use `envInt(name, default)` from `utils.ts` instead of `parseInt(process.env.VAR || 'X', 10)`.

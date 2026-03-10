@@ -107,7 +107,7 @@ import { appendConversationLog } from './conversation-log.js';
 import { statusMessage, escapeHtml } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { uploadContent, uploadHtml, getPresignedUrl } from './s3-sync.js';
-import { errStr, escapeRegex } from './utils.js';
+import { errStr, escapeRegex, envInt } from './utils.js';
 import { exportHistoryToS3 } from './history-export.js';
 
 import { GIT_VERSION } from './version.js';
@@ -278,13 +278,13 @@ function resolveReplyThread(
 
 // Exit-137 (SIGKILL) backoff — prevents tight respawn loops when containers are killed externally.
 // We can't know if it's OOM or a host kill, but we should still back off to avoid hammering resources.
-const KILL_137_COOLDOWN_MS = parseInt(process.env.KILL_137_COOLDOWN_MS || '60000', 10);
-const KILL_137_MAX_CONSECUTIVE = parseInt(process.env.KILL_137_MAX_CONSECUTIVE || '3', 10);
+const KILL_137_COOLDOWN_MS = envInt('KILL_137_COOLDOWN_MS', 60_000);
+const KILL_137_MAX_CONSECUTIVE = envInt('KILL_137_MAX_CONSECUTIVE', 3);
 const kill137Consecutive: Record<string, number> = {};
 const kill137CooldownUntil: Record<string, number> = {};
 
 // Idle pip — change display name pip after prolonged inactivity
-const IDLE_PIP_THRESHOLD_MS = parseInt(process.env.IDLE_PIP_THRESHOLD_MS || '300000', 10); // 5 minutes default
+const IDLE_PIP_THRESHOLD_MS = envInt('IDLE_PIP_THRESHOLD_MS', 300_000); // 5 minutes default
 const IDLE_PIP_CHECK_MS = 60_000;
 let lastActivityAt = Date.now();
 let idlePipActive = false;

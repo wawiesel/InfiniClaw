@@ -3,7 +3,7 @@
  * These were removed from upstream NanoClaw config in v1.2.2
  * (moved to channel modules or removed entirely).
  */
-import { escapeRegex } from './utils.js';
+import { envInt, escapeRegex } from './utils.js';
 
 export const ASSISTANT_ROLE = process.env.ASSISTANT_ROLE || '';
 export const CAPTAIN_USER_ID = process.env.CAPTAIN_USER_ID || '';
@@ -11,19 +11,19 @@ export const OPERATOR_USER_ID = process.env.OPERATOR_USER_ID || '';
 export const MAIN_GROUP_FOLDER = process.env.MAIN_GROUP_FOLDER || 'main';
 // Max time the main brain may run per turn before being killed (0 = disabled).
 // Enforces the dispatch model: main brain triages, Thread Brain works.
-export const MAIN_BRAIN_TURN_TIMEOUT_MS = parseInt(process.env.MAIN_BRAIN_TURN_TIMEOUT_MS || '90000', 10);
+export const MAIN_BRAIN_TURN_TIMEOUT_MS = envInt('MAIN_BRAIN_TURN_TIMEOUT_MS', 90_000);
 // Max inline tool calls before a dispatch warning is injected into the running container.
-export const MAIN_BRAIN_TOOL_LIMIT = parseInt(process.env.MAIN_BRAIN_TOOL_LIMIT || '3', 10);
-export const HEAP_LIMIT_MB = parseInt(process.env.HEAP_LIMIT_MB || '0', 10);
-export const RESUME_DELAY_SECONDS = parseInt(process.env.RESUME_DELAY_SECONDS || '0', 10);
-export const MEMORY_CHECK_INTERVAL = parseInt(process.env.MEMORY_CHECK_INTERVAL || '120000', 10);
+export const MAIN_BRAIN_TOOL_LIMIT = envInt('MAIN_BRAIN_TOOL_LIMIT', 3);
+export const HEAP_LIMIT_MB = envInt('HEAP_LIMIT_MB', 0);
+export const RESUME_DELAY_SECONDS = envInt('RESUME_DELAY_SECONDS', 0);
+export const MEMORY_CHECK_INTERVAL = envInt('MEMORY_CHECK_INTERVAL', 120_000);
 
 // Matrix channel config
 export const MATRIX_HOMESERVER = process.env.MATRIX_HOMESERVER || '';
 export const MATRIX_USERNAME = process.env.MATRIX_USERNAME || '';
 export const MATRIX_PASSWORD = process.env.MATRIX_PASSWORD || '';
 export const MATRIX_ACCESS_TOKEN = process.env.MATRIX_ACCESS_TOKEN || '';
-export const MATRIX_RECONNECT_INTERVAL = parseInt(process.env.MATRIX_RECONNECT_INTERVAL || '5000', 10);
+export const MATRIX_RECONNECT_INTERVAL = envInt('MATRIX_RECONNECT_INTERVAL', 5_000);
 export const MATRIX_DEVICE_NAME = process.env.MATRIX_DEVICE_NAME || '';
 export const MATRIX_USER_ID = process.env.MATRIX_USER_ID || '';
 

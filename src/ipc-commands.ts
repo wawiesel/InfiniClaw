@@ -561,7 +561,7 @@ async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): 
     if (chatJid) await ctx.sendMessage(chatJid, `✅ wksm started (pid ${child.pid}), health: ${health}`);
   } catch (err) {
     logger.error({ err }, 'restart_wksm failed');
-    if (chatJid) await ctx.sendMessage(chatJid, `⛔ restart_wksm failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (chatJid) await ctx.sendMessage(chatJid, `⛔ restart_wksm failed: ${errStr(err)}`);
   }
 }
 
@@ -578,7 +578,7 @@ async function handleRestartRelay(data: CommandData, ctx: InfiniClawIpcContext):
     if (chatJid) await ctx.sendMessage(chatJid, '✅ Relay restarted');
   } catch (err) {
     logger.error({ err }, 'restart_relay failed');
-    if (chatJid) await ctx.sendMessage(chatJid, `⛔ restart_relay failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (chatJid) await ctx.sendMessage(chatJid, `⛔ restart_relay failed: ${errStr(err)}`);
   }
 }
 

@@ -7,7 +7,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { isRecord, readJson, writeJson } from './utils.js';
+import { errStr, isRecord, readJson, writeJson } from './utils.js';
 
 export interface S3Config {
   endpoint: string;
@@ -84,7 +84,7 @@ export function loadShipConfig(): ShipConfig {
   try {
     parsed = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
   } catch (err) {
-    throw new Error(`fleet.json: invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`fleet.json: invalid JSON: ${errStr(err)}`);
   }
   if (!isRecord(parsed)) {
     throw new Error('fleet.json: top-level JSON must be an object');

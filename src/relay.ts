@@ -53,7 +53,7 @@ import {
   loadProfileEnv,
   removeStaleProcesses,
 } from './service.js';
-import { sleep, shellQuote, errStr } from './utils.js';
+import { sleep, shellQuote, errStr, envInt } from './utils.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 
 // ── Config ─────────────────────────────────────────────────────────
@@ -67,9 +67,9 @@ const STARTUP_SYNC_DELAY = 3_000;
 
 // Configurable intervals (env vars in milliseconds, or use defaults)
 const GITHUB_REPO_URL = 'https://github.com/wawiesel/InfiniClaw';
-const GIT_SYNC_INTERVAL = parseInt(process.env.GIT_SYNC_INTERVAL || '', 10) || 3 * 60_000;     // default 3 min
-const SECRETS_SYNC_INTERVAL = parseInt(process.env.SECRETS_SYNC_INTERVAL || '', 10) || 30_000;  // default 30s
-const HEALTH_INTERVAL = parseInt(process.env.HEALTH_INTERVAL || '', 10) || 30 * 60_000;         // default 30 min
+const GIT_SYNC_INTERVAL = envInt('GIT_SYNC_INTERVAL', 3 * 60_000);     // default 3 min
+const SECRETS_SYNC_INTERVAL = envInt('SECRETS_SYNC_INTERVAL', 30_000);  // default 30s
+const HEALTH_INTERVAL = envInt('HEALTH_INTERVAL', 30 * 60_000);         // default 30 min
 
 // ── Failure alerting (thread + exponential backoff) ─────────────────
 
@@ -1020,7 +1020,7 @@ const RELAY_TASKS_POLL_INTERVAL = 2_000;
 // ── Thread Brain task registry ──────────────────────────────────────────
 
 const THREAD_BRAIN_RESTART_DELAY = 30_000; // wait 30s after last TB exit before restarting bot
-const MAX_THREAD_BRAINS_PER_BOT = parseInt(process.env.MAX_THREAD_BRAINS_PER_BOT || '3', 10);
+const MAX_THREAD_BRAINS_PER_BOT = envInt('MAX_THREAD_BRAINS_PER_BOT', 3);
 const threadBrainRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const activeThreadBrainCount = new Map<string, number>(); // bot → active TB count
 
@@ -1590,7 +1590,7 @@ async function healthLoop(): Promise<void> {
 
 // ── Heartbeat — nudge idle bots to do autonomous work ──────────────
 
-const HEARTBEAT_INTERVAL = parseInt(process.env.HEARTBEAT_INTERVAL_MS || '', 10) || 30 * 60_000; // 30 min default
+const HEARTBEAT_INTERVAL = envInt('HEARTBEAT_INTERVAL_MS', 30 * 60_000); // 30 min default
 
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {

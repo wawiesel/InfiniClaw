@@ -11,6 +11,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { parseEnvLine } from './env-utils.js';
+import { envInt } from './utils.js';
 import {
   buildBotDirectory,
   buildInfiniClawMounts,
@@ -45,9 +46,9 @@ export type { ContainerOutput, ContainerInput } from 'nanoclaw/container-runner.
 // ── Config ──────────────────────────────────────────────────────────
 
 const CONTAINER_CPUS = parseFloat(process.env.CONTAINER_CPUS || '0');
-const CONTAINER_MEMORY_MB = parseInt(process.env.CONTAINER_MEMORY_MB || '0', 10);
-const CONTAINER_MEMORY_RESERVATION_MB = parseInt(process.env.CONTAINER_MEMORY_RESERVATION_MB || '0', 10);
-const CONTAINER_HEAP_LIMIT_MB = parseInt(process.env.CONTAINER_HEAP_LIMIT_MB || '0', 10);
+const CONTAINER_MEMORY_MB = envInt('CONTAINER_MEMORY_MB', 0);
+const CONTAINER_MEMORY_RESERVATION_MB = envInt('CONTAINER_MEMORY_RESERVATION_MB', 0);
+const CONTAINER_HEAP_LIMIT_MB = envInt('CONTAINER_HEAP_LIMIT_MB', 0);
 
 const SAFE_CONTAINER_NAME_TAG = /^[a-zA-Z0-9_.-]{1,32}$/;
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;

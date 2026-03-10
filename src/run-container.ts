@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from 'nanoclaw/logger.js';
 import type { ContainerOutput } from 'nanoclaw/container-runner.js';
+import { errStr } from './utils.js';
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
@@ -429,7 +430,7 @@ export function runContainer(opts: RunContainerOpts): Promise<ContainerOutput> {
         resolve({
           status: 'error',
           result: null,
-          error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
+          error: `Failed to parse container output: ${errStr(err)}`,
         });
       }
     });

@@ -14,6 +14,12 @@ export function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
+/** Parse an integer env var, returning `defaultVal` if absent or non-numeric. */
+export function envInt(name: string, defaultVal: number): number {
+  const n = parseInt(process.env[name] ?? '', 10);
+  return Number.isFinite(n) ? n : defaultVal;
+}
+
 /** Escape a string for use in a RegExp pattern. */
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
