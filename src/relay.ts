@@ -615,19 +615,14 @@ function resolveShipName(input: string, ships: Record<string, unknown>): string 
   return Object.keys(ships).find(s => s.toLowerCase() === lower) ?? null;
 }
 
-/** Resolve which local bots a command applies to. Matches by room name or quartersRoom JID. */
-function resolveBots(target: string | undefined, conn: RoomConn, action?: string): string[] {
+/** Resolve which local bots are in the given room. Matches by MAIN_GROUP_NAME or quartersRoom. */
+function resolveBots(target: string | undefined, conn: RoomConn): string[] {
   const roomName = conn.name.toLowerCase();
   const botRooms = buildBotRoomMap();
   const inRoom = Object.entries(liveFleet)
     .filter(([bot, e]) => e.ship === HOSTNAME && (botRooms[bot] === roomName || e.quartersRoom === conn.roomId))
     .map(([bot]) => bot);
-
-  if (target) {
-    if (inRoom.includes(target)) return [target];
-    if ((action === 'sleep' || action === 'wake') && liveFleet[target]?.ship === HOSTNAME) return [target];
-    return [];
-  }
+  if (target) return inRoom.includes(target) ? [target] : [];
   return inRoom;
 }
 
@@ -1641,7 +1636,7 @@ async function handleLifecycleCommand(
   conn: RoomConn,
 ): Promise<void> {
   const root = resolveRoot();
-  const bots = resolveBots(target, conn, action);
+  const bots = resolveBots(target, conn);
 
   // No local bots matched.
   if (bots.length === 0) {
@@ -1813,7 +1808,7 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
     return;
   }
 
-  const bots = resolveBots(targetBot, conn, 'go');
+  const bots = resolveBots(targetBot, conn);
   if (bots.length === 0) {
     if (targetBot) await reply(conn, `No local bot: ${targetBot}`);
     return;
@@ -1837,7 +1832,7 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
 /** Lightweight refresh: stop → rebuild → start. No brain/lobe/room changes. */
 async function handleRefresh(target: string | undefined, conn: RoomConn): Promise<void> {
   const root = resolveRoot();
-  const bots = resolveBots(target, conn, 'report');
+  const bots = resolveBots(target, conn);
   if (bots.length === 0) return;
 
   if (!isShipActive()) {
