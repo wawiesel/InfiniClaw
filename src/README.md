@@ -92,6 +92,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Progress throttle**: `PROGRESS_CHAT_COOLDOWN_MS=10s` throttles text on main timeline. Since `ca16ce9`, bypassed when in an active thread so bot reasoning is fully visible.
 - **`formatMessages`**: Since `5b94b50`, includes `thread="$id"` attribute on threaded messages so bot can see thread structure in prompt.
 - **IPC paths**: `/workspace/ipc/tasks/` → runs inside container (no git credentials). Git push uses `_runtime/relay-tasks/` → picked up by `relayTasksLoop()` in relay.ts and executed on host.
+- **`resolveBots`**: Finds bots on this ship — first by room membership, then (for explicit targets) by fleet assignment. Sleeping bots have no room but can still be targeted by name for `!wake`.
 - **Speaker**: `isSpeaker()` returns true for only one machine per Engineering room. That relay handles all `!` commands. `!refit` currently only refits the speaker's local bots — multi-machine refit coordination is a known issue.
 - **`!todo`**: Reads most-recently-modified `.claude/todos/*.json` from `_runtime/instances/{bot}/data/sessions/main/` to show actual todo items (since `ca16ce9`).
 - **`operator-commands.ts` removed**: Operator commands (`!allow`, `!deny`, `!todo`, `!roster`, etc.) were folded into `relay.ts`. `command-registry.ts` is now the single source of truth for all `!` command names.

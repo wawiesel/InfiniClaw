@@ -702,7 +702,12 @@ function resolveBots(target: string | undefined, conn: RoomConn): string[] {
   const inRoom = Object.entries(liveFleet)
     .filter(([bot, e]) => e.ship === HOSTNAME && (botRooms[bot] === roomName || e.quartersRoom === conn.roomId))
     .map(([bot]) => bot);
-  if (target) return inRoom.includes(target) ? [target] : [];
+  if (target) {
+    // Explicit target: first check room, then check any bot on this ship (e.g. sleeping bots)
+    if (inRoom.includes(target)) return [target];
+    if (liveFleet[target]?.ship === HOSTNAME) return [target];
+    return [];
+  }
   return inRoom;
 }
 
