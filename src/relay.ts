@@ -2473,7 +2473,11 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
     await speakerReport(conn, buildHelpText());
     return;
   }
-  await dispatch(cmd, conn, allConns || []);
+  const matched = await dispatch(cmd, conn, allConns || []);
+  if (!matched) {
+    const cmdName = cmd.split(/\s/)[0];
+    await reply(conn, `Unknown command: \`${cmdName}\`. Use \`!\` for help.`);
+  }
 }
 
 async function reply(conn: RoomConn, text: string, threadRootId?: string): Promise<string | undefined> {
