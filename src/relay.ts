@@ -1272,6 +1272,11 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                 const count = activeThreadBrainCount.get(botKey) ?? 0;
                 if (count >= MAX_THREAD_BRAINS_PER_BOT) {
                   log(`relayTasks: thread_brain rejected — ${botKey} already at limit (${MAX_THREAD_BRAINS_PER_BOT})`);
+                  const roomId = chat_jid.replace(/^matrix:/, '');
+                  const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
+                  if (conn?.accessToken && thread_id) {
+                    void threadReply(conn, thread_id, `⚠️ Thread Brain rejected: already at concurrent limit (${MAX_THREAD_BRAINS_PER_BOT}). Wait for a Thread Brain to finish.`).catch((err) => log(`relayTasks: rejection notify failed: ${errStr(err)}`));
+                  }
                 } else {
                   activeThreadBrainCount.set(botKey, count + 1);
                   void spawnThreadBrain({ thread_id, objective, chat_jid, bot }, conns).finally(() => {
