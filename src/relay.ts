@@ -618,10 +618,9 @@ function resolveShipName(input: string, ships: Record<string, unknown>): string 
 /** Resolve which local bots a command applies to. Matches by room name or quartersRoom JID. */
 function resolveBots(target: string | undefined, conn: RoomConn, action?: string): string[] {
   const roomName = conn.name.toLowerCase();
-  const jid = `matrix:${conn.roomId}`;
   const botRooms = buildBotRoomMap();
   const inRoom = Object.entries(liveFleet)
-    .filter(([bot, e]) => e.ship === HOSTNAME && (botRooms[bot] === roomName || e.quartersRoom === jid))
+    .filter(([bot, e]) => e.ship === HOSTNAME && (botRooms[bot] === roomName || e.quartersRoom === conn.roomId))
     .map(([bot]) => bot);
 
   if (target) {
@@ -1700,7 +1699,7 @@ async function handleLifecycleCommand(
         killStaleContainers(bot);
         await setBotPip(root, bot, '💤');
         // Leave non-quarters rooms
-        const qid = liveFleet[bot]?.quartersRoom?.replace(/^matrix:/, '');
+        const qid = liveFleet[bot]?.quartersRoom;
         try {
           const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
           for (const rid of [dutyRoomId, loungeId]) {
