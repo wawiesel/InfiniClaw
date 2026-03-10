@@ -74,11 +74,11 @@ When this file has content, the commanding engineer must address these items fir
 ### BUG-24: `isPreformattedHtml` bypass allows prompt injection via raw HTML
 
 **Reported:** 2026-03-08 (9th cycle audit)
-**Status:** open — deferred pending architecture review
+**Status:** fixed (this commit)
 **Priority:** MEDIUM (security)
 **Component:** `src/channels/matrix.ts` — `sendMessage()` / `editMessage()`
 **Symptom:** Strings starting with `<details`, `<font`, or `<small` skip `renderMarkdownForMatrix` and are sent as raw HTML with no sanitization. A prompt-injection payload beginning with `<details>` can carry arbitrary HTML to Matrix clients.
-**Fix:** Either restrict the HTML allowlist or add a post-hoc sanitizer (e.g. `sanitize-html`) to strip unsafe tags/attrs on the bypass path. Deferred — architecture decision needed.
+**Fix:** Added `sanitizePreformattedHtml()` — strips `<script>`, `<iframe>`, `<object>`, `<embed>` tags (with content), event-handler attributes (`on\w+=`), and `javascript:`/`data:` URL schemes. Applied on both bypass paths in `sendTextReturningId` and `editMessage`. No new dependencies. Legitimate uses (`<details>`, `<font>`, `<small>` with inline styles/color) are unaffected.
 
 ---
 

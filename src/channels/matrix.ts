@@ -270,6 +270,24 @@ function sanitizeRenderedHtmlLinks(html: string): string {
   });
 }
 
+/**
+ * Strips dangerous HTML from the preformatted-HTML bypass path (isPreformattedHtml).
+ * Removes script/iframe/object/embed tags, event handler attributes, and
+ * javascript:/data: URL schemes. Safe internal uses (<details>, <font>, <small>)
+ * are unaffected — they don't contain these patterns.
+ */
+function sanitizePreformattedHtml(html: string): string {
+  return html
+    // Remove script, iframe, object, embed with inner content
+    .replace(/<(script|iframe|object|embed)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    // Remove self-closing / unclosed versions of the above
+    .replace(/<(script|iframe|object|embed)\b[^>]*\/?>/gi, '')
+    // Remove event handler attributes (onclick, onerror, onload, etc.)
+    .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
+    // Remove javascript: and data: URL schemes in href/src/action
+    .replace(/\b(href|src|action)\s*=\s*(?:"(?:javascript|data):[^"]*"|'(?:javascript|data):[^']*')/gi, '$1="#"');
+}
+
 function createSafeMarkdownRenderer() {
   const renderer = new marked.Renderer();
   const origListitem = renderer.listitem.bind(renderer);
@@ -1060,7 +1078,7 @@ export class MatrixChannel implements Channel {
 
     let html: string;
     if (isPreformattedHtml) {
-      html = text;
+      html = sanitizePreformattedHtml(text);
     } else {
       html = await renderMarkdownForMatrix(normalizedText);
     }
@@ -1175,7 +1193,7 @@ export class MatrixChannel implements Channel {
       const isPreformattedHtml = /^<(details|font|small)\b/i.test(newText.trimStart());
       let editHtml: string;
       if (isPreformattedHtml) {
-        editHtml = newText;
+        editHtml = sanitizePreformattedHtml(newText);
       } else {
         editHtml = (await renderMarkdownForMatrix(normalizedEdit)).trim();
       }
