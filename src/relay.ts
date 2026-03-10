@@ -504,8 +504,16 @@ async function relaySend(homeserver: string, token: string, roomId: string, text
   return matrixSend({ homeserver, token, roomId, text, threadRootId, log });
 }
 
-/** Set the ship space name to "emoji shipName" using the operator account. */
-async function ensureShipSpaceNames(): Promise<void> {
+/** Room emoji map for the double-emoji naming scheme: <location><room> Name. */
+const ROOM_EMOJI: Record<string, string> = {
+  bridge: '🌉', engineering: '⚙️', astrometrics: '🔭',
+  lounge: '🛋️', curtain: '🎭',
+};
+const FLEET_LOCATION = '🌌';
+const QUARTERS_EMOJI = '🏠';
+
+/** Ensure all ship spaces, fleet rooms, and quarters rooms have correct emoji-prefixed names. */
+async function ensureRoomNames(): Promise<void> {
   const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
   let opConfig: { homeserver: string; accessToken: string } | null = null;
   try {
@@ -517,12 +525,53 @@ async function ensureShipSpaceNames(): Promise<void> {
   const found = findShipByHostname();
   if (!found) return;
   const [shipName, shipEntry] = found;
-  if (!shipEntry.emoji) return;
+  const shipEmoji = shipEntry.emoji || '';
 
-  const spaceName = `${shipEntry.emoji} ${shipName}`;
-  if (shipEntry.spaceId) {
-    const ok = await matrixSetRoomName(homeserver, accessToken, shipEntry.spaceId, spaceName).catch(() => false);
-    log(`ensureShipSpaceNames: ${ok ? '✅' : '❌'} space (${shipEntry.spaceId}) → ${spaceName}`);
+  const setName = async (roomId: string, name: string) => {
+    const ok = await matrixSetRoomName(homeserver, accessToken, roomId, name).catch(() => false);
+    log(`ensureRoomNames: ${ok ? '✅' : '❌'} ${name}`);
+  };
+
+  // Ship space: "🦁 Herc"
+  if (shipEntry.spaceId && shipEmoji) {
+    await setName(shipEntry.spaceId, `${shipEmoji} ${shipName}`);
+  }
+
+  // Fleet rooms (bridge, engineering, astrometrics): "🌌⚙️ Engineering"
+  const intercom = loadIntercomConfig();
+  if (intercom) {
+    for (const [name, room] of Object.entries(intercom.rooms)) {
+      const roomEmoji = ROOM_EMOJI[name];
+      if (roomEmoji) {
+        const displayName = name.charAt(0).toUpperCase() + name.slice(1);
+        await setName(room.roomId, `${FLEET_LOCATION}${roomEmoji} ${displayName}`);
+      }
+    }
+  }
+
+  // Lounge: "<ship>🛋️ Lounge"
+  if (shipEntry.loungeId && shipEmoji) {
+    await setName(shipEntry.loungeId, `${shipEmoji}${ROOM_EMOJI.lounge} Lounge`);
+  }
+
+  // BehindTheCurtain: "<ship>🎭 BehindTheCurtain"
+  try {
+    const opData = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+    const curtainId = opData?.rooms?.BehindTheCurtain;
+    if (curtainId && shipEmoji) {
+      await setName(curtainId, `${shipEmoji}${ROOM_EMOJI.curtain} BehindTheCurtain`);
+    }
+  } catch { /* non-fatal */ }
+
+  // Quarters rooms: "<ship>🏠 Name's Room"
+  const root = resolveRoot();
+  for (const [bot, entry] of Object.entries(liveFleet)) {
+    if (entry.ship !== HOSTNAME || !entry.quartersRoom) continue;
+    try {
+      const env = loadProfileEnv(root, bot);
+      const botName = env.ASSISTANT_NAME || bot.charAt(0).toUpperCase() + bot.slice(1);
+      await setName(entry.quartersRoom, `${shipEmoji}${QUARTERS_EMOJI} ${botName}'s Room`);
+    } catch { /* skip bots with broken env */ }
   }
 }
 
@@ -1712,7 +1761,7 @@ async function handleLifecycleCommand(
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
         restartBotForRoom(root, bot);
-        await reply(conn, `📢 ${name} dismissed`);
+        await reply(conn, `relay ${name} dismissed`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!dismiss ${name} failed: ${errStr(err)}`);
@@ -1733,7 +1782,7 @@ async function handleLifecycleCommand(
         } catch { /* non-fatal */ }
         fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         writeFleet(liveFleet);
-        await reply(conn, `😴 ${name} sleeping`);
+        await reply(conn, `relay ${name} sleeping 😴`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         await reply(conn, `⛔ !sleep ${name} — ${errStr(err)}`);
@@ -1742,9 +1791,11 @@ async function handleLifecycleCommand(
       // Wake: start container in quarters
       const startedAt = Date.now();
       const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-      const threadRoot = await reply(conn, `☀️ ${name} waking`);
+      const threadRoot = await reply(conn, `relay waking ${name} ...`);
       if (!threadRoot) continue;
-      const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
+      let stepN = 0;
+      const totalSteps = 4;
+      const step = (text: string) => threadReply(conn, threadRoot, `[${++stepN}/${totalSteps} ${formatDuration(Date.now() - startedAt)}] ${text}`);
       try {
         await setBotPip(root, bot, '🔄');
         await step('🔄 building');
@@ -1760,7 +1811,9 @@ async function handleLifecycleCommand(
         const ver = botVersion(root, bot);
         await setBotPip(root, bot, '🟢');
         await step(`🟢 online · ${role}[${rank}] · ${model} · ${thisShipName()}${ver}`);
-        await reply(conn, `☀️ ${name} awake (quarters)`);
+        const done = `relay ${name} awake!`;
+        await threadReply(conn, threadRoot, done);
+        await reply(conn, done);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
@@ -1787,7 +1840,7 @@ async function handleLifecycleCommand(
           await botJoinRoom(botToken, homeserver, dutyRoomId, conn, botUserId);
         } catch (roomErr) {
           log(`${name}: room move failed: ${errStr(roomErr)}`);
-          await reply(conn, `📢 ${name} failed to report — ${errStr(roomErr)}`);
+          await reply(conn, `relay ${name} failed to report — ${errStr(roomErr)}`);
           continue;
         }
         fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME });
@@ -1795,11 +1848,11 @@ async function handleLifecycleCommand(
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild)
         restartBotForRoom(root, bot);
-        await reply(conn, `📢 ${name} reporting for duty`);
+        await reply(conn, `relay ${name} reporting for duty`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!report ${name} failed: ${errStr(err)}`);
-        await reply(conn, `📢 ${name} failed to report — returned to quarters`);
+        await reply(conn, `relay ${name} failed to report — returned to quarters`);
       }
     }
   }
@@ -1881,17 +1934,21 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
     log(`!refresh ${name}`);
 
     const startedAt = Date.now();
-    const threadRoot = await reply(conn, `🔄 ${name} refreshing`);
+    const threadRoot = await reply(conn, `relay refreshing ${name} ...`);
     if (!threadRoot) continue;
-    const step = (text: string) => threadReply(conn, threadRoot, `[${formatDuration(Date.now() - startedAt)}] ${text}`);
+    let stepN = 0;
+    const totalSteps = 2;
+    const step = (text: string) => threadReply(conn, threadRoot, `[${++stepN}/${totalSteps} ${formatDuration(Date.now() - startedAt)}] ${text}`);
 
     try {
-      await step('refreshing...');
+      await step('🔄 refreshing');
       refreshBot(root, bot);
       const model = env?.BRAIN_MODEL || '?';
       const ver = botVersion(root, bot);
-      await step(`✅ refreshed · ${role}[${rank}] · ${model} · ${thisShipName()}${ver}`);
-      await reply(conn, `✅ ${name} refreshed`);
+      const done = `relay ${name} refreshed!`;
+      await step(`✅ done · ${role}[${rank}] · ${model} · ${thisShipName()}${ver}`);
+      await threadReply(conn, threadRoot, done);
+      await reply(conn, done);
       publishFleetReport().catch(() => {});
     } catch (err) {
       log(`!refresh ${name} failed: ${errStr(err)}`);
@@ -2906,8 +2963,8 @@ async function main(): Promise<void> {
     log('ship is decommissioned — skipping bot startup');
   }
 
-  // Ensure ship space has emoji prefix in its name
-  ensureShipSpaceNames().catch((err) => log(`ensureShipSpaceNames failed: ${errStr(err)}`));
+  // Ensure all rooms/spaces have correct emoji-prefixed names
+  ensureRoomNames().catch((err) => log(`ensureRoomNames failed: ${errStr(err)}`));
 
   // Sync all bot display names to current format
   syncBotDisplayNames().catch((err) => log(`syncBotDisplayNames failed: ${errStr(err)}`));
