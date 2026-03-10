@@ -179,7 +179,7 @@ function refreshTriggerType(): 'always' | 'callout' | 'never' {
 
 /** Parse relay lifecycle messages to update CO roster at runtime. */
 function handleLifecycleMessage(msg: { content: string; chat_jid: string; sender: string }): boolean {
-  // Relay messages: "HOSTNAME: Name stopped" / "HOSTNAME: Name started (rank N)" / "HOSTNAME: Name restarted" / "HOSTNAME: Name reranked (rank N)"
+  // Relay lifecycle messages: "<prefix> Name stopped/started/restarted/reranked (rank N)"
   const match = msg.content.match(/^\S+: (\S+) (stopped|started|restarted|reranked)(?:\s+\(rank (\d+)\))?$/);
   if (!match) return false;
   // Only process messages from intercom accounts (relay sends via intercom)

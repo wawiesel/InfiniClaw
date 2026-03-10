@@ -576,6 +576,17 @@ async function setBotPip(root: string, bot: string, pip: string): Promise<void> 
   }
 }
 
+/** Sync display names for ALL bots on this ship (including sleeping ones). */
+async function syncBotDisplayNames(): Promise<void> {
+  const root = resolveRoot();
+  const pipForStatus: Record<string, string> = { onduty: '🟢', quarters: '🟢', sleep: '💤', transit: '🔄' };
+  for (const [bot, entry] of Object.entries(liveFleet)) {
+    if (entry.ship !== HOSTNAME) continue;
+    const pip = pipForStatus[entry.status] || '💤';
+    await setBotPip(root, bot, pip);
+  }
+}
+
 /**
  * Restart all running bots on this ship into quarters.
  * Onduty bots are moved to quarters status. Sleeping bots are skipped.
@@ -748,7 +759,7 @@ async function publishFleetReport(): Promise<FleetReport> {
     try {
       await s3.client.send(new PutObjectCommand({
         Bucket: s3.bucket,
-        Key: `${FLEET_S3_PREFIX}/${HOSTNAME}.json`,
+        Key: `${FLEET_S3_PREFIX}/${thisShipName()}.json`,
         Body: Buffer.from(JSON.stringify(report)),
         ContentType: 'application/json',
       }));
@@ -1932,7 +1943,7 @@ function registerRelayCommands(): void {
       // !relay — each ship reports only its own status (ship report)
       if (!arg) {
         const status = isOperatorRelayEnabled() ? '✅ on' : '🔇 off';
-        await shipReport(conn, `${HOSTNAME}: operator relay ${status}`);
+        await shipReport(conn, `${thisShipName()}: operator relay ${status}`);
         return;
       }
 
@@ -1946,7 +1957,7 @@ function registerRelayCommands(): void {
       try {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
-        if (!me) { await reply(conn, `${HOSTNAME} not in ships.json`); return; }
+        if (!me) { await reply(conn, `${thisShipName()} not in ships.json`); return; }
         me[1].operatorRelay = action === 'on';
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `relay ${action} ${me[0]}`);
@@ -2275,10 +2286,12 @@ function registerRelayCommands(): void {
           }
         }
 
-        // Group by ship
+        // Group by ship (resolve hostname → ship name)
+        const hostnameToName: Record<string, string> = {};
+        for (const [sName, sEntry] of Object.entries(ships)) hostnameToName[sEntry.hostname] = sName;
         const byShip: Record<string, Array<[string, typeof allBots[string]]>> = {};
         for (const [botId, entry] of Object.entries(allBots)) {
-          const s = entry.ship || 'drydock';
+          const s = (entry.ship && hostnameToName[entry.ship]) || entry.ship || 'drydock';
           (byShip[s] ??= []).push([botId, entry]);
         }
         for (const s of Object.keys(ships)) { byShip[s] ??= []; }
@@ -2298,7 +2311,7 @@ function registerRelayCommands(): void {
             lines.push('🔧 drydock');
           } else {
             const rank = sConfig?.rank ?? '?';
-            const shipIcon = sConfig?.active ? '⚓' : '🚫';
+            const shipIcon = sConfig?.active ? (sConfig?.emoji ?? '⚓') : '🚫';
             let shipStatus: string;
             if (shipReport) {
               const isFresh = freshReports[shipName] != null;
@@ -2895,6 +2908,9 @@ async function main(): Promise<void> {
 
   // Ensure ship space has emoji prefix in its name
   ensureShipSpaceNames().catch((err) => log(`ensureShipSpaceNames failed: ${errStr(err)}`));
+
+  // Sync all bot display names to current format
+  syncBotDisplayNames().catch((err) => log(`syncBotDisplayNames failed: ${errStr(err)}`));
 
   // Start background loops (non-blocking alongside room sync loops)
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));

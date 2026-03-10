@@ -13,7 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from './env-utils.js';
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
-import { loadShipConfig } from './ship-config.js';
+import { loadShipConfig, shipTag } from './ship-config.js';
 import { logger } from 'nanoclaw/logger.js';
 import { errStr } from './utils.js';
 import { gitSyncRepo } from './git-utils.js';
@@ -117,8 +117,7 @@ function botStatusLine(bot: string, emoji: string): string {
       : rawModel.startsWith('gemini') ? 'Google'
       : isOllamaBaseUrl(env.BRAIN_BASE_URL || '') ? 'Ollama' : 'Claude';
     const model = `${provider}/${rawModel}`;
-    const hostname = os.hostname();
-    return `<font color="#888888"><em>${emoji} ${name} · 🔧 ${role} · 💬 ${group} · 🧠 ${model} · 🖥️ ${hostname} · 📦 ${GIT_VERSION}</em></font>`;
+    return `<font color="#888888"><em>${emoji} ${name} · 🔧 ${role} · 💬 ${group} · 🧠 ${model} · 🖥️ ${shipTag()} · 📦 ${GIT_VERSION}</em></font>`;
   } catch {
     return statusMessage(emoji, `${bot} restarting...`);
   }
@@ -844,7 +843,7 @@ async function handleHealthCheck(data: CommandData, ctx: InfiniClawIpcContext): 
       encoding: 'utf-8', timeout: 30_000, cwd: root,
       env: { ...process.env, MACHINE_NAME: os.hostname() },
     }).trim();
-    await ctx.sendMessage(chatJid, `**${os.hostname()} health:**\n\`\`\`\n${truncateOutput(output)}\n\`\`\``);
+    await ctx.sendMessage(chatJid, `**${shipTag()} health:**\n\`\`\`\n${truncateOutput(output)}\n\`\`\``);
   } catch (err) {
     await safeSend(ctx, chatJid, `health_check failed: ${errStr(err)}`);
   }
@@ -859,7 +858,7 @@ async function handleFleetStatus(data: CommandData, ctx: InfiniClawIpcContext): 
     const fleetPath = path.join(config.secretsPath, 'bots', 'fleet.json');
     const fleet = JSON.parse(fs.readFileSync(fleetPath, 'utf-8'));
     const bots = fleet.bots || {};
-    const lines: string[] = [`**Fleet status** (${os.hostname()}):\n`];
+    const lines: string[] = [`**Fleet status** (${shipTag()}):\n`];
     const byRole: Record<string, Array<[string, { rank: number; ship: string | null; status: string }]>> = {};
     for (const [name, entry] of Object.entries(bots) as Array<[string, { role: string; rank: number; ship: string | null; status: string }]>) {
       if (!byRole[entry.role]) byRole[entry.role] = [];

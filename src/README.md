@@ -62,7 +62,7 @@ Host machine (macOS / Linux)
 ├── status.ts           → Bot status reporting
 ├── status-cli.ts       → Status display for CLI and MCP server
 ├── todo.ts             → Read Claude Code task state from session files
-├── formatting.ts       → Message formatting helpers
+├── formatting.ts       → Message formatting helpers: escapeHtml, statusMessage, formatBotDisplayName
 ├── git-utils.ts        → Shared git helpers: gitOpts(), execErrOutput(), gitSyncRepo() (stash→rebase→pop, conflict hard-reset)
 ├── utils.ts            → Shared utilities: isRecord, sleep, shellQuote, errStr, envInt, escapeRegex, readJson, writeJson
 └── version.ts          → Git version resolution (prefers stamped GIT_VERSION file)
@@ -106,3 +106,6 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Error strings**: Always use `errStr(err)` from `utils.ts` instead of inline `err instanceof Error ? err.message : String(err)`. Already imported in all source files.
 - **Regex escaping**: Use `escapeRegex(s)` from `utils.ts` instead of inline `/[.*+?^${}()|[\]\\]/g` patterns.
 - **Env var integers**: Use `envInt(name, default)` from `utils.ts` instead of `parseInt(process.env.VAR || 'X', 10)`.
+- **Bot display names**: Use `formatBotDisplayName(bot, pip)` from `formatting.ts` — single source of truth for the `Name pip shipEmoji` format. Both `relay.ts:setBotPip` and `main.ts:botDisplayName` use it.
+- **Ship names in user-visible output**: Use `shipTag()` or `thisShipName()` from `ship-config.ts`, never raw `os.hostname()`. S3 keys for fleet reports also use ship names.
+- **Display name sync**: `syncBotDisplayNames()` runs on relay startup to ensure ALL bots (including sleeping) have current format.
