@@ -54,6 +54,7 @@ beforeEach(() => {
   deps = {
     sendMessage: async () => {},
     sendMessageReturningId: async () => undefined,
+    sendReaction: async () => {},
     sendImage: async () => {},
     sendFile: async () => {},
     defaultSenderForGroup: () => 'test',

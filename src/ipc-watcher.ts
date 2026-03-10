@@ -22,6 +22,7 @@ import { isRecord } from './utils.js';
 export interface IpcDeps {
   sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
   sendMessageReturningId: (jid: string, text: string, threadId?: string) => Promise<string | undefined>;
+  sendReaction: (jid: string, eventId: string, emoji: string) => Promise<void>;
   sendImage: (jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string) => Promise<void>;
   sendFile: (jid: string, buffer: Buffer, filename: string, mimetype: string, caption?: string) => Promise<void>;
   defaultSenderForGroup: (sourceGroup: string) => string;
@@ -289,6 +290,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain,
                   sourceGroup,
                   sendMessage: deps.sendMessage,
+                  sendReaction: deps.sendReaction,
                   registeredGroups: deps.registeredGroups,
                   setWorkThread: deps.setWorkThread,
                   clearDelegateThread,

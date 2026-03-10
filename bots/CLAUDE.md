@@ -76,7 +76,7 @@ Commands starting with `!` are reserved for captain and operators. The allow thi
 
 ## Reactions
 
-Use emoji reactions freely: thumbs-up for agreement, check for done, x for problems. 
+Use `send_reaction` to react to a message with an emoji instead of sending a text reply. Call `get_last_event_id` first to get the event ID, then `send_reaction` with the event ID and emoji. Use reactions when you have nothing substantive to add — thumbs-up for agreement, check for done, x for problems. A reaction is a complete response; you do not need to also send a text message.
 
 ## Self-management
 

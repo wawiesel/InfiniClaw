@@ -52,6 +52,7 @@ export interface InfiniClawIpcContext {
   isMain: boolean;
   sourceGroup: string;
   sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
+  sendReaction: (jid: string, eventId: string, emoji: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   setWorkThread: (chatJid: string, threadId: string | null) => void;
   /** Clear the auto-thread entry for this source group (called when set_thread clears the thread) */
@@ -507,6 +508,18 @@ function handleSetThread(data: CommandData, ctx: InfiniClawIpcContext): void {
     ctx.clearDelegateThread(ctx.sourceGroup);
   }
   logger.info({ chatJid: targetJid, threadId, sourceGroup: ctx.sourceGroup }, 'Work thread updated via IPC');
+}
+
+async function handleSendReaction(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const chatJid = parseChatJid(data);
+  const eventId = typeof data.eventId === 'string' ? data.eventId.trim() : '';
+  const emoji = typeof data.emoji === 'string' ? data.emoji.trim() : '';
+  if (!chatJid || !eventId || !emoji) {
+    logger.warn({ sourceGroup: ctx.sourceGroup }, 'send_reaction missing chatJid, eventId, or emoji');
+    return;
+  }
+  await ctx.sendReaction(chatJid, eventId, emoji);
+  logger.info({ chatJid, eventId, emoji, sourceGroup: ctx.sourceGroup }, 'Reaction sent via IPC');
 }
 
 async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
@@ -1028,6 +1041,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   rebuild_image: handleRebuildImage,
   bot_status: handleBotStatus,
   set_thread: handleSetThread,
+  send_reaction: handleSendReaction,
   send_to_room: handleSendToRoom,
   restart_wksm: handleRestartWksm,
   restart_relay: handleRestartRelay,

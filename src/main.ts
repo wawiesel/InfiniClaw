@@ -1874,6 +1874,14 @@ async function main(): Promise<void> {
       await ch.sendMessage(jid, text, threadId);
       storeOutgoing(jid, text, threadId);
     },
+    sendReaction: async (jid, eventId, emoji) => {
+      const ch = findChannel(channels, jid);
+      if (!ch) {
+        logger.warn({ jid }, 'No channel found for IPC reaction');
+        return;
+      }
+      if (ch.sendReaction) await ch.sendReaction(jid, eventId, emoji);
+    },
     sendMessageReturningId: async (jid, text, threadId) => {
       const ch = findChannel(channels, jid);
       if (!ch) {

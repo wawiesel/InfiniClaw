@@ -24,7 +24,7 @@ This is the **in-container agent runner**: the process that spawns inside each b
 | File | Purpose |
 |------|---------|
 | `index.ts` | Entry point: reads ContainerInput from stdin, spawns `claude` CLI, streams output, processes follow-up IPC messages between runs |
-| `tools.ts` | MCP server tools exposed to bot: `set_thread`, `get_last_event_id`, `send_message`, `send_and_open_thread`, `send_image`, `send_file`, `set_brain_mode`, `list_recipients`, `branch_to_thread`, `delegate_to_lobe` |
+| `tools.ts` | MCP server tools exposed to bot: `set_thread`, `get_last_event_id`, `send_message`, `send_reaction`, `send_image`, `send_file`, `set_brain_mode`, `list_recipients`, `branch_to_thread`, `delegate_to_lobe` |
 | `delegate-runner.ts` | Implements `branch_to_thread` and `delegate_to_lobe` — spawns codex/gemini/claude/ollama sub-processes, threads results back |
 | `progress.ts` | `formatToolCallWithOutput` — formats tool calls as HTML `<details>` blocks for Matrix; `createToolProgressHook` for PostToolUse |
 | `bot-messaging.ts` | `emitChatMessageTo` — writes outgoing messages to IPC messages dir for host pickup |

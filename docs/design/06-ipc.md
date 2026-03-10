@@ -25,6 +25,7 @@ Engineers can trigger system operations from inside their containers via IPC:
 | `git_push` | Push InfiniClaw repo |
 | `bot_status` | Get pm2 + error log status |
 | `send_to_room` | Send message to another room |
+| `send_reaction` | React to a message with an emoji |
 
 ## Cooldowns
 

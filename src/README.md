@@ -47,7 +47,7 @@ Host machine (macOS / Linux)
 ├── ship-config.ts      → Fleet/ship config, shared constants (SAFE_BOT_NAME, isValidBotName, RUNNING_STATUSES, BotStatus, TriggerType, defaultTriggerType)
 ├── allow-list.ts       → Validate mounts against host-side allowlist (~/.config/infiniclaw/allow-list.json)
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
-├── ipc-commands.ts     → Handle refresh_bot, stop_bot, start_bot, rebuild_image, git_push, etc.
+├── ipc-commands.ts     → Handle refresh_bot, stop_bot, send_reaction, rebuild_image, git_push, etc.
 ├── brain-management.ts → Runtime model switching
 ├── chat-activity.ts    → Track activity per room for idle detection
 ├── message-filtering.ts→ Dedup, echo prevention, ignore rules (📞 pill, @ callout, system accounts)

@@ -98,6 +98,28 @@ export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
     },
   );
 
+  // ── Reactions ───────────────────────────────────────────────────────
+
+  server.tool(
+    'send_reaction',
+    'React to a message with an emoji instead of sending a text reply. Use this when you have nothing substantive to add but want to acknowledge a message. Call get_last_event_id first to get the event ID.',
+    {
+      event_id: z.string().describe('Matrix event ID of the message to react to (e.g. $abc123)'),
+      emoji: z.string().describe('Single emoji to react with (e.g. 👍, ✅, 🎉)'),
+    },
+    async (args) => {
+      writeIpcFile(tasksDir, {
+        type: 'send_reaction',
+        chatJid,
+        eventId: args.event_id,
+        emoji: args.emoji,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Reacted with ${args.emoji}` }] };
+    },
+  );
+
   // ── File sending ────────────────────────────────────────────────────
 
   function sendFileIpc(filePath: string, ipcType: 'image' | 'file', caption?: string): { content: Array<{ type: 'text'; text: string }>; isError?: boolean } {
