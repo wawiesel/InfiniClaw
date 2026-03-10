@@ -118,7 +118,7 @@ function stageFail(what: string, suffix = ''): string { return `⛔ ${what}${suf
 function stageWarn(what: string, suffix = ''): string { return `⚠️ ${what}${suffix}`; }
 function resultEmoji(warnings: number, errors: number): string { return errors > 0 ? '⛔' : warnings > 0 ? '⚠️' : '✅'; }
 function refitResult(outcome: string, warnings: number, errors: number, elapsedMs: number): string {
-  return statusLine(resultEmoji(warnings, errors), 'refit', `${outcome} (${warnings}W ${errors}E)`, elapsedMs);
+  return `${resultEmoji(warnings, errors)} relay refit ${outcome} (${warnings}W ${errors}E) ${formatDuration(elapsedMs)}`;
 }
 
 async function reportFailure(system: string, detail: string, conns: RoomConn[]): Promise<void> {
@@ -1045,7 +1045,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             // Restart running bots so they pick up new code (skip dismissed)
             const engConn = findEngConn(conns);
             const threadRoot = engConn
-              ? await reply(engConn, `🔄 git sync: ${result.newCommits} new commit(s) — restarting fleet`)
+              ? await reply(engConn, `relay git sync: ${result.newCommits} new commit(s) — restarting fleet`)
               : undefined;
             for (const bot of getActiveBots()) {
               if (liveFleet[bot]?.status !== 'onduty') continue;
@@ -1059,11 +1059,11 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               }
             }
             // Post completion summary before relay restarts
-            if (engConn) await reply(engConn, `✅ git sync: fleet restarted`);
+            if (engConn) await reply(engConn, `relay git sync: fleet restarted`);
             // Restart relay itself to pick up new relay code
             try {
               log('git sync: restarting relay to pick up new code');
-              if (engConn && threadRoot) await threadReply(engConn, threadRoot, `🔄 relay restarting...`);
+              if (engConn && threadRoot) await threadReply(engConn, threadRoot, `relay restarting...`);
               execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
             } catch (err) {
               log(`git sync: relay self-restart failed: ${errStr(err)}`);
@@ -1718,9 +1718,10 @@ async function handleLifecycleCommand(
   const root = resolveRoot();
   const bots = resolveBots(target, conn);
 
-  // No local bots matched.
+  // No local bots matched — only announce in fleet rooms (not quarters).
   if (bots.length === 0) {
-    if (isSpeaker()) await reply(conn, `No bots here to ${action}.`);
+    const isQuarters = Object.values(liveFleet).some(e => e.quartersRoom === conn.roomId);
+    if (!isQuarters && isSpeaker()) await reply(conn, `No bots here to ${action}.`);
     return;
   }
 
@@ -1903,7 +1904,7 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
     try {
       const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
       await botJoinRoom(botToken, homeserver, roomId, conn, botUserId);
-      await reply(conn, `${name} → ${roomName}`);
+      await reply(conn, `relay ${name} → ${roomName}`);
     } catch (err) {
       log(`!go ${roomName} ${name} failed: ${errStr(err)}`);
       await reply(conn, `⛔ !go ${roomName} ${name} — ${errStr(err)}`);
@@ -2070,7 +2071,7 @@ function registerRelayCommands(): void {
         me[1].active = false;
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `decommission ${me[0]}`);
-        await reply(conn, `decommissioned — all bots stopped, relay still running`);
+        await reply(conn, `relay decommissioned — all bots stopped`);
       } catch (err) {
         await reply(conn, `decommission failed — ${errStr(err)}`);
       }
@@ -2088,7 +2089,7 @@ function registerRelayCommands(): void {
         secretsGitCommit(['operator/ships.json'], `commission ${me[0]}`);
         ensurePodmanReady();
         const { started } = restartBotsToQuarters(resolveRoot());
-        await reply(conn, `commissioned — started ${started.join(', ') || 'no bots assigned'}`);
+        await reply(conn, `relay commissioned — started ${started.join(', ') || 'no bots assigned'}`);
       } catch (err) {
         await reply(conn, `commission failed — ${errStr(err)}`);
       }
@@ -2150,7 +2151,7 @@ function registerRelayCommands(): void {
       if (targetShip && !isThisShip(targetShip)) return;
       const startedAt = Date.now();
 
-      const threadRoot = await reply(conn, statusLine('⚓', 'refit', 'starting', 0));
+      const threadRoot = await reply(conn, `relay refit starting ...`);
       if (!threadRoot) return;
       const elapsed = () => Date.now() - startedAt;
 
