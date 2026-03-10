@@ -35,7 +35,7 @@ Host machine (macOS / Linux)
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2; seeds quarters or duty room based on fleet status; restartBotForRoom for lightweight room switches
 ├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave, setDisplayName)
-├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, lightweight restart on room transitions, help account for feedback. resolveBots matches by room name and quartersRoom JID. Sleep leaves duty/lounge but never quarters.
+├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, lightweight restart on room transitions, help account for feedback. resolveBots matches by room name and quartersRoom JID. Sleep leaves duty/lounge but never quarters. Lifecycle commands always reply via loudspeaker when no bots match.
 ├── main.ts             → Message loop, indicators, reaction acks (👀/🔔), container lifecycle
 ├── container-spawn.ts  → Container orchestration: secrets, mounts, podman args, stale cleanup, IPC setup
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)

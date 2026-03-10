@@ -1660,9 +1660,11 @@ async function handleLifecycleCommand(
   const root = resolveRoot();
   const bots = resolveBots(target, conn.name, action, conn.roomId);
 
-  // No local bots matched — silently ignore. Another ship handles it,
-  // or the room simply has no bots from this ship.
-  if (bots.length === 0) return;
+  // No local bots matched.
+  if (bots.length === 0) {
+    if (isSpeaker()) await reply(conn, `No bots here to ${action}.`);
+    return;
+  }
 
   if (action !== 'dismiss' && action !== 'sleep') {
     if (!isShipActive()) {
