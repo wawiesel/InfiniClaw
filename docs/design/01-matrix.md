@@ -7,10 +7,13 @@ Matrix is the communication backbone. Every message, command, and status update 
 | Account | Purpose |
 |---------|---------|
 | Captain | Human. Admin in all rooms. Identity in `secrets/captain`. |
-| Operator (`@operator`) | Operator's direct Matrix presence. Admin in all rooms. Used for direct messages, BehindTheCurtain, and room management. Mentionable by bots to request operator assistance (see Special Mentions). |
-| Loudspeaker (`@loudspeaker`) | Relay's reply voice. Member of all rooms. Delivers `!` command responses prefixed `[SHIPNAME]`. Mentionable by on-duty bots for fleet status or broadcast (see Special Mentions). Bots should ignore loudspeaker messages. |
+| Operator (`@operator`) | Operator's direct Matrix presence. Admin in all rooms. Used for direct messages, BehindTheCurtain, quarters room commands, and room management. Mentionable by bots to request operator assistance (see Special Mentions). |
+| Loudspeaker (`@loudspeaker`) | Relay's reply voice. Member of all rooms. Delivers `!` command responses prefixed `[SHIPNAME]`. Mentionable by on-duty bots for fleet status or broadcast (see Special Mentions). |
+| Help (`@help`) | Help text and unknown command feedback. Member of all rooms. Captain-only visibility — bots ignore this account. |
 | Bot accounts | One per bot. Joins rooms based on lifecycle status. |
 | Intercom accounts | Write-only broadcast channels, one per duty room. The relay polls these for incoming `!` commands. Not present in ship rooms. |
+
+Bots ignore all system accounts (intercom, loudspeaker, help) via `IGNORE_SENDERS` in their env files.
 
 Account credentials are in `secrets/operator/`. See `operator/intercom.json` for intercom accounts.
 

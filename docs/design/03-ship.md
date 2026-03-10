@@ -35,6 +35,19 @@ A single always-on process per ship. The relay connects to Matrix rooms via inte
 
 When a command arrives (e.g. `!rejoin cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
 
+### Matrix Accounts
+
+The relay uses multiple Matrix accounts for different purposes:
+
+| Account | Credential file | Purpose |
+|---------|----------------|---------|
+| `@operator` | `operator-matrix.json` | Admin (invites, power levels), BehindTheCurtain watch, quarters room `!` commands |
+| `@loudspeaker` | `loudspeaker-matrix.json` | Relay command replies (status, lifecycle messages) |
+| `@help` | `help-matrix.json` | Help text and unknown command feedback (Captain-only visibility) |
+| Per-room intercom | `intercom.json` | Duty room watching (bridge, engineering, astrometrics) |
+
+The operator account watches BehindTheCurtain and all rooms it has joined (including quarters rooms). Captain `!` commands from any of these rooms are processed. The help account keeps help/error responses out of loudspeaker so bots don't see them — bots have all system accounts in `IGNORE_SENDERS`.
+
 Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay`.
 
 ### Startup Sequence
@@ -57,7 +70,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 | Health check | `HEALTH_INTERVAL` | 30 min | Run `health-check.sh`, upload to S3 |
 | Heartbeat | — | built-in | Publish relay liveness |
 | Relay tasks | — | built-in | Poll `_runtime/relay-tasks/` for host-side operations |
-| Curtain | — | built-in | Watch BehindTheCurtain room, forward to operator tmux |
+| Curtain | — | built-in | Watch operator-joined rooms (BehindTheCurtain, quarters), process `!` commands, forward Captain messages to operator tmux |
 
 **InfiniClaw sync** detects source changes (TypeScript, package.json, Dockerfiles, tsconfig) and triggers a rebuild → deploy dist → restart bots → restart relay.
 

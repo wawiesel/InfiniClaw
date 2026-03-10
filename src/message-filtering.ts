@@ -30,5 +30,6 @@ export function shouldIgnoreMessage(msg: NewMessage): boolean {
   if (typeof msg.content !== 'string') return isIgnoredSender(msg.sender);
   const content = msg.content.trimStart();
   if (content.startsWith('@') && msg.sender === CAPTAIN_USER_ID) return true; // operator callout — not for bots
+  if (content.startsWith('📞') && msg.sender === CAPTAIN_USER_ID) return true; // operator pill — not for bots
   return isIgnoredSender(msg.sender) || isIgnoredTrigger(content);
 }

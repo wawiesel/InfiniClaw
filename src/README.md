@@ -35,7 +35,7 @@ Host machine (macOS / Linux)
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2; seeds quarters or duty room based on fleet status; restartBotForRoom for lightweight room switches
 ├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave, setDisplayName)
-├── relay.ts            → Supervisor relay: Matrix watcher, bot lifecycle (!report/!dismiss/!go/!wake/!sleep), lightweight restart on room transitions, unknown command feedback
+├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, lightweight restart on room transitions, help account for feedback
 ├── main.ts             → Message loop, indicators, reaction acks (👀/🔔), container lifecycle
 ├── container-spawn.ts  → Container orchestration: secrets, mounts, podman args, stale cleanup, IPC setup
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)
@@ -50,7 +50,7 @@ Host machine (macOS / Linux)
 ├── ipc-commands.ts     → Handle refresh_bot, stop_bot, start_bot, rebuild_image, git_push, etc.
 ├── brain-management.ts → Runtime model switching
 ├── chat-activity.ts    → Track activity per room for idle detection
-├── message-filtering.ts→ Dedup, echo prevention, ignore rules
+├── message-filtering.ts→ Dedup, echo prevention, ignore rules (📞 pill, @ callout, system accounts)
 ├── intercom-relay.ts   → Cross-room messaging via per-room intercom Matrix accounts
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts       → Copy persona skills into container session

@@ -2,6 +2,10 @@
 
 The Captain controls the fleet via `!` commands typed in Matrix. Commands are processed by a lightweight **relay** process (one per ship), not by each bot's host process. Each ship's relay only acts on its local bots. Untargeted commands (e.g. `!dismiss` with no bot name) are scoped to the room — only bots whose `MAIN_GROUP_NAME` matches the room are affected on each ship.
 
+Commands work from any room the operator account has joined — duty rooms (via intercom), BehindTheCurtain, and quarters rooms.
+
+**Help and errors:** `!` (bare) prints the command list. Unknown commands get a feedback message. Both are sent via the help account (not loudspeaker) so bots ignore them.
+
 ## Command Reference
 
 ### Bot Commands

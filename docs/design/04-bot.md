@@ -147,6 +147,9 @@ Both fire together on triggering messages. Non-triggering messages get 👀 only
 Before routing, messages pass through filtering:
 - **Self-echo:** Bots ignore their own messages (tracked via `botMatrixUserIds` set)
 - **Pattern filtering:** Messages matching `IGNORE_PATTERNS` (from `IGNORE_TRIGGERS` env, uses `\b<name>\b` word-boundary) are skipped
+- **Operator callout:** Captain messages starting with `@` are operator-directed — bots ignore them
+- **Operator pill:** Captain messages starting with `📞` are operator-directed — bots ignore them
+- **System accounts:** Bots ignore messages from system accounts (`IGNORE_SENDERS` env) — intercom, loudspeaker, and help accounts
 
 ## Display Name
 

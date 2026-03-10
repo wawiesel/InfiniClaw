@@ -301,6 +301,33 @@ async function getLoudspeakerToken(homeserver: string, username: string, passwor
   }
 }
 
+function loadHelpConfig(): { homeserver: string; username: string; password: string; accessToken: string } | null {
+  try {
+    const helpFile = path.join(secretsRepoPath(), 'operator', 'help-matrix.json');
+    const config = JSON.parse(fs.readFileSync(helpFile, 'utf-8'));
+    return {
+      homeserver: config.homeserver || '',
+      username: config.username || '',
+      password: config.password || '',
+      accessToken: config.accessToken || '',
+    };
+  } catch { return null; }
+}
+
+let helpToken: string | null = null;
+
+async function getHelpToken(homeserver: string, username: string, password: string): Promise<string | null> {
+  if (helpToken) return helpToken;
+  try {
+    const { accessToken } = await relayMatrixLogin(homeserver, username, password);
+    helpToken = accessToken;
+    return helpToken;
+  } catch (err) {
+    log(`help login failed: ${errStr(err)}`);
+    return null;
+  }
+}
+
 function resolveOperatorUserId(): string {
   return resolveOperatorConfig().userId;
 }
@@ -2468,15 +2495,16 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 }
 
 async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[]): Promise<void> {
-  // ! (bare) — print help (speaker only, one reply)
+  // ! (bare) — print help via help account (speaker only, one reply)
   if (cmd === '!') {
-    await speakerReport(conn, buildHelpText());
+    if (!isSpeaker()) return;
+    await helpReply(conn, buildHelpText());
     return;
   }
   const matched = await dispatch(cmd, conn, allConns || []);
   if (!matched) {
     const cmdName = cmd.split(/\s/)[0];
-    await reply(conn, `Unknown command: \`${cmdName}\`. Use \`!\` for help.`);
+    await helpReply(conn, `Unknown command: \`${cmdName}\`. Use \`!\` for help.`);
   }
 }
 
@@ -2489,6 +2517,19 @@ async function reply(conn: RoomConn, text: string, threadRootId?: string): Promi
   }
   if (!conn.accessToken) return undefined;
   return relaySend(conn.homeserver, conn.accessToken, conn.roomId, tagged, threadRootId);
+}
+
+/** Reply via the help account (for help text, unknown command errors).
+ *  Falls back to loudspeaker if help account is not configured yet. */
+async function helpReply(conn: RoomConn, text: string): Promise<string | undefined> {
+  const tagged = `[${HOSTNAME}] ${text}`;
+  const hc = loadHelpConfig();
+  if (hc) {
+    const token = await getHelpToken(hc.homeserver, hc.username, hc.password);
+    if (token) return relaySend(hc.homeserver, token, conn.roomId, tagged);
+  }
+  // Fall back to loudspeaker until help account exists
+  return reply(conn, text);
 }
 
 /** Alias: reply in a thread. */
@@ -2596,25 +2637,25 @@ async function curtainLoop(captainUserId: string): Promise<void> {
             }
           }
 
-          // BehindTheCurtain-specific handling
-          if (rid !== roomId) continue;
-          if (captainUserId && event.sender !== captainUserId) continue; // Captain only
-
-          const curtainConn: RoomConn = {
-            name: 'BehindTheCurtain', roomId, homeserver,
-            username: '', password: '', accessToken, syncToken, filterId, userId,
-          };
-
-          // ! commands — execute and reply to BehindTheCurtain
-          if (body.startsWith('!')) {
-            log(`curtain: command from ${event.sender}: ${body.slice(0, 80)}`);
+          // ! commands — process from any room the operator can see (quarters, BehindTheCurtain, etc.)
+          if (body.startsWith('!') && isAuthorized(event.sender, captainUserId, '')) {
+            const cmdConn: RoomConn = {
+              name: rid === roomId ? 'BehindTheCurtain' : `operator:${rid}`,
+              roomId: rid, homeserver,
+              username: '', password: '', accessToken, syncToken, filterId, userId,
+            };
+            log(`${cmdConn.name}: command from ${event.sender}: ${body.slice(0, 80)}`);
             try {
-              await handleCommand(body, curtainConn, []);
+              await handleCommand(body, cmdConn, []);
             } catch (err) {
-              log(`curtain: command error: ${errStr(err)}`);
+              log(`${cmdConn.name}: command error: ${errStr(err)}`);
             }
             continue;
           }
+
+          // BehindTheCurtain-specific handling (@ relay to operator tmux)
+          if (rid !== roomId) continue;
+          if (captainUserId && event.sender !== captainUserId) continue; // Captain only
 
           if (!isOperatorRelayEnabled()) continue;
 
