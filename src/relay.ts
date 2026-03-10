@@ -2602,7 +2602,8 @@ async function curtainLoop(captainUserId: string): Promise<void> {
         for (const event of (roomData as any).timeline?.events || []) {
           if (event.type !== 'm.room.message') continue;
           if (event.content?.msgtype !== 'm.text') continue;
-          if (event.sender === userId) continue; // skip own messages
+          // Skip own non-command messages (operator commands should still be processed)
+          if (event.sender === userId && !event.content.body?.trim()?.startsWith('!')) continue;
           const body = event.content.body?.trim();
           if (!body) continue;
 
@@ -2632,7 +2633,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           }
 
           // ! commands — process from any room the operator can see (quarters, BehindTheCurtain, etc.)
-          if (body.startsWith('!') && isAuthorized(event.sender, captainUserId, '')) {
+          if (body.startsWith('!') && isAuthorized(event.sender, captainUserId, userId)) {
             const cmdConn: RoomConn = {
               name: rid === roomId ? 'BehindTheCurtain' : `operator:${rid}`,
               roomId: rid, homeserver,
