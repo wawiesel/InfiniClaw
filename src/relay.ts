@@ -47,6 +47,7 @@ import {
   deployBot,
   stopBot,
   refreshBot,
+  restartBotForRoom,
   ensurePodmanReady,
   killStaleContainers,
   loadProfileEnv,
@@ -1644,7 +1645,7 @@ async function handleLifecycleCommand(
     const dutyRoomId = conn.roomId;
 
     if (action === 'dismiss') {
-      // Dismiss: leave duty room. Bot keeps running in quarters with full capabilities.
+      // Dismiss: leave duty room. Restart bot to monitor quarters with full capabilities.
       try {
         try {
           const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
@@ -1656,6 +1657,9 @@ async function handleLifecycleCommand(
         }
         fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
         writeFleet(liveFleet);
+        clearShipConfigCache();
+        // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
+        restartBotForRoom(root, bot);
         await reply(conn, `📢 ${name} dismissed`);
         publishFleetReport().catch(() => {});
       } catch (err) {
@@ -1717,7 +1721,7 @@ async function handleLifecycleCommand(
         await reply(conn, fail);
       }
     } else {
-      // Report: move awake bot to duty room. Skip sleeping bots. No restart needed.
+      // Report: move awake bot to duty room. Skip sleeping bots.
       if (liveFleet[bot]?.status === 'sleep') {
         log(`!report ${name}: skipping (sleeping)`);
         continue;
@@ -1739,6 +1743,9 @@ async function handleLifecycleCommand(
         }
         fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME });
         writeFleet(liveFleet);
+        clearShipConfigCache();
+        // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild)
+        restartBotForRoom(root, bot);
         await reply(conn, `📢 ${name} reporting for duty`);
         publishFleetReport().catch(() => {});
       } catch (err) {

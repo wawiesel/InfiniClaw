@@ -6,6 +6,7 @@
 
 export const ASSISTANT_ROLE = process.env.ASSISTANT_ROLE || '';
 export const CAPTAIN_USER_ID = process.env.CAPTAIN_USER_ID || '';
+export const OPERATOR_USER_ID = process.env.OPERATOR_USER_ID || '';
 export const MAIN_GROUP_FOLDER = process.env.MAIN_GROUP_FOLDER || 'main';
 // Max time the main brain may run per turn before being killed (0 = disabled).
 // Enforces the dispatch model: main brain triages, Thread Brain works.

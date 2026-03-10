@@ -108,12 +108,12 @@ Bot emits: @someone (raw, no <m> markers)
 | Source | Input | Conversion | Output |
 |--------|-------|------------|--------|
 | Matrix pill (any user) | `<a href=".../@cid:...">Cid</a>` | `restoreMentionPrefixes` | `<m>Cid</m>` |
-| Raw `@Name` (Captain only) | `@Cid` in body | `convertRawMentions` | `<m>Cid</m>` |
+| Raw `@Name` (Captain/operator) | `@Cid` in body | `convertRawMentions` | `<m>Cid</m>` |
 | Raw `@Name` (bot or other) | `@Cid` in body | no conversion | `@Cid` (literal) |
 | Bot output `<m>Name</m>` | `<m>Cid</m>` | `pillifyMentions` | Matrix mention pill |
 | Bot output `@Name` | `@Cid` | no conversion | `@Cid` (literal) |
 
-`convertRawMentions` uses `\b@name\b` (case-insensitive) against all known display names. It skips text already inside `<m>` markers. It must only run on Captain messages — bots that emit raw `@Name` (e.g. in code output) should not have it rewritten.
+`convertRawMentions` uses `\b@name\b` (case-insensitive) against all known display names. It skips text already inside `<m>` markers. It only runs on Captain and operator messages — bots that emit raw `@Name` (e.g. in code output) should not have it rewritten.
 
 ### Resume context
 

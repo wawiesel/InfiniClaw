@@ -13,6 +13,7 @@ import { marked } from 'marked';
 import { DATA_DIR, STORE_DIR } from 'nanoclaw/config.js';
 import {
   CAPTAIN_USER_ID,
+  OPERATOR_USER_ID,
   MATRIX_ACCESS_TOKEN,
   MATRIX_DEVICE_NAME,
   MATRIX_HOMESERVER,
@@ -965,9 +966,10 @@ export class MatrixChannel implements Channel {
         if (formattedBody) {
           messageContent = restoreMentionPrefixes(messageContent, formattedBody);
         }
-        // Convert raw @Name mentions to <m>Name</m> — captain only.
+        // Convert raw @Name mentions to <m>Name</m> — captain and operator only.
         // Bots may emit raw @Name in code output; rewriting those would corrupt content.
-        if (CAPTAIN_USER_ID && event.sender === CAPTAIN_USER_ID) {
+        if ((CAPTAIN_USER_ID && event.sender === CAPTAIN_USER_ID) ||
+            (OPERATOR_USER_ID && event.sender === OPERATOR_USER_ID)) {
           messageContent = convertRawMentions(messageContent, this.senderNameCache);
         }
       } else {

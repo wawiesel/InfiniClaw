@@ -487,6 +487,7 @@ CAPTAIN_FILE=${shellQuote(path.join(config.secretsPath, 'captain'))}
 if [ -f "\$CAPTAIN_FILE" ]; then
   source "\$CAPTAIN_FILE"
   export CAPTAIN_USER_ID
+  export OPERATOR_USER_ID
 fi
 
 # Brain env → Anthropic/Claude SDK env (mirrors applyBrainEnv)
@@ -593,6 +594,38 @@ export function refreshBot(root: string, bot: string): void {
   stopBot(bot);
   killStaleContainers(bot);
   bootstrapBot(root, bot);
+}
+
+/**
+ * Lightweight room reconfiguration: re-seed main room from fleet.json, restart pm2.
+ * No rebuild, no rsync, no npm install. Used by !report and !dismiss to switch
+ * the bot's monitored room without a full deploy cycle.
+ */
+export function restartBotForRoom(root: string, bot: string): void {
+  const instance = instanceDir(root, bot);
+  const profileEnv = loadProfileEnv(root, bot);
+  const fleet = loadFleet();
+  const botStatus = fleet[bot]?.status;
+  const quartersRoom = fleet[bot]?.quartersRoom;
+
+  // Re-seed main room registration based on current fleet status
+  if (botStatus === 'quarters' && quartersRoom) {
+    const quartersJid = `matrix:${quartersRoom}`;
+    const quartersName = `${profileEnv.ASSISTANT_NAME || bot}'s Quarters`;
+    seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
+  } else {
+    const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
+    const mainGroupName = profileEnv.MAIN_GROUP_NAME;
+    const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+    if (mainJid && mainGroupName) {
+      seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
+    }
+  }
+
+  // Fast restart: kill containers, restart pm2 (no rebuild)
+  killStaleContainers(bot);
+  const logs = logDir(root);
+  pm2StartBot(bot, process.execPath, instance, logs, root);
 }
 
 // ── Relay ────────────────────────────────────────────────────────────

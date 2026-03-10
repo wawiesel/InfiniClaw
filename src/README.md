@@ -33,9 +33,9 @@ Host machine (macOS / Linux)
 │
 │── Orchestrator ─────────────────────────────────────────────
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
-├── service.ts          → Deploy, start, stop bots via pm2; seeds quarters or duty room based on fleet status
+├── service.ts          → Deploy, start, stop bots via pm2; seeds quarters or duty room based on fleet status; restartBotForRoom for lightweight room switches
 ├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave, setDisplayName)
-├── relay.ts            → Supervisor relay: Matrix watcher, bot lifecycle (!report/!dismiss/!go/!wake/!sleep), restartBotsToQuarters helper
+├── relay.ts            → Supervisor relay: Matrix watcher, bot lifecycle (!report/!dismiss/!go/!wake/!sleep), lightweight restart on room transitions
 ├── main.ts             → Message loop, indicators, reaction acks (👀/🔔), container lifecycle
 ├── container-spawn.ts  → Container orchestration: secrets, mounts, podman args, stale cleanup, IPC setup
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)
