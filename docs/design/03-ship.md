@@ -25,7 +25,7 @@ Fields:
 
 Ships are ranked. The lowest-rank **active** ship is the default tiebreaker for speaker election (see below).
 
-A decommissioned ship (`active: false`) keeps its relay running and listening for commands but does not start bots. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
+The `active` flag is a **ship-level** override in `ships.json` — distinct from per-bot `status` in `fleet.json`. A decommissioned ship (`active: false`) keeps its relay running but will not start any bots, regardless of their individual status. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
 
 ## The Relay
 
@@ -99,7 +99,7 @@ Infrastructure commands require an explicit `<ship>` argument. Each relay checks
 | Command | Scope | Behavior |
 |---------|-------|----------|
 | `!commission <ship>` | Target ship | Set `active: true`, reload fleet, start onduty bots |
-| `!decommission <ship>` | Target ship | Stop all bots, set statuses to `sleep`, set `active: false`. Relay keeps running. |
+| `!decommission <ship>` | Target ship | Stop all bots, set ship `active: false`. Relay keeps running — listens for `!commission`. |
 | `!transport <bot> <ship>` | Source ship | Two-phase: dematerialize on source → materialize on destination via secrets sync |
 | `!refit <ship>` | Target ship | Sync repos, rebuild, redeploy, restart target bots |
 | `!relay on/off <ship>` | Target ship | Enable/disable relay processing on target ship |
