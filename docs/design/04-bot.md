@@ -176,14 +176,14 @@ During boot, the pip changes through 🔄 → 🚀 → 🟡 → 🟢 so the curr
 
 ### Boot Progress Messages
 
-`!wake` posts a threaded sequence with numbered steps. The loudspeaker `[shipTag]` prefix identifies the ship — message bodies use `relay <action>` prefix:
+`!wake` posts a threaded sequence with numbered steps. The thread root and final summary go to the main timeline with the loudspeaker `[shipTag]` prefix. Thread steps omit the tag — the root already identifies the ship:
 
 ```
 [🦁 Herc] relay waking Norm ...          ← main timeline + thread root
-[🦁 Herc] [1/4 0s] 🔄 building          ← thread step
-[🦁 Herc] [2/4 1s] 🚀 starting          ← thread step
-[🦁 Herc] [3/4 1m] 🟡 waiting for first output  ← thread step
-[🦁 Herc] [4/4 1m] 🟢 online · Normie[1] · claude-haiku-4-5 · 📦 abc1234 (2m) ↑0  ← thread step
+[1/4 0s] 🔄 building                     ← thread step (no ship tag)
+[2/4 1s] 🚀 starting                     ← thread step
+[3/4 1m] 🟡 waiting for first output     ← thread step
+[4/4 1m] 🟢 online · Normie[1] · claude-haiku-4-5 · 📦 abc1234 (2m) ↑0  ← thread step
 [🦁 Herc] relay Norm awake!              ← thread + main timeline
 ```
 
@@ -252,7 +252,7 @@ Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
 6. **Self-echo prevented** — Bot does not process its own messages.
    *Check:* Bot's log shows its own messages filtered out.
 
-7. **Display name correct** — Bot's display name shows `<name> <pip> (<ship>)`.
+7. **Display name correct** — Bot's display name shows `<pip> <name> <shipEmoji>`.
    *Check:* Matrix profile API returns the expected display name format.
 
 8. **Resume works** — Wake the bot (via `!wake`), verify it injects context and responds.

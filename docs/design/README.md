@@ -10,8 +10,8 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 ## Bot Runtime
 
-- `03-ship.md` — Machine registry (`commissioned` flag vs bot `status`), relay (ship control plane: command dispatch, bot lifecycle, code sync, Thread Brain spawning), speaker election, relay commands (!fleet, !push/!pull, !commission/!decommission, !operator), per-machine config
-- `04-bot.md` — Identity, bot attributes (triggerType, status, rank), mention/callout flow, response rules, display name format, boot progress (`relay <action>` prefix), `!wake` restart behavior, resume behavior
+- `03-ship.md` — Machine registry (`commissioned` flag vs bot `status`), relay (ship control plane: command dispatch, bot lifecycle, code sync, Thread Brain spawning), speaker election, relay commands (!fleet, !push/!pull, !commission/!decommission, !operator), message conventions (ship tag on main timeline only, thread steps omit tag), per-machine config
+- `04-bot.md` — Identity, bot attributes (triggerType, status, rank), mention/callout flow, response rules, display name format (`<pip> <name> <shipEmoji>`), boot progress (thread steps omit ship tag), `!wake` restart behavior, resume behavior
 - `05-brain.md` — Persistent main brain, message delivery (SQLite → IPC), turn timeout (90s default, `podman stop`), credential mapping (BRAIN_* → CLAUDE_CODE_*/ANTHROPIC_*), quota fallback, session continuity
 - `06-ipc.md` — Container ↔ host IPC (messages/tasks/input directories), atomic file processing, per-room namespaces, main room elevation, wake/sleep cooldowns
 - `07-threading.md` — Branch and Merge model, Thread Brains (host-side `claude --print`), streaming output, concurrency limit, async lobes (codex/gemini/claude/ollama), delegation flow, correct branch protocol

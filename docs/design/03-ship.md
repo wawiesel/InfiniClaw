@@ -57,7 +57,7 @@ The relay uses multiple Matrix accounts for different purposes:
 
 The operator account watches BehindTheCurtain and all rooms it has joined (including quarters rooms). Captain `!` commands from any of these rooms are processed. The help account keeps help/error responses out of loudspeaker so bots don't see them — bots have all system accounts in `IGNORE_SENDERS`.
 
-All relay command responses are delivered via the loudspeaker account, automatically prefixed with `[<shipEmoji> <shipName>]` (e.g. `[🦁 Herc]`). Message bodies use `relay <action>` prefix — they must NOT repeat the ship name since the loudspeaker tag already provides it.
+All relay command responses are delivered via the loudspeaker account. Main timeline messages are prefixed with `[<shipEmoji> <shipName>]` (e.g. `[🦁 Herc]`). Thread steps omit the tag — the thread root already identifies the ship. Message bodies use `relay <action>` prefix — they must NOT repeat the ship name since the loudspeaker tag already provides it.
 
 Non-thread replies are mirrored to BehindTheCurtain so the Captain sees command results regardless of which room they originated from. Thread steps are not mirrored to avoid noise.
 

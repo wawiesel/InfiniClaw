@@ -2602,9 +2602,15 @@ async function helpReply(conn: RoomConn, text: string): Promise<string | undefin
   return reply(conn, text);
 }
 
-/** Alias: reply in a thread. */
+/** Reply in a thread. Thread steps omit [shipTag] — the thread root already identifies the ship. */
 async function threadReply(conn: RoomConn, threadRootId: string, text: string): Promise<string | undefined> {
-  return reply(conn, text, threadRootId);
+  const ls = loadLoudspeakerConfig();
+  if (ls) {
+    const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
+    if (token) return relaySend(ls.homeserver, token, conn.roomId, text, threadRootId);
+  }
+  if (!conn.accessToken) return undefined;
+  return relaySend(conn.homeserver, conn.accessToken, conn.roomId, text, threadRootId);
 }
 
 /** Ship report — every ship that receives the command replies with its own data. */
