@@ -1,48 +1,26 @@
 # 05 — Brain
 
-The brain is the LLM process running inside the bot's container. It makes the bot intelligent — without it, the bot is just a message relay.
+The brain is a persistent `claude-code` process inside a bot's container. It does NOT exit after each message — new messages arrive via IPC into the same ongoing conversation.
 
-## The Main Brain Is a Long-Lived Process
+## Persistent Session
 
-The main brain is a persistent `claude-code` process inside a running container. It does NOT exit after each message. New messages arrive via IPC into the same conversation — just like a human reading new messages in a chat. The main brain responds as part of its ongoing session.
+The main brain starts once and stays running. Messages arrive like a human reading chat — the brain triages each one as a normal conversation turn.
 
 This means:
-- **No container spawn per message.** The container starts once and stays running.
-- **Triage is instant.** Reading a new IPC message and deciding "branch or reply" is a normal conversation turn — sub-second, not 8 seconds.
-- **Context accumulates.** The main brain remembers prior messages in its session. It doesn't start cold each time.
+- **Triage is instant.** Reading a new message and deciding "branch or reply" is sub-second, not a cold start.
+- **Context accumulates.** The brain remembers prior messages in its session without being reminded.
+- **The host delivers, the brain decides.** The host writes incoming messages to the container via IPC (see [06-ipc](06-ipc.md)). The brain reads them and acts.
 
-The host's job is to deliver messages to the running container via IPC, not to spawn new containers.
+## Triage and Delegate
 
-## Message Delivery
+The brain's job on each turn is simple: read the message, respond or delegate.
 
-Messages flow from Matrix through the host to the container:
+- **Simple:** reply directly in the conversation.
+- **Complex:** call `branch_to_thread` to spawn a Thread Brain (see [07-threading](07-threading.md)), then continue listening. The main brain never blocks on complex work.
 
-```
-Matrix event
-  → host message loop (polls SQLite every ~100ms)
-  → getNewMessages() returns unprocessed messages
-  → host writes message to /workspace/ipc/{group}/input/
-  → agent-runner inside container reads IPC input
-  → delivers message to claude-code as a new conversation turn
-```
+The turn timeout enforces this model — if the brain takes too long, the container is killed via `podman stop` and the bot resumes via session recovery (see [04-bot](04-bot.md)). Default timeout is configurable per-bot via `MAIN_BRAIN_TURN_TIMEOUT_MS` env.
 
-The database is the source of truth for message ordering. Messages are stored in SQLite with `is_bot_message` flags to prevent echo loops (the bot's own output is stored with `is_bot_message: true` so it's never returned as a "new" message).
-
-## Turn Timeout
-
-The main brain has a hard wall-clock timeout to enforce the dispatch model — triage quickly, delegate complex work.
-
-**Default:** 90 seconds (`MAIN_BRAIN_TURN_TIMEOUT_MS`, configurable per-bot via env).
-
-When the timeout fires:
-1. `podman stop` sends SIGTERM to the container (15s grace period)
-2. If the container doesn't stop, SIGKILL follows
-3. The host flags the turn as killed-by-timeout
-4. The bot restarts and resumes via session recovery
-
-`podman stop` is required — not `process.kill('SIGTERM')`. Podman does not relay signals to container processes; only `podman stop` works.
-
-## Brain Configuration
+## Credential Mapping
 
 Each bot's LLM is configured via env keys in `secrets/bots/{name}/env`:
 
@@ -52,41 +30,7 @@ Each bot's LLM is configured via env keys in `secrets/bots/{name}/env`:
 | `BRAIN_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth authentication |
 | `BRAIN_API_KEY` | `ANTHROPIC_API_KEY` | API key authentication |
 
-The container never sees the raw `BRAIN_*` names — the host maps them during container spawn. This separation keeps bot configuration (secrets repo) decoupled from Claude Code internals (container runtime).
-
-### Model Resolution
-
-Generic model aliases are upgraded to concrete dated model IDs when available. The `brain-management.ts` module tracks model usage from Claude Code session stats and resolves the active model.
-
-### Runtime Model Switching
-
-Bots can switch models at runtime via the `set_brain_mode` IPC command + wake. The relay updates the bot's env file and wakes the bot.
-
-## Quota Fallback
-
-When the primary LLM provider returns a quota or credit error, the system automatically falls back to a local Ollama model:
-
-1. `maybeAutoSwitchBrainsOnQuotaError()` detects the quota error
-2. All bot env files are rewritten to use Ollama (local model, `http://host.containers.internal:11434`)
-3. The Captain is notified
-4. 10-minute cooldown prevents thrashing between providers
-
-## Session Continuity
-
-On wake (crash recovery, deploy, or `!wake`), the agent-runner recovers the most recent `claude-code` session to avoid losing conversation context:
-
-1. Synthetic resume message injected with the last 10 messages as context
-2. Active todo list included so the bot picks up where it left off
-3. Trigger patterns stripped from context to prevent false re-activation
-4. Container spawns to process the resume message
-
-Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
-
-## Crash Recovery
-
-- pm2 auto-restarts on crash (2s delay, max 100 restarts)
-- Exit code 137 (SIGKILL/OOM) triggers backoff cooldown (60s, after 3 consecutive crashes)
-- Session state persisted in SQLite survives restarts
+The container never sees the raw `BRAIN_*` names — the host maps them during container spawn. This keeps bot configuration (secrets repo) decoupled from Claude Code internals (container runtime). Bots can switch models at runtime via the `set_brain_mode` IPC command + wake.
 
 ## Verification
 
@@ -99,14 +43,8 @@ Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
 3. **Context persists** — Tell the bot something, then ask about it later in the same session.
    *Check:* Bot remembers the earlier information without being reminded.
 
-4. **Turn timeout enforced** — Bot runs a long task that exceeds the timeout.
-   *Check:* Container killed via `podman stop` after `MAIN_BRAIN_TURN_TIMEOUT_MS`. Bot restarts and resumes.
+4. **Triage speed** — Send a message to an idle bot.
+   *Check:* Response begins within seconds, not a cold-start delay.
 
-5. **Session resume** — Restart the bot (via `!wake`), ask about pre-restart context.
-   *Check:* Bot has access to prior conversation via session recovery.
-
-6. **Model switching** — Change `BRAIN_MODEL` in env, rejoin.
-   *Check:* Bot starts with the new model (visible in startup log).
-
-7. **Quota fallback** — Trigger a quota error (or simulate one).
-   *Check:* Bot switches to Ollama, Captain notified. Cooldown prevents rapid switching.
+5. **Delegation works** — Give the bot a complex task.
+   *Check:* Bot calls `branch_to_thread`, Thread Brain spawns, main brain remains responsive.
