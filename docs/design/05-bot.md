@@ -237,12 +237,12 @@ Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
 | Metric | What it measures | Target | Window |
 |--------|-----------------|--------|--------|
 | **Response latency** | Time from trigger (🔔) to first message posted | < 30s | 1-day, 7-day rolling |
-| **Task completion** | Branch brains completed vs failed/timed out | > 90% | 1-day, 7-day rolling |
+| **Branch brain success** | Branch brains that posted a result vs timed out/errored | > 90% | 1-day, 7-day rolling |
 | **Crashes** | pm2 restarts (especially exit code 137 OOM) | 0/day | 1-day, 7-day rolling |
 | **Self-healing ratio** | Bot-initiated restarts/rebuilds vs operator-triggered | Ratio → 1 | 7-day rolling |
 | **Turn timeout rate** | Container turns killed by timeout vs completed normally | < 5% | 1-day, 7-day rolling |
 
-Response latency is the primary bot metric — it measures whether the main brain is instantly responsive per core principle. Track from 🔔 reaction timestamp to first bot message in the room.
+Response latency is the primary bot metric — it measures whether the main brain is instantly responsive per core principle. Track from 🔔 reaction timestamp to first bot message in the room. Branch brain success is measurable because each branch has a clear lifecycle: spawned → posted result or timed out/errored.
 
 ## Verification
 
