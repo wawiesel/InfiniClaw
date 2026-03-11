@@ -1816,7 +1816,7 @@ async function handleLifecycleCommand(
         const model = env?.BRAIN_MODEL || '?';
         const ver = botVersion(root, bot);
         await setBotPip(root, bot, '🟢');
-        await step(`🟢 online · ${role}[${rank}] · ${model} · ${thisShipName()}${ver}`);
+        await step(`🟢 online · ${role}[${rank}] · ${model}${ver}`);
         const done = `relay ${name} awake!`;
         await threadReply(conn, threadRoot, done);
         await reply(conn, done);
@@ -1952,7 +1952,7 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
       const model = env?.BRAIN_MODEL || '?';
       const ver = botVersion(root, bot);
       const done = `relay ${name} refreshed!`;
-      await step(`✅ done · ${role}[${rank}] · ${model} · ${thisShipName()}${ver}`);
+      await step(`✅ done · ${role}[${rank}] · ${model}${ver}`);
       await threadReply(conn, threadRoot, done);
       await reply(conn, done);
       publishFleetReport().catch(() => {});
