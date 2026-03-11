@@ -48,7 +48,7 @@ Host machine (macOS / Linux)
 ├── allow-list.ts       → Validate mounts against host-side allowlist (~/.config/infiniclaw/allow-list.json)
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
 ├── ipc-commands.ts     → Handle refresh_bot, stop_bot, send_reaction, rebuild_image, git_push, etc.
-├── brain-management.ts → Runtime model switching
+├── brain-management.ts → Runtime model switching, mainSender() uses capitalizeName for provider display
 ├── chat-activity.ts    → Track activity per room for idle detection
 ├── message-filtering.ts→ Dedup, echo prevention, ignore rules (📞 pill, @ callout, system accounts)
 ├── intercom-relay.ts   → Cross-room messaging via per-room intercom Matrix accounts
