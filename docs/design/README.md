@@ -21,7 +21,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 - `09-roles-and-rooms.md` — Roles, room topology, bot statuses (pip progression), lifecycle commands (!wake/!sleep/!report/!dismiss/!go), quarters trigger rules
 - `10-fleet.md` — fleet.json, transport protocol, S3 coordination, fleet metrics (availability, autonomy score)
-- `11-commands.md` — X-commands (`!`-prefixed fleet control), `!metrics` (1d/7d rolling), status formats, alert threads
+- `11-commands.md` — X-commands (`!`-prefixed fleet control), `!metrics` (context-aware, 1d/7d rolling), status formats, alert threads
 - `12-co.md` — Commanding Officer election and delegation
 - `13-intercom.md` — Intercom broadcast accounts, loudspeaker replies, @room cross-room mentions
 

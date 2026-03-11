@@ -86,7 +86,7 @@ Interventions is the primary metric. A day with zero interventions outside Behin
 
 **Storage:** Metrics are computed by each ship's relay and published to S3 (`metrics/<ship>.json`). The speaker aggregates all ships for fleet-wide totals.
 
-**Access:** `!metrics [name]` x-command for the Captain, `get_metrics` MCP tool for bots. Named categories: `operator`, `bot`, `ship`, `fleet`. No arg = all.
+**Access:** `!metrics [scope]` x-command (context-aware — defaults based on room), `get_metrics` MCP tool for bots. See [11-commands](11-commands.md) for scope details.
 
 ## Monitoring
 

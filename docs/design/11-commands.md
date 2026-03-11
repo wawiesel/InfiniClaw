@@ -42,13 +42,37 @@ Commands work from any room the operator account has joined — duty rooms (via 
 | `!fleet` | Fleet status — each ship reports its local bots. |
 | `!fleet room` | Bots in this room only. |
 | `!health` | Fleet health summary from S3 (speaker replies). |
-| `!metrics [name]` | Fleet metrics (1d/7d rolling). No arg = all metrics. Named: `operator`, `bot`, `ship`, `fleet`. |
+| `!metrics [scope]` | Metrics (1d/7d rolling). Context-aware — see below. |
 
 ### Operator X-Commands
 
 | Command | Effect |
 |---------|--------|
 | `!relay <text>` | Send text to operator tmux session on each ship. |
+
+## Metrics
+
+`!metrics` is context-aware — the default scope depends on which room the command is sent from:
+
+| Room | Default scope | What it shows |
+|------|--------------|---------------|
+| Bot quarters | `bot <botname>` | That bot's score, response latency, crashes, branch brain success, timeouts |
+| Engineering | `engineering` | Relay uptime, warnings/errors, cumulative time bots running stale code, deploy success |
+| Bridge | `fleet` | Fleet availability, autonomy score, transport success, cross-ship sync lag |
+| BehindTheCurtain | `all` | Everything — operator, bot, ship, fleet |
+
+Explicit scope overrides the default: `!metrics operator` from any room shows operator metrics.
+
+| Scope | Metrics |
+|-------|---------|
+| `operator` | Interventions outside BTC, x-commands issued, restart ratio, MTBI |
+| `bot [name]` | Score (points/day), response latency, crashes, branch brain success, turn timeout rate, self-healing ratio |
+| `ship [name]` | Relay uptime, sync failures, x-command latency, deploy success, speaker stability |
+| `engineering` | Relay uptime, warnings/errors per day, cumulative stale-code bot-hours, deploy success |
+| `fleet` | Availability, autonomy score, transport success, cross-ship sync lag |
+| `all` | All of the above |
+
+All metrics report 1-day and 7-day rolling averages. Data sourced from S3 (`metrics/<ship>.json`).
 
 ## Status Line Format
 
