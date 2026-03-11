@@ -29,11 +29,20 @@ The `commissioned` flag is a **ship-level** override in `ships.json` — distinc
 
 ## The Relay
 
-A single always-on process per ship. The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or operator. It manages bot lifecycle by calling service functions directly.
+The relay is a pm2-managed Node.js process that runs on the host machine — one per ship, always on. It is the ship's control plane: it connects to Matrix, listens for `!` commands, manages bot lifecycle, syncs code, and spawns Thread Brains. Bots cannot function without a relay — it is the bridge between the Captain and the fleet.
 
-**The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't start bots.
+**What the relay does:**
+- Watches Matrix rooms for `!` commands from the Captain or operator
+- Wakes, sleeps, reports, and dismisses bots
+- Pulls and deploys code (git sync loops + `!pull`)
+- Spawns Thread Brains on the host
+- Sets bot display names and room names
+- Publishes fleet status to S3 for speaker election
+- Forwards Captain messages to the operator tmux session
 
-When a command arrives (e.g. `!rejoin cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
+**The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't wake bots.
+
+When a command arrives (e.g. `!wake cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore.
 
 ### Matrix Accounts
 
