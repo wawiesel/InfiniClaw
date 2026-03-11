@@ -5,7 +5,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 ## Foundation
 
 - `00-overview.md` — Core principles (responsive triage, branch-not-interrupt, autonomous fleet, Matrix as state, presence over spam), code structure
-- `01-matrix.md` — Matrix server, accounts, room naming convention (double-emoji `<location><room> Name`), room setup, message format, `<m>` mention pills, reactions (📡/👀/🔔), special mentions, verification
+- `01-matrix.md` — Matrix server, accounts, room naming convention, ship spaces (example not prescriptive), room setup, message format, `<m>` mention pills, reactions (📡/👀/🔔), special mentions, verification
 - `02-container.md` — Persistent Podman containers (one per bot, not per turn), internal concurrency (agent runner + persistent main brain + lobes), Thread Brains on host, image builds, mount table, secrets flow
 
 ## Bot Runtime

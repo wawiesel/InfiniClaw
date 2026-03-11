@@ -41,13 +41,13 @@ Private room between Captain and operator. Room ID in `operator/operator-matrix.
 
 ### Ship Spaces
 
-Each ship is a Matrix space containing its local rooms. Space names use `<shipEmoji> <shipName>` format.
+Each ship is a Matrix space containing its local rooms. Space names use `<shipEmoji> <shipName>` format. The rooms within a ship are not prescribed — each ship can have whatever rooms it needs. Example:
 
 ```
 🦁 Herc (space)
-  🦁🏠 Lounge      — all ship bots + captain + operator + loudspeaker (always)
+  🦁🏠 Lounge      — shared room for all ship bots
   Quarters (space)
-    🦁🏠 Norm's Room — norm + captain + operator + loudspeaker (always)
+    🦁🏠 Norm's Room — private quarters for one bot
 ```
 
 Ship space and lounge IDs are in `ships.json`. Per-bot quarters room IDs are in `fleet.json`.
