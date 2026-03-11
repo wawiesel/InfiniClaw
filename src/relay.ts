@@ -527,7 +527,20 @@ async function ensureRoomNames(): Promise<void> {
   const [shipName, shipEntry] = found;
   const shipEmoji = shipEntry.emoji || '';
 
+  const getName = async (roomId: string): Promise<string | null> => {
+    try {
+      const resp = await fetch(
+        `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.name/`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(5_000) },
+      );
+      if (!resp.ok) return null;
+      const data = await resp.json() as { name?: string };
+      return data.name ?? null;
+    } catch { return null; }
+  };
   const setName = async (roomId: string, name: string) => {
+    const current = await getName(roomId);
+    if (current === name) return; // already correct
     const ok = await matrixSetRoomName(homeserver, accessToken, roomId, name).catch(() => false);
     log(`ensureRoomNames: ${ok ? '✅' : '❌'} ${name}`);
   };
@@ -1794,10 +1807,13 @@ async function handleLifecycleCommand(
         await reply(conn, `⛔ !sleep ${name} — ${errStr(err)}`);
       }
     } else if (action === 'wake') {
-      // Wake: start container in quarters
+      // Wake sleeping bot or restart already-awake bot (preserves current status)
+      const isRestart = liveFleet[bot]?.status !== 'sleep';
+      const verb = isRestart ? 'restarting' : 'waking';
+      const doneVerb = isRestart ? 'restarted' : 'awake';
       const startedAt = Date.now();
       const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-      const threadRoot = await reply(conn, `relay waking ${name} ...`);
+      const threadRoot = await reply(conn, `relay ${verb} ${name} ...`);
       if (!threadRoot) continue;
       let stepN = 0;
       const totalSteps = 4;
@@ -1805,9 +1821,11 @@ async function handleLifecycleCommand(
       try {
         await setBotPip(root, bot, '🔄');
         await step('🔄 building');
-        fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
-        writeFleet(liveFleet);
-        clearShipConfigCache();
+        if (!isRestart) {
+          fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
+          writeFleet(liveFleet);
+          clearShipConfigCache();
+        }
         await setBotPip(root, bot, '🚀');
         await step('🚀 starting');
         bootstrapBot(root, bot);
@@ -1817,13 +1835,13 @@ async function handleLifecycleCommand(
         const ver = botVersion(root, bot);
         await setBotPip(root, bot, '🟢');
         await step(`🟢 online · ${role}[${rank}] · ${model}${ver}`);
-        const done = `relay ${name} awake!`;
+        const done = `relay ${name} ${doneVerb}!`;
         await threadReply(conn, threadRoot, done);
         await reply(conn, done);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
-        await setBotPip(root, bot, '💤');
+        if (!isRestart) await setBotPip(root, bot, '💤');
         const fail = `⛔ !wake ${name} — ${errStr(err)}`;
         await step(fail);
         await reply(conn, fail);
