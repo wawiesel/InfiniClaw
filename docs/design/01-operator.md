@@ -1,6 +1,8 @@
 # 01 — Operator
 
-The operator is the first entity in the system. Before any bot, relay, or ship exists, the operator bootstraps everything from scratch. The operator is a human with a Claude Code tmux session on a host machine and a Matrix account (`@operator`) on the homeserver.
+The operator is the escape hatch. In a fully working system, the Captain issues orders directly to bots, bots do their jobs, and relays handle updates autonomously — the operator is never needed. But during development and when bots are not yet reliable, the operator is used heavily for bootstrap, debugging, and meta-management.
+
+The operator is a human with a Claude Code tmux session on a host machine and a Matrix account (`@operator`) on the homeserver. Before any bot, relay, or ship exists, the operator bootstraps everything from scratch. Once the system is stable, the operator fades to a monitoring role — intervening only when something breaks that bots cannot fix themselves.
 
 ## Bootstrap Sequence
 

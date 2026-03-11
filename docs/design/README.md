@@ -5,7 +5,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 ## Foundation
 
 - `00-overview.md` — Definitions (fleet, ship, relay, bot, operator, space, room, duty room), core principles, code structure
-- `01-operator.md` — Bootstrap sequence (operator first → BehindTheCurtain → first ship → first bot), accounts, Captain communication routing (speaker default, 📞 broadcast), inter-operator inbox, x-commands, intervention guidelines
+- `01-operator.md` — Operator as escape hatch (idle in mature fleet, heavy use during development), bootstrap sequence (operator first → BehindTheCurtain → first ship → first bot), accounts, Captain communication routing (speaker default, 📞 broadcast), inter-operator inbox, x-commands, intervention guidelines
 - `02-matrix.md` — Matrix server, accounts, room naming convention (double-emoji on all rooms and spaces), ship spaces (example not prescriptive), room setup, message format, `<m>` mention pills, reactions (📡/👀/🔔), special mentions, bot Matrix navigation tools, verification
 - `03-container.md` — Persistent Podman containers (one per bot, not per turn), internal concurrency (agent runner + persistent main brain + lobes), branch brains on host, image builds, mount table, secrets flow
 

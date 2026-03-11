@@ -12,7 +12,7 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 >
 > **Bot** — A Matrix account backed by a Podman container. Has a persona, role, rank, and lifecycle status (`sleep`, `quarters`, `onduty`).
 >
-> **Operator** — The human-in-the-loop escape hatch. A Matrix account (`@operator`) and a tmux session on each ship. Receives forwarded Captain messages and can intervene directly.
+> **Operator** — The human-in-the-loop escape hatch. Bootstraps the system from scratch and intervenes when bots cannot fix themselves. In a mature fleet, the operator is idle — the Captain commands bots directly and relays handle updates autonomously. A Matrix account (`@operator`) and a tmux session on each ship.
 >
 > **Space** — A Matrix space that groups related rooms. Each ship has a space; quarters rooms are grouped under a quarters sub-space.
 >
