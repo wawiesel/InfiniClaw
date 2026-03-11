@@ -204,7 +204,7 @@ The Captain (or operator) scores bot output by reacting to bot messages:
 | 💯 | +3 | Excellent — exactly right |
 | ❌️ | −3 | Wrong — significant failure |
 
-Scores accumulate per bot and are published to S3 with other metrics. Bots can read their own scores via the `get_metrics` MCP tool. The scores provide direct Captain feedback that guides bot behavior over time — a bot with a declining score should adjust its approach.
+Either the Captain or operator can score bot messages. Scores are tallied as points/day per bot and reported as 1-day and 7-day rolling averages alongside other metrics. Bots can read their own scores via the `get_metrics` MCP tool — a bot with a declining score should adjust its approach.
 
 ## Special Mentions
 
