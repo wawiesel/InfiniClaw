@@ -30,7 +30,7 @@ Operator is admin (power 100) in every room. All room creation, invites, and pow
 
 ## Captain Communication
 
-The Captain communicates with operators via BehindTheCurtain. The relay watches this room and forwards messages to the operator's tmux session.
+The Captain communicates with operators via BehindTheCurtain. The relay watches this room and forwards messages to the operator's tmux session. BehindTheCurtain is the one room where operator conversation is expected and normal — the Captain checks in, asks about bot performance, and gives direction.
 
 **Routing:**
 - **Default**: Only the **speaker** operator receives Captain messages. The speaker is the operator on the ship running the newest code (same election as relay speaker).
@@ -56,6 +56,8 @@ X-commands work from any room the operator account has joined. The full referenc
 **Bots cannot use x-commands.** X-commands are Captain/operator only. Bots use IPC for self-service operations (restart, rebuild, git push).
 
 ## Intervention
+
+Every operator message outside BehindTheCurtain is an intervention — a sign that the system couldn't handle something on its own. The frequency of these interventions is a direct measure of fleet autonomy. A mature fleet means a quiet operator.
 
 **When to intervene:**
 - Bot is stuck, lazy, inefficient, broken, or needs a restart
