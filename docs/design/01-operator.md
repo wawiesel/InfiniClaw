@@ -2,7 +2,7 @@
 
 The operator is the escape hatch. In a fully working system, the Captain issues orders directly to bots, bots do their jobs, and relays handle updates autonomously — the operator is never needed. But during development and when bots are not yet reliable, the operator is used heavily for bootstrap, debugging, and meta-management.
 
-The operator is a human with a Claude Code tmux session on a host machine and a Matrix account (`@operator`) on the homeserver. The operator should always run at the maximum intelligence setting available — operator tasks are high-stakes meta-management where mistakes cascade across the fleet. Before any bot, relay, or ship exists, the operator bootstraps everything from scratch. Once the system is stable, the operator fades to a monitoring role — intervening only when something breaks that bots cannot fix themselves.
+The operator runs directly on the host machine (not in a container) inside a tmux session named `operator`, using Claude Code at the maximum intelligence setting available. It also has a Matrix account (`@operator`) on the homeserver. Operator tasks are high-stakes meta-management where mistakes cascade across the fleet. Before any bot, relay, or ship exists, the operator bootstraps everything from scratch. Once the system is stable, the operator fades to a monitoring role — intervening only when something breaks that bots cannot fix themselves.
 
 ## Bootstrap Sequence
 
