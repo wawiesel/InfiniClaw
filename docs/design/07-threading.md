@@ -66,10 +66,10 @@ Also inherits: `ANTHROPIC_BASE_URL`, `NODE_EXTRA_CA_CERTS`, `GH_TOKEN` (from `se
 
 When a Thread Brain exits:
 1. 30-second debounce timer starts (reset if another TB exits)
-2. After debounce: main bot restarts to pick up findings
+2. After debounce: main bot wakes to pick up findings
 3. Thread remains in Matrix history permanently
 
-The debounce ensures the bot restart only fires once when multiple Thread Brains finish in quick succession.
+The debounce ensures the bot wake only fires once when multiple Thread Brains finish in quick succession.
 
 ## The Merge
 

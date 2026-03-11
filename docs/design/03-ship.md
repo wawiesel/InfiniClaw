@@ -99,7 +99,7 @@ Infrastructure commands require an explicit `<ship>` argument. Each relay checks
 | Command | Scope | Behavior |
 |---------|-------|----------|
 | `!commission <ship>` | Target ship | Set `active: true`, reload fleet, start onduty bots |
-| `!decommission <ship>` | Target ship | Stop all bots, set ship `active: false`. Relay keeps running — listens for `!commission`. |
+| `!decommission <ship>` | Target ship | Sleep all bots, set ship `active: false`. Relay keeps running — listens for `!commission`. |
 | `!transport <bot> <ship>` | Source ship | Two-phase: dematerialize on source → materialize on destination via secrets sync |
 | `!refit <ship>` | Target ship | Sync repos, rebuild, redeploy, restart target bots |
 | `!relay on/off <ship>` | Target ship | Enable/disable relay processing on target ship |
@@ -107,7 +107,7 @@ Infrastructure commands require an explicit `<ship>` argument. Each relay checks
 | `!provision` | Per-ship | Each ship reports independently with ship name header |
 
 **Transport protocol:**
-1. Source ship stops bot, kills containers, removes mounts
+1. Source ship sleeps the bot, kills containers, removes mounts
 2. Source ship sets `status: 'transit'`, `ship: <destination>` in fleet.json, commits
 3. Destination ship's secrets sync loop pulls fleet.json, sees `transit` bot assigned to it
 4. Destination bootstraps the bot, sets `status: 'onduty'`, commits

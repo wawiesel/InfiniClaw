@@ -60,7 +60,7 @@ Generic model aliases are upgraded to concrete dated model IDs when available. T
 
 ### Runtime Model Switching
 
-Bots can switch models at runtime via the `set_brain_mode` IPC command + restart. The relay updates the bot's env file and triggers a rejoin.
+Bots can switch models at runtime via the `set_brain_mode` IPC command + wake. The relay updates the bot's env file and wakes the bot.
 
 ## Quota Fallback
 
@@ -73,7 +73,7 @@ When the primary LLM provider returns a quota or credit error, the system automa
 
 ## Session Continuity
 
-On restart (crash, deploy, or `!wake` restart), the agent-runner recovers the most recent `claude-code` session to avoid losing conversation context:
+On wake (crash recovery, deploy, or `!wake`), the agent-runner recovers the most recent `claude-code` session to avoid losing conversation context:
 
 1. Synthetic resume message injected with the last 10 messages as context
 2. Active todo list included so the bot picks up where it left off

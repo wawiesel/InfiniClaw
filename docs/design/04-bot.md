@@ -255,7 +255,7 @@ Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
 7. **Display name correct** — Bot's display name shows `<name> <pip> (<ship>)`.
    *Check:* Matrix profile API returns the expected display name format.
 
-8. **Resume works** — Restart the bot, verify it injects context and responds.
+8. **Resume works** — Wake the bot (via `!wake`), verify it injects context and responds.
    *Check:* Log shows "Injected resume message with context" with recent message count.
 
 9. **Reaction: context delivery** — Send a message the bot hears.

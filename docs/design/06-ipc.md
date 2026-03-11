@@ -31,8 +31,8 @@ Commands written by the container to `tasks/*.json`:
 
 | IPC Type | Effect |
 |----------|--------|
-| `refresh_bot` | Restart self or another bot |
-| `stop_bot` | Stop another bot |
+| `refresh_bot` | Wake self or another bot |
+| `stop_bot` | Sleep another bot |
 | `rebuild_image` | Rebuild container image |
 | `health_check` | Run health check and return results |
 | `fleet_status` | Return fleet.json status |
@@ -65,7 +65,7 @@ This prevents double-processing on rapid polls.
 
 ## Cooldowns
 
-IPC commands have per-command cooldowns to prevent bots from spamming expensive operations. 60-second cooldown between restarts of the same bot prevents bots from burning context in rapid restart cycles.
+IPC commands have per-command cooldowns to prevent bots from spamming expensive operations. 60-second cooldown between wakes of the same bot prevents bots from burning context in rapid wake cycles.
 
 ## Verification
 
