@@ -2003,7 +2003,7 @@ function registerRelayCommands(): void {
     relay: async (cmd, conn) => {
       const arg = cmd.slice('!relay'.length).trim();
 
-      // !relay — each ship reports only its own status (ship report)
+      // !relay — each ship reports its own status
       if (!arg) {
         const status = isOperatorRelayEnabled() ? '✅ on' : '🔇 off';
         await shipReport(conn, `${thisShipName()}: operator relay ${status}`);
@@ -2012,10 +2012,11 @@ function registerRelayCommands(): void {
 
       const [action, targetShip] = arg.split(/\s+/, 2);
       if (action !== 'on' && action !== 'off') {
-        await reply(conn, `usage: !relay | !relay on [ship] | !relay off [ship]`);
+        if (isSpeaker()) await reply(conn, `usage: !relay | !relay on <ship> | !relay off <ship>`);
         return;
       }
-      if (targetShip && !isThisShip(targetShip)) return; // not for this ship
+      if (!targetShip) { if (isSpeaker()) await reply(conn, `usage: !relay ${action} <ship>`); return; }
+      if (!isThisShip(targetShip)) return;
 
       try {
         const ships = loadShips();
@@ -2032,6 +2033,7 @@ function registerRelayCommands(): void {
     },
 
     push: async (cmd, conn) => {
+      if (!isSpeaker()) return; // speaker-only
       const arg = cmd.slice('!push'.length).trim();
       const branch = arg || 'main';
       if (!/^[a-zA-Z0-9._\-/]+$/.test(branch) || branch.startsWith('-')) {
@@ -2063,7 +2065,8 @@ function registerRelayCommands(): void {
 
     decommission: async (cmd, conn) => {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;
-      if (targetShip && !isThisShip(targetShip)) return;
+      if (!targetShip) { if (isSpeaker()) await reply(conn, `usage: !decommission <ship>`); return; }
+      if (!isThisShip(targetShip)) return;
       try {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
@@ -2084,7 +2087,8 @@ function registerRelayCommands(): void {
 
     commission: async (cmd, conn) => {
       const targetShip = cmd.slice('!commission'.length).trim() || null;
-      if (targetShip && !isThisShip(targetShip)) return;
+      if (!targetShip) { if (isSpeaker()) await reply(conn, `usage: !commission <ship>`); return; }
+      if (!isThisShip(targetShip)) return;
       try {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
@@ -2102,7 +2106,7 @@ function registerRelayCommands(): void {
 
     provision: async (cmd, conn) => {
       const target = cmd.slice('!provision'.length).trim() || null;
-      const results: string[] = [];
+      const results: string[] = [`**${thisShipName()}**`];
 
       const syncRepo = (name: string, repoPath: string): string => {
         const resolved = repoPath.replace(/^~/, os.homedir());
@@ -2141,19 +2145,20 @@ function registerRelayCommands(): void {
           if (paths[target]) {
             results.push(syncRepo(target, paths[target]));
           } else {
-            await reply(conn, `unknown target "${target}" — not in paths.json`);
+            if (isSpeaker()) await reply(conn, `unknown target "${target}" — not in paths.json`);
             return;
           }
         }
-        await reply(conn, `${results.join('\n')}`);
+        await shipReport(conn, `${results.join('\n')}`);
       } catch (err) {
-        await reply(conn, `!provision failed — ${errStr(err)}`);
+        await shipReport(conn, `!provision failed — ${errStr(err)}`);
       }
     },
 
     refit: async (cmd, conn) => {
       const targetShip = cmd.slice('!refit'.length).trim() || null;
-      if (targetShip && !isThisShip(targetShip)) return;
+      if (!targetShip) { if (isSpeaker()) await reply(conn, `usage: !refit <ship>`); return; }
+      if (!isThisShip(targetShip)) return;
       const startedAt = Date.now();
 
       const threadRoot = await reply(conn, `relay refit starting ...`);
