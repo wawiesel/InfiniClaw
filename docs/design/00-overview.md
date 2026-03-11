@@ -2,6 +2,24 @@
 
 InfiniClaw is a multi-agent orchestration system that operates a fleet of autonomous AI bots on Matrix. Each bot runs in a secure Podman container with a persistent Main Brain process. Complex work is delegated to ephemeral Thread Brains and async lobes via a "Branch and Merge" threading model.
 
+## Definitions
+
+> **Fleet** — All ships and bots, collectively. Coordinated via `fleet.json` in the secrets repo.
+>
+> **Ship** — A machine running a relay. Identified by hostname, registered in `ships.json`. Examples: HERACLES, Poseidon.
+>
+> **Relay** — The ship's control plane. A pm2-managed process that connects to Matrix, dispatches `!` commands, manages bot lifecycle, syncs code, and spawns Thread Brains. One per ship, always running.
+>
+> **Bot** — A Matrix account backed by a Podman container. Has a persona, role, rank, and lifecycle status (`sleep`, `quarters`, `onduty`).
+>
+> **Operator** — The human-in-the-loop escape hatch. A Matrix account (`@operator`) and a tmux session on each ship. Receives forwarded Captain messages and can intervene directly.
+>
+> **Space** — A Matrix space that groups related rooms. Each ship has a space; quarters rooms are grouped under a quarters sub-space.
+>
+> **Room** — A Matrix room where bots and humans communicate. Named with double-emoji prefix: `<location><type> Name`.
+>
+> **Duty room** — A fleet-wide shared room (Engineering, Bridge, Astrometrics). Bots join via `!report` and leave via `!dismiss`. Uses `🌌` location emoji.
+
 ## Core Principles
 
 - **Bots must be instantly responsive.** The Main Brain is a persistent process that triages instantly. Complex work is delegated to ephemeral Thread Brains. The Main Brain never blocks.
