@@ -578,6 +578,11 @@ async function ensureRoomNames(): Promise<void> {
     }
   } catch { /* non-fatal */ }
 
+  // Quarters space: "<ship>🏠 Quarters"
+  if (shipEntry.quartersSpaceId && shipEmoji) {
+    await setName(shipEntry.quartersSpaceId, `${shipEmoji}${QUARTERS_EMOJI} Quarters`);
+  }
+
   // Quarters rooms: "<ship>🏠 Name's Room"
   const root = resolveRoot();
   for (const [bot, entry] of Object.entries(liveFleet)) {

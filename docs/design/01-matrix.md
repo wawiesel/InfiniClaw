@@ -45,9 +45,9 @@ Each ship is a Matrix space containing its local rooms. Space names use `<shipEm
 
 ```
 🦁 Herc (space)
-  🦁🏠 Lounge      — shared room for all ship bots
-  Quarters (space)
-    🦁🏠 Norm's Room — private quarters for one bot
+  🦁🛋️ Lounge         — shared room for all ship bots
+  🦁🏠 Quarters (space)
+    🦁🏠 Norm's Room   — private quarters for one bot
 ```
 
 Ship space and lounge IDs are in `ships.json`. Per-bot quarters room IDs are in `fleet.json`.
