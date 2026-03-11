@@ -1,18 +1,33 @@
 # InfiniClaw Design
 
-InfiniClaw is a multi-agent orchestration system that operates a fleet of autonomous AI bots on Matrix. Each bot runs in a secure Podman container, utilizing a "Branch and Merge" threading model to ensure constant responsiveness and deep task execution.
+InfiniClaw is a multi-agent orchestration system that operates a fleet of autonomous AI bots on Matrix. Each bot runs in a secure Podman container with a persistent Main Brain process. Complex work is delegated to ephemeral Thread Brains and async lobes via a "Branch and Merge" threading model.
+
+## Definitions
+
+> **Fleet** — All ships and bots, collectively. Coordinated via `fleet.json` in the secrets repo.
+>
+> **Ship** — A machine running a relay. Identified by hostname, registered in `ships.json`. Examples: HERACLES, Poseidon.
+>
+> **Relay** — The ship's control plane. A pm2-managed process that connects to Matrix, dispatches `!` commands, manages bot lifecycle, syncs code, and spawns Thread Brains. One per ship, always running.
+>
+> **Bot** — A Matrix account backed by a Podman container. Has a persona, role, rank, and lifecycle status (`sleep`, `quarters`, `onduty`).
+>
+> **Operator** — The human-in-the-loop escape hatch. A Matrix account (`@operator`) and a tmux session on each ship. Receives forwarded Captain messages and can intervene directly.
+>
+> **Space** — A Matrix space that groups related rooms. Each ship has a space; quarters rooms are grouped under a quarters sub-space.
+>
+> **Room** — A Matrix room where bots and humans communicate. Named with double-emoji prefix: `<location><type> Name`.
+>
+> **Duty room** — A fleet-wide shared room (Engineering, Bridge, Astrometrics). Bots join via `!report` and leave via `!dismiss`. Uses `🌌` location emoji.
 
 ## Core Principles
 
-- **Bots must be instantly responsive.** The Main Brain stays permanently available on the main timeline, "minding the store." Complex work is immediately delegated via a "Branch and Merge" architecture to ephemeral Thread Brains and async lobes.
-- **No destructive interrupts.** We do not use `SIGTERM` to kill active processes. New requests are fielded instantly by the Main Brain, which spins up concurrent Thread Brains without destroying existing task contexts.
+- **Bots must be instantly responsive.** The Main Brain is a persistent process that triages instantly. Complex work is delegated to ephemeral Thread Brains. The Main Brain never blocks.
+- **Branch, don't interrupt.** New requests spawn concurrent workers without destroying existing task contexts.
 - **Autonomous Fleet Management.** Bots manage their own lifecycles: rebuilding images, fixing configuration, monitoring health, and migrating between machines without human intervention.
-- **Matrix as State Engine.** Matrix threads provide the permanent, immutable history of every task. While the AI processes (Thread Brains) are ephemeral, the conversation context is immortal and can be hydrated into new processes on-demand.
-- **No status message spam.** Bots do not post working/idle/resuming indicators. Presence is shown via a single pip emoji on the display name reflecting operational status: online 🟢, CO ⭐, sleep 💤 (plus transient boot stages 🔄/🚀/🟡). Display format: `<name> <pip> (<ship>)`. The pip is status, not location.
-- **System actions get an emoji prefix.** Any message that isn't a direct conversation response (restarts, working indicator, brain reload, startup) must start with an emoji.
-- **Git SHAs use a standard format.** Every git SHA displayed in Matrix must use: 📦 [sha](link) (age) ↑N — SHA hyperlinked to the GitHub commit, with age and up/down relation. Always include the 📦 box so version strings are noticeable everywhere.
-- **Fix code and process, not behavior.** When a bot behaves incorrectly, fix the underlying system — the code, the IPC flow, the routing logic — not the bot's in-context behavior. Workarounds that patch behavior without addressing root cause accumulate debt and mask real problems.
-- **Status is system telemetry, not conversation.** Status messages are delivered via the loudspeaker (`@loudspeaker`) from the relay — repo versions, fleet health, lifecycle changes. Distinct from conversation. Example: 📦 [sha](link) (age) ↑N.
+- **Matrix as State Engine.** Matrix threads provide the permanent, immutable history of every task. AI processes are ephemeral; conversation context is immortal.
+- **Presence over spam.** Status is shown via display name, not messages. Lifecycle events are system telemetry, distinct from conversation.
+- **Fix code and process, not behavior.** When a bot behaves incorrectly, fix the underlying system — not the bot's in-context behavior.
 
 ## Code Structure
 
@@ -24,4 +39,3 @@ InfiniClaw utilizes the NanoClaw core library for low-level container and IPC me
 | NanoClaw core library | Lifecycle, SQLite, queuing, scheduling |
 | Container agent | Runs inside containers: Claude CLI, MCP tools, IPC |
 | Bot definitions | Personas, roles, Dockerfiles, skills |
-

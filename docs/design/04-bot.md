@@ -156,10 +156,10 @@ Before routing, messages pass through filtering:
 Bots set their Matrix display name to show status at a glance:
 
 ```
-<name> <pip> (<ship>)
+<pip> <name> <shipEmoji>
 ```
 
-Examples: `Cid 🟢 (HERACLES)`, `Parker ⭐ (HERACLES)`, `Nora 💤 (POSEIDON)`
+Examples: `🟢 Cid 🦁`, `⭐ Parker 🦁`, `💤 Nora 🔱`
 
 The pip reflects **operational status**, not which room the bot is in. See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status model.
 
@@ -176,24 +176,24 @@ During boot, the pip changes through 🔄 → 🚀 → 🟡 → 🟢 so the curr
 
 ### Boot Progress Messages
 
-`!wake` posts a thread with staged progress. The ship name appears once in the summary, not on every step:
+`!wake` posts a threaded sequence with numbered steps. The thread root and final summary go to the main timeline with the loudspeaker `[shipTag]` prefix. Thread steps omit the tag — the root already identifies the ship:
 
 ```
-☀️ Norm waking
-├ [3s] 🔄 building
-├ [8s] 🚀 starting
-├ [15s] 🟡 waiting for first output
-└ [18s] 🟢 online · normie[1] · haiku · HERACLES · v1a2b3c (2m)
-☀️ Norm awake (quarters)
+[🦁 Herc] relay waking Norm ...          ← main timeline + thread root
+[1/4 0s] 🔄 building                     ← thread step (no ship tag)
+[2/4 1s] 🚀 starting                     ← thread step
+[3/4 1m] 🟡 waiting for first output     ← thread step
+[4/4 1m] 🟢 online · Normie[1] · claude-haiku-4-5 · 📦 abc1234 (2m) ↑0  ← thread step
+[🦁 Herc] relay Norm awake!              ← thread + main timeline
 ```
 
-Each step updates the bot's display name pip to match the current stage.
+Each step updates the bot's display name pip to match the current stage. `!wake` on an already-awake bot restarts it (says `restarting`/`restarted`).
 
 `!report` and `!dismiss` are **instant** — just room moves on a running bot:
 
 ```
-📢 Cid reporting for duty
-📢 Cid dismissed
+[🦁 Herc] relay Cid reporting for duty
+[🦁 Herc] relay Cid dismissed
 ```
 
 ## Message Flow
@@ -252,10 +252,10 @@ Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
 6. **Self-echo prevented** — Bot does not process its own messages.
    *Check:* Bot's log shows its own messages filtered out.
 
-7. **Display name correct** — Bot's display name shows `<name> <pip> (<ship>)`.
+7. **Display name correct** — Bot's display name shows `<pip> <name> <shipEmoji>`.
    *Check:* Matrix profile API returns the expected display name format.
 
-8. **Resume works** — Restart the bot, verify it injects context and responds.
+8. **Resume works** — Wake the bot (via `!wake`), verify it injects context and responds.
    *Check:* Log shows "Injected resume message with context" with recent message count.
 
 9. **Reaction: context delivery** — Send a message the bot hears.

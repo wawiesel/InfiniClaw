@@ -1,12 +1,12 @@
 # 02 — Containers
 
-One bot = one Podman container per turn. Each container runs the `agent-runner` entry point which manages a hierarchy of AI processes.
+One bot = one persistent Podman container. The container starts when the bot wakes and stays running until the bot sleeps. Inside it, a hierarchy of AI processes handles triage, execution, and delegation.
 
 ## Internal Concurrency
 
-Unlike standard container models where one container equals one process, an InfiniClaw container acts like a mini-OS:
+An InfiniClaw container acts like a mini-OS:
 1.  **The Agent Runner:** The Node.js entry point (`/app/entrypoint.sh` → `node /app/dist/index.js`) that manages IPC and process lifecycle.
-2.  **The Main Brain (Trunk):** A `claude-code` process spawned by the agent runner for triage and management.
+2.  **The Main Brain (Trunk):** A persistent `claude-code` process spawned by the agent runner for triage and management. It does NOT restart per message — it stays running and receives new messages via IPC.
 3.  **Async Lobes (Workers):** Stateless subprocesses (Codex, Gemini, Claude, Ollama) spawned by the delegate runner for fast parallel execution. Results returned via IPC files.
 
 **Thread Brains** run on the host (not inside containers). The relay spawns them as `claude --print` processes that communicate via Matrix threads. See `07-threading.md`.

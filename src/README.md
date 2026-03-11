@@ -93,7 +93,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`formatMessages`**: Since `5b94b50`, includes `thread="$id"` attribute on threaded messages so bot can see thread structure in prompt.
 - **IPC paths**: `/workspace/ipc/tasks/` → runs inside container (no git credentials). Git push uses `_runtime/relay-tasks/` → picked up by `relayTasksLoop()` in relay.ts and executed on host.
 - **`resolveBots`**: Finds bots on this ship — first by room membership, then (for explicit targets) by fleet assignment. Sleeping bots have no room but can still be targeted by name for `!wake`.
-- **Speaker**: `isSpeaker()` returns true for only one machine per Engineering room. That relay handles all `!` commands. `!refit` currently only refits the speaker's local bots — multi-machine refit coordination is a known issue.
+- **Speaker**: `isSpeaker()` returns true for only one machine per Engineering room. That relay handles all `!` commands.
 - **`!todo`**: Reads most-recently-modified `.claude/todos/*.json` from `_runtime/instances/{bot}/data/sessions/main/` to show actual todo items (since `ca16ce9`).
 - **`operator-commands.ts` removed**: Operator commands (`!allow`, `!deny`, `!todo`, `!roster`, etc.) were folded into `relay.ts`. `command-registry.ts` is now the single source of truth for all `!` command names.
 - **`command-registry.ts` security hardening**: `dispatch()` rejects cmd strings longer than 512 chars (DoS guard); `registerHandler()` sanitizes the `name` parameter in error messages (log injection); `dispatch()` emits a console.warn when a matched command has no registered handler (silent no-op guard).
@@ -108,12 +108,13 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Regex escaping**: Use `escapeRegex(s)` from `utils.ts` instead of inline `/[.*+?^${}()|[\]\\]/g` patterns.
 - **Env var integers**: Use `envInt(name, default)` from `utils.ts` instead of `parseInt(process.env.VAR || 'X', 10)`.
 - **Bot display names**: Use `formatBotDisplayName(bot, pip)` from `formatting.ts` — single source of truth for the `pip Name shipEmoji` format. Both `relay.ts:setBotPip` and `main.ts:botDisplayName` use it.
+- **Ship commissioned flag**: `isShipCommissioned()` from `ship-config.ts` checks the ship-level `commissioned` boolean (distinct from per-bot `status`). Renamed from `active`/`isShipActive()` for consistency with `!commission`/`!decommission` commands.
 - **Ship names in user-visible output**: Use `shipTag()` or `thisShipName()` from `ship-config.ts`, never raw `os.hostname()`. S3 keys for fleet reports also use ship names.
 - **Display name sync**: `syncBotDisplayNames()` runs on relay startup to ensure ALL bots (including sleeping) have current format.
-- **Room naming**: `ensureRoomNames()` sets double-emoji names on startup: fleet rooms get `🌌<room> Name` (e.g. `🌌⚙️ Engineering`), ship-local rooms get `<ship><room> Name` (e.g. `🦁🏠 Cid's Room`), BehindTheCurtain gets `🌑🎭 BehindTheCurtain`.
-- **Lifecycle messages**: Body uses `relay <action>` prefix (no shipTag — loudspeaker `[tag]` provides context). Wake/refresh/refit use numbered thread steps `[N/total time]`. Git sync, commission/decommission, and `!go` also use `relay` prefix. Detail lines (online/done steps) omit ship name since loudspeaker already tags it.
+- **Room naming**: `ensureRoomNames()` sets double-emoji names on startup: fleet rooms get `🌌<room> Name` (e.g. `🌌⚙️ Engineering`), ship-local rooms/spaces get `<ship><room> Name` (e.g. `🦁🏠 Quarters`, `🦁🏠 Cid's Room`), BehindTheCurtain gets `🌑🎭 BehindTheCurtain`.
+- **Lifecycle messages**: Body uses `relay <action>` prefix (no shipTag — loudspeaker `[tag]` provides context). Wake/refresh/pull use numbered thread steps `[N/total time]`. Git sync, commission/decommission, and `!go` also use `relay` prefix. `threadReply()` omits `[shipTag]` — thread root already identifies the ship; only main timeline messages get the tag.
 - **"No bots here" noise**: `handleLifecycleCommand` only announces "No bots here" in fleet rooms (not quarters) and only if speaker. Prevents noise from non-owning ships in bot quarters rooms.
-- **Command ship targeting**: Commands that affect infrastructure (`!refit`, `!decommission`, `!commission`, `!relay on/off`) require an explicit `<ship>` argument. `!push` is speaker-only. `!provision` is per-ship (each reports independently). Usage errors are speaker-only to avoid noise.
+- **Ship-targeted commands**: `!push`, `!pull`, `!decommission`, `!commission`, `!operator on/off` accept optional `[ship]` — omit to target all ships.
 - **`!wake` dual-purpose**: Wakes sleeping bots or restarts already-awake bots (preserving current status). Uses `restarting`/`restarted` verbs when bot is already running.
 - **Room name idempotency**: `ensureRoomNames` checks current name before setting — avoids spam of `m.room.name` state events on relay restarts.
 - **BehindTheCurtain mirror**: All non-thread `reply()` messages are mirrored to BehindTheCurtain so the Captain sees command results regardless of which room they originated from. Thread steps are not mirrored to avoid noise.

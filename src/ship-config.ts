@@ -169,7 +169,7 @@ export interface ShipEntry {
   ip: string | null;
   os: string;
   user: string | null;
-  active: boolean;
+  commissioned: boolean;
   rank: number;
   spaceId?: string;
   loungeId?: string;
@@ -212,9 +212,9 @@ export function thisShipName(): string {
   return findShipByHostname()?.[0] ?? os.hostname();
 }
 
-/** Check if this ship is active. */
-export function isShipActive(): boolean {
-  return thisShip()?.active !== false;
+/** Check if this ship is commissioned. */
+export function isShipCommissioned(): boolean {
+  return thisShip()?.commissioned !== false;
 }
 
 /** Short display tag: "🦁 Herc" or fallback to hostname. */

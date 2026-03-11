@@ -8,7 +8,7 @@ Ships are registered in `operator/ships.json` in the secrets repo.
 
 ```json
 {
-  "HERACLES": { "ip": null, "os": "macOS", "user": "ww5", "active": true, "rank": 2 }
+  "HERACLES": { "ip": null, "os": "macOS", "user": "ww5", "commissioned": true, "rank": 2 }
 }
 ```
 
@@ -16,7 +16,7 @@ Fields:
 - `ip` — IP address (nullable, informational)
 - `os` — Operating system identifier
 - `user` — Login username (nullable)
-- `active` — Whether the ship is commissioned
+- `commissioned` — Whether the ship is commissioned (see `!commission`/`!decommission`)
 - `rank` — Speaker election tiebreaker (lower wins)
 - `spaceId` — Matrix space for this ship's bots (optional)
 - `loungeId` — Lounge room ID (optional)
@@ -25,15 +25,24 @@ Fields:
 
 Ships are ranked. The lowest-rank **active** ship is the default tiebreaker for speaker election (see below).
 
-A decommissioned ship (`active: false`) keeps its relay running and listening for commands but does not start bots. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
+The `commissioned` flag is a **ship-level** override in `ships.json` — distinct from per-bot `status` in `fleet.json`. A decommissioned ship (`commissioned: false`) keeps its relay running but will not wake any bots, regardless of their individual status. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
 
 ## The Relay
 
-A single always-on process per ship. The relay connects to Matrix rooms via intercom accounts (credentials from `operator/intercom.json`) and watches for `!` commands from the Captain or operator. It manages bot lifecycle by calling service functions directly.
+The relay is a pm2-managed Node.js process that runs on the host machine — one per ship, always on. It is the ship's control plane: it connects to Matrix, listens for `!` commands, manages bot lifecycle, syncs code, and spawns Thread Brains. Bots cannot function without a relay — it is the bridge between the Captain and the fleet.
 
-**The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't start bots.
+**What the relay does:**
+- Watches Matrix rooms for `!` commands from the Captain or operator
+- Wakes, sleeps, reports, and dismisses bots
+- Pulls and deploys code (git sync loops + `!pull`)
+- Spawns Thread Brains on the host
+- Sets bot display names and room names
+- Publishes fleet status to S3 for speaker election
+- Forwards Captain messages to the operator tmux session
 
-When a command arrives (e.g. `!rejoin cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore. Untargeted commands are room-scoped: the relay matches the room against each bot's `MAIN_GROUP_NAME`.
+**The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't wake bots.
+
+When a command arrives (e.g. `!wake cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore.
 
 ### Matrix Accounts
 
@@ -47,6 +56,10 @@ The relay uses multiple Matrix accounts for different purposes:
 | Per-room intercom | `intercom.json` | Duty room watching (bridge, engineering, astrometrics) |
 
 The operator account watches BehindTheCurtain and all rooms it has joined (including quarters rooms). Captain `!` commands from any of these rooms are processed. The help account keeps help/error responses out of loudspeaker so bots don't see them — bots have all system accounts in `IGNORE_SENDERS`.
+
+All relay command responses are delivered via the loudspeaker account. Main timeline messages are prefixed with `[<shipEmoji> <shipName>]` (e.g. `[🦁 Herc]`). Thread steps omit the tag — the thread root already identifies the ship. Message bodies use `relay <action>` prefix — they must NOT repeat the ship name since the loudspeaker tag already provides it.
+
+Non-thread replies are mirrored to BehindTheCurtain so the Captain sees command results regardless of which room they originated from. Thread steps are not mirrored to avoid noise.
 
 Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay`.
 
@@ -88,20 +101,34 @@ Election algorithm:
 
 The speaker result is cached and triggers async re-election in the background. Speaker election runs before aggregate commands (`!fleet`, `!health`, `!promote`/`!demote` for ships).
 
-## Ship Commands
+## Relay Commands
+
+Commands that target ships and infrastructure — distinct from bot lifecycle commands (see [04-bot](04-bot.md)). Ship-targeted commands accept an optional `<ship>` argument; omit it to target all ships. Each relay checks if it's the target — only the matching ship acts, others silently ignore.
+
+### Fleet status
 
 | Command | Scope | Behavior |
 |---------|-------|----------|
-| `!commission [ship]` | Target ship | Set `active: true`, reload fleet, start onduty bots |
-| `!decommission [ship]` | Target ship | Stop all bots, set statuses to `sleep`, set `active: false`. Relay keeps running. |
-| `!transport <bot> <ship>` | Source ship | Two-phase: dematerialize on source → materialize on destination via secrets sync |
-| `!refit [target]` | Target ship/bot | Sync repos, rebuild, redeploy, restart target bots |
+| `!fleet` | Speaker | Aggregate fleet status: all ships, all bots, versions, health |
 
-**Transport protocol:**
-1. Source ship stops bot, kills containers, removes mounts
-2. Source ship sets `status: 'transit'`, `ship: <destination>` in fleet.json, commits
-3. Destination ship's secrets sync loop pulls fleet.json, sees `transit` bot assigned to it
-4. Destination bootstraps the bot, sets `status: 'onduty'`, commits
+The speaker publishes its own report to S3, polls for other ships' reports (up to 5s), then assembles a single threaded response showing every ship and bot grouped by ship rank.
+
+### Code pipeline
+
+| Command | Scope | Behavior |
+|---------|-------|----------|
+| `!push [ship]` | Target ship (all if omitted) | Push InfiniClaw repo to GitHub |
+| `!pull [ship]` | Target ship (all if omitted) | Pull repos, rebuild, deploy dist to bot instances, wake all bots |
+
+Flow: code changes → `!push [ship]` (send to GitHub) → `!pull` (each ship pulls, rebuilds, deploys to bots).
+
+### Ship lifecycle
+
+| Command | Scope | Behavior |
+|---------|-------|----------|
+| `!commission [ship]` | Target ship | Set `commissioned: true`, wake onduty bots |
+| `!decommission [ship]` | Target ship | Sleep all bots, set `commissioned: false`. Relay keeps running. |
+| `!operator on/off [ship]` | Target ship | Enable/disable operator relay (forwarding Captain messages to operator tmux) |
 
 ## Per-Machine Configuration
 
