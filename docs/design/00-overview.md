@@ -1,6 +1,6 @@
 # InfiniClaw Design
 
-InfiniClaw is a multi-agent orchestration system that operates a fleet of autonomous AI bots on Matrix. Each bot runs in a secure Podman container with a persistent Main Brain process. Complex work is delegated to ephemeral Thread Brains and async lobes via a "Branch and Merge" threading model.
+InfiniClaw is a multi-agent orchestration system that operates a fleet of autonomous AI bots on Matrix. Each bot runs in a secure Podman container with a persistent main brain. Complex work is delegated to ephemeral branch brains and lobes via a "Branch and Merge" threading model.
 
 ## Definitions
 
@@ -8,7 +8,7 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 >
 > **Ship** — A machine running a relay. Identified by hostname, registered in `ships.json`. Examples: HERACLES, Poseidon.
 >
-> **Relay** — The ship's control plane. A pm2-managed process that connects to Matrix, dispatches `!` commands, manages bot lifecycle, syncs code, and spawns Thread Brains. One per ship, always running.
+> **Relay** — The ship's control plane. A pm2-managed process that connects to Matrix, dispatches `!` commands, manages bot lifecycle, syncs code, and spawns branch brains. One per ship, always running.
 >
 > **Bot** — A Matrix account backed by a Podman container. Has a persona, role, rank, and lifecycle status (`sleep`, `quarters`, `onduty`).
 >
@@ -22,7 +22,7 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 
 ## Core Principles
 
-- **Bots must be instantly responsive.** The Main Brain is a persistent process that triages instantly. Complex work is delegated to ephemeral Thread Brains. The Main Brain never blocks.
+- **Bots must be instantly responsive.** The main brain is a persistent process that triages instantly. Complex work is delegated to ephemeral branch brains. The main brain never blocks.
 - **Branch, don't interrupt.** New requests spawn concurrent workers without destroying existing task contexts.
 - **Autonomous Fleet Management.** Bots manage their own lifecycles: rebuilding images, fixing configuration, monitoring health, and migrating between machines without human intervention.
 - **Matrix as State Engine.** Matrix threads provide the permanent, immutable history of every task. AI processes are ephemeral; conversation context is immortal.

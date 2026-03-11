@@ -29,13 +29,13 @@ The `commissioned` flag is a **ship-level** override in `ships.json` — distinc
 
 ## The Relay
 
-The relay is a pm2-managed Node.js process that runs on the host machine — one per ship, always on. It is the ship's control plane: it connects to Matrix, listens for `!` commands, manages bot lifecycle, syncs code, and spawns Thread Brains. Bots cannot function without a relay — it is the bridge between the Captain and the fleet.
+The relay is a pm2-managed Node.js process that runs on the host machine — one per ship, always on. It is the ship's control plane: it connects to Matrix, listens for `!` commands, manages bot lifecycle, syncs code, and spawns branch brains. Bots cannot function without a relay — it is the bridge between the Captain and the fleet.
 
 **What the relay does:**
 - Watches Matrix rooms for `!` commands from the Captain or operator
 - Wakes, sleeps, reports, and dismisses bots
 - Pulls and deploys code (git sync loops + `!pull`)
-- Spawns Thread Brains on the host
+- Spawns branch brains on the host
 - Sets bot display names and room names
 - Publishes fleet status to S3 for speaker election
 - Forwards Captain messages to the operator tmux session

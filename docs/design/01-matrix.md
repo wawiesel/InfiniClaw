@@ -226,6 +226,18 @@ On-duty bots can send messages across rooms by mentioning the target room name:
 
 Each on-duty room has access to the other two room intercoms. Messages appear as `<BotName> (<SourceRoom>): <message>` in the target room. See [12-intercom](12-intercom.md) for intercom account details.
 
+## Bot Matrix Navigation
+
+Bots have MCP tools for navigating Matrix room history. These let a bot "look back" at conversations — investigating lobe results, reading threads, or reviewing context it missed.
+
+| Tool | Purpose |
+|------|---------|
+| `get_message` | Fetch a specific message by event ID |
+| `get_thread` | Fetch all messages in a thread |
+| `get_last_event_id` | Get the event ID of the most recent message |
+
+These tools access the bot's current room (quarters or duty room). They do not require the bot to have been active when the messages were sent — Matrix history is permanent.
+
 ## Verification
 
 1. **Server reachable** — `curl $HOMESERVER/_matrix/client/versions` → HTTP 200

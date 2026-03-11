@@ -200,13 +200,13 @@ Each step updates the bot's display name pip to match the current stage. `!wake`
 
 ```
 User message → Matrix → host message loop → SQLite → trigger check
-  → [TRIGGERED] container spawns → Main Brain processes conversation
-    → [IF COMPLEX] Main Brain calls branch_to_thread(objective)
-      → Host creates thread: "🧵 Thread Brain: <title>"
-      → Host spawns Thread Brain (claude --print on host, not container)
-      → Thread Brain works, posts progress into thread
-      → Main Brain continues listening — never blocked
-    → [IF SIMPLE] Main Brain replies directly
+  → [TRIGGERED] container spawns → main brain processes conversation
+    → [IF COMPLEX] main brain calls branch_to_thread(objective)
+      → Host creates thread: "🧵 Branch: <title>"
+      → Host spawns branch brain (claude --print on host, not container)
+      → Branch brain works, posts progress into thread
+      → Main brain continues listening — never blocked
+    → [IF SIMPLE] main brain replies directly
   → [NOT TRIGGERED] message stored as context, no response
 ```
 

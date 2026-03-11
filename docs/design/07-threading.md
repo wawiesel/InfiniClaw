@@ -1,123 +1,109 @@
-# 07 — Threading and Lobes
+# 07 — Threading
 
-InfiniClaw uses a "Branch and Merge" threading model. The main brain stays responsive on the main timeline. Complex work happens in visible Matrix threads via Thread Brains and async lobes.
+InfiniClaw uses a "Branch and Merge" model. The main brain stays responsive on the main timeline. Complex work happens in visible Matrix threads via branch brains and lobes (see [05-brain](05-brain.md) for the brain taxonomy).
 
-## Architecture Overview
+## Branch and Merge Overview
 
 ```
-Main Brain (persistent claude-code in container)
-  ├── Simple request → reply directly on main timeline
+Main Brain (persistent, in container)
+  ├── Simple request → reply on main timeline
   ├── Complex request → branch_to_thread(objective)
-  │     → Relay spawns Thread Brain on HOST (claude --print)
-  │     → Thread Brain works in visible Matrix thread
-  │     → On exit: main brain restarts to pick up findings
-  └── Heavy lifting → delegate to async lobe
-        → Agent-runner spawns lobe subprocess on HOST
-        → Lobe writes result to IPC input dir
-        → Main brain picks up result on next turn
+  │     → Relay spawns Branch Brain on HOST (claude --print)
+  │     → Branch Brain streams into visible Matrix thread
+  │     → On exit: bot wakes to pick up findings
+  └── Heavy/async work → invoke lobe MCP tool
+        → Lobe works in a quarters thread (any provider)
+        → On completion: summary posted to quarters main timeline
+        → Bot picks up result naturally
 ```
 
-## The Main Brain (The Trunk)
+## Branch Brains
 
-A persistent, long-lived `claude-code` process inside the container. It stays running and receives new messages via IPC as conversation turns.
-
-- **Responsibility:** Read new messages, reply to simple ones, branch complex ones.
-- **Responsiveness:** A triage decision is a normal conversation turn — sub-second. The main brain never does heavy work itself.
-- **Action:** For complex requests, calls `branch_to_thread(objective)`. This tells the host to create a visible thread and spawn a Thread Brain. The main brain immediately continues listening.
-
-## Thread Brains (The Branches)
-
-Thread Brains run on the **host machine** — not inside containers. They are one-shot `claude --print` processes that stream output into a Matrix thread.
+Branch brains run on the **host machine** — not inside containers. They are one-shot `claude --print` processes that stream output into a Matrix thread in the bot's current room.
 
 ### How Branching Works
 
-1. Main brain decides to branch and calls `branch_to_thread(objective, thread_id)`
+1. Main brain calls `branch_to_thread(objective, thread_id)`
 2. Agent-runner writes a relay task file: `_runtime/relay-tasks/thread-brain-*.json`
-3. Relay polls the relay-tasks directory, finds the file, calls `spawnThreadBrain()`
-4. Relay posts announcement on main timeline: `🧵 Thread Brain: {objective first line}`
+3. Relay picks up the file, calls `spawnThreadBrain()`
+4. Relay posts announcement on main timeline: `🧵 Branch: {objective first line}`
 5. Announcement event ID becomes the thread root
-6. Relay spawns: `claude --print --verbose --output-format stream-json` with the objective
-7. Thread Brain streams output — each assistant message is posted into the Matrix thread
-8. Captain can follow along in the thread or ignore it
+6. Relay spawns: `claude --print --verbose --output-format stream-json`
+7. Branch brain streams output — each message posted into the Matrix thread
+8. Captain can follow along or ignore
+
+### Model Selection
+
+The bot chooses which model to use from its configured branch models. For example, a bot with main=haiku and branch=[haiku, sonnet] might pick sonnet for a complex engineering task and haiku for a quick investigation. This is configured in the bot's persona and memory.
 
 ### Streaming Output
 
 The relay parses `stream-json` format from the Claude CLI:
-- `event.type === 'assistant'` with `event.message.content[].text` — streamed as it arrives
-- `event.type === 'result'` — fallback if no streaming output was captured
-- Messages are posted to the thread individually (not batched)
+- `event.type === 'assistant'` with `event.message.content[].text` — posted as it arrives
+- `event.type === 'result'` — fallback if no streaming output captured
+- Messages posted individually (not batched)
 
 ### Concurrency Limit
 
-`MAX_THREAD_BRAINS_PER_BOT` (default 3, configurable via env) caps concurrent Thread Brains per bot. If a bot already has 3 running, new requests are rejected with a warning posted into the triggering thread so the bot knows to wait.
+`MAX_THREAD_BRAINS_PER_BOT` (default 3, configurable via env) caps concurrent branch brains per bot. Excess requests are rejected with a warning posted into the triggering thread.
 
-### Thread Brain Credentials
+### After Completion
 
-Thread Brains receive credentials from the bot's env file:
+When a branch brain exits:
+1. 30-second debounce timer starts (reset if another branch exits)
+2. After debounce: main bot wakes to pick up findings
+3. Thread remains in Matrix history permanently
 
-| Bot env key | Thread Brain env |
+### Credentials
+
+Branch brains receive credentials from the bot's env file:
+
+| Bot env key | Branch brain env |
 |-------------|-----------------|
 | `BRAIN_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `BRAIN_API_KEY` | `ANTHROPIC_API_KEY` |
 
 Also inherits: `ANTHROPIC_BASE_URL`, `NODE_EXTRA_CA_CERTS`, `GH_TOKEN` (from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account).
 
-### After Completion
+## Lobes
 
-When a Thread Brain exits:
-1. 30-second debounce timer starts (reset if another TB exits)
-2. After debounce: main bot wakes to pick up findings
-3. Thread remains in Matrix history permanently
-
-The debounce ensures the bot wake only fires once when multiple Thread Brains finish in quick succession.
-
-## The Merge
-
-When a Thread Brain completes its task:
-
-1. **Thread Summary:** Post a completion message in the thread.
-2. **Main Timeline Summary:** Post a one-line summary to the main timeline so the Captain sees the outcome without clicking into the thread.
-3. **Termination:** Thread Brain exits. The thread remains in Matrix history permanently.
-
-## Thread Reactivation (Immortal Context)
-
-Matrix thread history is permanent. Thread Brains are ephemeral — they exit after completing their task. But the thread context is immortal.
-
-If the Captain asks a follow-up in a completed thread days later:
-1. The host detects the thread and the bot's previous participation.
-2. The host spawns a new Thread Brain, hydrated with the thread's history from SQLite.
-3. The Thread Brain answers the question in the thread and exits.
-
-## Async Lobes (The Workers)
-
-Single-purpose worker processes for heavy lifting. Lobes are spawned by the agent-runner via the delegate system — they run on the host, not inside the main brain container.
+Lobes are MCP tools that spawn non-blocking workers using any provider. Unlike branch brains, lobes do not receive the full conversation context — only what the bot explicitly passes.
 
 ### Available Providers
 
-| Provider | Default model | Alternatives |
-|----------|--------------|--------------|
-| `codex` | `gpt-5.3-codex` | `o3`, `o4-mini` |
-| `gemini` | `gemini-3.1-pro-preview` | `gemini-2.5-flash` |
-| `claude` | `sonnet` | `opus`, `haiku` |
-| `ollama` | `qwen3:14b` | `qwen3:30b`, `devstral-small-2:24b` |
+| Provider | Examples |
+|----------|----------|
+| `codex` | `gpt-5.3-codex`, `o3`, `o4-mini` |
+| `gemini` | `gemini-3.1-pro-preview`, `gemini-2.5-flash` |
+| `claude` | `sonnet`, `opus`, `haiku` |
+| `ollama` | `qwen3:14b`, `qwen3:30b`, `devstral-small-2:24b` |
 
-### Delegation Flow
+### Lobe Flow
 
-1. Bot posts summary on main timeline or active thread (💭 + reason)
-2. Summary event ID becomes the delegate thread root
-3. Objective posted into delegate thread
-4. Lobe subprocess spawned (fire-and-forget, unref'd)
-5. Previous work thread restored immediately — bot is not blocked
-6. On lobe exit: result written to `IPC input dir` as `result-{lobeId}.json`
-7. Main brain picks up result on next turn
+1. Main or branch brain invokes the lobe MCP tool with an objective and context
+2. Lobe spawns on the host (fire-and-forget)
+3. Lobe posts progress into a thread in the bot's **quarters room** via loudspeaker
+4. On completion: lobe posts a summary to the **quarters main timeline**
+5. Bot picks up the summary naturally if active (quarters uses `triggerType: always`)
+6. Bot can use Matrix navigation tools to fetch the lobe thread and investigate further
 
-### Lobe Timeouts
+Lobes always post to quarters regardless of which room the bot is currently in. This keeps lobe output separate from the bot's active work context.
 
-| Timeout | Default | Max |
-|---------|---------|-----|
-| Delegate timeout | 15 min | 60 min |
+## The Merge
 
-Lobes do NOT post to Matrix directly. The main brain is responsible for reporting lobe results.
+When a branch brain completes:
+1. **Thread summary** — completion message in the thread
+2. **Main timeline summary** — one-line result so the Captain sees the outcome without clicking into the thread
+3. **Termination** — branch brain exits, thread remains in Matrix history
+
+## Thread Reactivation
+
+Matrix threads are permanent. Branch brains are ephemeral. But the thread context is immortal.
+
+If the Captain asks a follow-up in a completed thread:
+1. The host detects the thread and the bot's previous participation
+2. A new branch brain spawns, hydrated with the thread's history
+3. The branch brain answers in the thread and exits
 
 ## Correct branch_to_thread Protocol
 
@@ -126,30 +112,30 @@ Bots must follow this sequence:
 1. Post a conversational reply FIRST ("Got it, dispatching...")
 2. Call `get_last_event_id` to get the real Matrix event ID (`$...` format)
 3. Call `branch_to_thread` with that event ID and the objective
-4. Say "Thread Brain dispatched." and STOP — do NOT dispatch more in the same turn
+4. Say "Branch dispatched." and STOP — do NOT dispatch more in the same turn
 
 ## Verification
 
-1. **Branch creates thread** — Send a complex request to the bot.
-   *Check:* A new thread appears on the main timeline with `🧵 Thread Brain: <title>`.
+1. **Branch creates thread** — Send a complex request.
+   *Check:* Thread appears in current room with `🧵 Branch: <title>`.
 
-2. **Thread Brain posts in thread** — Thread Brain works on the task.
-   *Check:* All progress and results appear inside the thread, not on main timeline.
+2. **Branch posts in thread** — Branch brain works on the task.
+   *Check:* Progress appears inside the thread, not on main timeline.
 
-3. **Main timeline stays responsive** — While a Thread Brain is working, send another message.
-   *Check:* Main Brain responds immediately without waiting for Thread Brain to finish.
+3. **Main stays responsive** — While a branch is working, send another message.
+   *Check:* Main brain responds immediately.
 
-4. **Merge posts summary** — Thread Brain completes.
-   *Check:* One-line summary appears on main timeline. Thread has completion message.
+4. **Merge posts summary** — Branch brain completes.
+   *Check:* One-line summary on main timeline. Completion message in thread.
 
-5. **Thread reactivation** — Reply in a completed thread days later.
-   *Check:* New Thread Brain spawns, hydrated with old context, answers the question.
+5. **Thread reactivation** — Reply in a completed thread later.
+   *Check:* New branch brain spawns with old context, answers the question.
 
 6. **Concurrency limit** — Trigger more than `MAX_THREAD_BRAINS_PER_BOT` branches.
-   *Check:* Excess requests rejected with warning in the triggering thread.
+   *Check:* Excess rejected with warning.
 
-7. **Lobe delegation** — Bot delegates heavy work to a lobe.
-   *Check:* Lobe runs asynchronously. Result appears in IPC input. Main brain reports findings.
+7. **Lobe posts to quarters** — Bot delegates to a lobe.
+   *Check:* Thread appears in quarters (not current room). Summary on quarters timeline when done.
 
-8. **Thread Brain credentials** — Thread Brain makes API calls.
-   *Check:* Uses bot's credentials (not host user). PR reviews appear as fleet bot account.
+8. **No nested branching** — Branch brain attempts to branch.
+   *Check:* Rejected.

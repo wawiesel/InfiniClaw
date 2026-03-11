@@ -13,7 +13,7 @@ Architecture and behavior are specified in `docs/design/` — this README docume
 | [04-bot](../docs/design/04-bot.md) | `main.ts`, `infini-config.ts`, `message-filtering.ts` |
 | [05-brain](../docs/design/05-brain.md) | `brain-management.ts`, `container-spawn.ts` |
 | [06-ipc](../docs/design/06-ipc.md) | `ipc-watcher.ts`, `ipc-commands.ts` |
-| [07-threading](../docs/design/07-threading.md) | `relay.ts` (Thread Brains), `container-spawn.ts` (lobes) |
+| [07-threading](../docs/design/07-threading.md) | `relay.ts` (branch brains), `container-spawn.ts` (lobes) |
 
 ## Architecture
 
@@ -102,8 +102,8 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`resolveReplyThread`**: Scans messages in reverse for `thread_id` from non-bot senders. Returns `workThreadIds` override if set. Cleared after each response turn.
 - **`storeOutgoing`**: Must set `is_bot_message: true` — otherwise outgoing messages are re-detected as new human messages by `getNewMessages`, causing echo loops in quarters rooms.
 - **Turn timeout kill**: Must use `podman stop` (not `proc.kill('SIGTERM')`) — podman does not relay SIGTERM to the container process. Without this, containers survive the kill and run for minutes/hours.
-- **Thread Brain GitHub auth**: `GH_TOKEN` injected from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account, not the host user.
-- **Thread Brain limit**: `MAX_THREAD_BRAINS_PER_BOT` (default 3) caps concurrent Thread Brains per bot. Rejection posts a warning into the triggering Matrix thread so the bot knows to wait.
+- **Branch brain GitHub auth**: `GH_TOKEN` injected from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account, not the host user.
+- **Branch brain limit**: `MAX_THREAD_BRAINS_PER_BOT` (default 3) caps concurrent branch brains per bot. Rejection posts a warning into the triggering Matrix thread so the bot knows to wait.
 - **Error strings**: Always use `errStr(err)` from `utils.ts` instead of inline `err instanceof Error ? err.message : String(err)`. Already imported in all source files.
 - **Regex escaping**: Use `escapeRegex(s)` from `utils.ts` instead of inline `/[.*+?^${}()|[\]\\]/g` patterns.
 - **Env var integers**: Use `envInt(name, default)` from `utils.ts` instead of `parseInt(process.env.VAR || 'X', 10)`.
