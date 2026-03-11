@@ -36,7 +36,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipActive, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { formatBotDisplayName } from './formatting.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
@@ -462,13 +462,13 @@ let cachedIsSpeaker = true;
 async function electSpeaker(): Promise<boolean> {
   try {
     const ships = loadShips();
-    const active = Object.entries(ships).filter(([, m]) => m.active);
-    if (active.length === 0) return true;
-    if (!active.some(([, e]) => e.hostname === HOSTNAME)) return false;
+    const commissioned = Object.entries(ships).filter(([, m]) => m.commissioned);
+    if (commissioned.length === 0) return true;
+    if (!commissioned.some(([, e]) => e.hostname === HOSTNAME)) return false;
 
     const epochs = await fetchCommitEpochs();
     let maxEpoch = 0;
-    for (const [, entry] of active) {
+    for (const [, entry] of commissioned) {
       const e = epochs[entry.hostname] ?? 0;
       if (e > maxEpoch) maxEpoch = e;
     }
@@ -479,7 +479,7 @@ async function electSpeaker(): Promise<boolean> {
       return false;
     }
 
-    const atMax = active
+    const atMax = commissioned
       .filter(([, entry]) => (epochs[entry.hostname] ?? 0) >= maxEpoch)
       .sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
     return atMax.length > 0 && atMax[0][1].hostname === HOSTNAME;
@@ -1523,7 +1523,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
         } catch { /* no fleet on disk */ }
 
         // Materialize — bots assigned here but not active (dematerialized on source ship)
-        if (!isShipActive()) { /* decommissioned — skip materialize */ }
+        if (!isShipCommissioned()) { /* decommissioned — skip materialize */ }
         else try {
           for (const [bot, entry] of Object.entries(liveFleet)) {
             if (entry.ship === HOSTNAME && entry.status === 'transit') {
@@ -1751,7 +1751,7 @@ async function handleLifecycleCommand(
   }
 
   if (action !== 'dismiss' && action !== 'sleep') {
-    if (!isShipActive()) {
+    if (!isShipCommissioned()) {
       await reply(conn, `ship is decommissioned — use !commission first`);
       return;
     }
@@ -1948,7 +1948,7 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
   const bots = resolveBots(target, conn);
   if (bots.length === 0) return;
 
-  if (!isShipActive()) {
+  if (!isShipCommissioned()) {
     await reply(conn, `ship is decommissioned — use !commission first`);
     return;
   }
@@ -2101,10 +2101,10 @@ function registerRelayCommands(): void {
           killStaleContainers(bot);
           fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         }
-        me[1].active = false;
+        me[1].commissioned = false;
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `decommission ${me[0]}`);
-        await reply(conn, `relay decommissioned — all bots stopped`);
+        await reply(conn, `relay decommissioned — all bots asleep`);
       } catch (err) {
         await reply(conn, `decommission failed — ${errStr(err)}`);
       }
@@ -2118,7 +2118,7 @@ function registerRelayCommands(): void {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
         if (!me) { await reply(conn, `not in ships.json`); return; }
-        me[1].active = true;
+        me[1].commissioned = true;
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `commission ${me[0]}`);
         ensurePodmanReady();
@@ -2294,7 +2294,7 @@ function registerRelayCommands(): void {
         if (!resolved) { await reply(conn, `Unknown ship: ${shipInput}`); return; }
         targetName = resolved;
         targetShip = ships[resolved].hostname;
-        if (!ships[resolved].active) { await reply(conn, `${targetName} is decommissioned`); return; }
+        if (!ships[resolved].commissioned) { await reply(conn, `${targetName} is decommissioned`); return; }
       } catch { targetShip = shipInput; targetName = shipInput; }
       if (liveFleet[bot].ship !== HOSTNAME) return;
       try {
@@ -2404,7 +2404,7 @@ function registerRelayCommands(): void {
             lines.push('🔧 drydock');
           } else {
             const rank = sConfig?.rank ?? '?';
-            const shipIcon = sConfig?.active ? (sConfig?.emoji ?? '⚓') : '🚫';
+            const shipIcon = sConfig?.commissioned ? (sConfig?.emoji ?? '⚓') : '🚫';
             let shipStatus: string;
             if (shipReport) {
               const isFresh = freshReports[shipName] != null;
@@ -2994,7 +2994,7 @@ async function main(): Promise<void> {
   await sleep(30_000);
 
   // Bootstrap all bots to quarters
-  if (isShipActive()) {
+  if (isShipCommissioned()) {
     try {
       ensurePodmanReady();
       const root = resolveRoot();

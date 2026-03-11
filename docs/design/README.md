@@ -10,7 +10,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 ## Bot Runtime
 
-- `03-ship.md` — Machine registry (ship `active` vs bot `status`), relay process (loudspeaker tags, BehindTheCurtain mirror), speaker election, auto-sync loops, relay commands (commission/decommission/refit/transport), per-machine config
+- `03-ship.md` — Machine registry (ship `commissioned` flag vs bot `status`), relay process (loudspeaker tags, BehindTheCurtain mirror), speaker election, auto-sync loops, relay commands (commission/decommission/refit/transport), per-machine config
 - `04-bot.md` — Identity, bot attributes (triggerType, status, rank), mention/callout flow, response rules, display name format, boot progress (`relay <action>` prefix), `!wake` restart behavior, resume behavior
 - `05-brain.md` — Persistent main brain, message delivery (SQLite → IPC), turn timeout (90s default, `podman stop`), credential mapping (BRAIN_* → CLAUDE_CODE_*/ANTHROPIC_*), quota fallback, session continuity
 - `06-ipc.md` — Container ↔ host IPC (messages/tasks/input directories), atomic file processing, per-room namespaces, main room elevation, wake/sleep cooldowns

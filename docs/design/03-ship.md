@@ -8,7 +8,7 @@ Ships are registered in `operator/ships.json` in the secrets repo.
 
 ```json
 {
-  "HERACLES": { "ip": null, "os": "macOS", "user": "ww5", "active": true, "rank": 2 }
+  "HERACLES": { "ip": null, "os": "macOS", "user": "ww5", "commissioned": true, "rank": 2 }
 }
 ```
 
@@ -16,7 +16,7 @@ Fields:
 - `ip` — IP address (nullable, informational)
 - `os` — Operating system identifier
 - `user` — Login username (nullable)
-- `active` — Whether the ship is commissioned
+- `commissioned` — Whether the ship is commissioned (see `!commission`/`!decommission`)
 - `rank` — Speaker election tiebreaker (lower wins)
 - `spaceId` — Matrix space for this ship's bots (optional)
 - `loungeId` — Lounge room ID (optional)
@@ -25,7 +25,7 @@ Fields:
 
 Ships are ranked. The lowest-rank **active** ship is the default tiebreaker for speaker election (see below).
 
-The `active` flag is a **ship-level** override in `ships.json` — distinct from per-bot `status` in `fleet.json`. A decommissioned ship (`active: false`) keeps its relay running but will not start any bots, regardless of their individual status. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
+The `commissioned` flag is a **ship-level** override in `ships.json` — distinct from per-bot `status` in `fleet.json`. A decommissioned ship (`commissioned: false`) keeps its relay running but will not wake any bots, regardless of their individual status. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
 
 ## The Relay
 
@@ -98,8 +98,8 @@ Commands that target ships and infrastructure — distinct from bot lifecycle co
 
 | Command | Scope | Behavior |
 |---------|-------|----------|
-| `!commission <ship>` | Target ship | Set `active: true`, reload fleet, start onduty bots |
-| `!decommission <ship>` | Target ship | Sleep all bots, set ship `active: false`. Relay keeps running — listens for `!commission`. |
+| `!commission <ship>` | Target ship | Set `commissioned: true`, reload fleet, wake onduty bots |
+| `!decommission <ship>` | Target ship | Sleep all bots, set `commissioned: false`. Relay keeps running — listens for `!commission`. |
 | `!transport <bot> <ship>` | Source ship | Two-phase: dematerialize on source → materialize on destination via secrets sync |
 | `!refit <ship>` | Target ship | Sync repos, rebuild, redeploy, restart target bots |
 | `!relay on/off <ship>` | Target ship | Enable/disable relay processing on target ship |
