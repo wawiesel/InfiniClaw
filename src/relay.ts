@@ -554,12 +554,12 @@ async function ensureRoomNames(): Promise<void> {
     await setName(shipEntry.loungeId, `${shipEmoji}${ROOM_EMOJI.lounge} Lounge`);
   }
 
-  // BehindTheCurtain: "<ship>🎭 BehindTheCurtain"
+  // BehindTheCurtain: "🌑🎭 BehindTheCurtain"
   try {
     const opData = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
     const curtainId = opData?.rooms?.BehindTheCurtain;
-    if (curtainId && shipEmoji) {
-      await setName(curtainId, `${shipEmoji}${ROOM_EMOJI.curtain} BehindTheCurtain`);
+    if (curtainId) {
+      await setName(curtainId, `🌑${ROOM_EMOJI.curtain} BehindTheCurtain`);
     }
   } catch { /* non-fatal */ }
 

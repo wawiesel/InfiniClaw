@@ -110,6 +110,6 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Bot display names**: Use `formatBotDisplayName(bot, pip)` from `formatting.ts` — single source of truth for the `pip Name shipEmoji` format. Both `relay.ts:setBotPip` and `main.ts:botDisplayName` use it.
 - **Ship names in user-visible output**: Use `shipTag()` or `thisShipName()` from `ship-config.ts`, never raw `os.hostname()`. S3 keys for fleet reports also use ship names.
 - **Display name sync**: `syncBotDisplayNames()` runs on relay startup to ensure ALL bots (including sleeping) have current format.
-- **Room naming**: `ensureRoomNames()` sets double-emoji names on startup: fleet rooms get `🌌<room> Name` (e.g. `🌌⚙️ Engineering`), ship-local rooms get `<ship><room> Name` (e.g. `🦁🏠 Cid's Room`).
+- **Room naming**: `ensureRoomNames()` sets double-emoji names on startup: fleet rooms get `🌌<room> Name` (e.g. `🌌⚙️ Engineering`), ship-local rooms get `<ship><room> Name` (e.g. `🦁🏠 Cid's Room`), BehindTheCurtain gets `🌑🎭 BehindTheCurtain`.
 - **Lifecycle messages**: Body uses `relay <action>` prefix (no shipTag — loudspeaker `[tag]` provides context). Wake/refresh/refit use numbered thread steps `[N/total time]`. Git sync, commission/decommission, and `!go` also use `relay` prefix.
 - **"No bots here" noise**: `handleLifecycleCommand` only announces "No bots here" in fleet rooms (not quarters) and only if speaker. Prevents noise from non-owning ships in bot quarters rooms.
