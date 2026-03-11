@@ -1,4 +1,4 @@
-# 04 — Bot
+# 05 — Bot
 
 A bot is a Matrix account backed by a container running on a ship. It listens to room messages, responds when triggered, and accumulates context from everything it hears.
 
@@ -161,7 +161,7 @@ Bots set their Matrix display name to show status at a glance:
 
 Examples: `🟢 Cid 🦁`, `⭐ Parker 🦁`, `💤 Nora 🔱`
 
-The pip reflects **operational status**, not which room the bot is in. See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status model.
+The pip reflects **operational status**, not which room the bot is in. See [09-roles-and-rooms](09-roles-and-rooms.md) for the full status model.
 
 | Pip | Status |
 |-----|--------|
@@ -212,7 +212,7 @@ User message → Matrix → host message loop → SQLite → trigger check
 
 ## Mention-Wake
 
-A sleeping bot can be woken by an explicit `<m>name</m>` callout in any room where the bot has membership. The relay monitors for trigger-pattern matches against sleeping bots and auto-wakes them — equivalent to `!wake <bot>` but driven by a mention instead of an operator command. The bot resumes in the room where the callout occurred.
+A sleeping bot can be woken by an explicit `<m>name</m>` callout in any room where the bot has membership. The relay monitors for trigger-pattern matches against sleeping bots and auto-wakes them — equivalent to `!wake <bot>` but driven by a mention instead of an x-command. The bot resumes in the room where the callout occurred.
 
 ## Resume Behavior
 

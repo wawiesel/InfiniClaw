@@ -1,4 +1,4 @@
-# 05 — Brain
+# 06 — Brain
 
 Every bot has up to three types of brain process. Each serves a different purpose and runs in a different context.
 
@@ -10,13 +10,13 @@ Every bot has up to three types of brain process. Each serves a different purpos
 
 ## Main Brain
 
-A persistent `claude-code` session inside the bot's container. It does not exit after each message — new messages arrive via IPC into the same ongoing conversation (see [06-ipc](06-ipc.md)).
+A persistent `claude-code` session inside the bot's container. It does not exit after each message — new messages arrive via IPC into the same ongoing conversation (see [07-ipc](07-ipc.md)).
 
 - **Triage is instant.** Reading a new message and deciding "branch or reply" is sub-second.
 - **Context accumulates.** The brain remembers prior messages in its session.
 - **Never blocks.** Complex work is branched or lobed, never done inline.
 
-The turn timeout enforces this model — if the brain takes too long, the container is killed via `podman stop` and the bot resumes via session recovery (see [04-bot](04-bot.md)).
+The turn timeout enforces this model — if the brain takes too long, the container is killed via `podman stop` and the bot resumes via session recovery (see [05-bot](05-bot.md)).
 
 ## Branch Brain
 
@@ -27,7 +27,7 @@ A one-shot `claude` process that works in a visible Matrix thread in the bot's c
 - **No nested branching** — a branch brain cannot branch again.
 - **Streaming output** — progress is posted into the thread as it arrives.
 
-See [07-threading](07-threading.md) for the branching protocol and implementation.
+See [08-threading](08-threading.md) for the branching protocol and implementation.
 
 ## Lobe Brain
 
@@ -38,7 +38,7 @@ An MCP tool that spawns a non-blocking worker using any provider. The lobe does 
 - **Any provider** — gemini, codex, ollama, claude. The bot develops its own heuristics for when to use which.
 - **Both main and branch can lobe** — either brain type can invoke a lobe.
 
-The bot can use Matrix navigation tools (see [01-matrix](01-matrix.md)) to fetch the lobe thread and investigate results further.
+The bot can use Matrix navigation tools (see [02-matrix](02-matrix.md)) to fetch the lobe thread and investigate results further.
 
 ## Configuration
 

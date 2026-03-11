@@ -1,4 +1,4 @@
-# 06 — IPC
+# 07 — IPC
 
 Container ↔ host communication. Containers write JSON files to their IPC directory, and the host polls these directories to process commands and messages.
 

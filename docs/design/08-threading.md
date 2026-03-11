@@ -1,6 +1,6 @@
-# 07 — Threading
+# 08 — Threading
 
-InfiniClaw uses a "Branch and Merge" model. The main brain stays responsive on the main timeline. Complex work happens in visible Matrix threads via branch brains and lobes (see [05-brain](05-brain.md) for the brain taxonomy).
+InfiniClaw uses a "Branch and Merge" model. The main brain stays responsive on the main timeline. Complex work happens in visible Matrix threads via branch brains and lobes (see [06-brain](06-brain.md) for the brain taxonomy).
 
 ## Branch and Merge Overview
 

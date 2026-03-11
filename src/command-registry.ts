@@ -1,4 +1,4 @@
-/** Command registry — single source of truth for all ! commands.
+/** Command registry — single source of truth for all x-commands.
  *  Help text and dispatch are auto-generated from this registry. */
 
 export interface RoomConn {
@@ -108,5 +108,5 @@ export async function dispatch(cmd: string, conn: RoomConn, allConns: RoomConn[]
 export function buildHelpText(): string {
   const maxUsage = Math.max(...COMMANDS.map(c => c.usage.length));
   const lines = COMMANDS.map(c => `  ${c.usage.padEnd(maxUsage)} — ${c.description}`);
-  return ['📟 Operator commands:', ...lines, `  ${'!'.padEnd(maxUsage)} — this help`].join('\n');
+  return ['📟 X-commands:', ...lines, `  ${'!'.padEnd(maxUsage)} — this help`].join('\n');
 }

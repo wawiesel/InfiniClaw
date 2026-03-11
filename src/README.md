@@ -7,13 +7,13 @@ Architecture and behavior are specified in `docs/design/` — this README docume
 | Design doc | Implementation area |
 |------------|-------------------|
 | [00-overview](../docs/design/00-overview.md) | Core principles, code structure |
-| [01-matrix](../docs/design/01-matrix.md) | `channels/matrix.ts`, `matrix-api.ts`, `intercom-relay.ts` |
-| [02-container](../docs/design/02-container.md) | `container-spawn.ts`, `container-mounts.ts`, `container-secrets.ts`, `run-container.ts` |
-| [03-ship](../docs/design/03-ship.md) | `ship-config.ts`, `relay.ts`, `s3-sync.ts` |
-| [04-bot](../docs/design/04-bot.md) | `main.ts`, `infini-config.ts`, `message-filtering.ts` |
-| [05-brain](../docs/design/05-brain.md) | `brain-management.ts`, `container-spawn.ts` |
-| [06-ipc](../docs/design/06-ipc.md) | `ipc-watcher.ts`, `ipc-commands.ts` |
-| [07-threading](../docs/design/07-threading.md) | `relay.ts` (branch brains), `container-spawn.ts` (lobes) |
+| [02-matrix](../docs/design/02-matrix.md) | `channels/matrix.ts`, `matrix-api.ts`, `intercom-relay.ts` |
+| [03-container](../docs/design/03-container.md) | `container-spawn.ts`, `container-mounts.ts`, `container-secrets.ts`, `run-container.ts` |
+| [04-ship](../docs/design/04-ship.md) | `ship-config.ts`, `relay.ts`, `s3-sync.ts` |
+| [05-bot](../docs/design/05-bot.md) | `main.ts`, `infini-config.ts`, `message-filtering.ts` |
+| [06-brain](../docs/design/06-brain.md) | `brain-management.ts`, `container-spawn.ts` |
+| [07-ipc](../docs/design/07-ipc.md) | `ipc-watcher.ts`, `ipc-commands.ts` |
+| [08-threading](../docs/design/08-threading.md) | `relay.ts` (branch brains), `container-spawn.ts` (lobes) |
 
 ## Architecture
 
@@ -35,7 +35,7 @@ Host machine (macOS / Linux)
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2; seeds quarters or duty room based on fleet status; restartBotForRoom for lightweight room switches
 ├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave, setDisplayName, setRoomName)
-├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, room transitions, help account. `resolveBots(target, conn)` finds bots in a room by MAIN_GROUP_NAME or quartersRoom. Operator `!` commands in curtainLoop are allowed (not filtered as own messages). `ensureShipSpaceNames()` sets the ship's Matrix space name to "emoji shipName" on startup.
+├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, room transitions, help account. `resolveBots(target, conn)` finds bots in a room by MAIN_GROUP_NAME or quartersRoom. X-commands in curtainLoop are allowed (not filtered as own messages). `ensureShipSpaceNames()` sets the ship's Matrix space name to "emoji shipName" on startup.
 ├── main.ts             → Message loop, indicators, reaction acks (👀/🔔), container lifecycle
 ├── container-spawn.ts  → Container orchestration: secrets, mounts, podman args, stale cleanup, IPC setup
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)
@@ -55,7 +55,7 @@ Host machine (macOS / Linux)
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts       → Copy persona skills into container session
 ├── mcp-sync.ts         → Sync MCP server config (persona → session)
-├── command-registry.ts → Single source of truth for ! command names
+├── command-registry.ts → Single source of truth for x-command names
 ├── s3-sync.ts          → S3 backup/restore for cross-machine moves
 ├── podman-bootstrap.ts → Image availability checks, orphan cleanup, delegates recovery to podman-utils
 ├── history-export.ts   → Periodic S3 export of conversation history (JSONL by date)
@@ -95,7 +95,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`resolveBots`**: Finds bots on this ship — first by room membership, then (for explicit targets) by fleet assignment. Sleeping bots have no room but can still be targeted by name for `!wake`.
 - **Speaker**: `isSpeaker()` returns true for only one machine per Engineering room. That relay handles all `!` commands.
 - **`!todo`**: Reads most-recently-modified `.claude/todos/*.json` from `_runtime/instances/{bot}/data/sessions/main/` to show actual todo items (since `ca16ce9`).
-- **`operator-commands.ts` removed**: Operator commands (`!allow`, `!deny`, `!todo`, `!roster`, etc.) were folded into `relay.ts`. `command-registry.ts` is now the single source of truth for all `!` command names.
+- **`operator-commands.ts` removed**: X-commands (`!allow`, `!deny`, `!todo`, `!roster`, etc.) were folded into `relay.ts`. `command-registry.ts` is now the single source of truth for all x-command names.
 - **`command-registry.ts` security hardening**: `dispatch()` rejects cmd strings longer than 512 chars (DoS guard); `registerHandler()` sanitizes the `name` parameter in error messages (log injection); `dispatch()` emits a console.warn when a matched command has no registered handler (silent no-op guard).
 - **`machine-config.ts` removed**: Split into `infini-config.ts` (env-based config) and `ship-config.ts` (fleet.json loader).
 - **`get_message` tool bug**: Fails on event IDs containing `$` due to shell variable interpolation in the node -e command. Unfixed as of session 8.

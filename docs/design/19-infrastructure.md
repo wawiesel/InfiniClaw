@@ -1,4 +1,4 @@
-# 18 — Infrastructure Redundancy
+# 19 — Infrastructure Redundancy
 
 S3 (MinIO) and Gitea are single points of failure. This spec defines how to replicate both across multiple ships so the fleet survives a machine going down.
 
@@ -26,7 +26,7 @@ Physical Machine (host)
 - **Portability:** A ship can be migrated between physical machines (live migration, snapshot/restore, or cold move) without any config changes.
 - **Density:** Small ships (1-2 bots) can share hardware. Dedicated hardware is reserved for heavy workloads.
 - **Reproducibility:** Ship VMs can be provisioned from a base image. Spinning up a new ship is `create VM + bootstrap` rather than configuring bare metal.
-- **Holodeck:** Holodeck simulation ships (see [17-deployment](17-deployment.md)) are natural fits for ephemeral VMs — create for the test, destroy after.
+- **Holodeck:** Holodeck simulation ships (see [18-deployment](18-deployment.md)) are natural fits for ephemeral VMs — create for the test, destroy after.
 
 ### Fleet Registry
 

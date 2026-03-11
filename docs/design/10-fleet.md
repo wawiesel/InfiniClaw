@@ -1,4 +1,4 @@
-# 09 — Fleet
+# 10 — Fleet
 
 The fleet is the aggregate of all ships and bots, coordinated via `fleet.json` as the single source of truth.
 

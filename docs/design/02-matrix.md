@@ -1,4 +1,4 @@
-# 01 — Matrix
+# 02 — Matrix
 
 Matrix is the communication backbone. Every message, command, and status update flows through Matrix. InfiniClaw uses a self-hosted Conduwuit homeserver.
 
@@ -8,10 +8,10 @@ Matrix is the communication backbone. Every message, command, and status update 
 |---------|---------|
 | Captain | Human. Admin in all rooms. Identity in `secrets/captain`. |
 | Operator (`@operator`) | Operator's direct Matrix presence. Admin in all rooms. Used for direct messages, BehindTheCurtain, quarters room commands, and room management. Mentionable by bots to request operator assistance (see Special Mentions). |
-| Loudspeaker (`@loudspeaker`) | Relay's reply voice. Member of all rooms. Delivers `!` command responses prefixed `[SHIPNAME]`. Mentionable by on-duty bots for fleet status or broadcast (see Special Mentions). |
+| Loudspeaker (`@loudspeaker`) | Relay's reply voice. Member of all rooms. Delivers x-command responses prefixed `[SHIPNAME]`. Mentionable by on-duty bots for fleet status or broadcast (see Special Mentions). |
 | Help (`@help`) | Help text and unknown command feedback. Member of all rooms. Captain-only visibility — bots ignore this account. |
 | Bot accounts | One per bot. Joins rooms based on lifecycle status. |
-| Intercom accounts | Write-only broadcast channels, one per duty room. The relay polls these for incoming `!` commands. Not present in ship rooms. |
+| Intercom accounts | Write-only broadcast channels, one per duty room. The relay polls these for incoming x-commands. Not present in ship rooms. |
 
 Bots see loudspeaker and intercom messages in their context window (for situational awareness) but only ignore the help account via `IGNORE_SENDERS`. The trigger system controls whether bots respond — not whether they hear.
 
@@ -179,7 +179,7 @@ Bot outgoing messages are converted from Markdown to Matrix HTML before sending.
 - **Inbound (raw @ → marker, Captain and operator only):** When the Captain or operator types `@Cid` without TAB-completing to a pill, the host converts it via `convertRawMentions` using `\b@name\b` (case-insensitive). Raw `@Name` from bots is NOT converted — it passes through as literal text.
 - **Outbound (marker → pill):** Bots emit `<m>Cid</m>` to request a mention pill. The send pipeline converts it to `<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a>` in `formatted_body` via `pillifyMentions`. Unknown names are stripped to plain text. Raw `@Name` in bot output is left as-is.
 
-Full conversion rules are in [04-bot](04-bot.md#mentions-and-callouts).
+Full conversion rules are in [05-bot](05-bot.md#mentions-and-callouts).
 
 ## Reactions
 
@@ -224,7 +224,7 @@ On-duty bots can send messages across rooms by mentioning the target room name:
 | `@bridge: <message>` | From Engineering | Relay sends `<message>` to Bridge via bridge-intercom |
 | `@astrometrics: <message>` | From Bridge | Relay sends `<message>` to Astrometrics via astrometrics-intercom |
 
-Each on-duty room has access to the other two room intercoms. Messages appear as `<BotName> (<SourceRoom>): <message>` in the target room. See [12-intercom](12-intercom.md) for intercom account details.
+Each on-duty room has access to the other two room intercoms. Messages appear as `<BotName> (<SourceRoom>): <message>` in the target room. See [13-intercom](13-intercom.md) for intercom account details.
 
 ## Bot Matrix Navigation
 

@@ -8,7 +8,7 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 >
 > **Ship** — A machine running a relay. Identified by hostname, registered in `ships.json`. Examples: HERACLES, Poseidon.
 >
-> **Relay** — The ship's control plane. A pm2-managed process that connects to Matrix, dispatches `!` commands, manages bot lifecycle, syncs code, and spawns branch brains. One per ship, always running.
+> **Relay** — The ship's control plane. A pm2-managed process that connects to Matrix, dispatches x-commands, manages bot lifecycle, syncs code, and spawns branch brains. One per ship, always running.
 >
 > **Bot** — A Matrix account backed by a Podman container. Has a persona, role, rank, and lifecycle status (`sleep`, `quarters`, `onduty`).
 >

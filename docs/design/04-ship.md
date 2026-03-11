@@ -1,4 +1,4 @@
-# 03 — Ships
+# 04 — Ships
 
 A ship is a machine running a relay. The relay is the always-on process that connects the ship to the fleet via Matrix, manages bot lifecycle, and syncs repos.
 
@@ -29,10 +29,10 @@ The `commissioned` flag is a **ship-level** override in `ships.json` — distinc
 
 ## The Relay
 
-The relay is a pm2-managed Node.js process that runs on the host machine — one per ship, always on. It is the ship's control plane: it connects to Matrix, listens for `!` commands, manages bot lifecycle, syncs code, and spawns branch brains. Bots cannot function without a relay — it is the bridge between the Captain and the fleet.
+The relay is a pm2-managed Node.js process that runs on the host machine — one per ship, always on. It is the ship's control plane: it connects to Matrix, listens for x-commands, manages bot lifecycle, syncs code, and spawns branch brains. Bots cannot function without a relay — it is the bridge between the Captain and the fleet.
 
 **What the relay does:**
-- Watches Matrix rooms for `!` commands from the Captain or operator
+- Watches Matrix rooms for x-commands from the Captain or operator
 - Wakes, sleeps, reports, and dismisses bots
 - Pulls and deploys code (git sync loops + `!pull`)
 - Spawns branch brains on the host
@@ -50,12 +50,12 @@ The relay uses multiple Matrix accounts for different purposes:
 
 | Account | Credential file | Purpose |
 |---------|----------------|---------|
-| `@operator` | `operator-matrix.json` | Admin (invites, power levels), BehindTheCurtain watch, quarters room `!` commands |
+| `@operator` | `operator-matrix.json` | Admin (invites, power levels), BehindTheCurtain watch, quarters room x-commands |
 | `@loudspeaker` | `loudspeaker-matrix.json` | Relay command replies (status, lifecycle messages) |
 | `@help` | `help-matrix.json` | Help text and unknown command feedback (Captain-only visibility) |
 | Per-room intercom | `intercom.json` | Duty room watching (bridge, engineering, astrometrics) |
 
-The operator account watches BehindTheCurtain and all rooms it has joined (including quarters rooms). Captain `!` commands from any of these rooms are processed. The help account keeps help/error responses out of loudspeaker so bots don't see them — bots have all system accounts in `IGNORE_SENDERS`.
+The operator account watches BehindTheCurtain and all rooms it has joined (including quarters rooms). Captain x-commands from any of these rooms are processed. The help account keeps help/error responses out of loudspeaker so bots don't see them — bots have all system accounts in `IGNORE_SENDERS`.
 
 All relay command responses are delivered via the loudspeaker account. Main timeline messages are prefixed with `[<shipEmoji> <shipName>]` (e.g. `[🦁 Herc]`). Thread steps omit the tag — the thread root already identifies the ship. Message bodies use `relay <action>` prefix — they must NOT repeat the ship name since the loudspeaker tag already provides it.
 
@@ -83,7 +83,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 | Health check | `HEALTH_INTERVAL` | 30 min | Run `health-check.sh`, upload to S3 |
 | Heartbeat | — | built-in | Publish relay liveness |
 | Relay tasks | — | built-in | Poll `_runtime/relay-tasks/` for host-side operations |
-| Curtain | — | built-in | Watch operator-joined rooms (BehindTheCurtain, quarters), process `!` commands, forward Captain messages to operator tmux |
+| Curtain | — | built-in | Watch operator-joined rooms (BehindTheCurtain, quarters), process x-commands, forward Captain messages to operator tmux |
 
 **InfiniClaw sync** detects source changes (TypeScript, package.json, Dockerfiles, tsconfig) and triggers a rebuild → deploy dist → restart bots → restart relay.
 
@@ -101,9 +101,9 @@ Election algorithm:
 
 The speaker result is cached and triggers async re-election in the background. Speaker election runs before aggregate commands (`!fleet`, `!health`, `!promote`/`!demote` for ships).
 
-## Relay Commands
+## Relay X-Commands
 
-Commands that target ships and infrastructure — distinct from bot lifecycle commands (see [04-bot](04-bot.md)). Ship-targeted commands accept an optional `<ship>` argument; omit it to target all ships. Each relay checks if it's the target — only the matching ship acts, others silently ignore.
+X-commands that target ships and infrastructure — distinct from bot lifecycle x-commands (see [05-bot](05-bot.md)). Ship-targeted commands accept an optional `<ship>` argument; omit it to target all ships. Each relay checks if it's the target — only the matching ship acts, others silently ignore.
 
 ### Fleet status
 
@@ -132,7 +132,7 @@ Flow: code changes → `!push [ship]` (send to GitHub) → `!pull` (each ship pu
 
 ## Per-Machine Configuration
 
-These files live at `~/.config/infiniclaw/` and are **not** in git. See `docs/design/13-configuration.md` for full details.
+These files live at `~/.config/infiniclaw/` and are **not** in git. See `docs/design/14-configuration.md` for full details.
 
 ### paths.json
 

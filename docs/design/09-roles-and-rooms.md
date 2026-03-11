@@ -1,4 +1,4 @@
-# 08 — Roles and Rooms
+# 09 — Roles and Rooms
 
 Roles define what a bot can do. Rooms define where a bot is and what state it's in. Together they organize the fleet.
 
@@ -40,7 +40,7 @@ Duty rooms (Engineering, Bridge, Astrometrics) are fleet-wide — they are NOT c
 
 ### Quarters Trigger Rules
 
-A bot in its quarters room is a **primary** — it owns the room. Trigger behavior is determined by `triggerType` (see [04-bot](04-bot.md)):
+A bot in its quarters room is a **primary** — it owns the room. Trigger behavior is determined by `triggerType` (see [05-bot](05-bot.md)):
 
 | Status | triggerType | Responds to |
 |--------|------------|-------------|
