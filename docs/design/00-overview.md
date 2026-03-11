@@ -20,6 +20,14 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 >
 > **Duty room** — A fleet-wide shared room (Engineering, Bridge, Astrometrics). Bots join via `!report` and leave via `!dismiss`. Uses `🌌` location emoji.
 
+## Foundations
+
+Three services must exist before any bot can run:
+
+- **Matrix** — Communication backbone. All messages, commands, status updates, and bot interactions flow through Matrix.
+- **S3 (MinIO)** — Shared state between ships. Metrics, fleet reports, health checks, speaker election, error logs, and conversation history.
+- **Secrets repo** — Coordination via git. Fleet config, bot credentials, ship registry, operator config. Synced on every ship.
+
 ## Core Principles
 
 - **Bots must be instantly responsive.** The main brain is a persistent process that triages instantly. Complex work is delegated to ephemeral branch brains. The main brain never blocks.

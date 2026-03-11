@@ -6,18 +6,22 @@ The operator runs directly on the host machine (not in a container) inside a tmu
 
 ## Bootstrap Sequence
 
-Starting from nothing:
+Starting from nothing. Three foundational services must exist before any bot can run:
 
-1. **Matrix server** — Conduwuit homeserver is running (see `docs/solutions/matrix.md`).
-2. **BehindTheCurtain** — Operator creates the first room: a private channel between Captain and operator. This establishes the command link. Room naming: `🌑🎭 BehindTheCurtain`.
-3. **Operator and loudspeaker accounts** — Registered on the homeserver. Operator joins BehindTheCurtain. Captain is admin (power 100) in all rooms.
-4. **Secrets repo** — Operator initializes the secrets repo with `operator/`, `bots/fleet.json`, and credentials.
-5. **First ship** — Operator registers this machine in `ships.json`, creates a ship space, lounge, and quarters space on Matrix.
-6. **First bot (Norm)** — The simplest test: a normie with env file, fleet.json entry, and a quarters room. No duty rooms, no skills, no MCP. Just conversation in quarters. This validates the entire bot runtime end-to-end.
-7. **Relay** — Operator starts the relay. It connects to Matrix, discovers Norm, wakes him. The system is alive.
-8. **Growth** — Add more bots, more ships, duty rooms, intercom accounts. Each layer builds on what the operator already established.
+1. **Matrix server** — Conduwuit homeserver is running (see `docs/solutions/matrix.md`). This is the communication backbone.
+2. **S3 (MinIO)** — Object storage for metrics, fleet reports, health checks, speaker election, and error logs. Endpoint and credentials go in `fleet.json` under `s3`.
+3. **Secrets repo** — Operator initializes the secrets repo with `operator/`, `bots/fleet.json` (including S3 config), and credentials.
 
-Everything grows from BehindTheCurtain outward.
+With these three in place, the operator bootstraps the fleet:
+
+4. **BehindTheCurtain** — Operator creates the first room: a private channel between Captain and operator. This establishes the command link. Room naming: `🌑🎭 BehindTheCurtain`.
+5. **Operator and loudspeaker accounts** — Registered on the homeserver. Operator joins BehindTheCurtain. Captain is admin (power 100) in all rooms.
+6. **First ship** — Operator registers this machine in `ships.json`, creates a ship space, lounge, and quarters space on Matrix.
+7. **First bot (Norm)** — The simplest test: a normie with env file, fleet.json entry, and a quarters room. No duty rooms, no skills, no MCP. Just conversation in quarters. This validates the entire bot runtime end-to-end.
+8. **Relay** — Operator starts the relay. It connects to Matrix and S3, discovers Norm, wakes him. The system is alive.
+9. **Growth** — Add more bots, more ships, duty rooms, intercom accounts. Each layer builds on what the operator already established.
+
+Everything grows from these three foundations (Matrix, S3, secrets) outward.
 
 ## Accounts
 
