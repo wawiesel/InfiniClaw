@@ -35,7 +35,7 @@ export interface OperatorMetrics {
 }
 
 /** Score reactions: 👍(+1) 👎(−1) 💯(+3) ❌(−3) */
-const SCORE_REACTIONS: Record<string, number> = {
+export const SCORE_REACTIONS: Record<string, number> = {
   '👍️': 1, '👍': 1,
   '👎️': -1, '👎': -1,
   '💯': 3,
@@ -204,9 +204,19 @@ export async function backfillOperatorEvents(
   operatorEvents.sort((a, b) => a.ts - b.ts);
 }
 
+/** Reset all metrics state. For testing only. */
+export function resetMetrics(): void {
+  operatorEvents.length = 0;
+  scoreEvents.length = 0;
+  behindTheCurtainRoomId = null;
+  operatorUserId = null;
+  captainUserId = null;
+}
+
 // ── Computation ──────────────────────────────────────────────────────
 
-function rollingRate(events: { ts: number }[], windowDays: number): number {
+/** Exported for testing. */
+export function rollingRate(events: { ts: number }[], windowDays: number): number {
   const cutoff = Date.now() - windowDays * 86_400_000;
   const count = events.filter(e => e.ts >= cutoff).length;
   return Math.round((count / windowDays) * 10) / 10; // 1 decimal
