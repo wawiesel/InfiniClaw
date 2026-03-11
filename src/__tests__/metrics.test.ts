@@ -223,7 +223,7 @@ describe('formatting', () => {
       processRunning: true,
     });
     expect(result).toContain('🟢');
-    expect(result).toContain('cid');
+    expect(result).toContain('Cid');
     expect(result).toContain('quarters');
     expect(result).toContain('Score');
     expect(result).toContain('3 pts/day (1d)');
@@ -242,11 +242,12 @@ describe('formatting', () => {
 
   it('formatShipMetrics shows name, uptime, restarts', () => {
     const result = formatShipMetrics({
-      name: 'HERACLES',
+      name: 'Herc',
       relayUptimeSeconds: 7200,
       relayRestarts: 3,
     });
-    expect(result).toContain('HERACLES');
+    // shipTag() resolves to emoji+name from ships.json (e.g. "🦁 Herc")
+    expect(result).toContain('Herc');
     expect(result).toContain('2h'); // 7200s = 2h
     expect(result).toContain('3');
   });
@@ -292,7 +293,7 @@ describe('formatScopeMetrics', () => {
 
   it('scope "ship" returns ship metrics', () => {
     const result = formatScopeMetrics(mockSnapshot, 'ship');
-    expect(result).toContain('HERACLES');
+    expect(result).toContain('Herc');
     expect(result).not.toContain('Operator');
   });
 
@@ -305,20 +306,20 @@ describe('formatScopeMetrics', () => {
   it('scope "all" returns everything', () => {
     const result = formatScopeMetrics(mockSnapshot, 'all');
     expect(result).toContain('Operator');
-    expect(result).toContain('HERACLES');
-    expect(result).toContain('cid');
+    expect(result).toContain('Herc');
+    expect(result).toContain('Cid');
     expect(result).toContain('availability');
   });
 
   it('scope "cid" returns bot metrics for cid', () => {
     const result = formatScopeMetrics(mockSnapshot, 'cid');
-    expect(result).toContain('cid');
+    expect(result).toContain('Cid');
     expect(result).not.toContain('Operator');
   });
 
   it('scope "bot cid" returns bot metrics for cid', () => {
     const result = formatScopeMetrics(mockSnapshot, 'bot cid');
-    expect(result).toContain('cid');
+    expect(result).toContain('Cid');
   });
 
   it('unknown scope falls back to all', () => {
@@ -365,9 +366,9 @@ describe('formatAllMetrics', () => {
 
     const result = formatAllMetrics(snapshot);
     expect(result).toContain('Operator Metrics');
-    expect(result).toContain('HERACLES');
-    expect(result).toContain('cid');
-    expect(result).toContain('norm');
+    expect(result).toContain('Herc');
+    expect(result).toContain('Cid');
+    expect(result).toContain('Norm');
     expect(result).toContain('availability');
     expect(result).toContain('1d'); // 86400s = 1d
   });

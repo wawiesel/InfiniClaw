@@ -16,6 +16,7 @@ import { uploadContent } from './s3-sync.js';
 import {
   loadShipConfig,
   thisShipName,
+  shipTag,
   type BotEntry,
 } from './ship-config.js';
 import { errStr } from './utils.js';
@@ -330,8 +331,9 @@ export function formatOperatorMetrics(m: OperatorMetrics): string {
 
 export function formatBotMetrics(b: BotMetrics): string {
   const pip = b.processRunning ? '🟢' : '🔴';
+  const name = b.name.charAt(0).toUpperCase() + b.name.slice(1);
   return [
-    `${pip} **${b.name}** (${b.status})`,
+    `**${name}** ${pip} · ${b.status}`,
     `  Score: ${fmtRolling(b.score, ' pts/day')}`,
     `  Crashes: ${fmtRolling(b.crashes)}`,
   ].join('\n');
@@ -340,7 +342,7 @@ export function formatBotMetrics(b: BotMetrics): string {
 export function formatShipMetrics(m: ShipMetrics): string {
   const uptime = formatDuration(m.relayUptimeSeconds);
   return [
-    `🚢 **${m.name}**`,
+    `**${shipTag()}**`,
     `  Relay uptime: ${uptime}`,
     `  Relay restarts: ${m.relayRestarts}`,
   ].join('\n');

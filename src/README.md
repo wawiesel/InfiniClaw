@@ -55,7 +55,7 @@ Host machine (macOS / Linux)
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts       → Copy persona skills into container session
 ├── mcp-sync.ts         → Sync MCP server config (persona → session)
-├── metrics.ts          → Fleet metrics: operator interventions, bot scores, ship uptime, fleet availability. Publishes to S3. Back-fills from Matrix history on startup.
+├── metrics.ts          → Fleet metrics: operator interventions, bot scores, ship uptime, fleet availability. Publishes to S3. Back-fills from Matrix history on startup. `formatBotMetrics` capitalizes bot name; `formatShipMetrics` uses `shipTag()` for display header.
 ├── command-registry.ts → Single source of truth for x-command names (includes context-aware !metrics)
 ├── s3-sync.ts          → S3 backup/restore for cross-machine moves
 ├── podman-bootstrap.ts → Image availability checks, orphan cleanup, delegates recovery to podman-utils
@@ -113,7 +113,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Ship names in user-visible output**: Use `shipTag()` or `thisShipName()` from `ship-config.ts`, never raw `os.hostname()`. S3 keys for fleet reports also use ship names.
 - **Display name sync**: `syncBotDisplayNames()` runs on relay startup to ensure ALL bots (including sleeping) have current format.
 - **Room naming**: `ensureRoomNames()` sets double-emoji names on startup: fleet rooms get `🌌<room> Name` (e.g. `🌌⚙️ Engineering`), ship-local rooms/spaces get `<ship><room> Name` (e.g. `🦁🏠 Quarters`, `🦁🏠 Cid's Room`), BehindTheCurtain gets `🌑🎭 BehindTheCurtain`.
-- **Lifecycle messages**: Body uses `relay <action>` prefix (no shipTag — loudspeaker `[tag]` provides context). Wake/refresh/pull use numbered thread steps `[N/total time]`. Git sync, commission/decommission, and `!go` also use `relay` prefix. `threadReply()` omits `[shipTag]` — thread root already identifies the ship; only main timeline messages get the tag.
+- **Lifecycle messages**: Body uses `relay <action>` prefix (no shipTag — loudspeaker `[tag]` provides context). Wake/refresh/pull use numbered thread steps `[N/total time]`. Git sync, commission/decommission, and `!go` also use `relay` prefix. `!sleep` reports "asleep"; `!report` reports "on duty". `threadReply()` omits `[shipTag]` — thread root already identifies the ship; only main timeline messages get the tag.
 - **"No bots here" noise**: `handleLifecycleCommand` only announces "No bots here" in fleet rooms (not quarters) and only if speaker. Prevents noise from non-owning ships in bot quarters rooms.
 - **Ship-targeted commands**: `!push`, `!pull`, `!decommission`, `!commission`, `!operator on/off` accept optional `[ship]` — omit to target all ships.
 - **`!wake` dual-purpose**: Wakes sleeping bots or restarts already-awake bots (preserving current status). Uses `restarting`/`restarted` verbs when bot is already running.

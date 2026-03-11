@@ -1833,7 +1833,7 @@ async function handleLifecycleCommand(
         } catch { /* non-fatal */ }
         fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         writeFleet(liveFleet);
-        await reply(conn, `relay ${name} sleeping 😴`);
+        await reply(conn, `relay ${name} asleep`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         await reply(conn, `⛔ !sleep ${name} — ${errStr(err)}`);
@@ -1904,7 +1904,7 @@ async function handleLifecycleCommand(
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild)
         restartBotForRoom(root, bot);
-        await reply(conn, `relay ${name} reporting for duty`);
+        await reply(conn, `relay ${name} on duty`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!report ${name} failed: ${errStr(err)}`);

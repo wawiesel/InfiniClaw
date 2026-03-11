@@ -24,6 +24,6 @@ Integration and unit tests for InfiniClaw source modules that don't live next to
 | `matrix-mentions.test.ts` | Mention pill symmetry: inbound `<m>` wrapping, outbound `<m>` → pill conversion, raw `@Name` → `<m>` conversion |
 | `operator-commands.test.ts` | `!` command parsing and auth |
 | `routing.test.ts` | Message routing logic |
-| `metrics.test.ts` | Fleet metrics: rollingRate, SCORE_REACTIONS, operator/bot/ship/fleet metrics, scope routing, formatting |
+| `metrics.test.ts` | Fleet metrics: rollingRate, SCORE_REACTIONS, operator/bot/ship/fleet metrics, scope routing, formatting. Bot names capitalized; ship header uses `shipTag()`. |
 
 Run with: `npx vitest run --root .`
