@@ -11,6 +11,7 @@ import path from 'path';
 
 import { logger } from 'nanoclaw/logger.js';
 
+import { capitalizeName } from './formatting.js';
 import { matrixGetMessages } from './matrix-api.js';
 import { uploadContent } from './s3-sync.js';
 import {
@@ -331,7 +332,7 @@ export function formatOperatorMetrics(m: OperatorMetrics): string {
 
 export function formatBotMetrics(b: BotMetrics): string {
   const pip = b.processRunning ? '🟢' : '🔴';
-  const name = b.name.charAt(0).toUpperCase() + b.name.slice(1);
+  const name = capitalizeName(b.name);
   return [
     `**${name}** ${pip} · ${b.status}`,
     `  Score: ${fmtRolling(b.score, ' pts/day')}`,

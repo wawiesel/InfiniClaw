@@ -38,7 +38,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { formatBotDisplayName } from './formatting.js';
+import { capitalizeName, formatBotDisplayName } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -567,8 +567,7 @@ async function ensureRoomNames(): Promise<void> {
     for (const [name, room] of Object.entries(intercom.rooms)) {
       const roomEmoji = ROOM_EMOJI[name];
       if (roomEmoji) {
-        const displayName = name.charAt(0).toUpperCase() + name.slice(1);
-        await setName(room.roomId, `${FLEET_LOCATION}${roomEmoji} ${displayName}`);
+        await setName(room.roomId, `${FLEET_LOCATION}${roomEmoji} ${capitalizeName(name)}`);
       }
     }
   }
@@ -598,7 +597,7 @@ async function ensureRoomNames(): Promise<void> {
     if (entry.ship !== HOSTNAME || !entry.quartersRoom) continue;
     try {
       const env = loadProfileEnv(root, bot);
-      const botName = env.ASSISTANT_NAME || bot.charAt(0).toUpperCase() + bot.slice(1);
+      const botName = env.ASSISTANT_NAME || capitalizeName(bot);
       await setName(entry.quartersRoom, `${shipEmoji}${QUARTERS_EMOJI} ${botName}'s Room`);
     } catch { /* skip bots with broken env */ }
   }
@@ -820,7 +819,7 @@ async function publishFleetReport(): Promise<FleetReport> {
   for (const [botId, entry] of Object.entries(liveFleet)) {
     if (entry.ship !== HOSTNAME) continue;
     const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
-    const name = env?.ASSISTANT_NAME || botId;
+    const name = env?.ASSISTANT_NAME || capitalizeName(botId);
     const running = localRunning.has(botId);
     botReports[botId] = {
       name,
@@ -1788,7 +1787,7 @@ async function handleLifecycleCommand(
 
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-    const name = env?.ASSISTANT_NAME || bot;
+    const name = env?.ASSISTANT_NAME || capitalizeName(bot);
     const rank = liveFleet[bot]?.rank ?? 99;
     log(`!${action} ${name}`);
 
@@ -2369,7 +2368,7 @@ function registerRelayCommands(): void {
         // Assemble output
         const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; localStatus: string }> = {};
         for (const [botId, entry] of Object.entries(liveFleet)) {
-          allBots[botId] = { ...entry, name: botId, gitVersion: '', localStatus: entry.status };
+          allBots[botId] = { ...entry, name: capitalizeName(botId), gitVersion: '', localStatus: entry.status };
         }
         for (const [, shipReport] of Object.entries(allReports)) {
           for (const [botId, botData] of Object.entries(shipReport.bots)) {
@@ -2770,7 +2769,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           const formattedBody = event.content.formatted_body as string || '';
           for (const [bot, entry] of Object.entries(liveFleet)) {
             if (entry.status !== 'sleep' || entry.ship !== HOSTNAME) continue;
-            const name = bot.charAt(0).toUpperCase() + bot.slice(1);
+            const name = capitalizeName(bot);
             const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const mentioned =
               new RegExp(`<m>${escaped}</m>`, 'i').test(body) ||
