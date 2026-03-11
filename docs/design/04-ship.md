@@ -149,6 +149,18 @@ Maps logical names to local paths. Used by role-based mounts (fleet.json `roles[
 
 Per-bot rw mount overrides with optional expiry. Managed via `!allow`/`!deny` commands.
 
+## Metrics
+
+| Metric | What it measures | Target | Window |
+|--------|-----------------|--------|--------|
+| **Relay uptime** | pm2 process uptime without restart | 100% | 1-day, 7-day rolling |
+| **Sync failures** | Git sync errors (secrets or code) per day | 0/day | 1-day, 7-day rolling |
+| **X-command latency** | Time from x-command received to response posted | < 5s | 1-day, 7-day rolling |
+| **Code deploy success** | `!pull`/auto-sync rebuilds that succeed vs fail | 100% | 7-day rolling |
+| **Speaker stability** | Speaker election changes per day | ≤ 1/day | 7-day rolling |
+
+Relay uptime is the primary ship metric — a relay restart means all bots on that ship lost their supervisor. Track via pm2 restart count.
+
 ## Verification
 
 1. **Machine identified** — `hostname` returns a name that matches a key in `ships.json`.

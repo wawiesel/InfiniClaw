@@ -11,8 +11,8 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 ## Bot Runtime
 
-- `04-ship.md` — Machine registry (`commissioned` flag vs bot `status`), relay (ship control plane: x-command dispatch, bot lifecycle, code sync, branch brain spawning), speaker election, relay x-commands (!fleet, !push/!pull, !commission/!decommission, !operator), message conventions (ship tag on main timeline only, thread steps omit tag), per-machine config
-- `05-bot.md` — Identity, bot attributes (triggerType, status, rank), mention/callout flow, response rules, display name format (`<pip> <name> <shipEmoji>`), boot progress (thread steps omit ship tag), `!wake` restart behavior, resume behavior
+- `04-ship.md` — Machine registry (`commissioned` flag vs bot `status`), relay (ship control plane: x-command dispatch, bot lifecycle, code sync, branch brain spawning), speaker election, relay x-commands (!fleet, !push/!pull, !commission/!decommission, !operator), message conventions (ship tag on main timeline only, thread steps omit tag), per-machine config, ship metrics (uptime, sync failures, x-command latency)
+- `05-bot.md` — Identity, bot attributes (triggerType, status, rank), mention/callout flow, response rules, display name format (`<pip> <name> <shipEmoji>`), boot progress (thread steps omit ship tag), `!wake` restart behavior, resume behavior, bot metrics (response latency, task completion, crashes)
 - `06-brain.md` — Three brain types (main/branch/lobe), persistent main brain, triage-and-delegate model, branch model selection, lobe MCP (any provider, quarters threads), credential mapping
 - `07-ipc.md` — Container ↔ host IPC (messages/tasks/input directories), atomic file processing, per-room namespaces, main room elevation, wake/sleep cooldowns
 - `08-threading.md` — Branch and Merge model, branch brains (host-side `claude --print`), streaming output, concurrency limit, lobes (MCP, any provider, quarters threads), correct branch protocol
@@ -20,7 +20,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 ## Organization
 
 - `09-roles-and-rooms.md` — Roles, room topology, bot statuses (pip progression), lifecycle commands (!wake/!sleep/!report/!dismiss/!go), quarters trigger rules
-- `10-fleet.md` — fleet.json, transport protocol, S3 coordination
+- `10-fleet.md` — fleet.json, transport protocol, S3 coordination, fleet metrics (availability, autonomy score)
 - `11-commands.md` — X-commands (`!`-prefixed fleet control), status formats, alert threads
 - `12-co.md` — Commanding Officer election and delegation
 - `13-intercom.md` — Intercom broadcast accounts, loudspeaker replies, @room cross-room mentions
