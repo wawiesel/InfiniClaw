@@ -92,9 +92,9 @@ Election algorithm:
 
 The speaker result is cached and triggers async re-election in the background. Speaker election runs before aggregate commands (`!fleet`, `!health`, `!promote`/`!demote` for ships).
 
-## Ship Commands
+## Relay Commands
 
-Infrastructure commands require an explicit `<ship>` argument. Each relay checks if it's the target — only the matching ship acts, others silently ignore. Usage errors are speaker-only to avoid noise.
+Commands that target ships and infrastructure — distinct from bot lifecycle commands (see [04-bot](04-bot.md)). Ship-targeted commands require an explicit `<ship>` argument. Each relay checks if it's the target — only the matching ship acts, others silently ignore. Usage errors are speaker-only to avoid noise.
 
 | Command | Scope | Behavior |
 |---------|-------|----------|
