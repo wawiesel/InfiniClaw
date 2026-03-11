@@ -173,6 +173,8 @@ function loadGitHubBotToken(): string {
 
 type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; triggerType?: 'always' | 'callout' | 'never'; title?: string; quartersRoom?: string; activeBrainModel?: string };
 let liveFleet: Record<string, FleetEntry> = {};
+/** Cached BehindTheCurtain room ID — set once on startup from operator-matrix.json. */
+let curtainRoomId: string | null = null;
 /** Read this ship's operatorRelay flag from ships.json (default: true). */
 function isOperatorRelayEnabled(): boolean {
   return findShipByHostname()?.[1]?.operatorRelay !== false;
@@ -2625,9 +2627,17 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
 async function reply(conn: RoomConn, text: string, threadRootId?: string): Promise<string | undefined> {
   const tagged = `[${shipTag()}] ${text}`;
   const ls = loadLoudspeakerConfig();
+  let eventId: string | undefined;
   if (ls) {
     const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
-    if (token) return relaySend(ls.homeserver, token, conn.roomId, tagged, threadRootId);
+    if (token) {
+      eventId = await relaySend(ls.homeserver, token, conn.roomId, tagged, threadRootId);
+      // Mirror non-thread command output to BehindTheCurtain
+      if (!threadRootId && curtainRoomId && conn.roomId !== curtainRoomId) {
+        relaySend(ls.homeserver, token, curtainRoomId, tagged).catch(() => {});
+      }
+      return eventId;
+    }
   }
   if (!conn.accessToken) return undefined;
   return relaySend(conn.homeserver, conn.accessToken, conn.roomId, tagged, threadRootId);
@@ -2689,6 +2699,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
     return;
   }
 
+  curtainRoomId = roomId;
   log(`curtain: watching BehindTheCurtain as ${userId}`);
 
   const filterId = await matrixCreateFilter(homeserver, accessToken, userId).catch(() => null);

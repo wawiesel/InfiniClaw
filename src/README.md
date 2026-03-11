@@ -116,3 +116,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Command ship targeting**: Commands that affect infrastructure (`!refit`, `!decommission`, `!commission`, `!relay on/off`) require an explicit `<ship>` argument. `!push` is speaker-only. `!provision` is per-ship (each reports independently). Usage errors are speaker-only to avoid noise.
 - **`!wake` dual-purpose**: Wakes sleeping bots or restarts already-awake bots (preserving current status). Uses `restarting`/`restarted` verbs when bot is already running.
 - **Room name idempotency**: `ensureRoomNames` checks current name before setting — avoids spam of `m.room.name` state events on relay restarts.
+- **BehindTheCurtain mirror**: All non-thread `reply()` messages are mirrored to BehindTheCurtain so the Captain sees command results regardless of which room they originated from. Thread steps are not mirrored to avoid noise.
