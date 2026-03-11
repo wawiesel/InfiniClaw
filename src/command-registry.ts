@@ -68,7 +68,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'push',          usage: '!push [branch]',            description: 'git push InfiniClaw to origin',         match: prefix('push') },
   { name: 'allow',         usage: '!allow <bot> <path> [min]', description: 'grant rw mount (authorized)',          match: startsWith('allow') },
   { name: 'deny',          usage: '!deny <bot> <path>',        description: 'revoke rw mount (authorized)',         match: startsWith('deny') },
-  { name: 'relay',         usage: '!relay <text>',             description: 'send to operator tmux',                match: prefix('relay') },
+  { name: 'operator',      usage: '!operator [on|off] [ship]',  description: 'operator relay status or toggle',       match: prefix('operator') },
 ];
 
 /** Register a handler for a command by name. */

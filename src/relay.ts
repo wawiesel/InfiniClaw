@@ -2025,10 +2025,10 @@ function registerRelayCommands(): void {
       if (parsed.matched) await handleLifecycleCommand('wake', parsed.target, conn);
     },
 
-    relay: async (cmd, conn) => {
-      const arg = cmd.slice('!relay'.length).trim();
+    operator: async (cmd, conn) => {
+      const arg = cmd.slice('!operator'.length).trim();
 
-      // !relay — each ship reports its own status
+      // !operator — each ship reports its own status
       if (!arg) {
         const status = isOperatorRelayEnabled() ? '✅ on' : '🔇 off';
         await shipReport(conn, `${thisShipName()}: operator relay ${status}`);
@@ -2037,11 +2037,10 @@ function registerRelayCommands(): void {
 
       const [action, targetShip] = arg.split(/\s+/, 2);
       if (action !== 'on' && action !== 'off') {
-        if (isSpeaker()) await reply(conn, `usage: !relay | !relay on <ship> | !relay off <ship>`);
+        if (isSpeaker()) await reply(conn, `usage: !operator | !operator on [ship] | !operator off [ship]`);
         return;
       }
-      if (!targetShip) { if (isSpeaker()) await reply(conn, `usage: !relay ${action} <ship>`); return; }
-      if (!isThisShip(targetShip)) return;
+      if (targetShip && !isThisShip(targetShip)) return;
 
       try {
         const ships = loadShips();
@@ -2053,7 +2052,7 @@ function registerRelayCommands(): void {
         log(`operator relay ${action}`);
         await reply(conn, `operator relay ${action === 'on' ? 'on ✅' : 'off 🔇'}`);
       } catch (err) {
-        await reply(conn, `!relay failed — ${errStr(err)}`);
+        await reply(conn, `!operator failed — ${errStr(err)}`);
       }
     },
 
@@ -2090,8 +2089,7 @@ function registerRelayCommands(): void {
 
     decommission: async (cmd, conn) => {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;
-      if (!targetShip) { if (isSpeaker()) await reply(conn, `usage: !decommission <ship>`); return; }
-      if (!isThisShip(targetShip)) return;
+      if (targetShip && !isThisShip(targetShip)) return;
       try {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
@@ -2112,8 +2110,7 @@ function registerRelayCommands(): void {
 
     commission: async (cmd, conn) => {
       const targetShip = cmd.slice('!commission'.length).trim() || null;
-      if (!targetShip) { if (isSpeaker()) await reply(conn, `usage: !commission <ship>`); return; }
-      if (!isThisShip(targetShip)) return;
+      if (targetShip && !isThisShip(targetShip)) return;
       try {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
@@ -2182,8 +2179,7 @@ function registerRelayCommands(): void {
 
     refit: async (cmd, conn) => {
       const targetShip = cmd.slice('!refit'.length).trim() || null;
-      if (!targetShip) { if (isSpeaker()) await reply(conn, `usage: !refit <ship>`); return; }
-      if (!isThisShip(targetShip)) return;
+      if (targetShip && !isThisShip(targetShip)) return;
       const startedAt = Date.now();
 
       const threadRoot = await reply(conn, `relay refit starting ...`);

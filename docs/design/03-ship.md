@@ -94,23 +94,33 @@ The speaker result is cached and triggers async re-election in the background. S
 
 ## Relay Commands
 
-Commands that target ships and infrastructure — distinct from bot lifecycle commands (see [04-bot](04-bot.md)). Ship-targeted commands require an explicit `<ship>` argument. Each relay checks if it's the target — only the matching ship acts, others silently ignore. Usage errors are speaker-only to avoid noise.
+Commands that target ships and infrastructure — distinct from bot lifecycle commands (see [04-bot](04-bot.md)). Ship-targeted commands accept an optional `<ship>` argument; omit it to target all ships. Each relay checks if it's the target — only the matching ship acts, others silently ignore.
+
+### Fleet status
 
 | Command | Scope | Behavior |
 |---------|-------|----------|
-| `!commission <ship>` | Target ship | Set `commissioned: true`, reload fleet, wake onduty bots |
-| `!decommission <ship>` | Target ship | Sleep all bots, set `commissioned: false`. Relay keeps running — listens for `!commission`. |
-| `!transport <bot> <ship>` | Source ship | Two-phase: dematerialize on source → materialize on destination via secrets sync |
-| `!refit <ship>` | Target ship | Sync repos, rebuild, redeploy, restart target bots |
-| `!relay on/off <ship>` | Target ship | Enable/disable relay processing on target ship |
-| `!push` | Speaker only | Push InfiniClaw repo to remote |
-| `!provision` | Per-ship | Each ship reports independently with ship name header |
+| `!fleet` | Speaker | Aggregate fleet status: all ships, all bots, versions, health |
 
-**Transport protocol:**
-1. Source ship sleeps the bot, kills containers, removes mounts
-2. Source ship sets `status: 'transit'`, `ship: <destination>` in fleet.json, commits
-3. Destination ship's secrets sync loop pulls fleet.json, sees `transit` bot assigned to it
-4. Destination bootstraps the bot, sets `status: 'onduty'`, commits
+The speaker publishes its own report to S3, polls for other ships' reports (up to 5s), then assembles a single threaded response showing every ship and bot grouped by ship rank.
+
+### Code pipeline
+
+| Command | Scope | Behavior |
+|---------|-------|----------|
+| `!push` | Speaker | Push InfiniClaw repo to GitHub |
+| `!provision [target]` | Per-ship | Pull repos, rebuild if new commits. Each ship reports independently. Target: `secrets`, `infiniclaw`, or a name from `paths.json` |
+| `!refit [ship]` | Target ship | Pull repos, rebuild, redeploy dist to bot instances, wake all bots. Full deploy cycle. |
+
+Flow: code changes → `!push` (send to GitHub) → `!provision` (all ships pull) → `!refit` (deploy to bots on a ship).
+
+### Ship lifecycle
+
+| Command | Scope | Behavior |
+|---------|-------|----------|
+| `!commission [ship]` | Target ship | Set `commissioned: true`, wake onduty bots |
+| `!decommission [ship]` | Target ship | Sleep all bots, set `commissioned: false`. Relay keeps running. |
+| `!operator on/off [ship]` | Target ship | Enable/disable operator relay (forwarding Captain messages to operator tmux) |
 
 ## Per-Machine Configuration
 
