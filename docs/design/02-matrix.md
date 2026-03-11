@@ -193,6 +193,19 @@ Bots use emoji reactions to signal message processing status at a glance:
 
 Reactions accumulate — a message that triggers a bot will have all three. A message the bot heard but didn't respond to will have 📡 and 👀 but no 🔔.
 
+### Scoring Reactions
+
+The Captain (or operator) scores bot output by reacting to bot messages:
+
+| Emoji | Score | Meaning |
+|-------|-------|---------|
+| 👍️ | +1 | Good response |
+| 👎️ | −1 | Bad response |
+| 💯 | +3 | Excellent — exactly right |
+| ❌️ | −3 | Wrong — significant failure |
+
+Scores accumulate per bot and are published to S3 with other metrics. Bots can read their own scores via the `get_metrics` MCP tool. The scores provide direct Captain feedback that guides bot behavior over time — a bot with a declining score should adjust its approach.
+
 ## Special Mentions
 
 Certain `@` mentions trigger system-level behaviors handled by the relay, not by individual bots.
