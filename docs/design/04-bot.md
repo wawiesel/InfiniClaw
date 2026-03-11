@@ -156,10 +156,10 @@ Before routing, messages pass through filtering:
 Bots set their Matrix display name to show status at a glance:
 
 ```
-<name> <pip> (<ship>)
+<pip> <name> <shipEmoji>
 ```
 
-Examples: `Cid 🟢 (HERACLES)`, `Parker ⭐ (HERACLES)`, `Nora 💤 (POSEIDON)`
+Examples: `🟢 Cid 🦁`, `⭐ Parker 🦁`, `💤 Nora 🔱`
 
 The pip reflects **operational status**, not which room the bot is in. See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status model.
 
@@ -176,24 +176,24 @@ During boot, the pip changes through 🔄 → 🚀 → 🟡 → 🟢 so the curr
 
 ### Boot Progress Messages
 
-`!wake` posts a thread with staged progress. The ship name appears once in the summary, not on every step:
+`!wake` posts a threaded sequence with numbered steps. The loudspeaker `[shipTag]` prefix identifies the ship — message bodies use `relay <action>` prefix:
 
 ```
-☀️ Norm waking
-├ [3s] 🔄 building
-├ [8s] 🚀 starting
-├ [15s] 🟡 waiting for first output
-└ [18s] 🟢 online · normie[1] · haiku · HERACLES · v1a2b3c (2m)
-☀️ Norm awake (quarters)
+[🦁 Herc] relay waking Norm ...          ← main timeline + thread root
+[🦁 Herc] [1/4 0s] 🔄 building          ← thread step
+[🦁 Herc] [2/4 1s] 🚀 starting          ← thread step
+[🦁 Herc] [3/4 1m] 🟡 waiting for first output  ← thread step
+[🦁 Herc] [4/4 1m] 🟢 online · Normie[1] · claude-haiku-4-5 · 📦 abc1234 (2m) ↑0  ← thread step
+[🦁 Herc] relay Norm awake!              ← thread + main timeline
 ```
 
-Each step updates the bot's display name pip to match the current stage.
+Each step updates the bot's display name pip to match the current stage. `!wake` on an already-awake bot restarts it (says `restarting`/`restarted`).
 
 `!report` and `!dismiss` are **instant** — just room moves on a running bot:
 
 ```
-📢 Cid reporting for duty
-📢 Cid dismissed
+[🦁 Herc] relay Cid reporting for duty
+[🦁 Herc] relay Cid dismissed
 ```
 
 ## Message Flow

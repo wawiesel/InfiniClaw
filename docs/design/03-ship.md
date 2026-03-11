@@ -48,6 +48,10 @@ The relay uses multiple Matrix accounts for different purposes:
 
 The operator account watches BehindTheCurtain and all rooms it has joined (including quarters rooms). Captain `!` commands from any of these rooms are processed. The help account keeps help/error responses out of loudspeaker so bots don't see them — bots have all system accounts in `IGNORE_SENDERS`.
 
+All relay command responses are delivered via the loudspeaker account, automatically prefixed with `[<shipEmoji> <shipName>]` (e.g. `[🦁 Herc]`). Message bodies use `relay <action>` prefix — they must NOT repeat the ship name since the loudspeaker tag already provides it.
+
+Non-thread replies are mirrored to BehindTheCurtain so the Captain sees command results regardless of which room they originated from. Thread steps are not mirrored to avoid noise.
+
 Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay`.
 
 ### Startup Sequence
@@ -90,12 +94,17 @@ The speaker result is cached and triggers async re-election in the background. S
 
 ## Ship Commands
 
+Infrastructure commands require an explicit `<ship>` argument. Each relay checks if it's the target — only the matching ship acts, others silently ignore. Usage errors are speaker-only to avoid noise.
+
 | Command | Scope | Behavior |
 |---------|-------|----------|
-| `!commission [ship]` | Target ship | Set `active: true`, reload fleet, start onduty bots |
-| `!decommission [ship]` | Target ship | Stop all bots, set statuses to `sleep`, set `active: false`. Relay keeps running. |
+| `!commission <ship>` | Target ship | Set `active: true`, reload fleet, start onduty bots |
+| `!decommission <ship>` | Target ship | Stop all bots, set statuses to `sleep`, set `active: false`. Relay keeps running. |
 | `!transport <bot> <ship>` | Source ship | Two-phase: dematerialize on source → materialize on destination via secrets sync |
-| `!refit [target]` | Target ship/bot | Sync repos, rebuild, redeploy, restart target bots |
+| `!refit <ship>` | Target ship | Sync repos, rebuild, redeploy, restart target bots |
+| `!relay on/off <ship>` | Target ship | Enable/disable relay processing on target ship |
+| `!push` | Speaker only | Push InfiniClaw repo to remote |
+| `!provision` | Per-ship | Each ship reports independently with ship name header |
 
 **Transport protocol:**
 1. Source ship stops bot, kills containers, removes mounts

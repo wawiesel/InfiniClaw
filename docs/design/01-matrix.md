@@ -19,23 +19,35 @@ Account credentials are in `secrets/operator/`. See `operator/intercom.json` for
 
 ## Room Structure
 
+### Room Naming Convention
+
+All rooms use a double-emoji prefix: `<location><room> Name`.
+
+| Room type | Location emoji | Example |
+|-----------|---------------|---------|
+| Fleet (duty) rooms | `🌌` | `🌌⚙️ Engineering` |
+| Ship-local rooms | Ship emoji | `🦁🏠 Cid's Room` |
+| BehindTheCurtain | `🌑` | `🌑🎭 BehindTheCurtain` |
+
+The relay sets room names on startup via `ensureRoomNames()`, which checks the current name before setting to avoid spam of `m.room.name` state events on restarts.
+
 ### Duty Rooms
 
 Shared across all ships. Bots join/leave based on lifecycle status. Rooms and their IDs are in `operator/intercom.json`.
 
 ### BehindTheCurtain
 
-Private room between Captain and operator. Room ID in `operator/operator-matrix.json`. Not in intercom — operator account polls it directly.
+Private room between Captain and operator. Room ID in `operator/operator-matrix.json`. Not in intercom — operator account polls it directly. Named `🌑🎭 BehindTheCurtain`.
 
 ### Ship Spaces
 
-Each ship is a Matrix space containing its local rooms:
+Each ship is a Matrix space containing its local rooms. Space names use `<shipEmoji> <shipName>` format.
 
 ```
-HERACLES (space)
-  Lounge          — all ship bots + captain + operator + loudspeaker (always)
+🦁 Herc (space)
+  🦁🏠 Lounge      — all ship bots + captain + operator + loudspeaker (always)
   Quarters (space)
-    Norm's Room   — norm + captain + operator + loudspeaker (always)
+    🦁🏠 Norm's Room — norm + captain + operator + loudspeaker (always)
 ```
 
 Ship space and lounge IDs are in `ships.json`. Per-bot quarters room IDs are in `fleet.json`.
@@ -223,9 +235,9 @@ Each on-duty room has access to the other two room intercoms. Messages appear as
 5. **Space hierarchy** — `GET /_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$CHILD_ID` → `{"via": [...]}`
 6. **Power levels** — `GET /_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/` → captain and operator at 100
 7. **Message round-trip** — Operator posts to a room, reads back via `/messages` → posted message appears
-8. **Inbound pill restoration** — Send a mention pill (`@BotName`) in Matrix. Bot log shows the message with `@` prefix restored in body.
-   *Check:* Trigger pattern matches despite Matrix stripping the `@` from plaintext.
-9. **Outbound pill conversion** — Bot sends a message containing `@Name` for a known room member. Matrix client shows it as a clickable mention pill.
+8. **Inbound pill restoration** — Send a mention pill (`@BotName`) in Matrix. Bot log shows the message with `<m>Name</m>` markers in body.
+   *Check:* Trigger pattern matches via `<m>Name</m>` markers.
+9. **Outbound pill conversion** — Bot sends a message containing `<m>Name</m>` for a known room member. Matrix client shows it as a clickable mention pill.
    *Check:* `formatted_body` contains `<a href="https://matrix.to/#/@...">Name</a>`.
 10. **@operator wakes operator** — Bot or Captain mentions `@operator` in a room. Operator tmux session receives the request with context.
     *Check:* Operator session shows the message; only the bot's ship's operator responds.
