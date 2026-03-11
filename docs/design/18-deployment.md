@@ -1,4 +1,4 @@
-# 17 — Deployment Chain
+# 18 — Deployment Chain
 
 Engineers and architects work on git worktrees, never on main. Code does not merge to main until it passes a full deployment chain that proves it works end-to-end in a self-contained simulation.
 

@@ -4,9 +4,14 @@
 
 import { findShipByHostname } from './ship-config.js';
 
+/** Capitalize first letter: "cid" → "Cid". Single source of truth for name display. */
+export function capitalizeName(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 /** Format bot display name: "pip Name shipEmoji". */
 export function formatBotDisplayName(bot: string, pip: string): string {
-  const name = bot.charAt(0).toUpperCase() + bot.slice(1);
+  const name = capitalizeName(bot);
   const shipEmoji = findShipByHostname()?.[1]?.emoji;
   return shipEmoji ? `${pip} ${name} ${shipEmoji}` : `${pip} ${name}`;
 }

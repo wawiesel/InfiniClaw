@@ -38,7 +38,16 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { formatBotDisplayName } from './formatting.js';
+import { capitalizeName, formatBotDisplayName } from './formatting.js';
+import {
+  initMetrics,
+  recordOperatorMessage,
+  recordScoreReaction,
+  backfillOperatorEvents,
+  publishMetrics,
+  computeMetrics,
+  formatScopeMetrics,
+} from './metrics.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
 import type { RoomConn } from './command-registry.js';
@@ -558,8 +567,7 @@ async function ensureRoomNames(): Promise<void> {
     for (const [name, room] of Object.entries(intercom.rooms)) {
       const roomEmoji = ROOM_EMOJI[name];
       if (roomEmoji) {
-        const displayName = name.charAt(0).toUpperCase() + name.slice(1);
-        await setName(room.roomId, `${FLEET_LOCATION}${roomEmoji} ${displayName}`);
+        await setName(room.roomId, `${FLEET_LOCATION}${roomEmoji} ${capitalizeName(name)}`);
       }
     }
   }
@@ -589,7 +597,7 @@ async function ensureRoomNames(): Promise<void> {
     if (entry.ship !== HOSTNAME || !entry.quartersRoom) continue;
     try {
       const env = loadProfileEnv(root, bot);
-      const botName = env.ASSISTANT_NAME || bot.charAt(0).toUpperCase() + bot.slice(1);
+      const botName = env.ASSISTANT_NAME || capitalizeName(bot);
       await setName(entry.quartersRoom, `${shipEmoji}${QUARTERS_EMOJI} ${botName}'s Room`);
     } catch { /* skip bots with broken env */ }
   }
@@ -811,7 +819,7 @@ async function publishFleetReport(): Promise<FleetReport> {
   for (const [botId, entry] of Object.entries(liveFleet)) {
     if (entry.ship !== HOSTNAME) continue;
     const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
-    const name = env?.ASSISTANT_NAME || botId;
+    const name = env?.ASSISTANT_NAME || capitalizeName(botId);
     const running = localRunning.has(botId);
     botReports[botId] = {
       name,
@@ -1681,6 +1689,22 @@ async function healthLoop(): Promise<void> {
   }
 }
 
+// ── Metrics loop — periodic S3 publish ──────────────────────────────
+
+const METRICS_INTERVAL = envInt('METRICS_INTERVAL_MS', 5 * 60_000); // 5 min default
+
+async function metricsLoop(): Promise<void> {
+  await sleep(90_000); // let startup stabilize
+  while (true) {
+    try {
+      await publishMetrics();
+    } catch (err) {
+      log(`metrics: publish error: ${errStr(err)}`);
+    }
+    await sleep(METRICS_INTERVAL);
+  }
+}
+
 // ── Heartbeat — nudge idle bots to do autonomous work ──────────────
 
 const HEARTBEAT_INTERVAL = envInt('HEARTBEAT_INTERVAL_MS', 30 * 60_000); // 30 min default
@@ -1721,7 +1745,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         if (!conn?.accessToken) continue;
         // Get the bot's display name for the trigger
         const env = loadProfileEnv(root, bot);
-        const name = env?.ASSISTANT_NAME || bot;
+        const name = env?.ASSISTANT_NAME || capitalizeName(bot);
         await relaySend(conn.homeserver, conn.accessToken, conn.roomId,
           `${name}, check NEXT.md and work on the highest priority item you can act on.`);
         log(`heartbeat: nudged ${name} in ${roomName}`);
@@ -1763,7 +1787,7 @@ async function handleLifecycleCommand(
 
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-    const name = env?.ASSISTANT_NAME || bot;
+    const name = env?.ASSISTANT_NAME || capitalizeName(bot);
     const rank = liveFleet[bot]?.rank ?? 99;
     log(`!${action} ${name}`);
 
@@ -1808,7 +1832,7 @@ async function handleLifecycleCommand(
         } catch { /* non-fatal */ }
         fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         writeFleet(liveFleet);
-        await reply(conn, `relay ${name} sleeping 😴`);
+        await reply(conn, `relay ${name} asleep`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         await reply(conn, `⛔ !sleep ${name} — ${errStr(err)}`);
@@ -1879,7 +1903,7 @@ async function handleLifecycleCommand(
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild)
         restartBotForRoom(root, bot);
-        await reply(conn, `relay ${name} reporting for duty`);
+        await reply(conn, `relay ${name} on duty`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!report ${name} failed: ${errStr(err)}`);
@@ -1929,7 +1953,7 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
 
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-    const name = env?.ASSISTANT_NAME || bot;
+    const name = env?.ASSISTANT_NAME || capitalizeName(bot);
     log(`!go ${roomName} ${name}`);
     try {
       const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
@@ -1959,7 +1983,7 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
 
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-    const name = env?.ASSISTANT_NAME || bot;
+    const name = env?.ASSISTANT_NAME || capitalizeName(bot);
     const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
     const rank = liveFleet[bot]?.rank ?? 99;
     log(`!refresh ${name}`);
@@ -2083,6 +2107,42 @@ function registerRelayCommands(): void {
       }
     },
 
+    metrics: async (cmd, conn) => {
+      try {
+        // Context-aware scope resolution
+        let scope = cmd.slice('!metrics'.length).trim();
+        if (!scope) {
+          if (conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId) {
+            scope = 'all';
+          } else if (conn.name === 'Bridge') {
+            scope = 'fleet';
+          } else {
+            const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
+            scope = qBot ? qBot[0] : 'all';
+          }
+        }
+
+        const snapshot = computeMetrics();
+        // Publish to S3 in background (don't block the reply)
+        publishMetrics().catch(err => log(`metrics: publish error: ${errStr(err)}`));
+        const text = formatScopeMetrics(snapshot, scope);
+        // BTC/quarters: always reply. Fleet rooms: speaker only.
+        if (conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId) {
+          await reply(conn, text);
+        } else {
+          const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
+          if (qBot) {
+            await shipReport(conn, text);
+          } else if (isSpeaker()) {
+            await speakerReport(conn, text);
+          }
+        }
+      } catch (err) {
+        log(`metrics: command error: ${errStr(err)}`);
+        await reply(conn, `⛔ metrics error: ${errStr(err)}`);
+      }
+    },
+
     decommission: async (cmd, conn) => {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
@@ -2186,18 +2246,18 @@ function registerRelayCommands(): void {
         const result = restartBotsToQuarters(root);
         for (const bot of result.started) {
           const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-          await s(stageOk(`${bEnv?.ASSISTANT_NAME || bot} restarted (quarters)`));
+          await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restarted (quarters)`));
         }
         for (const bot of result.failed) {
           errors++;
           const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-          await s(stageFail(`${bEnv?.ASSISTANT_NAME || bot} restart`, ''));
+          await s(stageFail(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restart`, ''));
         }
         // Report sleeping bots
         for (const bot of activeBots) {
           if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status) && liveFleet[bot]?.status !== 'transit') {
             const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-            await s(stageOk(`${bEnv?.ASSISTANT_NAME || bot} stays ${liveFleet[bot]?.status}`));
+            await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} stays ${liveFleet[bot]?.status}`));
           }
         }
 
@@ -2308,7 +2368,7 @@ function registerRelayCommands(): void {
         // Assemble output
         const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; localStatus: string }> = {};
         for (const [botId, entry] of Object.entries(liveFleet)) {
-          allBots[botId] = { ...entry, name: botId, gitVersion: '', localStatus: entry.status };
+          allBots[botId] = { ...entry, name: capitalizeName(botId), gitVersion: '', localStatus: entry.status };
         }
         for (const [, shipReport] of Object.entries(allReports)) {
           for (const [botId, botData] of Object.entries(shipReport.bots)) {
@@ -2399,7 +2459,7 @@ function registerRelayCommands(): void {
       const lines: string[] = [];
       for (const bot of bots) {
         const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-        const name = env?.ASSISTANT_NAME || bot;
+        const name = env?.ASSISTANT_NAME || capitalizeName(bot);
         lines.push(`📋 **${name}**`);
 
         // Threads dispatched by this bot
@@ -2545,8 +2605,8 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const root = resolveRoot();
   const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
   const swapEnv = (() => { try { return loadProfileEnv(root, result.swap); } catch { return null; } })();
-  const botDisplayName = botEnv?.ASSISTANT_NAME || target;
-  const swapDisplayName = swapEnv?.ASSISTANT_NAME || result.swap;
+  const botDisplayName = botEnv?.ASSISTANT_NAME || capitalizeName(target);
+  const swapDisplayName = swapEnv?.ASSISTANT_NAME || capitalizeName(result.swap);
   const botRoom = (botEnv?.MAIN_GROUP_NAME || '').toLowerCase();
 
   const targetConn = allConns.find(c => c.name === botRoom) || conn;
@@ -2683,6 +2743,20 @@ async function curtainLoop(captainUserId: string): Promise<void> {
 
       for (const [rid, roomData] of Object.entries(joinedRooms)) {
         for (const event of (roomData as any).timeline?.events || []) {
+          // Record operator messages for metrics (before any filtering)
+          if (event.type === 'm.room.message' && event.content?.msgtype === 'm.text' && event.content?.body) {
+            recordOperatorMessage(event.sender, rid, String(event.content.body), event.origin_server_ts ?? Date.now());
+          }
+          // Record scoring reactions for metrics
+          if (event.type === 'm.reaction') {
+            const relates = event.content?.['m.relates_to'];
+            if (relates?.key) {
+              // Determine which bot the reacted-to message belongs to
+              // For now, record with empty bot — enriched when we have bot sender info
+              recordScoreReaction(event.sender, relates.key, '', event.origin_server_ts ?? Date.now());
+            }
+          }
+
           if (event.type !== 'm.room.message') continue;
           if (event.content?.msgtype !== 'm.text') continue;
           // Skip own non-command messages (operator commands should still be processed)
@@ -2695,7 +2769,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           const formattedBody = event.content.formatted_body as string || '';
           for (const [bot, entry] of Object.entries(liveFleet)) {
             if (entry.status !== 'sleep' || entry.ship !== HOSTNAME) continue;
-            const name = bot.charAt(0).toUpperCase() + bot.slice(1);
+            const name = capitalizeName(bot);
             const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const mentioned =
               new RegExp(`<m>${escaped}</m>`, 'i').test(body) ||
@@ -2806,8 +2880,8 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
       // Process timeline events
       const joinedRooms = data.rooms?.join;
       if (joinedRooms) {
-        for (const events of Object.values(joinedRooms)) {
-          for (const event of events.timeline?.events || []) {
+        for (const roomEvents of Object.values(joinedRooms)) {
+          for (const event of roomEvents.timeline?.events || []) {
             if (event.type !== 'm.room.message') continue;
             if (event.content?.msgtype !== 'm.text') continue;
             const body = event.content.body?.trim() || '';
@@ -2889,6 +2963,18 @@ async function main(): Promise<void> {
   if (captainUserId) log(`captain: ${captainUserId}`);
   if (operatorUserId) log(`operator: ${operatorUserId}`);
 
+  // Initialize metrics subsystem with identity info
+  {
+    const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
+    let btcRoomId = '';
+    try {
+      const opConf = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+      btcRoomId = opConf.rooms?.['BehindTheCurtain'] ?? '';
+    } catch { /* ok — curtainLoop will also handle this */ }
+    initMetrics({ btcRoomId, operatorUid: operatorUserId, captainUid: captainUserId });
+    log('metrics: initialized');
+  }
+
   const conns: RoomConn[] = [];
   for (const [name, room] of Object.entries(intercom.rooms)) {
     conns.push({
@@ -2961,6 +3047,22 @@ async function main(): Promise<void> {
   // Sync all bot display names to current format
   syncBotDisplayNames().catch((err) => log(`syncBotDisplayNames failed: ${errStr(err)}`));
 
+  // Back-fill operator metrics from Matrix history
+  {
+    const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
+    try {
+      const opConf = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+      const allRoomIds = conns.map(c => c.roomId);
+      // Add quarters room IDs from fleet
+      for (const entry of Object.values(liveFleet)) {
+        if (entry.quartersRoom) allRoomIds.push(entry.quartersRoom);
+      }
+      backfillOperatorEvents(opConf.homeserver, opConf.accessToken, allRoomIds)
+        .then(() => log('metrics: backfill complete'))
+        .catch(err => log(`metrics: backfill failed: ${errStr(err)}`));
+    } catch { log('metrics: skipping backfill (no operator config)'); }
+  }
+
   // Start background loops (non-blocking alongside room sync loops)
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));
   gitSyncLoop(conns).catch((err) => log(`git sync loop fatal: ${errStr(err)}`));
@@ -2968,6 +3070,7 @@ async function main(): Promise<void> {
   secretsSyncLoop(conns).catch((err) => log(`secrets sync loop fatal: ${errStr(err)}`));
   heartbeatLoop(conns).catch((err) => log(`heartbeat loop fatal: ${errStr(err)}`));
   curtainLoop(captainUserId).catch((err) => log(`curtain loop fatal: ${errStr(err)}`));
+  metricsLoop().catch((err) => log(`metrics loop fatal: ${errStr(err)}`));
 
   await Promise.all(loops);
 }

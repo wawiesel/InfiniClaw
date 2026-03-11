@@ -1,4 +1,4 @@
-# 13 — Configuration
+# 14 — Configuration
 
 ## CLAUDE.md Layers
 

@@ -10,7 +10,7 @@ import { loadShipConfig, isValidBotName } from './ship-config.js';
 import { ASSISTANT_NAME, DATA_DIR } from 'nanoclaw/config.js';
 import { MAIN_GROUP_FOLDER } from './infini-config.js';
 import { logger } from 'nanoclaw/logger.js';
-import { escapeHtml } from './formatting.js';
+import { capitalizeName, escapeHtml } from './formatting.js';
 
 const PROJECT_ENV_PATH = path.join(process.cwd(), '.env');
 const MAIN_MODEL_ENV_KEY = 'ANTHROPIC_MODEL';
@@ -279,7 +279,7 @@ export function setMainLlm(model: string): void {
 }
 
 export function mainSender(): string {
-  const providerName = MAIN_PROVIDER.charAt(0).toUpperCase() + MAIN_PROVIDER.slice(1);
+  const providerName = capitalizeName(MAIN_PROVIDER);
   const modelName = sanitizeModelName(mainLlm) || 'unknown-model';
   return `<font color="#888888">🧠 <em>${providerName}/${escapeHtml(modelName)}</em></font>`;
 }

@@ -293,6 +293,63 @@ export async function matrixSetRoomName(
   return resp.ok;
 }
 
+// ── Room history ─────────────────────────────────────────────────────
+
+export interface MatrixEvent {
+  type: string;
+  sender: string;
+  event_id: string;
+  origin_server_ts: number;
+  content?: Record<string, unknown>;
+}
+
+/**
+ * Fetch messages from a Matrix room using the /messages endpoint.
+ * Returns events in reverse-chronological order (newest first) by default.
+ * Use `from` token from previous response for pagination.
+ */
+export async function matrixGetMessages(
+  homeserver: string,
+  token: string,
+  roomId: string,
+  opts?: { limit?: number; from?: string; dir?: 'b' | 'f'; filter?: string },
+): Promise<{ chunk: MatrixEvent[]; end?: string }> {
+  const params = new URLSearchParams({
+    dir: opts?.dir ?? 'b',
+    limit: String(opts?.limit ?? 100),
+  });
+  if (opts?.from) params.set('from', opts.from);
+  if (opts?.filter) params.set('filter', opts.filter);
+  const resp = await fetch(
+    `${homeserver}${MATRIX_API}/rooms/${encodeURIComponent(roomId)}/messages?${params}`,
+    { headers: matrixHeaders(token), signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS) },
+  );
+  if (!resp.ok) throw new Error(`/messages failed for ${roomId}: ${resp.status}`);
+  const data = await resp.json() as { chunk: MatrixEvent[]; end?: string };
+  return data;
+}
+
+/**
+ * Fetch relations (reactions, threads, etc.) for a specific event.
+ * Used to find scoring reactions on bot messages.
+ */
+export async function matrixGetRelations(
+  homeserver: string,
+  token: string,
+  roomId: string,
+  eventId: string,
+  relType?: string,
+): Promise<MatrixEvent[]> {
+  const relPath = relType ? `/m.annotation` : '';
+  const resp = await fetch(
+    `${homeserver}${MATRIX_API}/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(eventId)}${relPath}`,
+    { headers: matrixHeaders(token), signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS) },
+  );
+  if (!resp.ok) return [];
+  const data = await resp.json() as { chunk: MatrixEvent[] };
+  return data.chunk ?? [];
+}
+
 // ── Intercom config ──────────────────────────────────────────────────
 
 let cachedIntercomConfig: IntercomConfig | null = null;

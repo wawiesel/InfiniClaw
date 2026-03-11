@@ -1,4 +1,4 @@
-# 12 — Intercom
+# 13 — Intercom
 
 Cross-room communication uses **intercom relay accounts** — dedicated Matrix accounts, one per room. Intercom accounts are **write-only broadcast channels**: operators and bots send messages through them, relays listen on them. They are not user identities.
 
@@ -20,19 +20,19 @@ Intercom credentials are stored in `operator/intercom.json` in the secrets repo.
 bash operator/send <room> "<message>"
 ```
 
-Operators on each ship use intercom to issue `!` commands that all relays receive. Messages appear as the intercom account in the room. For direct communication, operators use their own `@operator` Matrix account.
+Operators on each ship use intercom to issue x-commands that all relays receive. Messages appear as the intercom account in the room. For direct communication, operators use their own `@operator` Matrix account.
 
 ### Bots → Other Rooms
 
-Any on-duty bot can send cross-room messages by mentioning the target room in their message (e.g., `@engineering: <message>`). The relay detects the pattern and sends via the target room's intercom account. Messages appear as `<BotName> (<SourceRoom>): <message>`. Each on-duty room has access to the other two room intercoms. See [01-matrix](01-matrix.md) for the full `@room:` mention spec.
+Any on-duty bot can send cross-room messages by mentioning the target room in their message (e.g., `@engineering: <message>`). The relay detects the pattern and sends via the target room's intercom account. Messages appear as `<BotName> (<SourceRoom>): <message>`. Each on-duty room has access to the other two room intercoms. See [02-matrix](02-matrix.md) for the full `@room:` mention spec.
 
 ### Relays → Rooms
 
-Relays reply to `!` commands via the `@loudspeaker` account. All replies are prefixed with `[SHIPNAME]`.
+Relays reply to x-commands via the `@loudspeaker` account. All replies are prefixed with `[SHIPNAME]`.
 
 ## How Relays Receive Commands
 
-The relay on each ship connects to Matrix as the intercom accounts (same credentials as `send`). Messages starting with `!` are always processed, even from self. This is how operator-sent `!` commands reach all relays:
+The relay on each ship connects to Matrix as the intercom accounts (same credentials as `send`). X-commands (messages starting with `!`) are always processed, even from self. This is how operator-sent x-commands reach all relays:
 
 1. Operator sends `!rejoin cid` via `send bridge`
 2. Message arrives in Bridge room from `bridge-intercom`
@@ -60,5 +60,5 @@ The Captain can send commands to an operator's tmux session from any Matrix room
 4. **Non-CO blocked** — Non-CO bot tries to use intercom.
    *Check:* Error returned, message not sent.
 
-5. **No echo loops** — Relay processes a `!` command and replies.
+5. **No echo loops** — Relay processes an x-command and replies.
    *Check:* Reply does not start with `!`, relay does not re-process its own reply.

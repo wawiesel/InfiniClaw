@@ -10,6 +10,7 @@
  */
 import path from 'path';
 
+import { capitalizeName } from './formatting.js';
 import { getSystemStatus, getRecentLogLines, getBotActivity, type SystemStatus, type BotStatus } from './status.js';
 
 const ROOT_DIR = process.env.INFINICLAW_ROOT || path.resolve(process.cwd(), '..');
@@ -69,7 +70,7 @@ function formatBot(bot: BotStatus): string {
   const lines: string[] = [];
   const modelTag = bot.model ? ` (${bot.model})` : '';
   const pidTag = bot.pid ? `  PID ${bot.pid}` : '';
-  const nameDisplay = bot.name.charAt(0).toUpperCase() + bot.name.slice(1);
+  const nameDisplay = capitalizeName(bot.name);
   const heartbeatTag = bot.heartbeatStale
     ? '  \u26a0 STALE HEARTBEAT'
     : bot.lastHeartbeat

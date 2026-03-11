@@ -1,10 +1,10 @@
-# 10 — Commands
+# 11 — X-Commands
 
-The Captain controls the fleet via `!` commands typed in Matrix. Commands are processed by a lightweight **relay** process (one per ship), not by each bot's host process. Each ship's relay only acts on its local bots. Untargeted commands (e.g. `!dismiss` with no bot name) are scoped to the room — only bots whose `MAIN_GROUP_NAME` matches the room are affected on each ship.
+The Captain controls the fleet via x-commands (`!`-prefixed) typed in Matrix. Commands are processed by a lightweight **relay** process (one per ship), not by each bot's host process. Each ship's relay only acts on its local bots. Untargeted commands (e.g. `!dismiss` with no bot name) are scoped to the room — only bots whose `MAIN_GROUP_NAME` matches the room are affected on each ship.
 
 Commands work from any room the operator account has joined — duty rooms (via intercom), BehindTheCurtain, and quarters rooms.
 
-**Help and errors:** `!` (bare) prints the command list. Unknown commands get a feedback message. Both are sent via the help account (not loudspeaker) so bots ignore them.
+**Help and errors:** `!` (bare) prints the x-command list. Unknown commands get a feedback message. Both are sent via the help account (not loudspeaker) so bots ignore them.
 
 ## Command Reference
 
@@ -42,12 +42,37 @@ Commands work from any room the operator account has joined — duty rooms (via 
 | `!fleet` | Fleet status — each ship reports its local bots. |
 | `!fleet room` | Bots in this room only. |
 | `!health` | Fleet health summary from S3 (speaker replies). |
+| `!metrics [scope]` | Metrics (1d/7d rolling). Context-aware — see below. |
 
-### Operator Commands
+### Operator X-Commands
 
 | Command | Effect |
 |---------|--------|
 | `!relay <text>` | Send text to operator tmux session on each ship. |
+
+## Metrics
+
+`!metrics` is context-aware — the default scope depends on which room the command is sent from:
+
+| Room | Default scope | What it shows |
+|------|--------------|---------------|
+| Bot quarters | `bot <botname>` | That bot's score, response latency, crashes, branch brain success, timeouts |
+| Engineering | `engineering` | Relay uptime, warnings/errors, cumulative time bots running stale code, deploy success |
+| Bridge | `fleet` | Fleet availability, autonomy score, transport success, cross-ship sync lag |
+| BehindTheCurtain | `all` | Everything — operator, bot, ship, fleet |
+
+Explicit scope overrides the default: `!metrics operator` from any room shows operator metrics.
+
+| Scope | Metrics |
+|-------|---------|
+| `operator` | Interventions outside BTC, x-commands issued, restart ratio, MTBI |
+| `bot [name]` | Score (points/day), response latency, crashes, branch brain success, turn timeout rate, self-healing ratio |
+| `ship [name]` | Relay uptime, sync failures, x-command latency, deploy success, speaker stability |
+| `engineering` | Relay uptime, warnings/errors per day, cumulative stale-code bot-hours, deploy success |
+| `fleet` | Availability, autonomy score, transport success, cross-ship sync lag |
+| `all` | All of the above |
+
+All metrics report 1-day and 7-day rolling averages. Data sourced from S3 (`metrics/<ship>.json`).
 
 ## Status Line Format
 

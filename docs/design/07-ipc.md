@@ -1,4 +1,4 @@
-# 06 — IPC
+# 07 — IPC
 
 Container ↔ host communication. Containers write JSON files to their IPC directory, and the host polls these directories to process commands and messages.
 
@@ -13,7 +13,7 @@ _runtime/data/ipc/{group}/
   input/        ← host writes incoming messages and lobe results for container
 ```
 
-Additionally, `_runtime/relay-tasks/` holds host-side operations (thread brain spawns, git pushes) that require host credentials.
+Additionally, `_runtime/relay-tasks/` holds host-side operations (branch brain spawns, git pushes) that require host credentials.
 
 ## Message Types
 
@@ -43,7 +43,7 @@ Commands written by the container to `tasks/*.json`:
 | `send_reaction` | React to a message with an emoji |
 | `set_thread` | Set active reply thread for subsequent messages |
 | `set_brain_mode` | Switch LLM model at runtime |
-| `branch_to_thread` | Request Thread Brain spawn (written to relay-tasks) |
+| `branch_to_thread` | Request branch brain spawn (written to relay-tasks) |
 
 ## Per-Room Namespaces
 

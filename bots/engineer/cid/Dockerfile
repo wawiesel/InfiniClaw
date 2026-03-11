@@ -1,11 +1,27 @@
 # NanoClaw Engineer Agent Container
-# Lean image for Cid — infrastructure and code operations only.
-# No browser, no heavy dev tools. Just git, ripgrep, and Claude Code.
+# Infrastructure and code operations. Includes browser for web research.
 
 FROM node:22-slim
 
-# Minimal system dependencies
+# System dependencies: browser + dev tools
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    chromium \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    libgbm1 \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libasound2 \
+    libpangocairo-1.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxshmfence1 \
     curl \
     gh \
     git \
@@ -13,7 +29,12 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Set Chromium path for agent-browser
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install A_GIS dependencies so the runtime mount is immediately usable.
 # PYTHONPATH is injected at runtime via CONTAINER_ENV_PYTHONPATH in the bot's profile env.
@@ -27,7 +48,7 @@ ENV NODE_OPTIONS="--max-old-space-size=1024"
 RUN npm install -g npm@latest
 
 # Install global CLIs used by delegates/runners
-RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex
+RUN npm install -g agent-browser @anthropic-ai/claude-code @google/gemini-cli @openai/codex
 
 # Create app directory
 WORKDIR /app

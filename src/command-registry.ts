@@ -1,4 +1,4 @@
-/** Command registry — single source of truth for all ! commands.
+/** Command registry — single source of truth for all x-commands.
  *  Help text and dispatch are auto-generated from this registry. */
 
 export interface RoomConn {
@@ -68,6 +68,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'allow',         usage: '!allow <bot> <path> [min]', description: 'grant rw mount (authorized)',          match: startsWith('allow') },
   { name: 'deny',          usage: '!deny <bot> <path>',        description: 'revoke rw mount (authorized)',         match: startsWith('deny') },
   { name: 'operator',      usage: '!operator [on|off] [ship]',  description: 'operator relay status or toggle',       match: prefix('operator') },
+  { name: 'metrics',       usage: '!metrics [scope]',            description: 'metrics (context-aware, 1d/7d)',       match: prefix('metrics') },
 ];
 
 /** Register a handler for a command by name. */
@@ -108,5 +109,5 @@ export async function dispatch(cmd: string, conn: RoomConn, allConns: RoomConn[]
 export function buildHelpText(): string {
   const maxUsage = Math.max(...COMMANDS.map(c => c.usage.length));
   const lines = COMMANDS.map(c => `  ${c.usage.padEnd(maxUsage)} — ${c.description}`);
-  return ['📟 Operator commands:', ...lines, `  ${'!'.padEnd(maxUsage)} — this help`].join('\n');
+  return ['📟 X-commands:', ...lines, `  ${'!'.padEnd(maxUsage)} — this help`].join('\n');
 }

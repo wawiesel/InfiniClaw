@@ -1,4 +1,4 @@
-# 04 — Bot
+# 05 — Bot
 
 A bot is a Matrix account backed by a container running on a ship. It listens to room messages, responds when triggered, and accumulates context from everything it hears.
 
@@ -161,7 +161,7 @@ Bots set their Matrix display name to show status at a glance:
 
 Examples: `🟢 Cid 🦁`, `⭐ Parker 🦁`, `💤 Nora 🔱`
 
-The pip reflects **operational status**, not which room the bot is in. See [08-roles-and-rooms](08-roles-and-rooms.md) for the full status model.
+The pip reflects **operational status**, not which room the bot is in. See [09-roles-and-rooms](09-roles-and-rooms.md) for the full status model.
 
 | Pip | Status |
 |-----|--------|
@@ -200,19 +200,19 @@ Each step updates the bot's display name pip to match the current stage. `!wake`
 
 ```
 User message → Matrix → host message loop → SQLite → trigger check
-  → [TRIGGERED] container spawns → Main Brain processes conversation
-    → [IF COMPLEX] Main Brain calls branch_to_thread(objective)
-      → Host creates thread: "🧵 Thread Brain: <title>"
-      → Host spawns Thread Brain (claude --print on host, not container)
-      → Thread Brain works, posts progress into thread
-      → Main Brain continues listening — never blocked
-    → [IF SIMPLE] Main Brain replies directly
+  → [TRIGGERED] container spawns → main brain processes conversation
+    → [IF COMPLEX] main brain calls branch_to_thread(objective)
+      → Host creates thread: "🧵 Branch: <title>"
+      → Host spawns branch brain (claude --print on host, not container)
+      → Branch brain works, posts progress into thread
+      → Main brain continues listening — never blocked
+    → [IF SIMPLE] main brain replies directly
   → [NOT TRIGGERED] message stored as context, no response
 ```
 
 ## Mention-Wake
 
-A sleeping bot can be woken by an explicit `<m>name</m>` callout in any room where the bot has membership. The relay monitors for trigger-pattern matches against sleeping bots and auto-wakes them — equivalent to `!wake <bot>` but driven by a mention instead of an operator command. The bot resumes in the room where the callout occurred.
+A sleeping bot can be woken by an explicit `<m>name</m>` callout in any room where the bot has membership. The relay monitors for trigger-pattern matches against sleeping bots and auto-wakes them — equivalent to `!wake <bot>` but driven by a mention instead of an x-command. The bot resumes in the room where the callout occurred.
 
 ## Resume Behavior
 
@@ -231,6 +231,19 @@ Configurable delay via `RESUME_DELAY_SECONDS` (default 0).
 - pm2 auto-restarts on crash (2s delay, max 100 restarts)
 - Exit code 137 (SIGKILL/OOM) triggers backoff cooldown (60s, after 3 consecutive crashes)
 - Session state persisted in SQLite survives restarts
+
+## Metrics
+
+| Metric | What it measures | Target | Window |
+|--------|-----------------|--------|--------|
+| **Response latency** | Time from trigger (🔔) to first message posted | < 30s | 1-day, 7-day rolling |
+| **Branch brain success** | Branch brains that posted a result vs timed out/errored | > 90% | 1-day, 7-day rolling |
+| **Crashes** | pm2 restarts (especially exit code 137 OOM) | 0/day | 1-day, 7-day rolling |
+| **Self-healing ratio** | Bot-initiated restarts/rebuilds vs operator-triggered | Ratio → 1 | 7-day rolling |
+| **Turn timeout rate** | Container turns killed by timeout vs completed normally | < 5% | 1-day, 7-day rolling |
+| **Score** | Net points/day from 👍️(+1) 👎️(−1) 💯(+3) ❌️(−3) reactions (Captain or operator) | Positive | 1-day, 7-day rolling |
+
+Response latency is the primary bot metric — it measures whether the main brain is instantly responsive per core principle. Track from 🔔 reaction timestamp to first bot message in the room. Branch brain success is measurable because each branch has a clear lifecycle: spawned → posted result or timed out/errored.
 
 ## Verification
 

@@ -1,4 +1,4 @@
-# 16 — Skills
+# 17 — Skills
 
 Skills are pooled capability modules loaded by role. Each skill is a `SKILL.md` file that gets injected into the bot's context, providing domain-specific instructions.
 

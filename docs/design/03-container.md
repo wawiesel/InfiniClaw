@@ -1,4 +1,4 @@
-# 02 — Containers
+# 03 — Containers
 
 One bot = one persistent Podman container. The container starts when the bot wakes and stays running until the bot sleeps. Inside it, a hierarchy of AI processes handles triage, execution, and delegation.
 
@@ -9,7 +9,7 @@ An InfiniClaw container acts like a mini-OS:
 2.  **The Main Brain (Trunk):** A persistent `claude-code` process spawned by the agent runner for triage and management. It does NOT restart per message — it stays running and receives new messages via IPC.
 3.  **Async Lobes (Workers):** Stateless subprocesses (Codex, Gemini, Claude, Ollama) spawned by the delegate runner for fast parallel execution. Results returned via IPC files.
 
-**Thread Brains** run on the host (not inside containers). The relay spawns them as `claude --print` processes that communicate via Matrix threads. See `07-threading.md`.
+**Branch brains** run on the host (not inside containers). The relay spawns them as `claude --print` processes that communicate via Matrix threads. See [08-threading](08-threading.md).
 
 This architecture ensures the bot is always reachable on the main timeline regardless of how many complex tasks are running in parallel.
 

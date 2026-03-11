@@ -1,4 +1,4 @@
-# 09 — Fleet
+# 10 — Fleet
 
 The fleet is the aggregate of all ships and bots, coordinated via `fleet.json` as the single source of truth.
 
@@ -38,6 +38,17 @@ Transport uses git (not Matrix) because it must survive relay restarts and netwo
 3. **Assembly**: The speaker merges all ship reports with its in-memory `liveFleet` as fallback for any ship that didn't report in time, then emits a single formatted response.
 
 This guarantees exactly one reply per `!fleet` command, with live process data from every reachable ship.
+
+## Metrics
+
+| Metric | What it measures | Target | Window |
+|--------|-----------------|--------|--------|
+| **Availability** | % of assigned bots online (🟢 or ⭐) vs total assigned | 100% | 1-day, 7-day rolling |
+| **Fleet autonomy score** | Composite: 100 − (operator interventions × 10) − (bot crashes × 5) | 100 | 1-day, 7-day rolling |
+| **Transport success** | `!transport` completions vs timeouts | 100% | 7-day rolling |
+| **Cross-ship sync lag** | Time for fleet.json changes to propagate to all ships | < 60s | 7-day rolling |
+
+Availability is the primary fleet metric — it answers "how many bots are working right now?" The autonomy score is a composite that penalizes operator interventions (heavy weight) and bot crashes (lighter weight). A score of 100 means fully autonomous operation.
 
 ## Verification
 

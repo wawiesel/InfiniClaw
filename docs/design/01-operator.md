@@ -1,0 +1,120 @@
+# 01 — Operator
+
+The operator is the escape hatch. In a fully working system, the Captain issues orders directly to bots, bots do their jobs, and relays handle updates autonomously — the operator is never needed. But during development and when bots are not yet reliable, the operator is used heavily for bootstrap, debugging, and meta-management.
+
+The operator runs directly on the host machine (not in a container) inside a tmux session named `operator`, using Claude Code at the maximum intelligence setting available. It also has a Matrix account (`@operator`) on the homeserver. Operator tasks are high-stakes meta-management where mistakes cascade across the fleet. Before any bot, relay, or ship exists, the operator bootstraps everything from scratch. Once the system is stable, the operator fades to a monitoring role — intervening only when something breaks that bots cannot fix themselves.
+
+## Bootstrap Sequence
+
+Starting from nothing. Three foundational services must exist before any bot can run:
+
+1. **Matrix server** — Conduwuit homeserver is running (see `docs/solutions/matrix.md`). This is the communication backbone.
+2. **S3 (MinIO)** — Object storage for metrics, fleet reports, health checks, speaker election, and error logs. Endpoint and credentials go in `fleet.json` under `s3`.
+3. **Secrets repo** — Operator initializes the secrets repo with `operator/`, `bots/fleet.json` (including S3 config), and credentials.
+
+With these three in place, the operator bootstraps the fleet:
+
+4. **BehindTheCurtain** — Operator creates the first room: a private channel between Captain and operator. This establishes the command link. Room naming: `🌑🎭 BehindTheCurtain`.
+5. **Operator and loudspeaker accounts** — Registered on the homeserver. Operator joins BehindTheCurtain. Captain is admin (power 100) in all rooms.
+6. **First ship** — Operator registers this machine in `ships.json`, creates a ship space, lounge, and quarters space on Matrix.
+7. **First bot (Norm)** — The simplest test: a normie with env file, fleet.json entry, and a quarters room. No duty rooms, no skills, no MCP. Just conversation in quarters. This validates the entire bot runtime end-to-end.
+8. **Relay** — Operator starts the relay. It connects to Matrix and S3, discovers Norm, wakes him. The system is alive.
+9. **Growth** — Add more bots, more ships, duty rooms, intercom accounts. Each layer builds on what the operator already established.
+
+Everything grows from these three foundations (Matrix, S3, secrets) outward.
+
+## Accounts
+
+| Account | Credential file | Purpose |
+|---------|----------------|---------|
+| `@operator` | `operator-matrix.json` | Direct presence — messages, room management, admin ops |
+| `@loudspeaker` | `loudspeaker-matrix.json` | Relay reply voice for x-commands |
+
+Operator is admin (power 100) in every room. All room creation, invites, and power-level changes go through the operator account. Intercom accounts are write-only broadcast channels — never used for admin.
+
+## Captain Communication
+
+The Captain communicates with operators via BehindTheCurtain. The relay watches this room and forwards messages to the operator's tmux session. BehindTheCurtain is the one room where operator conversation is expected and normal — the Captain checks in, asks about bot performance, and gives direction.
+
+**Routing:**
+- **Default**: Only the **speaker** operator receives Captain messages. The speaker is the operator on the ship running the newest code (same election as relay speaker).
+- **Broadcast**: Captain uses `📞 Operator` pill to send to **all** active operators simultaneously.
+- **Direct**: Captain can also send x-commands from any room the operator account has joined — BehindTheCurtain, duty rooms, quarters rooms.
+
+Operators reply via `bash operator/matrix reply "<response>"` — always back to Matrix, never in Claude Code output.
+
+## Inter-Operator Communication
+
+Multiple ships mean multiple operators. The only coordination channel is `operator/inbox.md` in the secrets repo. Operators do not use intercom rooms (engineering, bridge, astrometrics) to talk to each other.
+
+Inbox items are structured with a target ship name. Each operator reads items targeting their ship, acts on them, marks them done, and pushes.
+
+## X-Commands
+
+X-commands are `!`-prefixed messages that control the fleet. X for exclamation, X for eXecute. The Captain types them in Matrix; every ship's relay processes them.
+
+X-commands work from any room the operator account has joined. The full reference is in [11-commands](11-commands.md). The command registry (`command-registry.ts`) is the single source of truth for command names.
+
+**Who can issue x-commands:** Captain (by user ID) and intercom accounts (by sender pattern). Operators issue x-commands via intercom scripts (`bash operator/matrix send <room> "!command"`).
+
+**Bots cannot use x-commands.** X-commands are Captain/operator only. Bots use IPC for self-service operations (restart, rebuild, git push).
+
+## Intervention
+
+Every operator message outside BehindTheCurtain is an intervention — a sign that the system couldn't handle something on its own. The frequency of these interventions is a direct measure of fleet autonomy. A mature fleet means a quiet operator.
+
+**When to intervene:**
+- Bot is stuck, lazy, inefficient, broken, or needs a restart
+
+**How to intervene (escalating):**
+- **Mild**: Message the bot directly — `bash operator/matrix send <room> "@<bot> <message>"`
+- **Medium**: X-commands — `!rejoin <bot>`, `!dismiss <bot>`, `!report <bot>`
+- **Heavy**: Edit persona/config, then `!rejoin <bot>`
+- **Fallback**: Restart the relay
+
+**When NOT to intervene:**
+- Bot is working. Let it work.
+- Bot made a minor mistake. It will self-correct.
+- You want to "improve" something proactively. Don't.
+
+## Metrics
+
+| Metric | What it measures | Target | Window |
+|--------|-----------------|--------|--------|
+| **Interventions** | `@operator` messages sent to any room except BehindTheCurtain | 0/day | 1-day, 7-day rolling |
+| **X-commands issued** | X-commands sent by operator (not Captain) | Decreasing | 1-day, 7-day rolling |
+| **Bot restarts** | Operator-triggered `!wake`/`!rejoin`/`!refresh` vs automatic | Ratio → 0 | 1-day, 7-day rolling |
+| **Mean time between interventions** | Time gap between consecutive operator interventions | Increasing | 7-day rolling |
+
+Interventions is the primary metric. A day with zero interventions outside BehindTheCurtain means the fleet ran autonomously. Track by counting `@operator:a-gis.org` sends per room per day from Matrix history. Report both 1-day (yesterday) and 7-day rolling averages.
+
+**Storage:** Metrics are computed by each ship's relay and published to S3 (`metrics/<ship>.json`). The speaker aggregates all ships for fleet-wide totals.
+
+**Access:** `!metrics [scope]` x-command (context-aware — defaults based on room), `get_metrics` MCP tool for bots. See [11-commands](11-commands.md) for scope details.
+
+## Monitoring
+
+- **Messages**: `bash operator/matrix read <room> [N]`
+- **Containers**: `podman ps --filter "name=nanoclaw"`
+- **Error logs**: `tail -f _runtime/logs/<bot>.error.log`
+- **Fleet status**: `!fleet` in any room
+
+## Verification
+
+1. **Operator account exists** — `@operator:a-gis.org` can log in to Matrix.
+   *Check:* `POST /_matrix/client/v3/login` returns access token.
+
+2. **BehindTheCurtain reachable** — Operator is joined and admin in BehindTheCurtain.
+   *Check:* Room members API includes `@operator:a-gis.org` with power 100.
+
+3. **Captain comms work** — Captain sends message in BehindTheCurtain, operator tmux receives it.
+   *Check:* Tmux session shows the message.
+
+4. **X-command dispatch** — `!fleet` from BehindTheCurtain produces a response.
+   *Check:* Loudspeaker replies with fleet status.
+
+5. **Quarters x-commands** — `!sleep cid` from Cid's quarters room works.
+   *Check:* Bot sleeps, fleet.json updated.
+
+6. **Inter-operator inbox** — Post an item to `inbox.md` targeting another ship.
+   *Check:* Other ship's operator picks it up on next startup or secrets sync.
