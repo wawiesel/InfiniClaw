@@ -35,7 +35,7 @@ import {
   holodeckPromote as serviceHolodeckPromote,
 } from './service.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
-import { statusMessage } from './formatting.js';
+import { capitalizeName, statusMessage } from './formatting.js';
 
 // ── Cooldown tracking ───────────────────────────────────────────────────
 
@@ -108,7 +108,7 @@ function getMainRoomJid(ctx: InfiniClawIpcContext): string | null {
 function botStatusLine(bot: string, emoji: string): string {
   try {
     const env = loadProfileEnv(resolveRoot(), bot);
-    const name = env.ASSISTANT_NAME || bot;
+    const name = env.ASSISTANT_NAME || capitalizeName(bot);
     const role = env.ASSISTANT_ROLE || 'Bot';
     const group = env.MAIN_GROUP_NAME || 'main';
     const rawModel = env.BRAIN_MODEL || 'unknown';

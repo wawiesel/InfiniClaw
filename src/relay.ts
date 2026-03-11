@@ -1745,7 +1745,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         if (!conn?.accessToken) continue;
         // Get the bot's display name for the trigger
         const env = loadProfileEnv(root, bot);
-        const name = env?.ASSISTANT_NAME || bot;
+        const name = env?.ASSISTANT_NAME || capitalizeName(bot);
         await relaySend(conn.homeserver, conn.accessToken, conn.roomId,
           `${name}, check NEXT.md and work on the highest priority item you can act on.`);
         log(`heartbeat: nudged ${name} in ${roomName}`);
@@ -1953,7 +1953,7 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
 
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-    const name = env?.ASSISTANT_NAME || bot;
+    const name = env?.ASSISTANT_NAME || capitalizeName(bot);
     log(`!go ${roomName} ${name}`);
     try {
       const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
@@ -1983,7 +1983,7 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
 
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-    const name = env?.ASSISTANT_NAME || bot;
+    const name = env?.ASSISTANT_NAME || capitalizeName(bot);
     const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
     const rank = liveFleet[bot]?.rank ?? 99;
     log(`!refresh ${name}`);
@@ -2246,18 +2246,18 @@ function registerRelayCommands(): void {
         const result = restartBotsToQuarters(root);
         for (const bot of result.started) {
           const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-          await s(stageOk(`${bEnv?.ASSISTANT_NAME || bot} restarted (quarters)`));
+          await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restarted (quarters)`));
         }
         for (const bot of result.failed) {
           errors++;
           const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-          await s(stageFail(`${bEnv?.ASSISTANT_NAME || bot} restart`, ''));
+          await s(stageFail(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restart`, ''));
         }
         // Report sleeping bots
         for (const bot of activeBots) {
           if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status) && liveFleet[bot]?.status !== 'transit') {
             const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-            await s(stageOk(`${bEnv?.ASSISTANT_NAME || bot} stays ${liveFleet[bot]?.status}`));
+            await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} stays ${liveFleet[bot]?.status}`));
           }
         }
 
@@ -2459,7 +2459,7 @@ function registerRelayCommands(): void {
       const lines: string[] = [];
       for (const bot of bots) {
         const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-        const name = env?.ASSISTANT_NAME || bot;
+        const name = env?.ASSISTANT_NAME || capitalizeName(bot);
         lines.push(`📋 **${name}**`);
 
         // Threads dispatched by this bot
@@ -2605,8 +2605,8 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const root = resolveRoot();
   const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
   const swapEnv = (() => { try { return loadProfileEnv(root, result.swap); } catch { return null; } })();
-  const botDisplayName = botEnv?.ASSISTANT_NAME || target;
-  const swapDisplayName = swapEnv?.ASSISTANT_NAME || result.swap;
+  const botDisplayName = botEnv?.ASSISTANT_NAME || capitalizeName(target);
+  const swapDisplayName = swapEnv?.ASSISTANT_NAME || capitalizeName(result.swap);
   const botRoom = (botEnv?.MAIN_GROUP_NAME || '').toLowerCase();
 
   const targetConn = allConns.find(c => c.name === botRoom) || conn;

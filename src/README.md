@@ -108,7 +108,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Error strings**: Always use `errStr(err)` from `utils.ts` instead of inline `err instanceof Error ? err.message : String(err)`. Already imported in all source files.
 - **Regex escaping**: Use `escapeRegex(s)` from `utils.ts` instead of inline `/[.*+?^${}()|[\]\\]/g` patterns.
 - **Env var integers**: Use `envInt(name, default)` from `utils.ts` instead of `parseInt(process.env.VAR || 'X', 10)`.
-- **Bot name capitalization**: Use `capitalizeName(name)` from `formatting.ts` — single source of truth. Never inline `charAt(0).toUpperCase() + slice(1)`.
+- **Bot name capitalization**: Use `capitalizeName(name)` from `formatting.ts` — single source of truth. Never inline `charAt(0).toUpperCase() + slice(1)`. All `ASSISTANT_NAME || botId` fallbacks must use `capitalizeName(botId)`.
 - **Bot display names**: Use `formatBotDisplayName(bot, pip)` from `formatting.ts` — single source of truth for the `pip Name shipEmoji` format. Both `relay.ts:setBotPip` and `main.ts:botDisplayName` use it.
 - **Ship commissioned flag**: `isShipCommissioned()` from `ship-config.ts` checks the ship-level `commissioned` boolean (distinct from per-bot `status`). Renamed from `active`/`isShipActive()` for consistency with `!commission`/`!decommission` commands.
 - **Ship names in user-visible output**: Use `shipTag()` or `thisShipName()` from `ship-config.ts`, never raw `os.hostname()`. S3 keys for fleet reports also use ship names.

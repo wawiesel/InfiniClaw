@@ -115,7 +115,7 @@ import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
-import { formatBotDisplayName } from './formatting.js';
+import { capitalizeName, formatBotDisplayName } from './formatting.js';
 import { loadFleet } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
 
@@ -1550,7 +1550,7 @@ async function main(): Promise<void> {
       const room = (env?.MAIN_GROUP_NAME || '').toLowerCase();
       const jid = roomNameToJid[room];
       if (!jid) continue;
-      const name = env?.ASSISTANT_NAME || botId;
+      const name = env?.ASSISTANT_NAME || capitalizeName(botId);
       if (!roomRoster[jid]) roomRoster[jid] = new Map();
       roomRoster[jid].set(name, entry.rank ?? 99);
     }

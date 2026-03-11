@@ -12,6 +12,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { parseEnvFile } from './env-utils.js';
+import { capitalizeName } from './formatting.js';
 import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 
 import { loadShipConfig, loadFleet, isValidBotName } from './ship-config.js';
@@ -288,7 +289,7 @@ export function deployBot(root: string, bot: string): void {
   if (botStatus === 'quarters' && quartersRoom) {
     // Bot is in quarters — seed quarters room as main
     const quartersJid = `matrix:${quartersRoom}`;
-    const quartersName = `${profileEnv.ASSISTANT_NAME || bot}'s Quarters`;
+    const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
     seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
     console.log(`${bot}: pre-registered quarters (${quartersName})`);
   } else {
@@ -611,7 +612,7 @@ export function restartBotForRoom(root: string, bot: string): void {
   // Re-seed main room registration based on current fleet status
   if (botStatus === 'quarters' && quartersRoom) {
     const quartersJid = `matrix:${quartersRoom}`;
-    const quartersName = `${profileEnv.ASSISTANT_NAME || bot}'s Quarters`;
+    const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
     seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
   } else {
     const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
