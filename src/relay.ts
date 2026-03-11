@@ -117,8 +117,8 @@ function stageOk(what: string, suffix = ''): string { return `✅ ${what}${suffi
 function stageFail(what: string, suffix = ''): string { return `⛔ ${what}${suffix}`; }
 function stageWarn(what: string, suffix = ''): string { return `⚠️ ${what}${suffix}`; }
 function resultEmoji(warnings: number, errors: number): string { return errors > 0 ? '⛔' : warnings > 0 ? '⚠️' : '✅'; }
-function refitResult(outcome: string, warnings: number, errors: number, elapsedMs: number): string {
-  return `${resultEmoji(warnings, errors)} relay refit ${outcome} (${warnings}W ${errors}E) ${formatDuration(elapsedMs)}`;
+function pullResult(outcome: string, warnings: number, errors: number, elapsedMs: number): string {
+  return `${resultEmoji(warnings, errors)} relay pull ${outcome} (${warnings}W ${errors}E) ${formatDuration(elapsedMs)}`;
 }
 
 async function reportFailure(system: string, detail: string, conns: RoomConn[]): Promise<void> {
@@ -218,7 +218,7 @@ function rankSwap<T extends { rank: number }>(
   return { target, swap: sorted[swapIdx][0], targetRank: sorted[idx][1].rank, swapRank: sorted[swapIdx][1].rank };
 }
 
-// ── Sync/rebuild helpers (shared by !provision and !refit) ────────
+// ── Sync/rebuild helpers (used by !pull) ────────
 
 function formatSyncResult(name: string, r: { ok: boolean; newCommits: number; output: string }): string {
   if (!r.ok) return `${name}: failed — ${r.output.slice(0, 200)}`;
@@ -2126,63 +2126,12 @@ function registerRelayCommands(): void {
       }
     },
 
-    provision: async (cmd, conn) => {
-      const target = cmd.slice('!provision'.length).trim() || null;
-      const results: string[] = [`**${thisShipName()}**`];
-
-      const syncRepo = (name: string, repoPath: string): string => {
-        const resolved = repoPath.replace(/^~/, os.homedir());
-        if (!fs.existsSync(path.join(resolved, '.git'))) return `${name}: not a git repo`;
-        try {
-          const opts = { cwd: resolved, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
-          execSync('git fetch origin', opts);
-          const count = parseInt(execSync('git rev-list HEAD..origin/main --count', { ...opts, timeout: 5_000 }).trim(), 10) || 0;
-          if (count === 0) return `${name}: up to date`;
-          execSync('git pull --rebase', opts);
-          return `${name}: pulled ${count} commit(s)`;
-        } catch (err) {
-          return `${name}: sync failed — ${errStr(err).slice(0, 200)}`;
-        }
-      };
-
-      try {
-        if (!target) {
-          const secretsResult = secretsGitSync();
-          results.push(formatSyncResult('secrets', secretsResult));
-          const icResult = gitSync();
-          results.push(formatSyncResult('infiniclaw', icResult));
-          if (icResult.ok && icResult.newCommits > 0) results.push(rebuildInfiniClaw());
-        } else if (target === 'secrets') {
-          results.push(formatSyncResult('secrets', secretsGitSync()));
-        } else if (target === 'infiniclaw') {
-          const r = gitSync();
-          results.push(formatSyncResult('infiniclaw', r));
-          if (r.ok && r.newCommits > 0) results.push(rebuildInfiniClaw());
-        } else {
-          let paths: Record<string, string> = {};
-          try {
-            const configDir = path.dirname(secretsRepoPath());
-            paths = JSON.parse(fs.readFileSync(path.join(configDir, 'paths.json'), 'utf-8'));
-          } catch { /* no paths.json */ }
-          if (paths[target]) {
-            results.push(syncRepo(target, paths[target]));
-          } else {
-            if (isSpeaker()) await reply(conn, `unknown target "${target}" — not in paths.json`);
-            return;
-          }
-        }
-        await shipReport(conn, `${results.join('\n')}`);
-      } catch (err) {
-        await shipReport(conn, `!provision failed — ${errStr(err)}`);
-      }
-    },
-
-    refit: async (cmd, conn) => {
-      const targetShip = cmd.slice('!refit'.length).trim() || null;
+    pull: async (cmd, conn) => {
+      const targetShip = cmd.slice('!pull'.length).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
       const startedAt = Date.now();
 
-      const threadRoot = await reply(conn, `relay refit starting ...`);
+      const threadRoot = await reply(conn, `relay pull starting ...`);
       if (!threadRoot) return;
       const elapsed = () => Date.now() - startedAt;
 
@@ -2227,7 +2176,7 @@ function registerRelayCommands(): void {
           errors++;
           const link = await uploadErrorLog('build', new Error(buildResult));
           await s(stageFail('relay + dist rebuild', link));
-          const msg = refitResult('failed', warnings, errors, elapsed());
+          const msg = pullResult('failed', warnings, errors, elapsed());
           await s(msg);
           await reply(conn, msg);
           return;
@@ -2258,7 +2207,7 @@ function registerRelayCommands(): void {
 
         persistFleet();
         await publishFleetReport().catch(() => {});
-        const msg = refitResult('complete', warnings, errors, elapsed());
+        const msg = pullResult('complete', warnings, errors, elapsed());
         await s(msg);
         await reply(conn, msg);
         await sleep(1_000);
@@ -2267,7 +2216,7 @@ function registerRelayCommands(): void {
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
         errors++;
-        const msg = refitResult('failed', warnings, errors, elapsed());
+        const msg = pullResult('failed', warnings, errors, elapsed());
         await threadReply(conn, threadRoot, msg);
         await reply(conn, msg);
       }
