@@ -84,6 +84,10 @@ Every operator message outside BehindTheCurtain is an intervention — a sign th
 
 Interventions is the primary metric. A day with zero interventions outside BehindTheCurtain means the fleet ran autonomously. Track by counting `@operator:a-gis.org` sends per room per day from Matrix history. Report both 1-day (yesterday) and 7-day rolling averages.
 
+**Storage:** Metrics are computed by each ship's relay and published to S3 (`metrics/<ship>.json`). The speaker aggregates all ships for fleet-wide totals.
+
+**Access:** `!metrics [name]` x-command for the Captain, `get_metrics` MCP tool for bots. Named categories: `operator`, `bot`, `ship`, `fleet`. No arg = all.
+
 ## Monitoring
 
 - **Messages**: `bash operator/matrix read <room> [N]`

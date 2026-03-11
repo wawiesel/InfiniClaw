@@ -55,8 +55,8 @@ Host machine (macOS / Linux)
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts       → Copy persona skills into container session
 ├── mcp-sync.ts         → Sync MCP server config (persona → session)
-├── command-registry.ts → Single source of truth for x-command names
-├── s3-sync.ts          → S3 backup/restore for cross-machine moves
+├── command-registry.ts → Single source of truth for x-command names (includes !metrics)
+├── s3-sync.ts          → S3 backup/restore for cross-machine moves, metrics publish
 ├── podman-bootstrap.ts → Image availability checks, orphan cleanup, delegates recovery to podman-utils
 ├── history-export.ts   → Periodic S3 export of conversation history (JSONL by date)
 ├── status.ts           → Bot status reporting

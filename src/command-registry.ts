@@ -68,6 +68,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'allow',         usage: '!allow <bot> <path> [min]', description: 'grant rw mount (authorized)',          match: startsWith('allow') },
   { name: 'deny',          usage: '!deny <bot> <path>',        description: 'revoke rw mount (authorized)',         match: startsWith('deny') },
   { name: 'operator',      usage: '!operator [on|off] [ship]',  description: 'operator relay status or toggle',       match: prefix('operator') },
+  { name: 'metrics',       usage: '!metrics [name]',             description: 'fleet metrics (1d/7d rolling)',         match: prefix('metrics') },
 ];
 
 /** Register a handler for a command by name. */

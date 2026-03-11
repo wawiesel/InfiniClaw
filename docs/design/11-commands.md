@@ -42,6 +42,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 | `!fleet` | Fleet status — each ship reports its local bots. |
 | `!fleet room` | Bots in this room only. |
 | `!health` | Fleet health summary from S3 (speaker replies). |
+| `!metrics [name]` | Fleet metrics (1d/7d rolling). No arg = all metrics. Named: `operator`, `bot`, `ship`, `fleet`. |
 
 ### Operator X-Commands
 

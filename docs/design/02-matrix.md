@@ -235,8 +235,9 @@ Bots have MCP tools for navigating Matrix room history. These let a bot "look ba
 | `get_message` | Fetch a specific message by event ID |
 | `get_thread` | Fetch all messages in a thread |
 | `get_last_event_id` | Get the event ID of the most recent message |
+| `get_metrics` | Fleet metrics (operator, bot, ship, fleet) with 1d/7d rolling windows |
 
-These tools access the bot's current room (quarters or duty room). They do not require the bot to have been active when the messages were sent — Matrix history is permanent.
+Navigation tools access the bot's current room (quarters or duty room). They do not require the bot to have been active when the messages were sent — Matrix history is permanent. `get_metrics` returns the same data as the `!metrics` x-command.
 
 ## Verification
 
