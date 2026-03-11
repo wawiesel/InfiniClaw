@@ -114,7 +114,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Room naming**: `ensureRoomNames()` sets double-emoji names on startup: fleet rooms get `🌌<room> Name` (e.g. `🌌⚙️ Engineering`), ship-local rooms/spaces get `<ship><room> Name` (e.g. `🦁🏠 Quarters`, `🦁🏠 Cid's Room`), BehindTheCurtain gets `🌑🎭 BehindTheCurtain`.
 - **Lifecycle messages**: Body uses `relay <action>` prefix (no shipTag — loudspeaker `[tag]` provides context). Wake/refresh/refit use numbered thread steps `[N/total time]`. Git sync, commission/decommission, and `!go` also use `relay` prefix. Detail lines (online/done steps) omit ship name since loudspeaker already tags it.
 - **"No bots here" noise**: `handleLifecycleCommand` only announces "No bots here" in fleet rooms (not quarters) and only if speaker. Prevents noise from non-owning ships in bot quarters rooms.
-- **Ship-targeted commands**: `!pull`, `!decommission`, `!commission`, `!operator on/off` accept optional `[ship]` — omit to target all ships. `!push` is speaker-only.
+- **Ship-targeted commands**: `!push`, `!pull`, `!decommission`, `!commission`, `!operator on/off` accept optional `[ship]` — omit to target all ships.
 - **`!wake` dual-purpose**: Wakes sleeping bots or restarts already-awake bots (preserving current status). Uses `restarting`/`restarted` verbs when bot is already running.
 - **Room name idempotency**: `ensureRoomNames` checks current name before setting — avoids spam of `m.room.name` state events on relay restarts.
 - **BehindTheCurtain mirror**: All non-thread `reply()` messages are mirrored to BehindTheCurtain so the Captain sees command results regardless of which room they originated from. Thread steps are not mirrored to avoid noise.

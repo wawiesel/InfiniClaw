@@ -108,10 +108,10 @@ The speaker publishes its own report to S3, polls for other ships' reports (up t
 
 | Command | Scope | Behavior |
 |---------|-------|----------|
-| `!push` | Speaker | Push InfiniClaw repo to GitHub |
+| `!push [ship]` | Target ship (all if omitted) | Push InfiniClaw repo to GitHub |
 | `!pull [ship]` | Target ship (all if omitted) | Pull repos, rebuild, deploy dist to bot instances, wake all bots |
 
-Flow: code changes → `!push` (send to GitHub) → `!pull` (each ship pulls, rebuilds, deploys to bots).
+Flow: code changes → `!push [ship]` (send to GitHub) → `!pull` (each ship pulls, rebuilds, deploys to bots).
 
 ### Ship lifecycle
 

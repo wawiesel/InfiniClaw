@@ -2057,13 +2057,9 @@ function registerRelayCommands(): void {
     },
 
     push: async (cmd, conn) => {
-      if (!isSpeaker()) return; // speaker-only
-      const arg = cmd.slice('!push'.length).trim();
-      const branch = arg || 'main';
-      if (!/^[a-zA-Z0-9._\-/]+$/.test(branch) || branch.startsWith('-')) {
-        await reply(conn, `⛔ !push: invalid branch name`);
-        return;
-      }
+      const targetShip = cmd.slice('!push'.length).trim() || null;
+      if (targetShip && !isThisShip(targetShip)) return;
+      const branch = 'main';
       const root = resolveRoot();
       const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
       try {
