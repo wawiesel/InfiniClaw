@@ -190,6 +190,8 @@ function isOperatorRelayEnabled(): boolean {
   return findShipByHostname()?.[1]?.operatorRelay !== false;
 }
 let fleetDirty = false;
+/** Active intercom connections — set in startRelay so lifecycle helpers can send messages. */
+let activeConns: RoomConn[] = [];
 
 function fleetUpdate(bot: string, updates: Partial<FleetEntry>): void {
   if (!liveFleet[bot]) return;
@@ -1787,6 +1789,28 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
 
 // ── Command handling ───────────────────────────────────────────────
 
+/**
+ * Broadcast a lifecycle event for a bot via its duty room intercom connection.
+ * Bots' handleLifecycleMessage() listens for these to update roomRoster / CO election.
+ * Format: `HOSTNAME: BotName stopped|started (rank N)|reranked (rank N)`
+ */
+async function sendLifecycleMsg(
+  botId: string,
+  event: 'stopped' | 'started' | 'reranked',
+  rank?: number,
+): Promise<void> {
+  try {
+    const root = resolveRoot();
+    const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
+    const botName = env?.ASSISTANT_NAME || capitalizeName(botId);
+    const roomName = (env?.MAIN_GROUP_NAME || '').toLowerCase();
+    const conn = activeConns.find(c => c.name.toLowerCase() === roomName);
+    if (!conn?.accessToken) return;
+    const rankPart = rank !== undefined ? ` (rank ${rank})` : '';
+    await relaySend(conn.homeserver, conn.accessToken, conn.roomId, `${HOSTNAME}: ${botName} ${event}${rankPart}`);
+  } catch { /* non-fatal — lifecycle broadcast is best-effort */ }
+}
+
 async function handleLifecycleCommand(
   action: 'report' | 'dismiss' | 'refresh' | 'sleep' | 'wake',
   target: string | undefined,
@@ -1840,6 +1864,7 @@ async function handleLifecycleCommand(
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
         restartBotForRoom(root, bot);
         await reply(conn, `relay ${name} dismissed`);
+        sendLifecycleMsg(bot, 'stopped').catch(() => {});
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!dismiss ${name} failed: ${errStr(err)}`);
@@ -1861,6 +1886,7 @@ async function handleLifecycleCommand(
         fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         writeFleet(liveFleet);
         await reply(conn, `relay ${name} asleep`);
+        sendLifecycleMsg(bot, 'stopped').catch(() => {});
         publishFleetReport().catch(() => {});
       } catch (err) {
         await reply(conn, `⛔ relay sleep ${name} failed — ${errStr(err)}`);
@@ -1932,6 +1958,7 @@ async function handleLifecycleCommand(
         // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild)
         restartBotForRoom(root, bot);
         await reply(conn, `relay ${name} on duty`);
+        sendLifecycleMsg(bot, 'started', rank).catch(() => {});
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!report ${name} failed: ${errStr(err)}`);
@@ -2646,6 +2673,8 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
     await reply(targetConn, `relay ${botDisplayName} reranked → #${result.targetRank}`);
     await reply(targetConn, `relay ${swapDisplayName} reranked → #${result.swapRank}`);
   }
+  sendLifecycleMsg(target, 'reranked', result.targetRank).catch(() => {});
+  sendLifecycleMsg(result.swap, 'reranked', result.swapRank).catch(() => {});
 }
 
 async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[]): Promise<void> {
@@ -3066,6 +3095,7 @@ async function main(): Promise<void> {
   }
 
   log(`watching ${conns.length} room(s): ${conns.map((c) => c.name).join(', ')}`);
+  activeConns = conns;
 
   // Ensure git hooks are installed
   try { installGitHooks(); } catch (err) { log(`git hooks install failed: ${errStr(err)}`); }
