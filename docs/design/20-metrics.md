@@ -1,133 +1,172 @@
 # 20 — Metrics
 
-All metrics use rolling time windows. Cumulative totals are not displayed — without a time frame, a number has no meaning. A metric with no rolling activity shows `0 (1d)` — that is informative. `185 (total)` is not.
+Good metrics for InfiniClaw answer three questions: **Is the fleet doing useful work? Is it reliable? Is it autonomous?** Each metric must have a clear good/bad threshold so you can look at a number and immediately know whether to act.
 
-All windows are:
-- **1d** — last 24 hours (current behavior, is it trending up or down today?)
-- **7d** — last 7 days (baseline trend — is the fleet getting better or worse?)
+All rolling metrics use:
+- **1d** — last 24 hours: how is today going?
+- **7d** — last 7 days: is this a trend or a blip?
 
-The 1d number answers "how is today going?" The 7d answers "is this a new problem or an ongoing one?"
+Snapshots (no suffix) are point-in-time values. All rates are per-day.
 
-## Operator Metrics
+---
 
-These measure how much human effort the fleet requires. A mature fleet approaches zero.
+## Productivity — Is the fleet doing work?
 
-| Metric | Formula | Target | Alarm |
-|--------|---------|--------|-------|
-| **Interventions** | `@operator` messages sent outside BehindTheCurtain (per day) | 0 | > 3/day |
-| **X-commands issued** | `!`-commands sent by operators (per day) | Decreasing | — |
+| Metric | Formula | Good | Alarm | Status |
+|--------|---------|------|-------|--------|
+| **Messages/day** | Bot replies sent per day | > 5/day | 0/day (silent bot) | ✅ Tracked |
+| **Token throughput** | (input + output tokens) / day | Increasing | Sudden drop | 🔲 Planned |
+| **Score** | Net reaction points/day: 👍=+1, 💯=+3, 👎=−1, ❌=−3 | > 0 | < −2/day | ✅ Tracked |
+| **Task completion** | Todos resolved / todos created per day | > 80% | < 50% | 🔲 Planned |
+| **Branch brain success** | % of branch brain sessions with output (not error/timeout) | > 80% | < 50% | ✅ Tracked |
 
-**Interventions** is the single most important metric in the system. Every intervention is evidence that a bot failed to handle something autonomously. Target is zero. An intervention-free day means the fleet ran itself.
+**Token throughput** is the raw measure of how much thinking the fleet is doing. A bot sending 5-word replies has low token throughput. A bot doing deep code analysis has high throughput. A sudden drop means a bot is idle or broken. Source: session JSONL usage fields.
 
-X-commands (like `!metrics`, `!fleet`, `!wake`) are management queries and maintenance, not emergency responses. They are tracked but not penalized.
+**Score** is the Captain's subjective quality rating. It is the only metric that directly measures whether the work was good, not just that work happened.
 
-## Bot Metrics
+**Task completion** tracks whether bots finish what they start. Source: Claude Code todos JSON from session files.
 
-Measured per bot, rolled up to ship level.
+---
 
-| Metric | Formula | Good | Alarm |
-|--------|---------|------|-------|
-| **Score** | Net reaction points from Captain (👍=+1, 💯=+3, 👎=-1, ❌=-3) per day | > 0 | < −2/day |
-| **Crashes** | PM2 restart count per day | 0 | > 2/day |
-| **Branch brain success** | % of branch brain sessions that produced a merged result | > 80% | < 50% |
-| **OOM kills** | Container memory-limit evictions per day | 0 | > 1/day |
-| **SIGKILL** | Forced process kills per day (container/PM2 stop) | 0 | > 0 |
-| **RSS / limit** | Current resident memory vs container memory limit | < 80% | > 90% |
+## Reliability — Is the fleet stable?
 
-**OOM kills** happen when a container hits its memory limit. Each kill terminates the bot mid-thought. Zero is the target. If a bot OOMs repeatedly, increase its memory limit or reduce its context load.
+| Metric | Formula | Good | Alarm | Status |
+|--------|---------|------|-------|--------|
+| **Uptime %** | % of window (1d/7d) bot process was running | > 99% (1d) | < 95% | 🔲 Planned |
+| **Response latency** | p50/p95 time from Captain mention to first bot reply | < 30s p50 | > 2min p95 | 🔲 Planned |
+| **Crashes/day** | PM2 restart count per day | 0 | > 2/day | ✅ Tracked |
+| **OOM kills/day** | Container killed by memory limit per day | 0 | Any | ✅ Tracked |
+| **SIGKILL/day** | Forced process termination per day | 0 | > 0 | ✅ Tracked |
+| **RSS / limit** | Current RSS vs container memory cap (snapshot) | < 80% | > 90% | ✅ Tracked |
 
-**SIGKILL** is a forced process termination — not a graceful stop. Zero is the target. SIGKILLs that aren't operator-initiated suggest a container is being killed externally (OOM at the host level, podman issue, or a bot requesting self-restart).
+**Uptime %** is more useful than "2.1h up" — it tells you what fraction of the day the bot was actually available. "2.1h up" could mean the bot just restarted or has been stable for 2 hours. "99.5% (7d)" means it was down for only ~50 minutes total last week. Requires recording relay start/stop timestamps.
 
-**RSS / limit** is a snapshot of current memory usage. It is not rolling — it reflects right now. If a bot is at > 80% of its limit, it is at risk of an OOM kill on the next large context operation. This is the primary memory health signal — how much headroom does the bot have?
+**Response latency** measures the user experience — how long does the Captain wait? A bot that's running but slow to respond is as useless as one that's down. Source: relay tracks the delta between curtainLoop event timestamp and first bot reply.
 
-## Ship Metrics
+**RSS / limit** is the primary memory health signal. A bot at 90% of its container limit is one large context operation away from an OOM kill. The fleet-level total RSS shows aggregate memory consumption across all ships.
 
-Measured per ship (relay process + infrastructure).
+---
 
-| Metric | Formula | Good | Alarm |
-|--------|---------|------|-------|
-| **Relay uptime** | Time since relay last started | > 24h | < 1h |
-| **Relay restarts** | PM2 restart count per day (1d / 7d) | 0 | > 3/day |
-| **Sync failures** | Failed git sync or build steps per day | 0 | > 2/day |
+## Autonomy — Is the fleet self-managing?
 
-**Relay restarts** happen when the relay PM2 process crashes and PM2 restarts it automatically, or when `!pull` restarts it after a build. Git-sync-triggered restarts (via `!pull`) are expected — a relay restart count of 2–5/day on an active ship is normal during active development. Counts > 10/day suggest a recurring crash.
+| Metric | Formula | Good | Alarm | Status |
+|--------|---------|------|-------|--------|
+| **Interventions/day** | `@operator` messages outside BehindTheCurtain | 0 | > 3/day | ✅ Tracked |
+| **Autonomy score** | 100 − (interventions × 10) − (crashes × 5), clamped 0–100 | 100 | < 50 | ✅ Tracked |
+| **MTBI** | Mean time between interventions | Increasing | < 1h | 🔲 Planned |
+| **Self-recovery rate** | Crashes resolved without operator action / total crashes | 100% | < 80% | 🔲 Planned |
 
-**Sync failures** cover both git pull failures and TypeScript build failures. Each failed sync means the ship may be running stale code. Zero is the target; 1–2/day during a period of bad commits is tolerable. Persistent failures indicate an environment problem (network, node_modules, disk space).
+**Interventions/day** is the single most important metric. Each one means the fleet couldn't handle something on its own. Target is zero. An intervention-free day means the fleet ran itself.
 
-## Fleet Metrics
+**Autonomy score** formula: `100 − (interventions × 10) − (crashes × 5)`. Score of 100 = fully autonomous. Score of 80 = 2 crashes (normal during development). Score of 50 = 5 interventions or 10 crashes. Score below 20 = crisis. Note: heavy operator sessions (bootstrap, debugging) will drive this down — use 7d window for trend.
 
-Aggregated across all ships and bots.
+**MTBI** (Mean Time Between Interventions) is the complement of interventions/day — it answers "how long can the fleet run itself?" A MTBI of 3 days is much better than 3 hours. Requires timestamp tracking per intervention event.
 
-| Metric | Formula | Good | Alarm |
-|--------|---------|------|-------|
-| **Availability** | % of assigned (non-sleeping) bots whose PM2 process is currently running | 100% | < 90% |
-| **Autonomy score** | 100 − (interventions × 10) − (bot crashes × 5), clamped 0–100 | 100 | < 50 |
+---
 
-**Availability** answers "how many bots are working right now?" An assigned bot that is not running is a problem. Sleeping bots are excluded — they are intentionally offline. A bot in `onduty` or `quarters` status with no running process is a dead bot.
+## Infrastructure — Is the platform stable?
 
-**Autonomy score** is a composite penalty:
-- Each intervention costs 10 points (heavy — every intervention is a failure of autonomy)
-- Each bot crash costs 5 points (medium — crashes are infrastructure failures, not necessarily operator failures)
+| Metric | Formula | Good | Alarm | Status |
+|--------|---------|------|-------|--------|
+| **Relay restarts** | PM2 restarts per day (1d / 7d) | 0 | > 5/day | ✅ Tracked |
+| **Sync failures** | Failed git pulls + build failures per day | 0 | > 2/day | ✅ Tracked |
+| **Fleet RSS** | Total RSS across all bot containers (snapshot) | < 2GB fleet total | > 4GB | ✅ Tracked |
 
-A score of 100 means the fleet ran without operator intervention and without crashes. A score of 80 means 2 crashes occurred (normal during active development). A score of 50 means 5 interventions or 10 crashes — investigate. A score below 20 means the fleet is in crisis.
+**Relay restarts**: 0–2/day from `!pull` is normal during active development. > 5/day suggests the relay is crash-looping. Note: PM2 only tracks cumulative restarts; rolling counts are approximate (see Accuracy Notes below).
 
-**Caveat:** During intensive operator sessions (setup, debugging, feature work), the autonomy score will be low because every operator message is counted as an intervention. This is expected during development. The 7d window smooths over burst operator activity.
+**Sync failures** include git pull failures and TypeScript build failures. Every `⚠️ code build down` alert becomes a count here. Zero is the target.
 
-## Infrastructure Events
+**Fleet RSS** is total RAM consumed by all bot containers right now. < 2GB for a 4-bot fleet is normal. Growing fleet RSS means bots are accumulating context; OOM kills will follow.
 
-These feed the **sync failures** metric. Every event is recorded with a timestamp so the 1d/7d rolling counts are accurate.
-
-| Event | Trigger |
-|-------|---------|
-| `git-sync` failure | Git pull returned non-zero or threw an exception |
-| `build` failure | TypeScript compilation (`npm run build`) failed |
-| `relay-restart` | Relay PM2 process crashed (not an operator-triggered `!pull`) |
-
-Build failures and sync failures are consolidated into a single `infraFailures` metric so the Captain sees the total infrastructure health of each ship in one number. The raw event types are available in error logs.
-
-## Health Check
-
-The health check runs on every ship when `!metrics` or `!health` is issued. It collects:
-- Per-bot: status, RSS, memory limit, rolling OOM/SIGKILL counts
-- Ship: session data totals
-
-Health data is uploaded to S3 and aggregated by the speaker ship. The age of each ship's health report is shown ("live" if < 2 minutes, otherwise "Xm ago"). A stale report (> 30 minutes) indicates the ship missed the health upload — the ship may be down or its relay may have crashed.
+---
 
 ## Displaying Metrics
 
-### What each field tells you at a glance
+The `!metrics` output uses the same visual language as `!fleet`:
 
 ```
-🦁◉ Herc · 🏅1 · 2.1h up · ↻2 (1d) 5 (7d) · sync OK
-  ├ ⭐ Cid   · 🎨 Artist · 🏅1 · RSS 120/512MB · 1d: SK+0 OOM+0
-  └ ◉ Norm  · 💬 Normie · 🏅2 · RSS 98/512MB  · 1d: SK+0 OOM+0
-```
+🦁◉ Herc · 🏅1 · 2.1h up · ↻2/5 · sync OK
+  ├ ⭐ Cid   · 🎨 Artist   · 🏅1 · mem 120/512MB · SK+0 OOM+0 (1d)
+  └ ◉ Norm  · 💬 Normie   · 🏅2 · mem 98/512MB  · SK+0 OOM+0 (1d)
 
-- `↻2 (1d) 5 (7d)` — relay restarted twice today, five times over the last week
-- `RSS 120/512MB` — Cid is using 120MB of its 512MB container limit right now (23%)
-- `1d: SK+0 OOM+0` — no kills today; Cid has not been forcibly terminated
-
-```
-Fleet · 2 ships · availability 100% · autonomy 85% (1d) · OOM+0 (24h)
+Fleet · 2 ships · avail 100% · autonomy 85% (1d) · OOM+0 (24h) · RSS 218MB
 Operator · interventions 0/day (1d) · x-cmds 2/day (1d)
 ```
 
-- `availability 100%` — all assigned bots are running
-- `autonomy 85% (1d)` — 1 crash today (100 − 5×3) or 1–2 interventions
-- `OOM+0 (24h)` — no memory kills across the fleet in the last 24h
-- `interventions 0/day` — no operator interventions today (good)
-- `x-cmds 2/day` — two management commands today (normal)
+| Field | Meaning | Good | Bad |
+|-------|---------|------|-----|
+| `↻2/5` | Relay restarts: 2 today, 5 this week | 0/0 | > 5/day |
+| `mem 120/512MB` | Current RSS / container limit — how close to OOM? | < 80% | > 90% |
+| `SK+0 OOM+0 (1d)` | Process kills today (hidden when both zero) | 0 | Any |
+| `avail 100%` | All active bots have running processes | 100% | < 90% |
+| `autonomy 85% (1d)` | Fleet self-managed 85% — 1 crash or ~1 intervention | 100% | < 50% |
+| `OOM+0 (24h)` | No memory kills today | 0 | Any |
+| `RSS 218MB` | Total container RAM in use fleet-wide | < 2GB | > 4GB |
+| `interventions 0/day` | No operator interventions today | 0 | > 3/day |
+
+---
+
+## Planned Metrics (Not Yet Implemented)
+
+> **Status:** The metrics below are designed and specified but not yet implemented. They require additional data collection in the relay or bot runtime.
+
+### Token Throughput
+
+Track `(input_tokens + output_tokens)` per bot per day from session JSONL files. Collected by the health check script reading Claude Code session files. Published alongside RSS in the S3 health report.
+
+- **> 50K tokens/day** = active bot
+- **< 5K tokens/day** = idle or broken
+- **Sudden drop** = bot may be stuck or sleeping unexpectedly
+
+### Response Latency
+
+The relay records a timestamp when a Captain message enters a bot's context (👀 reaction), and another when the bot's reply is sent (🔔 reaction). Delta = response latency.
+
+- **p50 < 30s** = normal for a working bot
+- **p95 > 2min** = bot is struggling (large context, slow model, stuck)
+- Display as `lat 12s p50 · 45s p95 (1d)` per bot in `!metrics`
+
+### Uptime %
+
+Record relay/bot start timestamps. Compute `(window_ms − downtime_ms) / window_ms × 100%`. Downtime = sum of gaps between a stop event and the next start event within the window.
+
+- **> 99% (1d)** = healthy
+- **< 95% (7d)** = frequent crashes
+- Replaces "2.1h up" with a fraction that's meaningful across restarts
+
+### Task Completion Rate
+
+Read Claude Code todos JSON from `_runtime/instances/{bot}/data/sessions/main/.claude/todos/`. Track resolved vs created counts per day.
+
+- **> 80%** = bot is finishing what it starts
+- **< 50%** = bot is accumulating work debt or not prioritizing
+
+### Mean Time Between Interventions (MTBI)
+
+Timestamp each intervention event. Compute average gap between consecutive interventions in the 7d window.
+
+- **> 24h** = fleet is largely autonomous
+- **< 1h** = operator is fire-fighting
+
+---
+
+## Accuracy Notes
+
+- **Restart approximation**: PM2 only tracks cumulative restarts, not per-event timestamps. Rolling counts use an approximation: if the process started within the window, all restarts are counted as in-window. If running longer than the window, count shows 0 until next restart.
+- **Sync failures**: Counted per `reportFailure()` call — a build that fails 3× in one day counts as 3.
+- **Interventions**: Counted from relay's `backfillOperatorEvents()` on startup plus in-memory accumulation. Accuracy depends on Matrix history availability.
+
+---
 
 ## Alerting
 
-> **Status:** Designed, not yet implemented. Thresholds above are guidance for operator review, not automated alerts.
+> **Status:** Designed, not yet implemented.
 
-The intended alert pipeline: relay detects threshold breach → loudspeaker posts to Engineering → operator reviews.
-
-Priority order (highest first):
-1. Availability < 90% (bots are down)
-2. OOM kills > 1/day for any bot (memory pressure)
-3. Sync failures > 2/day (infrastructure degraded)
-4. Autonomy < 50 (1d) (fleet requires heavy intervention)
-5. Bot crashes > 2/day (instability)
-6. RSS > 90% of limit (OOM imminent)
+Priority order:
+1. Availability < 90% — bots are down
+2. OOM kills > 0 — memory pressure (any OOM is bad)
+3. Sync failures > 2/day — infrastructure degraded
+4. Response latency p95 > 2min — bots are slow
+5. Autonomy score < 50 (1d) — heavy intervention required
+6. RSS > 90% of limit per bot — OOM imminent
+7. Score < −2/day — Captain disapproves of output
