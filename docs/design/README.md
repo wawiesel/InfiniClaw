@@ -5,8 +5,8 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 ## Foundation
 
 - `00-overview.md` — Definitions (fleet, ship, relay, bot, operator, space, room, duty room), core principles, code structure
-- `01-operator.md` — Operator as escape hatch (host-side tmux, max intelligence, idle in mature fleet), bootstrap foundations (Matrix + S3 + secrets → BehindTheCurtain → first ship → first bot), accounts, Captain communication routing (speaker default, 📞 broadcast), inter-operator inbox, x-commands, autonomy metrics (interventions/day, 1d/7d rolling)
-- `02-matrix.md` — Matrix server, accounts, room naming convention (double-emoji on all rooms and spaces), ship spaces (example not prescriptive), room setup, message format, `<m>` mention pills, reactions (📡/👀/🔔), scoring reactions (👍️/👎️/💯/❌️ points/day from Captain or operator), special mentions, bot Matrix navigation tools, verification
+- `01-operator.md` — Operator as escape hatch (host-side tmux, max intelligence, idle in mature fleet), bootstrap foundations (Matrix + S3 + secrets → BehindTheCurtain → first ship → first bot), accounts, Captain communication (all ships with operatorRelay=true receive BTC; !operator on/off per ship), inter-operator inbox, x-commands, autonomy metrics (interventions/day, 1d/7d rolling)
+- `02-matrix.md` — Matrix server, accounts, room naming convention (double-emoji on all rooms and spaces), ship spaces (example not prescriptive), room setup (m.space.child + m.space.parent both required), message format, `<m>` mention pills, reactions (📡/👀/🔔), scoring reactions (👍️/👎️/💯/❌️ points/day from Captain or operator), special mentions (@operator/@loudspeaker/@room intercom), bot Matrix navigation tools, verification
 - `03-container.md` — Persistent Podman containers (one per bot, not per turn), internal concurrency (agent runner + persistent main brain + lobes), branch brains on host, image builds, mount table, secrets flow
 
 ## Bot Runtime

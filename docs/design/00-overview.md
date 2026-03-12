@@ -10,7 +10,7 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 >
 > **Relay** — The ship's control plane. A pm2-managed process that connects to Matrix, dispatches x-commands, manages bot lifecycle, syncs code, and spawns branch brains. One per ship, always running.
 >
-> **Bot** — A Matrix account backed by a Podman container. Has a persona, role, rank, and lifecycle status (`sleep`, `quarters`, `onduty`).
+> **Bot** — A Matrix account backed by a Podman container. Has a persona, role, rank, and lifecycle status (`sleep`, `quarters`, `onduty`, `transit`).
 >
 > **Operator** — The human-in-the-loop escape hatch. Bootstraps the system from scratch and intervenes when bots cannot fix themselves. In a mature fleet, the operator is idle — the Captain commands bots directly and relays handle updates autonomously. A Matrix account (`@operator`) and a tmux session on each ship.
 >

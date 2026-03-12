@@ -122,12 +122,12 @@ BOT_ROOM_ID=$(curl -s -X POST "$HOMESERVER/_matrix/client/v3/createRoom" \
 
 Invite and join: bot account, captain, loudspeaker.
 
-### 5. Add space children
+### 5. Add space hierarchy
 
-Link rooms to their parent spaces via `m.space.child` state events. Also add the corresponding `m.space.parent` on each child so Element renders the hierarchy correctly:
+Both directions are required for Element to display rooms inside spaces correctly. For each relationship, set `m.space.child` on the parent and `m.space.parent` on the child:
 
 ```bash
-# Lounge → ship space (child + parent)
+# Lounge ↔ ship space
 curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$LOUNGE_ID" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
@@ -137,7 +137,7 @@ curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$LOUNGE_ID/state/m.space.par
   -H "Content-Type: application/json" \
   -d '{"via": ["a-gis.org"], "canonical": true}'
 
-# Quarters space → ship space (child + parent)
+# Quarters space ↔ ship space
 curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$QUARTERS_SPACE_ID" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
@@ -147,7 +147,7 @@ curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$QUARTERS_SPACE_ID/state/m.s
   -H "Content-Type: application/json" \
   -d '{"via": ["a-gis.org"], "canonical": true}'
 
-# Bot's Room → Quarters space (child + parent)
+# Bot's Room ↔ Quarters space
 curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$QUARTERS_SPACE_ID/state/m.space.child/$BOT_ROOM_ID" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
@@ -226,9 +226,11 @@ Certain `@` mentions trigger system-level behaviors handled by the relay, not by
 
 ### @operator
 
-Mentioning `@operator` requests operator assistance. The relay wakes the operator's tmux session and delivers the full request context (bot name, room, ship, message content).
+Mentioning `@operator` requests operator assistance. The relay detects the mention and delivers the context to the operator's tmux session.
 
-**Routing:** If the mention comes from a bot, only the operator on that bot's ship responds. Operators on other ships stay silent in the thread but log the request to their BehindTheCurtain room for awareness. If the mention comes from the Captain, all operators see it. Only requires the relay to be running — no bot needs to be active.
+**Current behavior:** The relay scans outgoing bot messages for `@operator` mentions via the `<m>operator</m>` marker pattern. When detected, it sends the full message context (bot name, room, content) to the local operator tmux session. All ships with `operatorRelay: true` receive the notification simultaneously.
+
+> **Planned:** Ship-scoped routing — bots on HERACLES only wake the HERACLES operator; other ships log awareness silently to their BehindTheCurtain.
 
 ### @loudspeaker
 
@@ -242,6 +244,8 @@ Two behaviors depending on message format:
 | `@loudspeaker: <message>` (callout + text) | Any on-duty bot | Relay broadcasts `<message>` to all duty rooms via the loudspeaker account, prefixed with the bot name and source room |
 
 Off-duty bots (lounge, quarters, sleep) cannot use the loudspeaker. The relay silently ignores their mentions.
+
+> **Planned:** Bot-initiated @loudspeaker mention handling is not yet implemented in the relay. Currently `@loudspeaker` mentions from bots pass through as ordinary text. The `@loudspeaker: <message>` broadcast and fleet status response are the priority items.
 
 ### @room intercom
 
@@ -276,7 +280,9 @@ Navigation tools access the bot's current room (quarters or duty room). They do 
 2. **Tokens valid** — `GET /_matrix/client/v3/account/whoami` with each stored token → expected `user_id`
 3. **Rooms exist** — `GET /_matrix/client/v3/joined_rooms` with operator token → includes all expected room IDs
 4. **Memberships correct** — `GET /_matrix/client/v3/rooms/$ROOM_ID/members` → correct accounts in each room
-5. **Space hierarchy** — `GET /_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$CHILD_ID` → `{"via": [...]}`
+5. **Space hierarchy** — Both directions required:
+   - `GET /_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$CHILD_ID` → `{"via": [...]}`
+   - `GET /_matrix/client/v3/rooms/$CHILD_ID/state/m.space.parent/$SPACE_ID` → `{"via": [...], "canonical": true}`
 6. **Power levels** — `GET /_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/` → captain and operator at 100
 7. **Message round-trip** — Operator posts to a room, reads back via `/messages` → posted message appears
 8. **Inbound pill restoration** — Send a mention pill (`@BotName`) in Matrix. Bot log shows the message with `<m>Name</m>` markers in body.
