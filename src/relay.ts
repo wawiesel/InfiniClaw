@@ -481,9 +481,6 @@ async function fetchCommitEpochs(): Promise<Record<string, number>> {
   return result;
 }
 
-/** Cached speaker result — refreshed by async election. */
-let cachedIsSpeaker = true;
-
 async function electSpeaker(): Promise<boolean> {
   try {
     const ships = loadShips();
@@ -511,12 +508,6 @@ async function electSpeaker(): Promise<boolean> {
   } catch {
     return true;
   }
-}
-
-function isSpeaker(): boolean {
-  // Trigger async re-election in background, return cached result
-  electSpeaker().then(v => { cachedIsSpeaker = v; }).catch(() => {});
-  return cachedIsSpeaker;
 }
 
 // ── Matrix API helpers (delegates to matrix-api.ts) ─────────────────
@@ -1822,7 +1813,7 @@ async function handleLifecycleCommand(
   // No local bots matched — only announce in fleet rooms (not quarters).
   if (bots.length === 0) {
     const isQuarters = Object.values(liveFleet).some(e => e.quartersRoom === conn.roomId);
-    if (!isQuarters && isSpeaker()) await reply(conn, `relay no bots here to ${action}`);
+    if (!isQuarters && await electSpeaker()) await reply(conn, `relay no bots here to ${action}`);
     return;
   }
 
@@ -2115,7 +2106,7 @@ function registerRelayCommands(): void {
 
       const [action, targetShip] = arg.split(/\s+/, 2);
       if (action !== 'on' && action !== 'off') {
-        if (isSpeaker()) await helpReply(conn, `usage: !operator | !operator on [ship] | !operator off [ship]`);
+        if (await electSpeaker()) await helpReply(conn, `usage: !operator | !operator on [ship] | !operator off [ship]`);
         return;
       }
       if (targetShip && !isThisShip(targetShip)) return;
@@ -2153,7 +2144,7 @@ function registerRelayCommands(): void {
     health: async (_cmd, conn) => {
       const report = runHealthCheck();
       if (report) await uploadHealthToS3(report);
-      if (isSpeaker()) {
+      if (await electSpeaker()) {
         await sleep(3_000);
         const reports = await fetchAllHealthReports();
         const summary = formatHealthSummary(reports);
@@ -2189,7 +2180,7 @@ function registerRelayCommands(): void {
           const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
           if (qBot) {
             await shipReport(conn, text);
-          } else if (isSpeaker()) {
+          } else if (await electSpeaker()) {
             await speakerReport(conn, text);
           }
         }
@@ -2631,7 +2622,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const shipName = Object.keys(ships).length > 0 ? resolveShipName(rawTarget, ships) : null;
   if (shipName) {
     const target = shipName;
-    if (!isSpeaker()) return;
+    if (!await electSpeaker()) return;
     const result = rankSwap(Object.entries(ships), target, direction);
     if (!result) {
       await speakerReport(conn, `relay ${target} already ${isPromote ? 'highest' : 'lowest'} rank ship`);
@@ -2680,7 +2671,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[]): Promise<void> {
   // ! (bare) — print help via help account (speaker only, one reply)
   if (cmd === '!') {
-    if (!isSpeaker()) return;
+    if (!await electSpeaker()) return;
     await helpReply(conn, buildHelpText());
     return;
   }
@@ -2739,9 +2730,9 @@ async function shipReport(conn: RoomConn, text: string): Promise<string | undefi
   return reply(conn, text);
 }
 
-/** Speaker report — only the lowest-rank active ship replies, avoiding duplicate aggregates. */
+/** Speaker report — only the elected speaker replies, avoiding duplicate aggregates. */
 async function speakerReport(conn: RoomConn, text: string): Promise<string | undefined> {
-  if (!isSpeaker()) return undefined;
+  if (!await electSpeaker()) return undefined;
   return reply(conn, text);
 }
 
