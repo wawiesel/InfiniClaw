@@ -350,6 +350,19 @@ function isAuthorized(sender: string, captainUserId: string, operatorUserId: str
   return sender === captainUserId || sender === operatorUserId;
 }
 
+/** Dedup: multiple sync loops (curtainLoop + dialtone) see the same events. Track processed IDs to avoid double-handling. */
+const processedEventIds = new Set<string>();
+const PROCESSED_MAX = 500;
+function markProcessed(eventId: string): boolean {
+  if (processedEventIds.has(eventId)) return false;
+  processedEventIds.add(eventId);
+  if (processedEventIds.size > PROCESSED_MAX) {
+    const first = processedEventIds.values().next().value;
+    if (first) processedEventIds.delete(first);
+  }
+  return true;
+}
+
 /** Is this ship the "speaker" — lowest-rank active ship? Used to avoid duplicate replies. */
 // ── Git version helper ────────────────────────────────────────────
 
@@ -515,8 +528,15 @@ async function relaySend(homeserver: string, token: string, roomId: string, text
   return matrixSend({ homeserver, token, roomId, text, threadRootId, log });
 }
 
-/** React to a message with 📡 to signal relay received it. Fire-and-forget. */
+/** React to a message with 📡 to signal relay received it. Fire-and-forget, deduped per event. */
+const ackedEventIds = new Set<string>();
 function relayAck(homeserver: string, token: string, roomId: string, eventId: string): void {
+  if (ackedEventIds.has(eventId)) return;
+  ackedEventIds.add(eventId);
+  if (ackedEventIds.size > PROCESSED_MAX) {
+    const first = ackedEventIds.values().next().value;
+    if (first) ackedEventIds.delete(first);
+  }
   matrixSendReaction(homeserver, token, roomId, eventId, '📡', log).catch(() => {});
 }
 
@@ -2803,7 +2823,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           }
 
           // ! commands — process from any room the operator can see (quarters, BehindTheCurtain, etc.)
-          if (body.startsWith('!') && isAuthorized(event.sender, captainUserId, userId)) {
+          if (body.startsWith('!') && isAuthorized(event.sender, captainUserId, userId) && markProcessed(event.event_id)) {
             const cmdConn: RoomConn = {
               name: rid === roomId ? 'BehindTheCurtain' : `operator:${rid}`,
               roomId: rid, homeserver,
@@ -2957,6 +2977,9 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               log(`${conn.name}: unauthorized command from ${event.sender}: ${body.slice(0, 50)}`);
               continue;
             }
+
+            // Dedup: curtainLoop may have already handled this event
+            if (!markProcessed(event.event_id)) continue;
 
             log(`${conn.name}: command from ${event.sender}: ${body}`);
             try {
