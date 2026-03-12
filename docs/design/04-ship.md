@@ -8,11 +8,13 @@ Ships are registered in `operator/ships.json` in the secrets repo.
 
 ```json
 {
-  "HERACLES": { "ip": null, "os": "macOS", "user": "ww5", "commissioned": true, "rank": 2 }
+  "Herc": { "hostname": "HERACLES", "emoji": "🦁", "ip": null, "os": "macOS", "user": "ww5", "commissioned": true, "rank": 2 }
 }
 ```
 
-Fields:
+Keys are short display names (e.g. `"Herc"`). Fields:
+- `hostname` — Machine hostname returned by `os.hostname()`
+- `emoji` — Ship emoji used in display names and room prefixes
 - `ip` — IP address (nullable, informational)
 - `os` — Operating system identifier
 - `user` — Login username (nullable)
@@ -71,7 +73,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 4. Load intercom config (per-room Matrix credentials)
 5. Connect to Matrix rooms with staggered sync (one per room)
 6. Wait for Matrix warmup before bootstrapping bots
-7. If ship is active, bootstrap and start all `onduty` bots
+7. If ship is commissioned, bootstrap and start all `onduty` bots
 8. Launch background loops
 
 ### Background Loops

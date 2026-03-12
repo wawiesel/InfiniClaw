@@ -11,7 +11,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 ## Bot Runtime
 
-- `04-ship.md` — Machine registry (`commissioned` flag vs bot `status`), relay (ship control plane: x-command dispatch, bot lifecycle, code sync, branch brain spawning), speaker election, relay x-commands (!fleet, !push/!pull, !commission/!decommission, !operator), message conventions (ship tag on main timeline only, thread steps omit tag), per-machine config, ship metrics (uptime, sync failures, x-command latency)
+- `04-ship.md` — Machine registry (`commissioned` flag vs bot `status`, ships.json with hostname+emoji+shortname key), relay (ship control plane: x-command dispatch, bot lifecycle, code sync, branch brain spawning), speaker election, relay x-commands (!fleet, !push/!pull, !commission/!decommission, !operator), message conventions (ship tag on main timeline only, thread steps omit tag), per-machine config, ship metrics (uptime, sync failures, x-command latency)
 - `05-bot.md` — Identity, bot attributes (triggerType, status, rank), mention/callout flow, response rules, display name format (`<pip> <name> <shipEmoji>`), boot progress (thread steps omit ship tag), `!wake` restart behavior, resume behavior, bot metrics (response latency, branch brain success, crashes)
 - `06-brain.md` — Three brain types (main/branch/lobe), persistent main brain, triage-and-delegate model, branch model selection, lobe MCP (not yet implemented), credential mapping
 - `07-ipc.md` — Container ↔ host IPC (messages/tasks/input directories), atomic file processing, per-room namespaces, main room elevation, wake/sleep cooldowns
