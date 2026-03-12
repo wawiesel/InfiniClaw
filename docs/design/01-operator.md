@@ -37,9 +37,9 @@ Operator is admin (power 100) in every room. All room creation, invites, and pow
 The Captain communicates with operators via BehindTheCurtain. The relay watches this room and forwards messages to the operator's tmux session. BehindTheCurtain is the one room where operator conversation is expected and normal — the Captain checks in, asks about bot performance, and gives direction.
 
 **Routing:**
-- **Default**: Only the **speaker** operator receives Captain messages. The speaker is the operator on the ship running the newest code (same election as relay speaker).
-- **Broadcast**: Captain uses `📞 Operator` pill to send to **all** active operators simultaneously.
+- **Default**: All ships with `operatorRelay: true` in `ships.json` receive Captain messages in BehindTheCurtain. Each operator's relay forwards the message to the local tmux session. There is no speaker gate — all enabled operators see every message.
 - **Direct**: Captain can also send x-commands from any room the operator account has joined — BehindTheCurtain, duty rooms, quarters rooms.
+- **@ prefix**: Captain can send `@ <text>` from any room the relay watches. The relay strips the `@` and pipes the message to the operator tmux session on all ships with operatorRelay enabled.
 
 Operators reply via `bash operator/matrix reply "<response>"` — always back to Matrix, never in Claude Code output.
 

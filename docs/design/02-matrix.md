@@ -124,26 +124,38 @@ Invite and join: bot account, captain, loudspeaker.
 
 ### 5. Add space children
 
-Link rooms to their parent spaces via `m.space.child` state events:
+Link rooms to their parent spaces via `m.space.child` state events. Also add the corresponding `m.space.parent` on each child so Element renders the hierarchy correctly:
 
 ```bash
-# Lounge → ship space
+# Lounge → ship space (child + parent)
 curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$LOUNGE_ID" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"via": ["a-gis.org"]}'
+curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$LOUNGE_ID/state/m.space.parent/$SPACE_ID" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"via": ["a-gis.org"], "canonical": true}'
 
-# Quarters space → ship space
+# Quarters space → ship space (child + parent)
 curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$SPACE_ID/state/m.space.child/$QUARTERS_SPACE_ID" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"via": ["a-gis.org"]}'
+curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$QUARTERS_SPACE_ID/state/m.space.parent/$SPACE_ID" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"via": ["a-gis.org"], "canonical": true}'
 
-# Bot's Room → Quarters space
+# Bot's Room → Quarters space (child + parent)
 curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$QUARTERS_SPACE_ID/state/m.space.child/$BOT_ROOM_ID" \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"via": ["a-gis.org"]}'
+curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$BOT_ROOM_ID/state/m.space.parent/$QUARTERS_SPACE_ID" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"via": ["a-gis.org"], "canonical": true}'
 ```
 
 ### 6. Set power levels
@@ -183,6 +195,8 @@ Full conversion rules are in [05-bot](05-bot.md#mentions-and-callouts).
 
 ## Reactions
 
+> **Status:** Status reactions (📡 👀 🔔) are not yet implemented. Scoring reactions (👍 👎 💯 ❌) are implemented and recorded by the relay.
+
 Bots use emoji reactions to signal message processing status at a glance:
 
 | Emoji | Meaning | When applied |
@@ -218,6 +232,8 @@ Mentioning `@operator` requests operator assistance. The relay wakes the operato
 
 ### @loudspeaker
 
+> **Status:** Not yet implemented. The relay does not currently parse `@loudspeaker` mentions from bots.
+
 Two behaviors depending on message format:
 
 | Pattern | Who can use | Behavior |
@@ -228,6 +244,8 @@ Two behaviors depending on message format:
 Off-duty bots (lounge, quarters, sleep) cannot use the loudspeaker. The relay silently ignores their mentions.
 
 ### @room intercom
+
+> **Status:** Not yet implemented. The relay does not currently parse `@room` cross-room routing from bots.
 
 On-duty bots can send messages across rooms by mentioning the target room name:
 
