@@ -4,10 +4,10 @@ Container ↔ host communication. Containers write JSON files to their IPC direc
 
 ## Directory Structure
 
-Each room gets its own IPC namespace under `_runtime/data/ipc/{group}/`:
+Each room gets its own IPC namespace under `_runtime/instances/{bot}/data/ipc/{group}/`:
 
 ```
-_runtime/data/ipc/{group}/
+_runtime/instances/{bot}/data/ipc/{group}/
   messages/     ← container writes outgoing messages (text, image, file)
   tasks/        ← container writes IPC commands (restart, react, set_thread, etc.)
   input/        ← host writes incoming messages and lobe results for container
