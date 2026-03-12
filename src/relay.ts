@@ -2,7 +2,7 @@
  * Supervisor relay — lightweight Matrix watcher for fleet lifecycle.
  *
  * Connects to each room via its intercom account (from intercom.json),
- * watches for operator commands (!report, !dismiss, !refresh), and manages
+ * watches for operator commands (!report, !dismiss, !sleep, !wake), and manages
  * bots via pm2 — no CLI needed.
  *
  * Run: node dist/relay.js
@@ -1889,7 +1889,7 @@ async function sendLifecycleMsg(
 }
 
 async function handleLifecycleCommand(
-  action: 'report' | 'dismiss' | 'refresh' | 'sleep' | 'wake',
+  action: 'report' | 'dismiss' | 'sleep' | 'wake',
   target: string | undefined,
   conn: RoomConn,
 ): Promise<void> {
@@ -2118,6 +2118,11 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
     return;
   }
 
+  const labelEnv = targetBot ? (() => { try { return loadProfileEnv(root, targetBot); } catch { return null; } })() : null;
+  const label = labelEnv?.ASSISTANT_NAME || (targetBot ? capitalizeName(targetBot) : `${bots.length} bot${bots.length !== 1 ? 's' : ''}`);
+  const goThreadRoot = await reply(conn, `📡 go ${roomName} ${label}`);
+  const tr = (text: string) => goThreadRoot ? threadReply(conn, goThreadRoot, text) : reply(conn, text);
+
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
     const name = env?.ASSISTANT_NAME || capitalizeName(bot);
@@ -2125,10 +2130,10 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
     try {
       const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
       await botJoinRoom(botToken, homeserver, roomId, conn, botUserId);
-      await reply(conn, `📡 ${name} → ${roomName}`);
+      await tr(`✅ ${name} → ${roomName}`);
     } catch (err) {
       log(`!go ${roomName} ${name} failed: ${errStr(err)}`);
-      await reply(conn, `⛔ 📡 go ${roomName} ${name} failed — ${errStr(err)}`);
+      await tr(`⛔ go ${roomName} ${name} failed — ${errStr(err)}`);
     }
   }
 }
