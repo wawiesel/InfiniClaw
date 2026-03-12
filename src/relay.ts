@@ -992,7 +992,7 @@ function runHealthCheck(): string | null {
 async function uploadHealthToS3(report: string): Promise<boolean> {
   const s3 = getS3Client();
   if (!s3) return false;
-  const key = `${HEALTH_S3_PREFIX}/${HOSTNAME}.json`;
+  const key = `${HEALTH_S3_PREFIX}/${thisShipName()}.json`;
   try {
     await s3.client.send(new PutObjectCommand({
       Bucket: s3.bucket,

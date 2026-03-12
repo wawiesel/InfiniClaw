@@ -352,7 +352,7 @@ function computeFleetMetrics(bots: BotMetrics[], operator: OperatorMetrics): Fle
   return {
     availability: assigned.length > 0
       ? Math.round((running.length / assigned.length) * 100)
-      : 100,
+      : 0,
     autonomyScore: {
       day1: Math.round(autonomy1d * 10) / 10,
       day7: Math.round(autonomy7d * 10) / 10,
