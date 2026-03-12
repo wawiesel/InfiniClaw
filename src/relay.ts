@@ -2584,7 +2584,7 @@ function registerRelayCommands(): void {
               shipStatus = ' · unknown';
             }
             const spaceId = sConfig?.spaceId;
-            const shipLink = spaceId ? `${shipName} [↗](https://matrix.to/#/${encodeURIComponent(spaceId)})` : shipName;
+            const shipLink = spaceId ? `[${shipName}](https://matrix.to/#/${encodeURIComponent(spaceId)})` : shipName;
             lines.push(`${shipEmoji}${statusChar} ${shipLink} · 🏅${rank}${shipStatus}`);
           }
 
@@ -2621,7 +2621,7 @@ function registerRelayCommands(): void {
             const qRoom = entry.quartersRoom;
             const namePad = NBSP.repeat(maxName - entry.name.length);
             const nameLink = qRoom
-              ? `${entry.name}${namePad} [↗](https://matrix.to/#/${encodeURIComponent(qRoom)})`
+              ? `[${entry.name}](https://matrix.to/#/${encodeURIComponent(qRoom)})${namePad}`
               : `${entry.name}${namePad}`;
             lines.push(`${prefix} ${badge} ${nameLink} · ${roleDisplay}${rolePad} · 🏅${entry.rank}${entry.gitVersion}`);
           }
