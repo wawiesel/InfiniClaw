@@ -125,7 +125,7 @@ From a non-duty room: send bot(s) to their RESPECTIVE duty rooms.
 
 1. Leave any non-quarters room, join duty room
 2. Update fleet.json: `status=onduty`, `triggerType=callout`
-3. `📢 <Name> reporting for duty` or `📢 <Name> failed to report`
+3. `relay <Name> on duty` or `relay <Name> failed to report — <error>`
 
 ### !dismiss
 
@@ -133,7 +133,7 @@ From a non-duty room: send bot(s) to their RESPECTIVE duty rooms.
 
 1. Leave duty room
 2. Update fleet.json: `status=quarters`, `triggerType=always`
-3. `📢 <Name> dismissed`
+3. `relay <Name> dismissed`
 
 ### !go
 
