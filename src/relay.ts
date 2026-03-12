@@ -1168,8 +1168,10 @@ function formatCombinedMetrics(
       const sk24 = r24?.sigkills ?? t24?.sigkills ?? 0;
       totalOom24h += oom24;
       const hBot = hBots[bot.name];
-      const mem = hBot?.rss_mb != null ? ` · ${hBot.rss_mb}/${hBot.limit_mb ?? '?'}MB` : '';
-      const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24}` : '';
+      // mem: current RSS / container limit — snapshot value, not rolling
+      const mem = hBot?.rss_mb != null ? ` · mem ${hBot.rss_mb}/${hBot.limit_mb ?? '?'}MB` : '';
+      // kills: 1d rolling counts — show only when non-zero
+      const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
 
       lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}`);
     }
