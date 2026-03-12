@@ -1143,98 +1143,98 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
 
 const RELAY_TASKS_POLL_INTERVAL = 2_000;
 
-// ── Thread Brain task registry ──────────────────────────────────────────
+// ── Branch Brain task registry ──────────────────────────────────────────
 
-const THREAD_BRAIN_RESTART_DELAY = 30_000; // wait 30s after last TB exit before restarting bot
-const MAX_THREAD_BRAINS_PER_BOT = envInt('MAX_THREAD_BRAINS_PER_BOT', 3);
-const threadBrainRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const activeThreadBrainCount = new Map<string, number>(); // bot → active TB count
+const BRANCH_BRAIN_RESTART_DELAY = 30_000; // wait 30s after last TB exit before restarting bot
+const MAX_BRANCH_BRAINS_PER_BOT = envInt('MAX_BRANCH_BRAINS_PER_BOT', 3);
+const branchBrainRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const activeBranchBrainCount = new Map<string, number>(); // bot → active TB count
 
-interface ThreadTaskEntry {
+interface BranchTaskEntry {
   objective: string;
   chat_jid: string;
   bot?: string;
   createdAt: number;
 }
 
-function threadTasksPath(): string {
-  return path.join(resolveRoot(), '_runtime', 'data', 'thread-tasks.json');
+function branchTasksPath(): string {
+  return path.join(resolveRoot(), '_runtime', 'data', 'branch-tasks.json');
 }
 
 const THREAD_TASK_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-function readThreadTasks(): Record<string, ThreadTaskEntry> {
+function readBranchTasks(): Record<string, BranchTaskEntry> {
   try {
-    const p = threadTasksPath();
+    const p = branchTasksPath();
     if (!fs.existsSync(p)) return {};
-    const tasks = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, ThreadTaskEntry>;
+    const tasks = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, BranchTaskEntry>;
     // Auto-prune entries older than TTL
     const now = Date.now();
     const stale = Object.keys(tasks).filter(k => !tasks[k].createdAt || now - tasks[k].createdAt > THREAD_TASK_TTL_MS);
     if (stale.length > 0) {
       stale.forEach(k => { delete tasks[k]; });
       try { fs.writeFileSync(p, JSON.stringify(tasks, null, 2)); } catch { /* best-effort */ }
-      log(`threadTasks: pruned ${stale.length} stale entr${stale.length === 1 ? 'y' : 'ies'}`);
+      log(`branchTasks: pruned ${stale.length} stale entr${stale.length === 1 ? 'y' : 'ies'}`);
     }
     return tasks;
   } catch { return {}; }
 }
 
-function writeThreadTask(threadId: string, entry: ThreadTaskEntry): void {
+function writeBranchTask(threadId: string, entry: BranchTaskEntry): void {
   try {
-    const p = threadTasksPath();
+    const p = branchTasksPath();
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    const tasks = readThreadTasks();
+    const tasks = readBranchTasks();
     tasks[threadId] = entry;
     fs.writeFileSync(p, JSON.stringify(tasks, null, 2));
-  } catch (err) { log(`threadTasks: write failed: ${errStr(err)}`); }
+  } catch (err) { log(`branchTasks: write failed: ${errStr(err)}`); }
 }
 
-function removeThreadTask(threadId: string): void {
+function removeBranchTask(threadId: string): void {
   try {
-    const p = threadTasksPath();
+    const p = branchTasksPath();
     if (!fs.existsSync(p)) return;
-    const tasks = readThreadTasks();
+    const tasks = readBranchTasks();
     delete tasks[threadId];
     fs.writeFileSync(p, JSON.stringify(tasks, null, 2));
-  } catch (err) { log(`threadTasks: remove failed: ${errStr(err)}`); }
+  } catch (err) { log(`branchTasks: remove failed: ${errStr(err)}`); }
 }
 
 /**
- * Spawn a Thread Brain as a host-side claude process (BUG-14 fix).
- * Thread Brain runs independently of the bot container, capturing stdout
+ * Spawn a Branch Brain as a host-side claude process (BUG-14 fix).
+ * Branch Brain runs independently of the bot container, capturing stdout
  * and posting results to the specified Matrix thread.
  */
-async function spawnThreadBrain(
+async function spawnBranchBrain(
   task: { thread_id: string; objective: string; chat_jid: string; bot?: string },
   conns: RoomConn[],
 ): Promise<void> {
   const { thread_id, objective, chat_jid, bot } = task;
-  log(`threadBrain: spawning for thread=${thread_id.slice(0, 20)}`);
+  log(`branchBrain: spawning for thread=${thread_id.slice(0, 20)}`);
 
   // Find the connection for this room (strip matrix: prefix if present)
   const roomId = chat_jid.replace(/^matrix:/, '');
   const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
   if (!conn?.accessToken) {
-    log(`threadBrain: no active connection for chat_jid=${chat_jid}`);
+    log(`branchBrain: no active connection for chat_jid=${chat_jid}`);
     return;
   }
 
-  // Announce Thread Brain dispatch on main timeline before spawning.
-  // Capture the returned event ID so Thread Brain replies thread under this
+  // Announce Branch Brain dispatch on main timeline before spawning.
+  // Capture the returned event ID so Branch Brain replies thread under this
   // announcement (not under the triggering message).
   const announcedTitle = objective.split('\n')[0].trim().slice(0, 80);
   let announcementEventId: string | undefined;
   try {
-    announcementEventId = await reply(conn, `🧵 Thread Brain: ${announcedTitle}`);
+    announcementEventId = await reply(conn, `🧵 Branch Brain: ${announcedTitle}`);
   } catch (err) {
-    log(`threadBrain: announce failed: ${errStr(err)}`);
+    log(`branchBrain: announce failed: ${errStr(err)}`);
   }
   // Use the announcement event as the thread root; fall back to the triggering thread_id.
   const replyThreadId = announcementEventId ?? thread_id;
 
-  // Register task in thread-tasks.json for !todo deep-link annotation
-  writeThreadTask(replyThreadId, { objective, chat_jid, bot, createdAt: Date.now() });
+  // Register task in branch-tasks.json for !todo deep-link annotation
+  writeBranchTask(replyThreadId, { objective, chat_jid, bot, createdAt: Date.now() });
 
   // Load bot credentials so claude can authenticate on the host.
   // Raw env file uses BRAIN_* names; map to CLAUDE_CODE_* / ANTHROPIC_* as needed.
@@ -1253,11 +1253,11 @@ async function spawnThreadBrain(
   const ghBotToken = loadGitHubBotToken();
   if (ghBotToken) childEnv['GH_TOKEN'] = ghBotToken;
 
-  // Notes file: Thread Brain can persist key findings here; relay injects as context on bot restart.
+  // Notes file: Branch Brain can persist key findings here; relay injects as context on bot restart.
   const notesFile = path.join(resolveRoot(), '_runtime', 'data', 'thread-notes', `${replyThreadId.slice(0, 12)}.md`);
 
   const fullPrompt = [
-    'You are a Thread Brain — a focused research/analysis agent.',
+    'You are a Branch Brain — a focused research/analysis agent.',
     'Output your findings as plain text. Do NOT call send_message, set_thread, or any Matrix communication tools.',
     'Do NOT announce that you are starting. Just do the work and output findings at the end.',
     '',
@@ -1307,11 +1307,11 @@ async function spawnThreadBrain(
             .join('');
           if (text.trim()) {
             postedCount++;
-            threadReply(conn, replyThreadId, text.trim()).catch((err) => log(`threadBrain: stream post failed: ${errStr(err)}`));
+            threadReply(conn, replyThreadId, text.trim()).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
           }
         } else if (event.type === 'result' && typeof event.result === 'string' && event.result.trim() && postedCount === 0) {
           postedCount++;
-          threadReply(conn, replyThreadId, event.result.trim()).catch((err) => log(`threadBrain: result post failed: ${errStr(err)}`));
+          threadReply(conn, replyThreadId, event.result.trim()).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
         }
       } catch { /* not JSON, skip */ }
     }
@@ -1321,35 +1321,35 @@ async function spawnThreadBrain(
   child.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString(); });
 
   child.on('error', (err) => {
-    log(`threadBrain: spawn error: ${errStr(err)}`);
-    removeThreadTask(replyThreadId);
-    threadReply(conn, replyThreadId, `⚠️ Thread Brain failed to start: ${err.message}`).catch(() => {});
+    log(`branchBrain: spawn error: ${errStr(err)}`);
+    removeBranchTask(replyThreadId);
+    threadReply(conn, replyThreadId, `⚠️ Branch Brain failed to start: ${err.message}`).catch(() => {});
   });
 
   child.on('close', (code) => {
-    if (stderrBuf.trim()) log(`threadBrain: stderr: ${stderrBuf.trim().slice(0, 400)}`);
-    log(`threadBrain: done exit=${code} posted=${postedCount}`);
-    removeThreadTask(replyThreadId);
+    if (stderrBuf.trim()) log(`branchBrain: stderr: ${stderrBuf.trim().slice(0, 400)}`);
+    log(`branchBrain: done exit=${code} posted=${postedCount}`);
+    removeBranchTask(replyThreadId);
     if (postedCount === 0) {
-      threadReply(conn, replyThreadId, `Thread Brain completed with no output (exit ${code ?? 'null'})`).catch((err) => log(`threadBrain: post failed: ${errStr(err)}`));
+      threadReply(conn, replyThreadId, `Branch Brain completed with no output (exit ${code ?? 'null'})`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }
 
-    // Schedule debounced main-brain restart so it picks up Thread Brain findings (30s delay).
+    // Schedule debounced main-brain restart so it picks up Branch Brain findings (30s delay).
     // Reset timer on each successive TB exit; fires once all TBs for this bot are done.
     if (bot && getActiveBots().includes(bot)) {
-      const existing = threadBrainRestartTimers.get(bot);
+      const existing = branchBrainRestartTimers.get(bot);
       if (existing) clearTimeout(existing);
       const timer = setTimeout(() => {
-        threadBrainRestartTimers.delete(bot);
-        log(`threadBrain: restarting ${bot} to pick up findings`);
+        branchBrainRestartTimers.delete(bot);
+        log(`branchBrain: restarting ${bot} to pick up findings`);
         try {
           bootstrapBot(resolveRoot(), bot);
-          log(`threadBrain: ${bot} restarted`);
+          log(`branchBrain: ${bot} restarted`);
         } catch (err) {
-          log(`threadBrain: restart ${bot} failed: ${errStr(err)}`);
+          log(`branchBrain: restart ${bot} failed: ${errStr(err)}`);
         }
-      }, THREAD_BRAIN_RESTART_DELAY);
-      threadBrainRestartTimers.set(bot, timer);
+      }, BRANCH_BRAIN_RESTART_DELAY);
+      branchBrainRestartTimers.set(bot, timer);
     }
   });
 
@@ -1388,31 +1388,31 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                   log(`relayTasks: git_push failed: ${errStr(err)}`);
                 }
               }
-            } else if (data['type'] === 'thread_brain') {
+            } else if (data['type'] === 'branch_brain') {
               const thread_id = typeof data['thread_id'] === 'string' ? data['thread_id'] : '';
               const objective = typeof data['objective'] === 'string' ? data['objective'] : '';
               const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
               const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
               if (thread_id && objective) {
                 const botKey = bot ?? '__relay__';
-                const count = activeThreadBrainCount.get(botKey) ?? 0;
-                if (count >= MAX_THREAD_BRAINS_PER_BOT) {
-                  log(`relayTasks: thread_brain rejected — ${botKey} already at limit (${MAX_THREAD_BRAINS_PER_BOT})`);
+                const count = activeBranchBrainCount.get(botKey) ?? 0;
+                if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
+                  log(`relayTasks: branch_brain rejected — ${botKey} already at limit (${MAX_BRANCH_BRAINS_PER_BOT})`);
                   const roomId = chat_jid.replace(/^matrix:/, '');
                   const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
                   if (conn?.accessToken && thread_id) {
-                    void threadReply(conn, thread_id, `⚠️ Thread Brain rejected: already at concurrent limit (${MAX_THREAD_BRAINS_PER_BOT}). Wait for a Thread Brain to finish.`).catch((err) => log(`relayTasks: rejection notify failed: ${errStr(err)}`));
+                    void threadReply(conn, thread_id, `⚠️ Branch Brain rejected: already at concurrent limit (${MAX_BRANCH_BRAINS_PER_BOT}). Wait for a Branch Brain to finish.`).catch((err) => log(`relayTasks: rejection notify failed: ${errStr(err)}`));
                   }
                 } else {
-                  activeThreadBrainCount.set(botKey, count + 1);
-                  void spawnThreadBrain({ thread_id, objective, chat_jid, bot }, conns).finally(() => {
-                    const n = activeThreadBrainCount.get(botKey) ?? 1;
-                    if (n <= 1) activeThreadBrainCount.delete(botKey);
-                    else activeThreadBrainCount.set(botKey, n - 1);
+                  activeBranchBrainCount.set(botKey, count + 1);
+                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot }, conns).finally(() => {
+                    const n = activeBranchBrainCount.get(botKey) ?? 1;
+                    if (n <= 1) activeBranchBrainCount.delete(botKey);
+                    else activeBranchBrainCount.set(botKey, n - 1);
                   });
                 }
               } else {
-                log(`relayTasks: thread_brain missing required fields (thread_id or objective)`);
+                log(`relayTasks: branch_brain missing required fields (thread_id or objective)`);
               }
             }
             fs.unlinkSync(processingPath);
@@ -2480,8 +2480,8 @@ function registerRelayCommands(): void {
       const threadRoot = await reply(conn, `📋 Todo${target ? ` — ${target}` : ''}`);
       if (!threadRoot) return;
 
-      // Load active Thread Brain tasks for deep-link annotation
-      const threadTasks = readThreadTasks();
+      // Load active Branch Brain tasks for deep-link annotation
+      const branchTasks = readBranchTasks();
       const homeserverDomain = conn.homeserver.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
 
       const lines: string[] = [];
@@ -2491,7 +2491,7 @@ function registerRelayCommands(): void {
         lines.push(`📋 **${name}**`);
 
         // Threads dispatched by this bot
-        const botThreadEntries = Object.entries(threadTasks).filter(([, t]) => !t.bot || t.bot === bot);
+        const botThreadEntries = Object.entries(branchTasks).filter(([, t]) => !t.bot || t.bot === bot);
 
         // Read actual todos from most recently modified session todos file
         const todosDir = path.join(root, '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude', 'todos');
