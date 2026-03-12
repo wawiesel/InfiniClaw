@@ -195,7 +195,7 @@ Full conversion rules are in [05-bot](05-bot.md#mentions-and-callouts).
 
 ## Reactions
 
-> **Status:** Status reactions (📡 👀 🔔) are not yet implemented. Scoring reactions (👍 👎 💯 ❌) are implemented and recorded by the relay.
+> **Status:** All reactions are implemented. Status reactions (📡 👀 🔔) signal message processing pipeline. Scoring reactions (👍 👎 💯 ❌) are recorded by the relay for metrics.
 
 Bots use emoji reactions to signal message processing status at a glance:
 

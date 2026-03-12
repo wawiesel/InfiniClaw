@@ -31,6 +31,7 @@ import {
   matrixLeave,
   matrixSetDisplayName,
   matrixSetRoomName,
+  matrixSendReaction,
   markdownToHtml,
   loadIntercomConfig,
   clearIntercomConfigCache,
@@ -512,6 +513,11 @@ async function relayMatrixLogin(homeserver: string, username: string, password: 
 /** Send a message to a room (plain or threaded). */
 async function relaySend(homeserver: string, token: string, roomId: string, text: string, threadRootId?: string): Promise<string | undefined> {
   return matrixSend({ homeserver, token, roomId, text, threadRootId, log });
+}
+
+/** React to a message with 📡 to signal relay received it. Fire-and-forget. */
+function relayAck(homeserver: string, token: string, roomId: string, eventId: string): void {
+  matrixSendReaction(homeserver, token, roomId, eventId, '📡', log).catch(() => {});
 }
 
 /** Room emoji map for the double-emoji naming scheme: <location><room> Name. */
@@ -2766,6 +2772,11 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           const body = event.content.body?.trim();
           if (!body) continue;
 
+          // 📡 — relay received acknowledgement for Captain messages
+          if (event.sender === captainUserId && event.event_id) {
+            relayAck(homeserver, accessToken, rid, event.event_id);
+          }
+
           // Mention-wake: mention of a sleeping bot in any room wakes it.
           // Matches: <m>Name</m> in body, @Name in body, or mention pill in formatted_body.
           const formattedBody = event.content.formatted_body as string || '';
@@ -2887,6 +2898,11 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             if (event.type !== 'm.room.message') continue;
             if (event.content?.msgtype !== 'm.text') continue;
             const body = event.content.body?.trim() || '';
+
+            // 📡 — relay received acknowledgement for Captain messages
+            if (event.sender === captainUserId && event.event_id && conn.accessToken) {
+              relayAck(conn.homeserver, conn.accessToken, conn.roomId, event.event_id);
+            }
 
             // Captain-only: @ <text> — pipe to operator tmux (if relay enabled)
             if (event.sender === captainUserId && body.startsWith('@') && isOperatorRelayEnabled()) {

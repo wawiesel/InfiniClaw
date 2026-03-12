@@ -34,7 +34,7 @@ Host machine (macOS / Linux)
 │── Orchestrator ─────────────────────────────────────────────
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2; seeds quarters or duty room based on fleet status; restartBotForRoom for lightweight room switches
-├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sync, invite, join, leave, setDisplayName, setRoomName)
+├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sendReaction, sync, invite, join, leave, setDisplayName, setRoomName)
 ├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, room transitions, help account. `resolveBots(target, conn)` finds bots in a room by MAIN_GROUP_NAME or quartersRoom. X-commands in curtainLoop are allowed (not filtered as own messages). `ensureShipSpaceNames()` sets the ship's Matrix space name to "emoji shipName" on startup. Wires metrics: `initMetrics()` on startup, `recordOperatorMessage()` from curtainLoop, `backfillOperatorEvents()` from Matrix history, `metricsLoop()` publishes to S3 every 5min, `!metrics` handler with context-aware scope resolution.
 ├── main.ts             → Message loop, indicators, reaction acks (👀/🔔), container lifecycle
 ├── container-spawn.ts  → Container orchestration: secrets, mounts, podman args, stale cleanup, IPC setup
@@ -121,3 +121,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`!wake` dual-purpose**: Wakes sleeping bots or restarts already-awake bots (preserving current status). Uses `restarting`/`restarted` verbs when bot is already running.
 - **Room name idempotency**: `ensureRoomNames` checks current name before setting — avoids spam of `m.room.name` state events on relay restarts.
 - **BehindTheCurtain mirror**: All non-thread `reply()` messages are mirrored to BehindTheCurtain so the Captain sees command results regardless of which room they originated from. Thread steps are not mirrored to avoid noise.
+- **Status reactions pipeline**: 📡 (relay received, `relayAck` in relay.ts) → 👀 (delivered to bot context, main.ts) → 🔔 (triggered response, main.ts). 📡 fires in both curtainLoop (operator account) and dialtone (intercom accounts) for Captain messages. `matrixSendReaction` in matrix-api.ts is the shared primitive.

@@ -188,6 +188,43 @@ export async function matrixSend(opts: SendOpts): Promise<string | undefined> {
   return data.event_id;
 }
 
+/**
+ * Send a reaction (emoji annotation) to an event in a Matrix room.
+ * Returns true on success, false on failure.
+ */
+export async function matrixSendReaction(
+  homeserver: string,
+  token: string,
+  roomId: string,
+  eventId: string,
+  emoji: string,
+  log?: (msg: string) => void,
+): Promise<boolean> {
+  const id = txnId('rx');
+  const content = {
+    'm.relates_to': {
+      rel_type: 'm.annotation',
+      event_id: eventId,
+      key: emoji,
+    },
+  };
+  try {
+    const resp = await fetch(
+      `${homeserver}${MATRIX_API}/rooms/${encodeURIComponent(roomId)}/send/m.reaction/${encodeURIComponent(id)}`,
+      { method: 'PUT', headers: matrixHeaders(token), body: JSON.stringify(content), signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS) },
+    );
+    if (!resp.ok) {
+      const body = await resp.text();
+      if (log) log(`reaction failed in ${roomId}: ${resp.status} ${body}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    if (log) log(`reaction error in ${roomId}: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
 // ── Room membership ──────────────────────────────────────────────────
 
 export async function matrixInvite(
