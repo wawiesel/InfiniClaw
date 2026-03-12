@@ -14,6 +14,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from './env-utils.js';
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
 import { loadShipConfig, loadFleet, writeFleet, shipTag } from './ship-config.js';
+import { runHealthCheck as healthCheck } from './health.js';
 import { logger } from 'nanoclaw/logger.js';
 import { errStr } from './utils.js';
 import { gitSyncRepo } from './git-utils.js';
@@ -840,16 +841,21 @@ async function handleHealthCheck(data: CommandData, ctx: InfiniClawIpcContext): 
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
   try {
-    const root = resolveRoot();
-    const script = path.join(root, 'scripts', 'health-check.sh');
-    if (!fs.existsSync(script)) {
-      await ctx.sendMessage(chatJid, 'No health-check.sh script found.');
-      return;
+    const report = healthCheck(os.hostname());
+    // Format as text
+    const lines = ['Fleet Health — ' + report.ts.replace('T', ' ').slice(0, 19) + ' UTC'];
+    for (const [bot, d] of Object.entries(report.bots)) {
+      if (d.error) { lines.push(`--- ${bot} ---\n  Error: ${d.error}`); continue; }
+      lines.push(`--- ${bot} [${d.status}] ---`);
+      lines.push(`  Log age: ${d.log_age_min}min | Error: ${d.error_log_kb}KB | Main: ${d.main_log_kb}KB`);
+      if (d.rss_mb != null) {
+        let mem = `  Memory: RSS=${d.rss_mb}MB heap=${d.heap_mb ?? '?'}MB`;
+        if (d.limit_mb != null) mem += ` limit=${d.limit_mb}MB (${d.mem_pct}%)`;
+        lines.push(mem);
+      }
+      lines.push(`  Cumulative: spawns=${d.spawns} SIGKILLs=${d.sigkills} SIGTERMs=${d.sigterms} OOM=${d.oom_kills} errors=${d.errors}`);
     }
-    const output = execSync(`bash "${script}"`, {
-      encoding: 'utf-8', timeout: 30_000, cwd: root,
-      env: { ...process.env, MACHINE_NAME: os.hostname() },
-    }).trim();
+    const output = lines.join('\n');
     await ctx.sendMessage(chatJid, `**${shipTag()} health:**\n\`\`\`\n${truncateOutput(output)}\n\`\`\``);
   } catch (err) {
     await safeSend(ctx, chatJid, `health_check failed: ${errStr(err)}`);

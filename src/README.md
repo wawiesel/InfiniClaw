@@ -55,7 +55,9 @@ Host machine (macOS / Linux)
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts       → Copy persona skills into container session
 ├── mcp-sync.ts         → Sync MCP server config (persona → session)
-├── metrics.ts          → Fleet metrics: operator interventions (non-command only), bot scores, ship uptime + infra failure rate, fleet availability/autonomy, response latency (p50/p95), token throughput, MTBI. Publishes to S3. `recordMessageDelivery()`/`recordBotReply()` track response latency. `readBotTokens()` reads stats-cache.json for token counts. MTBI computed from intervention gaps in `OperatorMetrics`. Formatting uses badge vocabulary per `docs/design/20-metrics.md` (◉ running, 🔴 down, 💤 sleep).
+├── health.ts           → Public API wrappers: `runHealthCheck()` and `runSessionCleanup()`. Delegates to health-check.ts. Used by ipc-commands.ts health_check handler and relay healthLoop/sessionCleanup.
+├── health-check.ts     → Health data collection: reads bot logs, parses sigkills/sigterms/OOM/spawns/memory, falls back to metrics-history.jsonl. `sessionCleanup()` prunes telemetry/, debug/, and old JSONL files per-bot. Token throughput computed from session JSONL files.
+├── metrics.ts          → Fleet metrics: operator interventions (non-command only), bot scores, ship uptime + infra failure rate, fleet availability/autonomy, response latency (p50/p95), token throughput (rolling 1d/7d from session JSONL), MTBI. Publishes to S3. `recordMessageDelivery()`/`recordBotReply()` track response latency. `readBotTokens()` reads stats-cache.json for token counts. MTBI computed from intervention gaps in `OperatorMetrics`. Formatting uses badge vocabulary per `docs/design/20-metrics.md` (◉ running, 🔴 down, 💤 sleep).
 ├── command-registry.ts → Single source of truth for x-command names (includes context-aware !metrics). Help text for !pull says "restart bots" (preserves state, not "wake").
 ├── s3-sync.ts          → S3 backup/restore for cross-machine moves
 ├── podman-bootstrap.ts → Image availability checks, orphan cleanup, delegates recovery to podman-utils

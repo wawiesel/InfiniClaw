@@ -55,6 +55,8 @@ export interface BotMetrics {
   crashes: RollingMetric;
   /** Branch brain success rate (0–100%) */
   branchBrainSuccess: RollingMetric;
+  /** (input+output+cache) tokens per day from session JSONL. -1 if no data. */
+  tokenThroughput: RollingMetric;
   /** Current status from fleet.json */
   status: string;
   /** Whether pm2 process is running */
@@ -360,6 +362,10 @@ function computeBotMetrics(): BotMetrics[] {
         day1: branchBrainSuccessRate(botId, 1),
         day7: branchBrainSuccessRate(botId, 7),
       },
+      tokenThroughput: {
+        day1: readTokenThroughput(botId, 1),
+        day7: readTokenThroughput(botId, 7),
+      },
       status: entry?.status ?? 'unknown',
       processRunning: pm2?.status === 'online',
       totalTokens: readBotTokens(botId) || undefined,
@@ -367,6 +373,53 @@ function computeBotMetrics(): BotMetrics[] {
       responseLatencyP95: latency.p95 >= 0 ? latency.p95 : undefined,
     };
   });
+}
+
+/** Read token throughput (total tokens/day) for a bot from session JSONL files. -1 if no data. */
+function readTokenThroughput(bot: string, windowDays: number): number {
+  const cutoff = Date.now() - windowDays * 86_400_000;
+  const instancesDir = path.join(resolveRoot(), '_runtime', 'instances');
+  const projectsBase = path.join(instancesDir, bot, 'data', 'sessions', 'main', '.claude', 'projects');
+  if (!fs.existsSync(projectsBase)) return -1;
+
+  let totalTokens = 0;
+  let hasData = false;
+
+  try {
+    for (const projectDir of fs.readdirSync(projectsBase)) {
+      const projectPath = path.join(projectsBase, projectDir);
+      try { if (!fs.statSync(projectPath).isDirectory()) continue; } catch { continue; }
+
+      for (const file of fs.readdirSync(projectPath)) {
+        if (!file.endsWith('.jsonl')) continue;
+        const filePath = path.join(projectPath, file);
+        try { if (fs.statSync(filePath).mtimeMs < cutoff) continue; } catch { continue; }
+
+        try {
+          const content = fs.readFileSync(filePath, 'utf-8');
+          for (const line of content.split('\n')) {
+            if (!line.trim()) continue;
+            try {
+              const d = JSON.parse(line) as {
+                timestamp?: string;
+                message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } };
+              };
+              if (!d.timestamp || !d.message?.usage) continue;
+              const ts = new Date(d.timestamp).getTime();
+              if (ts < cutoff) continue;
+              const u = d.message.usage;
+              totalTokens += (u.input_tokens ?? 0) + (u.output_tokens ?? 0) +
+                (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+              hasData = true;
+            } catch { /* skip bad lines */ }
+          }
+        } catch { /* skip bad files */ }
+      }
+    }
+  } catch { return -1; }
+
+  if (!hasData) return -1;
+  return Math.round(totalTokens / windowDays);
 }
 
 /** Branch brain success rate (0–100%) for a bot in the given window. -1 if no data. */

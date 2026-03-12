@@ -367,6 +367,7 @@ describe('formatting', () => {
       score: { day1: 3, day7: 1.5 },
       crashes: { day1: 0, day7: 1 },
       branchBrainSuccess: { day1: -1, day7: -1 },
+      tokenThroughput: { day1: -1, day7: -1 },
       status: 'quarters',
       processRunning: true,
     });
@@ -382,6 +383,7 @@ describe('formatting', () => {
       score: { day1: 0, day7: 0 },
       crashes: { day1: 0, day7: 0 },
       branchBrainSuccess: { day1: -1, day7: -1 },
+      tokenThroughput: { day1: -1, day7: -1 },
       status: 'sleep',
       processRunning: false,
     });
@@ -408,6 +410,7 @@ describe('formatting', () => {
       score: { day1: 0, day7: 0 },
       crashes: { day1: 0, day7: 0 },
       branchBrainSuccess: { day1: 100, day7: 80 },
+      tokenThroughput: { day1: -1, day7: -1 },
       status: 'quarters',
       processRunning: true,
     });
@@ -422,6 +425,7 @@ describe('formatting', () => {
       score: { day1: 0, day7: 0 },
       crashes: { day1: 0, day7: 0 },
       branchBrainSuccess: { day1: -1, day7: -1 },
+      tokenThroughput: { day1: -1, day7: -1 },
       status: 'quarters',
       processRunning: true,
     });
@@ -453,6 +457,7 @@ describe('formatScopeMetrics', () => {
         score: { day1: 1, day7: 0.5 },
         crashes: { day1: 0, day7: 0 },
         branchBrainSuccess: { day1: -1, day7: -1 },
+      tokenThroughput: { day1: -1, day7: -1 },
         status: 'quarters',
         processRunning: true,
       },
@@ -536,6 +541,7 @@ describe('formatAllMetrics', () => {
           score: { day1: 0, day7: 0 },
           crashes: { day1: 0, day7: 0 },
           branchBrainSuccess: { day1: 100, day7: 80 },
+      tokenThroughput: { day1: -1, day7: -1 },
           status: 'onduty',
           processRunning: true,
         },
@@ -544,6 +550,7 @@ describe('formatAllMetrics', () => {
           score: { day1: 0, day7: 0 },
           crashes: { day1: 0, day7: 0 },
           branchBrainSuccess: { day1: -1, day7: -1 },
+      tokenThroughput: { day1: -1, day7: -1 },
           status: 'quarters',
           processRunning: true,
         },
