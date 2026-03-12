@@ -99,7 +99,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`operator-commands.ts` removed**: X-commands (`!allow`, `!deny`, `!todo`, `!roster`, etc.) were folded into `relay.ts`. `command-registry.ts` is now the single source of truth for all x-command names.
 - **`command-registry.ts` security hardening**: `dispatch()` rejects cmd strings longer than 512 chars (DoS guard); `registerHandler()` sanitizes the `name` parameter in error messages (log injection); `dispatch()` emits a console.warn when a matched command has no registered handler (silent no-op guard).
 - **`machine-config.ts` removed**: Split into `infini-config.ts` (env-based config) and `ship-config.ts` (fleet.json loader).
-- **`get_message` tool bug**: Fails on event IDs containing `$` due to shell variable interpolation in the node -e command. Unfixed as of session 8.
+- **`get_message` tool**: Fixed shell interpolation bug — event IDs start with `$` which was expanded by `/bin/sh`. Uses `execFileSync('node', ['-e', script])` (no shell) in `bots/container/agent-runner/src/tools.ts`. The `external/nanoclaw/dist/` version is not used for container builds.
 - **`resolveReplyThread`**: Scans messages in reverse for `thread_id` from non-bot senders. Returns `workThreadIds` override if set. Cleared after each response turn.
 - **`storeOutgoing`**: Must set `is_bot_message: true` — otherwise outgoing messages are re-detected as new human messages by `getNewMessages`, causing echo loops in quarters rooms.
 - **Turn timeout kill**: Must use `podman stop` (not `proc.kill('SIGTERM')`) — podman does not relay SIGTERM to the container process. Without this, containers survive the kill and run for minutes/hours.
