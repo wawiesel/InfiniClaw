@@ -143,8 +143,8 @@ async function reportFailure(system: string, detail: string, conns: RoomConn[]):
   if (!conn?.accessToken) return;
 
   const existing = failureStates[system];
+  recordInfraFailure(system); // count every occurrence, not just first
   if (!existing) {
-    recordInfraFailure(system);
     // First failure — create thread
     const rootId = await reply(conn, statusLine('⚠️', system, 'down', 0));
     if (!rootId) return;

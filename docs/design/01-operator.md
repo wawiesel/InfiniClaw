@@ -80,18 +80,18 @@ Every operator message outside BehindTheCurtain is an intervention — a sign th
 
 ## Metrics
 
+Interventions is the primary operator metric — a day with zero interventions outside BehindTheCurtain means the fleet ran autonomously.
+
 | Metric | What it measures | Target | Window |
 |--------|-----------------|--------|--------|
-| **Interventions** | `@operator` messages sent to any room except BehindTheCurtain | 0/day | 1-day, 7-day rolling |
-| **X-commands issued** | X-commands sent by operator (not Captain) | Decreasing | 1-day, 7-day rolling |
-| **Bot restarts** | Operator-triggered `!wake` vs automatic | Ratio → 0 | 1-day, 7-day rolling |
-| **Mean time between interventions** | Time gap between consecutive operator interventions | Increasing | 7-day rolling |
+| **Interventions** | `@operator` messages sent to any room except BehindTheCurtain | 0/day | 1d, 7d rolling |
+| **X-commands issued** | X-commands sent by operator (not Captain) | 0/day | 1d, 7d rolling |
 
-Interventions is the primary metric. A day with zero interventions outside BehindTheCurtain means the fleet ran autonomously. Track by counting `@operator:a-gis.org` sends per room per day from Matrix history. Report both 1-day (yesterday) and 7-day rolling averages.
+See [20-metrics](20-metrics.md) for full definitions, good/bad thresholds, and all metric fields.
 
 **Storage:** Metrics are computed by each ship's relay and published to S3 (`metrics/<ship>.json`). The speaker aggregates all ships for fleet-wide totals.
 
-**Access:** `!metrics [scope]` x-command (context-aware — defaults based on room), `get_metrics` MCP tool for bots. See [11-commands](11-commands.md) for scope details.
+**Access:** `!metrics [scope]` x-command (context-aware — defaults based on room). See [11-commands](11-commands.md) for scope details.
 
 ## Monitoring
 

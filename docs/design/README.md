@@ -36,6 +36,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `17-skills.md` — Pooled capability modules per role
 - `18-deployment.md` — Code pipeline, holodeck simulation gates
 - `19-infrastructure.md` — Ships as VMs, Gitea/MinIO redundancy
+- `20-metrics.md` — Full metrics reference: all `!metrics` fields, definitions, good/bad thresholds, data sources, symbols
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
 
