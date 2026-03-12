@@ -761,11 +761,11 @@ async function syncBotDisplayNames(): Promise<void> {
 }
 
 /**
- * Restart all running bots on this ship into quarters.
- * Onduty bots are moved to quarters status. Sleeping bots are skipped.
- * Returns { started, failed } counts.
+ * Restart all running bots on this ship, preserving their current status.
+ * Onduty bots stay onduty, quarters bots stay in quarters. Sleeping bots are skipped.
+ * Returns { started, failed } arrays.
  */
-function restartBotsToQuarters(root: string): { started: string[]; failed: string[] } {
+function restartRunningBots(root: string): { started: string[]; failed: string[] } {
   const started: string[] = [];
   const failed: string[] = [];
   for (const [bot, entry] of Object.entries(liveFleet)) {
@@ -774,12 +774,11 @@ function restartBotsToQuarters(root: string): { started: string[]; failed: strin
     try {
       stopBot(bot);
       killStaleContainers(bot);
-      if (entry.status === 'onduty') fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
       bootstrapBot(root, bot);
       writeCrewStatus(root, bot);
       started.push(bot);
     } catch (err) {
-      log(`restartBotsToQuarters: ${bot} failed — ${errStr(err)}`);
+      log(`restartRunningBots: ${bot} failed — ${errStr(err)}`);
       failed.push(bot);
     }
   }
@@ -2335,7 +2334,7 @@ function registerRelayCommands(): void {
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `commission ${me[0]}`);
         ensurePodmanReady();
-        const { started } = restartBotsToQuarters(resolveRoot());
+        const { started } = restartRunningBots(resolveRoot());
         await send(`✅ commissioned — started ${started.join(', ') || 'no bots assigned'}`);
       } catch (err) {
         await send(`⛔ commission failed — ${errStr(err)}`);
@@ -2403,11 +2402,12 @@ function registerRelayCommands(): void {
           ensurePodmanReady();
           removeStaleProcesses();
 
-          // Refit returns all bots to quarters
-          const result = restartBotsToQuarters(root);
+          // Refit restarts running bots, preserving their current status
+          const result = restartRunningBots(root);
           for (const bot of result.started) {
             const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-            await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restarted (quarters)`));
+            const status = liveFleet[bot]?.status ?? 'quarters';
+            await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restarted (${status})`));
           }
           for (const bot of result.failed) {
             errors++;
@@ -3281,13 +3281,13 @@ async function main(): Promise<void> {
   log('warming up — syncing Matrix for 30s before bootstrap...');
   await sleep(30_000);
 
-  // Bootstrap all bots to quarters
+  // Bootstrap all running bots (preserving their fleet status)
   if (isShipCommissioned()) {
     try {
       ensurePodmanReady();
       const root = resolveRoot();
       removeStaleProcesses();
-      const { started, failed } = restartBotsToQuarters(root);
+      const { started, failed } = restartRunningBots(root);
       log(`bootstrap: ${started.length} started, ${failed.length} failed`);
     } catch (err) {
       log(`bootstrap failed: ${errStr(err)}`);
