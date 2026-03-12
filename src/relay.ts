@@ -50,6 +50,11 @@ import {
   publishMetrics,
   computeMetrics,
   formatScopeMetrics,
+  formatOperatorMetrics,
+  formatShipMetrics,
+  formatBotMetrics,
+  formatFleetMetrics,
+  type MetricsSnapshot,
 } from './metrics.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
@@ -1031,6 +1036,75 @@ async function fetchAllHealthReports(): Promise<Array<{ ship: string; data: Reco
     log(`S3 health fetch failed: ${errStr(err)}`);
   }
   return results;
+}
+
+async function fetchAllMetricsSnapshots(): Promise<MetricsSnapshot[]> {
+  const s3 = getS3Client();
+  if (!s3) return [];
+  const results: MetricsSnapshot[] = [];
+  try {
+    const listed = await s3.client.send(new ListObjectsV2Command({
+      Bucket: s3.bucket,
+      Prefix: 'metrics/',
+    }));
+    for (const obj of listed.Contents || []) {
+      if (!obj.Key?.endsWith('.json')) continue;
+      try {
+        const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: obj.Key }));
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+        const data = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as MetricsSnapshot;
+        if (data.ship && data.ts) results.push(data);
+      } catch { /* skip corrupt snapshots */ }
+    }
+  } catch (err) {
+    log(`S3 metrics fetch failed: ${errStr(err)}`);
+  }
+  return results;
+}
+
+/** Format combined metrics from all ships into a single view. */
+function formatCombinedMetrics(snapshots: MetricsSnapshot[]): string {
+  if (snapshots.length === 0) return '';
+  const sections: string[] = [];
+
+  // Aggregate operator metrics across all ships
+  const totalInterventions = { day1: 0, day7: 0 };
+  const totalXCmds = { day1: 0, day7: 0 };
+  for (const s of snapshots) {
+    totalInterventions.day1 += s.operator.interventions.day1;
+    totalInterventions.day7 += s.operator.interventions.day7;
+    totalXCmds.day1 += s.operator.xCommandsIssued.day1;
+    totalXCmds.day7 += s.operator.xCommandsIssued.day7;
+  }
+  sections.push(formatOperatorMetrics({ interventions: totalInterventions, xCommandsIssued: totalXCmds }));
+
+  // Per-ship metrics
+  for (const s of snapshots) {
+    sections.push('', formatShipMetrics(s.shipMetrics));
+    if (s.bots.length > 0) {
+      for (const bot of s.bots) {
+        sections.push(formatBotMetrics(bot));
+      }
+    }
+  }
+
+  // Fleet-level: aggregate availability and autonomy
+  const assigned = snapshots.flatMap(s => s.bots.filter(b => b.status !== 'sleep' && b.status !== 'transit'));
+  const running = assigned.filter(b => b.processRunning);
+  const availability = assigned.length > 0 ? Math.round((running.length / assigned.length) * 100) : 100;
+  // Autonomy: average across ships
+  const avgAutonomy1d = snapshots.reduce((sum, s) => sum + s.fleet.autonomyScore.day1, 0) / snapshots.length;
+  const avgAutonomy7d = snapshots.reduce((sum, s) => sum + s.fleet.autonomyScore.day7, 0) / snapshots.length;
+  sections.push('', formatFleetMetrics({
+    availability,
+    autonomyScore: {
+      day1: Math.round(avgAutonomy1d * 10) / 10,
+      day7: Math.round(avgAutonomy7d * 10) / 10,
+    },
+  }));
+
+  return sections.join('\n');
 }
 
 function formatHealthSummary(reports: Array<{ ship: string; data: Record<string, unknown> }>): string {
@@ -2183,10 +2257,6 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
 
     const snapshot = computeMetrics();
     publishMetrics().catch(err => log(`metrics: publish error: ${errStr(err)}`));
-    let text = formatScopeMetrics(snapshot, scope);
-
-    // If scope resolved to empty (e.g. bot not on this ship), skip.
-    if (!text) return;
 
     // For fleet/all scopes: run and upload health check on every ship.
     const wantsHealth = scope === 'fleet' || scope === 'all';
@@ -2195,15 +2265,28 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
       if (healthReport) uploadHealthToS3(healthReport).catch(() => {});
     }
 
-    const isBTC = conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId;
     const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
     const isLocal = !!qBot; // quarters-room commands are always local; BTC goes through speaker check
     const speaker = !isLocal && await electSpeaker();
     if (!isLocal && !speaker) return;
 
+    // For 'all' scope: aggregate metrics from all ships via S3.
+    let text: string;
+    if (scope === 'all' && !isLocal) {
+      await sleep(3_000); // let other ships publish their metrics
+      const allSnapshots = await fetchAllMetricsSnapshots();
+      text = allSnapshots.length > 0 ? formatCombinedMetrics(allSnapshots) : formatScopeMetrics(snapshot, scope);
+    } else {
+      text = formatScopeMetrics(snapshot, scope);
+    }
+
+    // If scope resolved to empty (e.g. bot not on this ship), skip.
+    if (!text) return;
+
     // Speaker appends health summary to fleet/all output.
-    if (wantsHealth && (isBTC || speaker)) {
-      await sleep(3_000);
+    // Skip the extra sleep if we already waited for combined metrics.
+    if (wantsHealth && speaker) {
+      if (scope !== 'all') await sleep(3_000); // 'all' already waited
       const healthReports = await fetchAllHealthReports();
       if (healthReports.length > 0) {
         text += '\n\n' + formatHealthSummary(healthReports);
