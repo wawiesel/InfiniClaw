@@ -133,7 +133,22 @@ describe('recordOperatorMessage', () => {
     recordOperatorMessage(OPERATOR, ENG_ROOM, 'regular message', hoursAgo(2));
     const snapshot = computeMetrics();
     expect(snapshot.operator.xCommandsIssued.day1).toBe(1); // only !fleet
-    expect(snapshot.operator.interventions.day1).toBe(2); // both
+    // Interventions exclude x-commands (queries are not interventions)
+    expect(snapshot.operator.interventions.day1).toBe(1); // only 'regular message'
+  });
+
+  it('x-commands do not count as interventions (autonomy not penalized)', () => {
+    // Send 5 x-commands and 1 regular message
+    for (let i = 0; i < 5; i++) {
+      recordOperatorMessage(OPERATOR, ENG_ROOM, `!fleet`, hoursAgo(1));
+    }
+    recordOperatorMessage(OPERATOR, ENG_ROOM, '@cid fix this bug', hoursAgo(1));
+    const snapshot = computeMetrics();
+    // Only the non-command message counts as intervention
+    expect(snapshot.operator.interventions.day1).toBe(1);
+    expect(snapshot.operator.xCommandsIssued.day1).toBe(5);
+    // Autonomy: 100 - (1 intervention × 10) = 90
+    expect(snapshot.fleet.autonomyScore.day1).toBe(90);
   });
 
   it('prunes events older than 8 days', () => {
@@ -404,8 +419,18 @@ describe('formatScopeMetrics', () => {
     expect(result).toContain('Cid');
   });
 
-  it('unknown scope falls back to all', () => {
+  it('unknown bot-like scope returns empty (bot not on this ship)', () => {
     const result = formatScopeMetrics(mockSnapshot, 'nonexistent');
+    expect(result).toBe('');
+  });
+
+  it('"bot xyz" scope returns empty when bot not found', () => {
+    const result = formatScopeMetrics(mockSnapshot, 'bot xyz');
+    expect(result).toBe('');
+  });
+
+  it('non-bot-like scope falls back to all', () => {
+    const result = formatScopeMetrics(mockSnapshot, 'SOMETHING WEIRD');
     expect(result).toContain('Operator');
     expect(result).toContain('availability');
   });

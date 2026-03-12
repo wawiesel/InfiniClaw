@@ -257,8 +257,11 @@ function rolling(events: { ts: number }[]): RollingMetric {
 function computeOperatorMetrics(): OperatorMetrics {
   const nonBtc = operatorEvents.filter(e => e.roomId !== behindTheCurtainRoomId);
   const xCmds = nonBtc.filter(e => e.isXCommand);
+  // Interventions = non-BTC messages that are NOT x-commands.
+  // X-commands are legitimate management actions (queries, lifecycle), not emergency interventions.
+  const interventions = nonBtc.filter(e => !e.isXCommand);
   return {
-    interventions: rolling(nonBtc),
+    interventions: rolling(interventions),
     xCommandsIssued: rolling(xCmds),
   };
 }
@@ -440,6 +443,12 @@ export function formatScopeMetrics(snapshot: MetricsSnapshot, scope: string): st
   const botName = scope.startsWith('bot ') ? scope.slice(4).trim() : scope;
   const bot = snapshot.bots.find(b => b.name === botName);
   if (bot) return formatBotMetrics(bot);
+
+  // If scope looks like a bot name but wasn't found on this ship, return empty
+  // so the handler can skip responding (avoids flooding with unrelated data).
+  if (botName && botName !== scope) return ''; // "bot xyz" but not found
+  // Check if scope matches any known bot name pattern (lowercase, short)
+  if (/^[a-z][a-z0-9_-]*$/.test(scope) && scope.length <= 20) return '';
 
   return formatAllMetrics(snapshot);
 }

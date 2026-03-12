@@ -2183,6 +2183,9 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
     publishMetrics().catch(err => log(`metrics: publish error: ${errStr(err)}`));
     let text = formatScopeMetrics(snapshot, scope);
 
+    // If scope resolved to empty (e.g. bot not on this ship), skip.
+    if (!text) return;
+
     // For fleet/all scopes: run and upload health check on every ship.
     const wantsHealth = scope === 'fleet' || scope === 'all';
     if (wantsHealth) {
