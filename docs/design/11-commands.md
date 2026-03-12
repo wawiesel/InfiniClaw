@@ -32,8 +32,8 @@ Commands work from any room the operator account has joined — duty rooms (via 
 |---------|--------|
 | `!commission [ship]` | Commission ship(s), start assigned bots. No arg = all. |
 | `!decommission [ship]` | Stop all bots on ship(s), keep relay running. No arg = all. |
-| `!provision [target]` | Sync repos. No arg = secrets + infiniclaw. Named targets from paths.json. |
-| `!pull [ship]` | Full overhaul: pull repos, rebuild, restart bots. No arg = all. |
+| `!pull [ship]` | Sync secrets + code, rebuild, restart bots to quarters. No arg = this ship. |
+| `!push [branch]` | Push InfiniClaw to origin (default: current branch). |
 
 ### Fleet Commands
 
@@ -43,11 +43,6 @@ Commands work from any room the operator account has joined — duty rooms (via 
 | `!fleet room` | Bots in this room only. |
 | `!health` | Fleet health summary from S3 (speaker replies). |
 | `!metrics [scope]` | Metrics (1d/7d rolling). Context-aware — see below. |
-
-### Operator X-Commands
-
-| Command | Effect |
-|---------|--------|
 | `!operator [on|off] [ship]` | Show or toggle operator relay on/off for ship(s). |
 
 ## Metrics
@@ -87,8 +82,8 @@ When elapsed is zero (e.g. initial message), only the timestamp is shown.
 Examples:
 
 ```
-⚠️ secrets sync (HERACLES) down (14:30)
-✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
+⚠️ secrets sync (Herc) down (14:30)
+✅ secrets sync (Herc) operational (16:55 · 2.5h)
 ```
 
 Implemented by `statusLine()` in the relay module.
@@ -129,18 +124,18 @@ Multi-step operations and failure alerts use Matrix threads to keep the main tim
 
 ### Pull threads
 
-`!pull` creates one thread per ship. The thread root appears on the main timeline. Each step posts as a numbered thread reply (`[1/N]`, `[2/N]`, ...). The final status (✅ complete or ⛔ failed) posts to both the thread and the main timeline.
+`!pull` creates one thread. The thread root appears on the main timeline (with ship tag via loudspeaker). Each step posts as a numbered thread reply (`[N/total elapsed]`). The final status posts to both the thread and main timeline.
 
 ```
-Main:   relay pull starting ...
-Thread: [1/7 2s]  ✅ secrets up to date · a1b2c3d (3h) ↑0
-        [2/7 5s]  ✅ code pulled 3 commit(s) · 82bfd78 (20m) ↑0
+Main:   [🔱 Posi] relay pull starting ...
+Thread: [1/7 0s]  ✅ secrets up to date · a1b2c3d (3h) ↑0
+        [2/7 2s]  ✅ code pulled 3 commit(s) · 82bfd78 (20m) ↑0
         [3/7 12s] ✅ relay + dist rebuilt · 82bfd78 (20m) ↑0
         [4/7 25s] ✅ Max restarted (quarters)
         [5/7 38s] ✅ Parker restarted (quarters)
         [6/7 48s] ⛔ Nora restart
         [7/7 50s] ✅ relay pull complete (0W 1E) 50s
-Main:   ✅ relay pull complete (0W 1E) 50s
+Main:   [🔱 Posi] ✅ relay pull complete (0W 1E) 50s
 ```
 
 Two different times are shown:
@@ -154,14 +149,14 @@ Every step uses ✅ on success, ⛔ on failure, ⚠️ on warning. All bots on t
 Sync failures (secrets, code, build) create a thread in engineering on first occurrence. Updates post in the thread on an exponential backoff schedule: 1m → 2m → 4m → ... → 8h max. Recovery posts to both the thread and the main timeline.
 
 ```
-Main:   ⚠️ secrets sync (HERACLES) down (14:30)
+Main:   ⚠️ secrets sync (Herc) down (14:30)
 Thread: <error detail>
-        ⚠️ secrets sync (HERACLES) down (14:31 · 1m)
-        ⚠️ secrets sync (HERACLES) down (14:33 · 3m)
-        ⚠️ secrets sync (HERACLES) down (14:37 · 7m)
+        ⚠️ secrets sync (Herc) down (14:31 · 1m)
+        ⚠️ secrets sync (Herc) down (14:33 · 3m)
+        ⚠️ secrets sync (Herc) down (14:37 · 7m)
         ...
-        ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
-Main:   ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
+        ✅ secrets sync (Herc) operational (16:55 · 2.5h)
+Main:   ✅ secrets sync (Herc) operational (16:55 · 2.5h)
 ```
 
 ## Verification
@@ -172,7 +167,7 @@ Main:   ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
 2. **Bot command works** — `!dismiss cid` removes bot from duty.
    *Check:* Bot leaves duty room, fleet.json updated to `quarters`, `triggerType` to `always`.
 
-3. **Ship command works** — `!pull heracles` triggers full overhaul.
+3. **Ship command works** — `!pull heracles` triggers sync + rebuild + restart.
    *Check:* Pull thread appears with numbered steps, all stages complete.
 
 4. **Status line format** — Any relay output follows the standard format.
