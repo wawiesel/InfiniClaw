@@ -1141,9 +1141,10 @@ function formatCombinedMetrics(
       const isLast = i === botsWithMeta.length - 1;
       const prefix = isLast ? '  └' : '  ├';
 
-      // CO detection: highest-rank on-duty bot of its role
-      const isCO = bot.status === 'onduty' && !botsWithMeta.some(
-        b => b.role === bot.role && b.status === 'onduty' && b.rank < bot.rank && b !== bot
+      // CO detection: highest-rank awake bot of its role (onduty or quarters)
+      const awakeStatuses = ['onduty', 'quarters'];
+      const isCO = awakeStatuses.includes(bot.status) && !botsWithMeta.some(
+        b => b.role === bot.role && awakeStatuses.includes(b.status) && b.rank < bot.rank && b !== bot
       );
 
       let badge: string;
@@ -2831,8 +2832,9 @@ function registerRelayCommands(): void {
 
           for (const [i, [, entry]] of bots.entries()) {
             const isLast = i === bots.length - 1;
-            const isCO = entry.status === 'onduty' && !Object.values(allBots).some(
-              e => e.role === entry.role && e.status === 'onduty' && e.rank < entry.rank && e !== entry
+            const awakeStatuses = ['onduty', 'quarters'];
+            const isCO = awakeStatuses.includes(entry.status) && !Object.values(allBots).some(
+              e => e.role === entry.role && awakeStatuses.includes(e.status) && e.rank < entry.rank && e !== entry
             );
 
             let badge: string;
