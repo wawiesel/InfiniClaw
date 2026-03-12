@@ -2882,7 +2882,11 @@ async function threadReply(conn: RoomConn, threadRootId: string, text: string): 
   const ls = loadLoudspeakerConfig();
   if (ls) {
     const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
-    if (token) return relaySend(ls.homeserver, token, conn.roomId, text, threadRootId);
+    if (token) {
+      const eventId = await relaySend(ls.homeserver, token, conn.roomId, text, threadRootId);
+      if (eventId) return eventId;
+      // Loudspeaker not in room (e.g. BTC) — fall through to conn.accessToken
+    }
   }
   if (!conn.accessToken) return undefined;
   return relaySend(conn.homeserver, conn.accessToken, conn.roomId, text, threadRootId);
