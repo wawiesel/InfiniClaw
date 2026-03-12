@@ -1181,14 +1181,17 @@ function formatCombinedMetrics(
       const hBot = hBots[bot.name];
       const rss = hBot?.rss_mb != null ? Number(hBot.rss_mb) : 0;
       totalRssMb += rss;
-      const mem = rss > 0 ? ` · mem ${rss}/${hBot?.limit_mb ?? '?'}MB` : '';
+      const memStr = rss > 0
+        ? (hBot?.limit_mb != null ? `${rss}/${hBot.limit_mb}MB` : `${rss}MB`)
+        : '';
+      const mem = memStr ? ` · mem ${memStr}` : '';
       const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
       // Token throughput: prefer health report (cross-ship), fall back to local stats-cache
       const tokData = (health?.tokens as Record<string, { total_24h?: number }> | undefined)?.[bot.name];
       const tok24k = tokData?.total_24h != null ? Math.round(tokData.total_24h / 1000) : null;
-      const tokTag = tok24k != null && tok24k > 0 ? ` · tok ${tok24k}K (1d)` : (bot.totalTokens ? ` · ${formatTokens(bot.totalTokens)} tok` : '');
-      // Response latency p50/p95
-      const latTag = bot.responseLatencyP50 != null ? ` · lat ${bot.responseLatencyP50}s/${bot.responseLatencyP95 ?? '?'}s` : '';
+      const tokTag = tok24k != null && tok24k > 0 ? ` · tok/d ${tok24k}K` : (bot.totalTokens ? ` · ${formatTokens(bot.totalTokens)} tok` : '');
+      // Response latency (p50)
+      const latTag = bot.responseLatencyP50 != null ? ` · rsp ${bot.responseLatencyP50}s` : ` · rsp ?`;
 
       lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}${tokTag}${latTag}`);
     }
