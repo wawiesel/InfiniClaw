@@ -2816,9 +2816,9 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 
 async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[]): Promise<void> {
   // ! (bare) — print help via help account (speaker only, one reply)
-  // Use cached speaker state for instant response; fall back to full election if uncertain.
+  
   if (cmd === '!') {
-    if (!(isSpeakerCached || await electSpeaker())) return;
+    if (!await electSpeaker()) return;
     await helpReply(conn, buildHelpText());
     return;
   }
