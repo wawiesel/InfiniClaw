@@ -236,7 +236,6 @@ export async function backfillOperatorEvents(
   operatorEvents.sort((a, b) => a.ts - b.ts);
 }
 
-/** Reset all metrics state. For testing only. */
 /** Record an infra failure event (secrets sync, code sync, code build). */
 export function recordInfraFailure(system: string): void {
   infraFailureEvents.push({ ts: Date.now(), system });
@@ -244,6 +243,7 @@ export function recordInfraFailure(system: string): void {
   while (infraFailureEvents.length > 0 && infraFailureEvents[0].ts < cutoff) infraFailureEvents.shift();
 }
 
+/** Reset all metrics state. For testing only. */
 export function resetMetrics(): void {
   operatorEvents.length = 0;
   scoreEvents.length = 0;

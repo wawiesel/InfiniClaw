@@ -6,6 +6,7 @@ import {
   recordOperatorMessage,
   recordScoreReaction,
   recordBranchBrainResult,
+  recordInfraFailure,
   computeMetrics,
   rollingRate,
   SCORE_REACTIONS,
@@ -213,6 +214,33 @@ describe('recordBranchBrainResult', () => {
   });
 });
 
+// ── recordInfraFailure ──────────────────────────────────────────────
+
+describe('recordInfraFailure', () => {
+  beforeEach(setup);
+
+  it('records infra failures in ship metrics', () => {
+    recordInfraFailure('code sync');
+    recordInfraFailure('code build');
+    const snapshot = computeMetrics();
+    expect(snapshot.shipMetrics.infraFailures.day1).toBeGreaterThan(0);
+  });
+
+  it('shows 0 failures when none recorded', () => {
+    const snapshot = computeMetrics();
+    expect(snapshot.shipMetrics.infraFailures.day1).toBe(0);
+    expect(snapshot.shipMetrics.infraFailures.day7).toBe(0);
+  });
+
+  it('is cleared by resetMetrics', () => {
+    recordInfraFailure('code sync');
+    resetMetrics();
+    initMetrics({ btcRoomId: BTC_ROOM, operatorUid: OPERATOR, captainUid: CAPTAIN });
+    const snapshot = computeMetrics();
+    expect(snapshot.shipMetrics.infraFailures.day1).toBe(0);
+  });
+});
+
 // ── autonomy score ──────────────────────────────────────────────────
 
 describe('autonomy score', () => {
@@ -307,16 +335,18 @@ describe('formatting', () => {
     expect(result).toContain('🔴');
   });
 
-  it('formatShipMetrics shows name, uptime, restarts', () => {
+  it('formatShipMetrics shows name, uptime, restarts, infra failures', () => {
     const result = formatShipMetrics({
       name: 'Herc',
       relayUptimeSeconds: 7200,
-      relayRestarts: 3, infraFailures: { day1: 0, day7: 0 },
+      relayRestarts: 3,
+      infraFailures: { day1: 2, day7: 0.4 },
     });
-    // shipTag() resolves to emoji+name from ships.json (e.g. "🦁 Herc")
     expect(result).toContain('Herc');
-    expect(result).toContain('2h'); // 7200s = 2h
+    expect(result).toContain('2h');
     expect(result).toContain('3');
+    expect(result).toContain('Sync/build failures');
+    expect(result).toContain('2/day (1d)');
   });
 
   it('formatBotMetrics shows branch success when data exists', () => {
