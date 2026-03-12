@@ -437,7 +437,6 @@ function saveSyncToken(key: string, token: string): void {
   } catch { /* non-fatal */ }
 }
 
-/** Is this ship the "speaker" — lowest-rank active ship? Used to avoid duplicate replies. */
 // ── Git version helper ────────────────────────────────────────────
 
 /** Format version string: ` · 📦 [sha](github) (age) ↑N|↓N` */
