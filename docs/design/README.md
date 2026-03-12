@@ -41,6 +41,8 @@ Engineers cannot modify these files (enforced by pre-commit hook). Architecture 
 
 **No source code references.** Design docs describe behavior and architecture, not implementation details. Source code paths and function names belong in the implementation README, which links back to each design doc. The pre-commit hook enforces this rule.
 
+**Status markers.** Unimplemented features within design docs are annotated with `> **Status:** ...` blockquotes explaining what is not yet built. This prevents specs from being mistaken for documentation of working code.
+
 See `docs/solutions/matrix.md` for Element Desktop math rendering setup.
 
 Historical planning files (`_old/IMPLEMENTATION_ROADMAP.md`) have been removed. Design history lives in git log.

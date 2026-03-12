@@ -172,6 +172,8 @@ The pip reflects **operational status**, not which room the bot is in. See [09-r
 | 🟢 | Online — running, responding |
 | ⭐ | CO — commanding officer |
 
+> **Status:** Dynamic pip transitions (🔄 → 🚀 → 🟡 → 🟢) during boot are not yet implemented. `setStatusPip()` is currently a no-op in `channels/matrix.ts`. The relay sets pips at lifecycle boundaries (💤 on sleep, 🟢 on wake completion, ⭐ on CO) but not during boot stages.
+
 During boot, the pip changes through 🔄 → 🚀 → 🟡 → 🟢 so the current stage is visible at a glance.
 
 ### Boot Progress Messages

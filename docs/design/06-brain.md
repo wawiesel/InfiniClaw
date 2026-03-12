@@ -31,7 +31,7 @@ See [08-threading](08-threading.md) for the branching protocol and implementatio
 
 ## Lobe Brain
 
-> **Status:** Not yet implemented. See [08-threading](08-threading.md) for full lobe protocol.
+> **Status:** Lobe infrastructure exists (`delegate_to_lobe` tool, `delegate-runner.ts`) but the full end-to-end workflow (quarters thread posting, completion notifications, bot pickup) is not yet production-ready.
 
 An MCP tool that spawns a non-blocking worker using any provider. The lobe does not receive the full conversation context — only what the bot explicitly passes.
 
@@ -43,6 +43,8 @@ An MCP tool that spawns a non-blocking worker using any provider. The lobe does 
 The bot can use Matrix navigation tools (see [02-matrix](02-matrix.md)) to fetch the lobe thread and investigate results further.
 
 ## Configuration
+
+> **Status:** Per-task model selection from persona/memory is not yet implemented. Branch brains currently use the bot's `BRAIN_MODEL` env.
 
 Brain preferences live in the bot's **persona and memory** — not in fleet.json or env files. The bot chooses its branch model at branch time based on the task. Over time, the bot develops guidance on which models work best for which tasks.
 
@@ -56,7 +58,7 @@ Each bot's LLM is configured via env keys in `secrets/bots/{name}/env`:
 | `BRAIN_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth authentication |
 | `BRAIN_API_KEY` | `ANTHROPIC_API_KEY` | API key authentication |
 
-The container never sees the raw `BRAIN_*` names — the host maps them during container spawn. This keeps bot configuration (secrets repo) decoupled from Claude Code internals.
+The container never sees the raw `BRAIN_*` names — the host maps them in the pm2 startup script before the bot process runs. This keeps bot configuration (secrets repo) decoupled from Claude Code internals.
 
 ## Verification
 

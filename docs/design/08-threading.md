@@ -116,10 +116,13 @@ Lobes always post to quarters regardless of which room the bot is currently in. 
 
 When a branch brain completes:
 1. **Thread summary** — completion message in the thread
-2. **Main timeline summary** — one-line result so the Captain sees the outcome without clicking into the thread
-3. **Termination** — branch brain exits, thread remains in Matrix history
+2. **Termination** — branch brain exits, thread remains in Matrix history
+
+> **Status:** Main timeline summary (one-line result posted outside the thread) is not yet implemented. Currently, completion messages only appear inside the thread.
 
 ## Thread Reactivation
+
+> **Status:** Thread reactivation is not yet implemented. Currently, completed threads cannot spawn new branch brains from follow-up messages.
 
 Matrix threads are permanent. Branch brains are ephemeral. But the thread context is immortal.
 
