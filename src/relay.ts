@@ -211,6 +211,57 @@ function persistFleet(): void {
   }
 }
 
+/**
+ * Write crew-status.json to a bot's instance data dir.
+ * Called after bootstrapBot so the container's crew_roster MCP tool has current roster.
+ */
+function writeCrewStatus(root: string, bot: string): void {
+  const instanceData = path.join(root, '_runtime', 'instances', bot, 'data');
+  fs.mkdirSync(instanceData, { recursive: true });
+
+  interface CrewEntry {
+    name: string; role: string; rank: number; title?: string;
+    room: string; present: boolean; isCommandingOfficer: boolean;
+  }
+
+  const raw: (Omit<CrewEntry, 'isCommandingOfficer'>)[] = [];
+  for (const [name, entry] of Object.entries(liveFleet)) {
+    const present = entry.status !== 'sleep';
+    let room = 'Quarters';
+    if (entry.status === 'onduty') {
+      try {
+        room = loadProfileEnv(root, name).MAIN_GROUP_NAME || 'Duty Room';
+      } catch { room = 'Duty Room'; }
+    }
+    const e: Omit<CrewEntry, 'isCommandingOfficer'> = { name: capitalizeName(name), role: entry.role, rank: entry.rank, room, present };
+    if (entry.title) e.title = entry.title;
+    raw.push(e);
+  }
+
+  // Lowest rank among present bots per room = CO
+  const roomBots: Record<string, { name: string; rank: number }[]> = {};
+  for (const e of raw) {
+    if (e.present) (roomBots[e.room] ??= []).push({ name: e.name, rank: e.rank });
+  }
+  const coByRoom: Record<string, string> = {};
+  for (const [room, members] of Object.entries(roomBots)) {
+    coByRoom[room] = members.sort((a, b) => a.rank - b.rank)[0].name;
+  }
+
+  const crew: CrewEntry[] = raw
+    .sort((a, b) => a.rank - b.rank)
+    .map(e => ({ ...e, isCommandingOfficer: e.present && coByRoom[e.room] === e.name }));
+
+  try {
+    fs.writeFileSync(
+      path.join(instanceData, 'crew-status.json'),
+      JSON.stringify({ thisBot: bot, generatedAt: new Date().toISOString(), crew }, null, 2),
+    );
+  } catch (err) {
+    log(`writeCrewStatus: ${bot} failed — ${errStr(err)}`);
+  }
+}
+
 // ── Rank swap (shared by bots and ships) ──────────────────────
 
 /** Swap rank of target with its neighbor. Mutates entries in place. Returns null if at boundary. */
@@ -699,6 +750,7 @@ function restartBotsToQuarters(root: string): { started: string[]; failed: strin
       killStaleContainers(bot);
       if (entry.status === 'onduty') fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
       bootstrapBot(root, bot);
+      writeCrewStatus(root, bot);
       started.push(bot);
     } catch (err) {
       log(`restartBotsToQuarters: ${bot} failed — ${errStr(err)}`);
@@ -1103,6 +1155,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               if (liveFleet[bot]?.status !== 'onduty') continue;
               try {
                 bootstrapBot(resolveRoot(), bot);
+                writeCrewStatus(resolveRoot(), bot);
                 log(`git sync: restarted ${bot}`);
                 if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${bot} restarted${botVersion(resolveRoot(), bot)}`);
               } catch (err) {
@@ -1340,6 +1393,7 @@ async function spawnBranchBrain(
         log(`branchBrain: restarting ${bot} to pick up findings`);
         try {
           bootstrapBot(resolveRoot(), bot);
+          writeCrewStatus(resolveRoot(), bot);
           log(`branchBrain: ${bot} restarted`);
         } catch (err) {
           log(`branchBrain: restart ${bot} failed: ${errStr(err)}`);
@@ -1566,6 +1620,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
               try {
                 ensurePodmanReady();
                 bootstrapBot(root, bot);
+                writeCrewStatus(root, bot);
                 for (const c of conns) {
                   if (c.accessToken) {
                     await reply(c, `relay ${capitalizeName(bot)} materialized`).catch(() => {});
@@ -1854,6 +1909,7 @@ async function handleLifecycleCommand(
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
         restartBotForRoom(root, bot);
+        writeCrewStatus(root, bot);
         await reply(conn, `relay ${name} dismissed`);
         sendLifecycleMsg(bot, 'stopped').catch(() => {});
         publishFleetReport().catch(() => {});
@@ -1905,6 +1961,7 @@ async function handleLifecycleCommand(
         await setBotPip(root, bot, '🚀');
         await step('🚀 starting');
         bootstrapBot(root, bot);
+        writeCrewStatus(root, bot);
         await setBotPip(root, bot, '🟡');
         await step('🟡 waiting for first output');
         const model = env?.BRAIN_MODEL || '?';
@@ -1948,6 +2005,7 @@ async function handleLifecycleCommand(
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild)
         restartBotForRoom(root, bot);
+        writeCrewStatus(root, bot);
         await reply(conn, `relay ${name} on duty`);
         sendLifecycleMsg(bot, 'started', rank).catch(() => {});
         publishFleetReport().catch(() => {});
