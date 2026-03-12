@@ -1064,127 +1064,132 @@ async function fetchAllMetricsSnapshots(): Promise<MetricsSnapshot[]> {
 }
 
 /**
- * Unified fleet report: merges metrics + health per ship in numbered sections.
- * Filters stale bots with 0 24h activity to reduce noise.
+ * Unified fleet metrics report using the same visual language as !fleet:
+ * ship headers + tree-structured bot lines, with metrics/health data merged inline.
  */
 function formatCombinedMetrics(
   snapshots: MetricsSnapshot[],
   healthReports: Array<{ ship: string; data: Record<string, unknown> }> = [],
 ): string {
   if (snapshots.length === 0) return '';
+  const NBSP = '\u00A0';
   const r1 = (n: number) => Math.round(n * 10) / 10;
-  const out: string[] = [];
+  const ships = safeLoadShips();
 
-  // ── 1 · Operator ──
-  const totalInterventions = { day1: 0, day7: 0 };
-  const totalXCmds = { day1: 0, day7: 0 };
-  for (const s of snapshots) {
-    totalInterventions.day1 += s.operator.interventions.day1;
-    totalInterventions.day7 += s.operator.interventions.day7;
-    totalXCmds.day1 += s.operator.xCommandsIssued.day1;
-    totalXCmds.day7 += s.operator.xCommandsIssued.day7;
-  }
-  out.push(
-    '**1. Operator**',
-    `  Interventions: ${r1(totalInterventions.day1)}/day (1d) · ${r1(totalInterventions.day7)}/day (7d)`,
-    `  X-commands: ${r1(totalXCmds.day1)}/day (1d) · ${r1(totalXCmds.day7)}/day (7d)`,
-    '',
-  );
-
-  // ── Build health lookup by canonical ship name ──
-  const shipsConfig = safeLoadShips();
+  // Build health lookup: canonical ship name → health data
   const hostnameToName = new Map<string, string>();
-  for (const [name, entry] of Object.entries(shipsConfig)) {
+  for (const [name, entry] of Object.entries(ships)) {
     if (entry.hostname) hostnameToName.set(entry.hostname, name);
     hostnameToName.set(name, name);
   }
   const healthByShip = new Map<string, Record<string, unknown>>();
-  for (const report of healthReports) {
-    const canonical = hostnameToName.get(report.ship) ?? report.ship;
+  for (const r of healthReports) {
+    const canonical = hostnameToName.get(r.ship) ?? r.ship;
     const existing = healthByShip.get(canonical);
-    const reportTs = Number(report.data.ts || 0);
-    const existingTs = existing ? Number(existing.ts || 0) : 0;
-    if (!existing || reportTs > existingTs) {
-      healthByShip.set(canonical, report.data);
+    if (!existing || Number(r.data.ts || 0) > Number(existing.ts || 0)) {
+      healthByShip.set(canonical, r.data);
     }
   }
 
-  // ── 2+ · Per-ship (relay metrics + bot process health merged) ──
-  let sectionNum = 2;
+  // Sort snapshots by ship rank
+  const sorted = [...snapshots].sort((a, b) =>
+    (ships[a.ship]?.rank ?? 99) - (ships[b.ship]?.rank ?? 99)
+  );
+
+  const lines: string[] = [];
   let totalOom24h = 0;
-  let totalSk24h = 0;
   let totalSessions = 0;
+  let totalInterventions = { day1: 0, day7: 0 };
+  let totalXCmds = { day1: 0, day7: 0 };
 
-  for (const s of snapshots) {
-    const shipEntry = shipsConfig[s.ship];
-    const tag = shipEntry?.emoji ? `${shipEntry.emoji} ${s.ship}` : s.ship;
-    const uptime = formatDuration(s.shipMetrics.relayUptimeSeconds * 1000);
-    const syncFail1d = s.shipMetrics.infraFailures.day1;
-    const syncTag = syncFail1d > 0 ? `⚠️ ${syncFail1d} sync fail/day` : 'sync OK';
-    out.push(`**${sectionNum}. ${tag}** — relay ${uptime} ↻${s.shipMetrics.relayRestarts} · ${syncTag}`);
+  for (const s of sorted) {
+    const cfg = ships[s.ship];
+    const rank = cfg?.rank ?? '?';
+    const commissioned = cfg?.commissioned !== false;
+    const statusChar = commissioned ? '◉' : '💤';
+    const shipEmoji = cfg?.emoji ?? '';
+    const uptime = formatDuration(s.shipMetrics.relayUptimeSeconds);
+    const syncFail = s.shipMetrics.infraFailures.day1;
+    const syncTag = syncFail > 0 ? `⚠️${syncFail} sync/day` : 'sync OK';
+    lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptime} up · ↻${s.shipMetrics.relayRestarts} · ${syncTag}`);
 
-    // Merge bot metrics (from metrics snapshot) + health (from health reports) into one line per bot
+    // Build bot list: merge metrics snapshot + health + liveFleet role/rank
     const health = healthByShip.get(s.ship);
     const hBots = health ? (health.bots || {}) as Record<string, Record<string, unknown>> : {};
-    const trends = health ? (health.trends_24h || {}) as Record<string, { sigkills: number; oom_kills: number }> : {};
     const rolling24h = health ? (health.rolling as Record<string, unknown> | undefined)?.['24h'] as
       { bots?: Record<string, { sigkills?: number; oom_kills?: number }> } | undefined : undefined;
-    const metricsBotNames = new Set(s.bots.map(b => b.name));
+    const trends = health ? (health.trends_24h || {}) as Record<string, { sigkills?: number; oom_kills?: number }> : {};
 
-    // Helper: get 24h kill stats for a bot
-    const getKills = (name: string) => {
-      const r = rolling24h?.bots?.[name];
-      const t = trends[name];
-      const oom24 = r?.oom_kills ?? t?.oom_kills ?? 0;
-      const sk24 = r?.sigkills ?? t?.sigkills ?? 0;
-      totalOom24h += oom24;
-      totalSk24h += sk24;
-      return { sk24, oom24 };
-    };
+    // Sort bots by rank from liveFleet
+    const botsWithMeta = s.bots.map(b => ({
+      ...b,
+      rank: liveFleet[b.name]?.rank ?? 99,
+      role: liveFleet[b.name]?.role ?? '',
+    })).sort((a, b) => a.rank - b.rank);
 
-    // Bots from metrics snapshot (active/quarters) — combined with health data
-    for (const bot of s.bots) {
-      const pip = bot.processRunning ? '🟢' : '💤';
-      const score = bot.score.day1 > 0 ? ` · ${bot.score.day1} pts/day` : '';
-      const hBot = hBots[bot.name];
-      const mem = hBot?.rss_mb != null ? ` · ${hBot.rss_mb}MB` : '';
-      const { sk24, oom24 } = getKills(bot.name);
-      const kills = (sk24 || oom24) ? ` · 24h: ${sk24} SK ${oom24} OOM` : '';
-      out.push(`  ${capitalizeName(bot.name)} ${pip} ${bot.status}${score}${mem}${kills}`);
+    // Compute column widths for alignment
+    let maxName = 0;
+    let maxRole = 0;
+    for (const b of botsWithMeta) {
+      maxName = Math.max(maxName, capitalizeName(b.name).length);
+      const roleCap = b.role ? capitalizeName(b.role) : '';
+      maxRole = Math.max(maxRole, roleCap.length);
     }
 
-    // Health-only bots (sleeping/stale, not in metrics but with 24h activity)
-    for (const [name, b] of Object.entries(hBots)) {
-      if (name === 'relay' || metricsBotNames.has(name)) continue;
-      const { sk24, oom24 } = getKills(name);
-      if (sk24 > 0 || oom24 > 0) {
-        const mem = b.rss_mb != null ? `${b.rss_mb}MB` : '';
-        out.push(`  ${name}: ${mem} 24h: ${sk24} SK ${oom24} OOM`);
-      }
+    for (const [i, bot] of botsWithMeta.entries()) {
+      const isLast = i === botsWithMeta.length - 1;
+      const prefix = isLast ? '  └' : '  ├';
+
+      let badge: string;
+      if (bot.status === 'transit') badge = '🚀';
+      else if (bot.status === 'sleep') badge = '💤';
+      else if (bot.status === 'warn') badge = '⚠️';
+      else if (bot.processRunning) badge = '◉';
+      else badge = '🔴';
+
+      const nameDisplay = capitalizeName(bot.name) + NBSP.repeat(maxName - capitalizeName(bot.name).length);
+      const roleCap = bot.role ? capitalizeName(bot.role) : '';
+      const roleIcon = ROLE_ICONS[bot.role?.toLowerCase()] ?? '';
+      const roleDisplay = roleIcon ? `${roleIcon} ${roleCap}` : roleCap;
+      const rolePad = NBSP.repeat(maxRole - roleCap.length);
+
+      // Health data
+      const r24 = rolling24h?.bots?.[bot.name];
+      const t24 = trends[bot.name];
+      const oom24 = r24?.oom_kills ?? t24?.oom_kills ?? 0;
+      const sk24 = r24?.sigkills ?? t24?.sigkills ?? 0;
+      totalOom24h += oom24;
+      const hBot = hBots[bot.name];
+      const mem = hBot?.rss_mb != null ? ` · ${hBot.rss_mb}/${hBot.limit_mb ?? '?'}MB` : '';
+      const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24}` : '';
+
+      lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}`);
     }
 
     if (health) {
       const sess = Number(health.session_total_mb || 0);
       totalSessions += sess;
-      out.push(`  Sessions: ${Math.round(sess)}MB`);
     }
-    out.push('');
-    sectionNum++;
+
+    totalInterventions.day1 += s.operator.interventions.day1;
+    totalInterventions.day7 += s.operator.interventions.day7;
+    totalXCmds.day1 += s.operator.xCommandsIssued.day1;
+    totalXCmds.day7 += s.operator.xCommandsIssued.day7;
+    lines.push('');
   }
 
-  // ── Fleet summary ──
-  const assigned = snapshots.flatMap(s => s.bots.filter(b => b.status !== 'sleep' && b.status !== 'transit'));
+  // Fleet summary footer
+  const assigned = sorted.flatMap(s => s.bots.filter(b => b.status !== 'sleep' && b.status !== 'transit'));
   const running = assigned.filter(b => b.processRunning);
   const availability = assigned.length > 0 ? Math.round((running.length / assigned.length) * 100) : 100;
-  const avgAutonomy1d = snapshots.reduce((sum, s) => sum + s.fleet.autonomyScore.day1, 0) / snapshots.length;
-  const avgAutonomy7d = snapshots.reduce((sum, s) => sum + s.fleet.autonomyScore.day7, 0) / snapshots.length;
-  out.push(
-    `**${sectionNum}. Fleet**`,
-    `Availability: ${availability}% · Autonomy: ${r1(avgAutonomy1d)}% (1d) · ${r1(avgAutonomy7d)}% (7d)`,
-    `24h: ${totalSk24h} SK, ${totalOom24h} OOM · ${Math.round(totalSessions)}MB sessions`,
+  const avgAutonomy1d = sorted.reduce((sum, s) => sum + s.fleet.autonomyScore.day1, 0) / sorted.length;
+  const avgAutonomy7d = sorted.reduce((sum, s) => sum + s.fleet.autonomyScore.day7, 0) / sorted.length;
+  lines.push(
+    `**Fleet** · ${sorted.length} ships · availability ${availability}% · autonomy ${r1(avgAutonomy1d)}% (1d) · OOM+${totalOom24h} (24h) · ${Math.round(totalSessions * 10) / 10}MB sessions`,
+    `**Operator** · interventions ${r1(totalInterventions.day1)}/day (1d) · x-cmds ${r1(totalXCmds.day1)}/day (1d)`,
   );
 
-  return out.join('\n');
+  return lines.join('\n');
 }
 
 function formatHealthSummary(reports: Array<{ ship: string; data: Record<string, unknown> }>): string {
