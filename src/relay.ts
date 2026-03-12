@@ -1546,7 +1546,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
                 bootstrapBot(root, bot);
                 for (const c of conns) {
                   if (c.accessToken) {
-                    await reply(c, `${bot} materialized and started`).catch(() => {});
+                    await reply(c, `relay ${bot} materialized and started`).catch(() => {});
                   }
                 }
               } catch (err) {
@@ -1883,7 +1883,7 @@ async function handleLifecycleCommand(
         continue;
       }
       if (liveFleet[bot]?.status === 'onduty') {
-        await reply(conn, `${name} is already on duty`);
+        await reply(conn, `relay ${name} already on duty`);
         continue;
       }
       try {
@@ -2298,7 +2298,7 @@ function registerRelayCommands(): void {
         if (!resolved) { await reply(conn, `Unknown ship: ${shipInput}`); return; }
         targetName = resolved;
         targetShip = ships[resolved].hostname;
-        if (!ships[resolved].commissioned) { await reply(conn, `${targetName} is decommissioned`); return; }
+        if (!ships[resolved].commissioned) { await reply(conn, `relay ${targetName} is decommissioned`); return; }
       } catch { targetShip = shipInput; targetName = shipInput; }
       if (liveFleet[bot].ship !== HOSTNAME) return;
       try {
@@ -2310,7 +2310,7 @@ function registerRelayCommands(): void {
         const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetName}`);
         fleetDirty = false;
         if (!result.ok) throw new Error(result.error);
-        await reply(conn, `${bot} dematerialized — awaiting materialization on ${targetName}`);
+        await reply(conn, `relay ${bot} dematerialized — awaiting materialization on ${targetName}`);
       } catch (err) {
         await reply(conn, `transport failed — ${errStr(err)}`);
       }
@@ -2577,12 +2577,12 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
     if (!isSpeaker()) return;
     const result = rankSwap(Object.entries(ships), target, direction);
     if (!result) {
-      await speakerReport(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank ship`);
+      await speakerReport(conn, `relay ${target} already ${isPromote ? 'highest' : 'lowest'} rank ship`);
       return;
     }
     writeShips(ships);
     secretsGitCommit(['operator/ships.json'], `rerank ships: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
-    await speakerReport(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank}`);
+    await speakerReport(conn, `relay ${result.target} rank ${result.targetRank}, ${result.swap} rank ${result.swapRank}`);
     return;
   }
 
@@ -2594,7 +2594,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const sameRole = Object.entries(liveFleet).filter(([_, b]) => b.role === role);
   const result = rankSwap(sameRole, target, direction);
   if (!result) {
-    await reply(conn, `${target} is already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
+    await reply(conn, `relay ${target} already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
     return;
   }
   fleetUpdate(result.target, { rank: result.targetRank });
@@ -2602,7 +2602,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   writeFleet(liveFleet);
   secretsGitCommit(['bots/fleet.json'], `rerank ${role}: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
   fleetDirty = false;
-  await reply(conn, `${result.target} now rank ${result.targetRank}, ${result.swap} now rank ${result.swapRank} (in ${role})`);
+  await reply(conn, `relay ${result.target} rank ${result.targetRank}, ${result.swap} rank ${result.swapRank} (in ${role})`);
 
   const root = resolveRoot();
   const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
