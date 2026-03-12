@@ -2272,6 +2272,7 @@ async function handleLifecycleCommand(
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
+        recordInfraFailure(`wake-${bot}`);
         if (!isRestart) await setBotPip(root, bot, '💤');
         const fail = `⛔ wake ${name} failed — ${errStr(err)}`;
         await step(fail);
