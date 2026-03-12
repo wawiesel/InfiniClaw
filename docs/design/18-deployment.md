@@ -71,7 +71,7 @@ If the holodeck simulation passes:
 1. Rebase the feature branch onto current main
 2. Merge to main (fast-forward preferred)
 3. Push
-4. The relay auto-sync picks up the new code and deploys via normal refit
+4. The relay auto-sync picks up the new code and deploys via normal pull cycle
 
 ## Why
 
@@ -94,4 +94,4 @@ This was motivated by a real incident: an engineer's Phase 1 branch/merge commit
    *Check:* No access to production Matrix, secrets, or S3.
 
 5. **Merge after pass** — Holodeck simulation passes.
-   *Check:* Branch merged to main, relay auto-deploys via refit.
+   *Check:* Branch merged to main, relay auto-deploys via pull cycle.

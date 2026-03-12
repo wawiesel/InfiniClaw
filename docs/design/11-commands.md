@@ -33,7 +33,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 | `!commission [ship]` | Commission ship(s), start assigned bots. No arg = all. |
 | `!decommission [ship]` | Stop all bots on ship(s), keep relay running. No arg = all. |
 | `!provision [target]` | Sync repos. No arg = secrets + infiniclaw. Named targets from paths.json. |
-| `!refit [ship]` | Full overhaul: sync, rebuild, restart bots + relay. No arg = all. |
+| `!pull [ship]` | Full overhaul: pull repos, rebuild, restart bots. No arg = all. |
 
 ### Fleet Commands
 
@@ -48,7 +48,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 
 | Command | Effect |
 |---------|--------|
-| `!relay <text>` | Send text to operator tmux session on each ship. |
+| `!operator [on|off] [ship]` | Show or toggle operator relay on/off for ship(s). |
 
 ## Metrics
 
@@ -87,8 +87,6 @@ When elapsed is zero (e.g. initial message), only the timestamp is shown.
 Examples:
 
 ```
-⚓ refit (Poseidon) starting (10:07)
-✅ refit (Poseidon) complete (10:08 · 1m)
 ⚠️ secrets sync (HERACLES) down (14:30)
 ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
 ```
@@ -129,29 +127,27 @@ Implemented by `gitVersionStr()`, `repoVersion()`, `relayVersion()`, `botVersion
 
 Multi-step operations and failure alerts use Matrix threads to keep the main timeline clean.
 
-### Refit threads
+### Pull threads
 
-`!refit` creates one thread per ship. The thread root appears on the main timeline. Each step posts as a numbered thread reply (`[1/N]`, `[2/N]`, ...). The final status (✅ complete or ⛔ failed) posts to both the thread and the main timeline.
+`!pull` creates one thread per ship. The thread root appears on the main timeline. Each step posts as a numbered thread reply (`[1/N]`, `[2/N]`, ...). The final status (✅ complete or ⛔ failed) posts to both the thread and the main timeline.
 
 ```
-Main:   ⚓ refit (Poseidon) starting (10:07)
+Main:   relay pull starting ...
 Thread: [1/7 2s]  ✅ secrets up to date · a1b2c3d (3h) ↑0
         [2/7 5s]  ✅ code pulled 3 commit(s) · 82bfd78 (20m) ↑0
         [3/7 12s] ✅ relay + dist rebuilt · 82bfd78 (20m) ↑0
-        [4/7 25s] ✅ max deployed · 82bfd78 (20m) ↑0
-        [5/7 38s] ✅ parker restarted · 82bfd78 (20m) ↑0
-        [6/7 48s] ⛔ nora restart failed
-        [7/7 50s] ✅ refit (Poseidon) complete (10:08 · 50s)
-Main:   ✅ refit (Poseidon) complete (10:08 · 50s)
+        [4/7 25s] ✅ Max restarted (quarters)
+        [5/7 38s] ✅ Parker restarted (quarters)
+        [6/7 48s] ⛔ Nora restart
+        [7/7 50s] ✅ relay pull complete (0W 1E) 50s
+Main:   ✅ relay pull complete (0W 1E) 50s
 ```
 
 Two different times are shown:
-- **Stage prefix** `[N/total elapsed]` — time since refit started (refit progress)
+- **Stage prefix** `[N/total elapsed]` — time since pull started
 - **Version suffix** `· sha ↑0|↓N (age)` — age of the deployed code (commit freshness)
 
-Repo versions (secrets, code) reflect when the last commit was made. Bot/relay versions reflect when the dist file was built — right after `npm run build`, so age ≈ refit elapsed.
-
-Every step uses ✅ on success, ⛔ on failure, ⚠️ on partial (e.g. sync failed but refit continues). All bots on the ship get deployed (container image rebuild + instance sync). Active bots are also restarted. The final status line posts to both the thread and the main timeline.
+Every step uses ✅ on success, ⛔ on failure, ⚠️ on warning. All bots on the ship are restarted to quarters. The final status line posts to both the thread and the main timeline.
 
 ### Failure alert threads
 
@@ -176,8 +172,8 @@ Main:   ✅ secrets sync (HERACLES) operational (16:55 · 2.5h)
 2. **Bot command works** — `!dismiss cid` removes bot from duty.
    *Check:* Bot leaves duty room, fleet.json updated to `quarters`, `triggerType` to `always`.
 
-3. **Ship command works** — `!refit heracles` triggers full overhaul.
-   *Check:* Refit thread appears with numbered steps, all stages complete.
+3. **Ship command works** — `!pull heracles` triggers full overhaul.
+   *Check:* Pull thread appears with numbered steps, all stages complete.
 
 4. **Status line format** — Any relay output follows the standard format.
    *Check:* Output matches `<emoji> <what> (<ship>) <status> (<timestamp> · <elapsed>)`.
