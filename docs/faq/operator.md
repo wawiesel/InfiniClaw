@@ -25,11 +25,13 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 
 | Command | Action |
 |---------|--------|
-| `!join <bot>` | Start bot, update fleet.json |
-| `!dismiss <bot>` | Stop bot, update fleet.json |
-| `!rejoin <bot>` | Dismiss + join (full lifecycle reset) |
-| `!refresh <bot>` | Rebuild + restart (pick up new code, no brain/room changes) |
-| `!transport <bot> <ship>` | Beam bot to another ship (dematerialize/materialize) |
+| `!wake [bot]` | Start container in quarters (full brain) |
+| `!sleep [bot]` | Stop container, leave all rooms except quarters |
+| `!report [bot]` | Send awake bot(s) to duty room |
+| `!dismiss [bot]` | Back to quarters (bot keeps running), update fleet.json |
+| `!rejoin [bot]` | Dismiss + report (full lifecycle reset) |
+| `!refresh [bot]` | Rebuild + restart (pick up new code, no brain/room changes) |
+| `!transport <bot> <ship>` | Beam bot to another ship |
 | `!promote <target>` / `!demote <target>` | Swap rank (bot within role, or ship) |
 | `!allow <bot> <path> [min]` / `!deny <bot> <path>` | Mount grants |
 
