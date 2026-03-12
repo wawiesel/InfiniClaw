@@ -4,7 +4,7 @@
 
 There are **4 layers** of communication, each serving a different purpose:
 
-1. **Relay** — Matrix lifecycle commands (`!join`, `!dismiss`, `!rejoin`, `!refresh`, `!fleet`, `!transport`, etc.)
+1. **Relay** — Matrix lifecycle commands (`!report`, `!dismiss`, `!rejoin`, `!refresh`, `!fleet`, `!transport`, etc.)
 2. **Loudspeaker** — relay's reply voice in fleet rooms
 3. **Operator account** — operator's direct Matrix presence (BehindTheCurtain + fleet rooms)
 4. **Intercom** — write-only broadcast channels the relay polls for incoming commands
