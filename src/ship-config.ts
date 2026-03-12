@@ -227,14 +227,14 @@ export const ROLE_ROOMS: Record<string, { room: string; icon: string }> = {
 };
 
 /**
- * Short display tag: "🦁🟢 Herc" with status pip.
- * pip overrides the auto-derived status (🟢 commissioned, 💤 decommissioned).
+ * Short display tag: "🦁⭐ Herc" with status pip.
+ * pip overrides the auto-derived status ('' commissioned, 💤 decommissioned).
  */
 export function shipTag(hostname?: string, pip?: string): string {
   const found = findShipByHostname(hostname);
   if (!found) return hostname ?? os.hostname();
   const [name, entry] = found;
-  const statusPip = pip ?? (entry.commissioned !== false ? '🟢' : '💤');
+  const statusPip = pip ?? (entry.commissioned !== false ? '' : '💤');
   return entry.emoji ? `${entry.emoji}${statusPip} ${name}` : `${statusPip} ${name}`;
 }
 
