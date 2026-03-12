@@ -395,7 +395,6 @@ function fmtRolling(m: RollingMetric, unit = '/day'): string {
 
 export function formatOperatorMetrics(m: OperatorMetrics): string {
   return [
-    `📋 **Operator Metrics**`,
     `  Interventions: ${fmtRolling(m.interventions)}`,
     `  X-commands issued: ${fmtRolling(m.xCommandsIssued)}`,
   ].join('\n');
@@ -404,18 +403,15 @@ export function formatOperatorMetrics(m: OperatorMetrics): string {
 export function formatBotMetrics(b: BotMetrics): string {
   const pip = b.processRunning ? '🟢' : '🔴';
   const name = capitalizeName(b.name);
-  const lines = [
-    `**${name}** ${pip} · ${b.status}`,
-    `  Score: ${fmtRolling(b.score, ' pts/day')}`,
-    `  Crashes: ${fmtRolling(b.crashes)}`,
-  ];
-  // Only show branch brain success if there's data
+  const score = `score ${b.score.day1}/${b.score.day7}`;
+  const crashes = `crashes ${b.crashes.day1}/${b.crashes.day7}`;
+  let line = `  ${pip} **${name}** · ${b.status} · ${score} · ${crashes}`;
   if (b.branchBrainSuccess.day1 >= 0 || b.branchBrainSuccess.day7 >= 0) {
     const fmt1 = b.branchBrainSuccess.day1 >= 0 ? `${b.branchBrainSuccess.day1}%` : '—';
     const fmt7 = b.branchBrainSuccess.day7 >= 0 ? `${b.branchBrainSuccess.day7}%` : '—';
-    lines.push(`  Branch success: ${fmt1} (1d) · ${fmt7} (7d)`);
+    line += ` · bb ${fmt1}/${fmt7}`;
   }
-  return lines.join('\n');
+  return line;
 }
 
 export function formatShipMetrics(m: ShipMetrics): string {
@@ -432,19 +428,21 @@ export function formatShipMetrics(m: ShipMetrics): string {
 }
 
 export function formatFleetMetrics(m: FleetMetrics): string {
-  return `🌌 **Fleet** — availability: ${m.availability}% · autonomy: ${fmtRolling(m.autonomyScore, '%')}`;
+  return `  Availability: ${m.availability}% · autonomy: ${fmtRolling(m.autonomyScore, '%')}`;
 }
 
 export function formatAllMetrics(snapshot: MetricsSnapshot): string {
   const sections = [
+    '## 1 · Operator',
     formatOperatorMetrics(snapshot.operator),
     '',
+    '## 2 · Ship',
     formatShipMetrics(snapshot.shipMetrics),
+    ...snapshot.bots.map(formatBotMetrics),
+    '',
+    '## 3 · Fleet',
+    formatFleetMetrics(snapshot.fleet),
   ];
-  if (snapshot.bots.length > 0) {
-    sections.push('', ...snapshot.bots.map(formatBotMetrics));
-  }
-  sections.push('', formatFleetMetrics(snapshot.fleet));
   return sections.join('\n');
 }
 

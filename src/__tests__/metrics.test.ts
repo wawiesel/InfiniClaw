@@ -300,7 +300,6 @@ describe('formatting', () => {
       interventions: { day1: 5, day7: 2.1 },
       xCommandsIssued: { day1: 3, day7: 1 },
     });
-    expect(result).toContain('Operator Metrics');
     expect(result).toContain('Interventions');
     expect(result).toContain('5/day (1d)');
     expect(result).toContain('2.1/day (7d)');
@@ -319,8 +318,7 @@ describe('formatting', () => {
     expect(result).toContain('🟢');
     expect(result).toContain('Cid');
     expect(result).toContain('quarters');
-    expect(result).toContain('Score');
-    expect(result).toContain('3 pts/day (1d)');
+    expect(result).toContain('score');
   });
 
   it('formatBotMetrics shows red pip when not running', () => {
@@ -358,7 +356,7 @@ describe('formatting', () => {
       status: 'quarters',
       processRunning: true,
     });
-    expect(result).toContain('Branch success');
+    expect(result).toContain('bb');
     expect(result).toContain('100%');
     expect(result).toContain('80%');
   });
@@ -372,7 +370,7 @@ describe('formatting', () => {
       status: 'quarters',
       processRunning: true,
     });
-    expect(result).not.toContain('Branch success');
+    expect(result).not.toContain('bb ');
   });
 
   it('formatFleetMetrics shows availability and autonomy', () => {
@@ -414,7 +412,7 @@ describe('formatScopeMetrics', () => {
 
   it('scope "operator" returns operator metrics', () => {
     const result = formatScopeMetrics(mockSnapshot, 'operator');
-    expect(result).toContain('Operator Metrics');
+    expect(result).toContain('Interventions');
     expect(result).not.toContain('Fleet');
   });
 
@@ -426,7 +424,7 @@ describe('formatScopeMetrics', () => {
 
   it('scope "fleet" returns fleet metrics', () => {
     const result = formatScopeMetrics(mockSnapshot, 'fleet');
-    expect(result).toContain('availability');
+    expect(result).toContain('Availability');
     expect(result).not.toContain('Operator');
   });
 
@@ -435,7 +433,7 @@ describe('formatScopeMetrics', () => {
     expect(result).toContain('Operator');
     expect(result).toContain('Herc');
     expect(result).toContain('Cid');
-    expect(result).toContain('availability');
+    expect(result).toContain('Availability');
   });
 
   it('scope "cid" returns bot metrics for cid', () => {
@@ -462,7 +460,7 @@ describe('formatScopeMetrics', () => {
   it('non-bot-like scope falls back to all', () => {
     const result = formatScopeMetrics(mockSnapshot, 'SOMETHING WEIRD');
     expect(result).toContain('Operator');
-    expect(result).toContain('availability');
+    expect(result).toContain('Availability');
   });
 });
 
@@ -504,11 +502,11 @@ describe('formatAllMetrics', () => {
     };
 
     const result = formatAllMetrics(snapshot);
-    expect(result).toContain('Operator Metrics');
+    expect(result).toContain('Operator');
     expect(result).toContain('Herc');
     expect(result).toContain('Cid');
     expect(result).toContain('Norm');
-    expect(result).toContain('availability');
+    expect(result).toContain('Availability');
     expect(result).toContain('1d'); // 86400s = 1d
   });
 });

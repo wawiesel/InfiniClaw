@@ -1069,6 +1069,12 @@ function formatCombinedMetrics(
   healthReports?: Array<{ ship: string; data: Record<string, unknown> }>,
 ): string {
   if (snapshots.length === 0) return '';
+<<<<<<< Updated upstream
+=======
+  const sections: string[] = [];
+
+  // ## 1 · Operator — aggregate across all ships
+>>>>>>> Stashed changes
   const r1 = (n: number) => Math.round(n * 10) / 10;
   const out: string[] = [];
 
@@ -1085,6 +1091,7 @@ function formatCombinedMetrics(
   totalInterventions.day7 = r1(totalInterventions.day7);
   totalXCmds.day1 = r1(totalXCmds.day1);
   totalXCmds.day7 = r1(totalXCmds.day7);
+<<<<<<< Updated upstream
   out.push(
     '## 1 · Operator',
     `  Interventions: ${totalInterventions.day1}/day (1d) · ${totalInterventions.day7}/day (7d)`,
@@ -1092,17 +1099,41 @@ function formatCombinedMetrics(
   );
 
   // ── 2 · Fleet ─────────────────────────────────────────────────────────────
+=======
+  sections.push('## 1 · Operator', formatOperatorMetrics({ interventions: totalInterventions, xCommandsIssued: totalXCmds }));
+
+  // ## 2 · Ships — per-ship relay stats + bots
+  sections.push('', '## 2 · Ships');
+  for (const s of snapshots) {
+    sections.push('', formatShipMetrics(s.shipMetrics));
+    for (const bot of s.bots) {
+      sections.push(formatBotMetrics(bot));
+    }
+  }
+
+  // ## 3 · Fleet — aggregate availability and autonomy
+>>>>>>> Stashed changes
   const assigned = snapshots.flatMap(s => s.bots.filter(b => b.status !== 'sleep' && b.status !== 'transit'));
   const running = assigned.filter(b => b.processRunning);
   const availability = assigned.length > 0 ? Math.round((running.length / assigned.length) * 100) : 100;
   const avgAutonomy1d = snapshots.reduce((sum, s) => sum + s.fleet.autonomyScore.day1, 0) / snapshots.length;
   const avgAutonomy7d = snapshots.reduce((sum, s) => sum + s.fleet.autonomyScore.day7, 0) / snapshots.length;
+<<<<<<< Updated upstream
   out.push(
     '',
     '## 2 · Fleet',
     `  Availability: ${availability}% · Autonomy: ${r1(avgAutonomy1d)}% (1d) · ${r1(avgAutonomy7d)}% (7d)`,
     `  Ships: ${snapshots.length} · Bots assigned: ${assigned.length} (${running.length} running)`,
   );
+=======
+  sections.push('', '## 3 · Fleet', formatFleetMetrics({
+    availability,
+    autonomyScore: {
+      day1: Math.round(avgAutonomy1d * 10) / 10,
+      day7: Math.round(avgAutonomy7d * 10) / 10,
+    },
+  }));
+>>>>>>> Stashed changes
 
   // ── 3 · Ships ─────────────────────────────────────────────────────────────
   out.push('', '## 3 · Ships');
@@ -1214,12 +1245,17 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
     }
   }
 
-  const lines: string[] = [`🏥 Fleet Health — ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n`];
+  // Only show bots that are in the current fleet — filters stale/removed bot names
+  const knownBots = new Set(Object.keys(liveFleet));
+
+  const lines: string[] = [`## 4 · Health — ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n`];
   let total24hOom = 0;
   let totalSessions = 0;
 
   for (const { ship, data } of deduped.values()) {
-    const bots = (data.bots || {}) as Record<string, Record<string, unknown>>;
+    const allBots = (data.bots || {}) as Record<string, Record<string, unknown>>;
+    // Filter to known fleet bots only — ignore stale entries from prior configurations
+    const bots = Object.fromEntries(Object.entries(allBots).filter(([n]) => knownBots.has(n)));
     const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => n);
     // Show data age so the Captain knows if it's fresh
     const reportTs = data.ts ? new Date(String(data.ts)) : null;
