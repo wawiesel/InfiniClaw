@@ -41,6 +41,10 @@ export function gitSyncRepo(cwd: string): { pulled: number; changed: boolean; ou
     const diff = execSync('git diff HEAD..origin/main --name-only', { ...opts, timeout: 5_000 }).trim();
     changed = diff.split('\n').includes('package-lock.json');
   } catch { /* best effort */ }
+  // If there's an in-progress merge (e.g. from a previous conflict), abort it so git stash works
+  if (fs.existsSync(path.join(cwd, '.git', 'MERGE_HEAD'))) {
+    try { execSync('git merge --abort', opts); } catch { /* ignore */ }
+  }
   // Stash any uncommitted changes
   let didStash = false;
   try {
