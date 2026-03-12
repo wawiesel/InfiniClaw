@@ -1985,6 +1985,7 @@ async function handleLifecycleCommand(
           writeFleet(liveFleet);
           clearShipConfigCache();
         }
+        stopBot(bot);
         killStaleContainers(bot);
         await setBotPip(root, bot, '🚀');
         await step('🚀 starting');
@@ -2082,21 +2083,10 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
   const scope = isBTC ? 'assigned' : 'present' as const;
   const bots = resolveBots(targetBot, conn, scope);
   if (bots.length === 0) {
-<<<<<<< Updated upstream
-    if (targetBot) {
-      const root = resolveRoot();
-      if (liveFleet[targetBot]?.ship === HOSTNAME) {
-        const env = (() => { try { return loadProfileEnv(root, targetBot); } catch { return null; } })();
-        await reply(conn, `relay ${env?.ASSISTANT_NAME || capitalizeName(targetBot)} not in this room`);
-      } else {
-        await helpReply(conn, `No local bot: ${targetBot}`);
-      }
-=======
     if (targetBot && scope === 'present' && liveFleet[targetBot]?.ship === HOSTNAME) {
       await reply(conn, `relay ${capitalizeName(targetBot)} not in this room`);
     } else if (targetBot) {
       await helpReply(conn, `No local bot: ${targetBot}`);
->>>>>>> Stashed changes
     }
     return;
   }
