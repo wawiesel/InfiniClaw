@@ -48,7 +48,7 @@ Sent automatically to each bot's main room on every boot, wrapped in a collapsib
 ### Rules
 
 - **All bots** show: Skills table, MCP Servers table, Active Todos table.
-- **Engineers** additionally show a Ship Health table. The table header must name the ship explicitly (e.g. `🏥 Ship Health — HERACLES`). Engineers are always in Engineering rooms.
+- **Engineers** additionally show a Ship Health table. The table header must name the ship explicitly (e.g. `🏥 Ship Health — Herc`). Engineers are always in Engineering rooms.
 - **Navigators** additionally show:
   1. The Captain's global weekly goal list.
   2. The latest entry from a knowledge search (most recently updated knowledge base item).

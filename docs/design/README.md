@@ -27,7 +27,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 ## Resilience
 
-- `14-configuration.md` — CLAUDE.md layers, MCP, startup checklist
+- `14-configuration.md` — CLAUDE.md layers (base/persona/room), MCP per-role config, startup checklist (skills/MCP/todos/ship health/weekly goals by role)
 - `15-safety.md` — OOM handling, memory limits, rate limiting
 - `16-autonomy.md` — Self-healing, auto-rebuild, holodeck
 
