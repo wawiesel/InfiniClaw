@@ -24,6 +24,6 @@ Integration and unit tests for InfiniClaw source modules that don't live next to
 | `matrix-mentions.test.ts` | Mention pill symmetry: inbound `<m>` wrapping, outbound `<m>` → pill conversion, raw `@Name` → `<m>` conversion |
 | `operator-commands.test.ts` | `!` command parsing and auth |
 | `routing.test.ts` | Message routing logic |
-| `metrics.test.ts` | Fleet metrics: rollingRate, SCORE_REACTIONS, operator/bot/ship/fleet metrics, autonomy score (x-commands excluded), infra failure tracking, branch brain success, scope routing (bot-scoped returns empty on non-owning ships), formatting (46 tests). |
+| `metrics.test.ts` | Fleet metrics: rollingRate, SCORE_REACTIONS, operator/bot/ship/fleet metrics, autonomy score (x-commands excluded), infra failure tracking, branch brain success, scope routing (bot-scoped returns empty on non-owning ships), formatting with fleet-aligned badges ◉/❓ (46 tests). |
 
 Run with: `npx vitest run --root .`

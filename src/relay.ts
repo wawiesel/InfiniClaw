@@ -1140,12 +1140,18 @@ function formatCombinedMetrics(
       const isLast = i === botsWithMeta.length - 1;
       const prefix = isLast ? '  └' : '  ├';
 
+      // CO detection: highest-rank on-duty bot of its role
+      const isCO = bot.status === 'onduty' && !botsWithMeta.some(
+        b => b.role === bot.role && b.status === 'onduty' && b.rank < bot.rank && b !== bot
+      );
+
       let badge: string;
       if (bot.status === 'transit') badge = '🚀';
       else if (bot.status === 'sleep') badge = '💤';
       else if (bot.status === 'warn') badge = '⚠️';
-      else if (bot.processRunning) badge = '◉';
-      else badge = '🔴';
+      else if (isCO) badge = '⭐';
+      else if (bot.status === 'onduty' || bot.status === 'quarters') badge = '◉';
+      else badge = '❓';
 
       const nameDisplay = capitalizeName(bot.name) + NBSP.repeat(maxName - capitalizeName(bot.name).length);
       const roleCap = bot.role ? capitalizeName(bot.role) : '';
@@ -1226,7 +1232,7 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
     const allBots = (data.bots || {}) as Record<string, Record<string, unknown>>;
     // Filter to known fleet bots only — ignore stale entries from prior configurations
     const bots = Object.fromEntries(Object.entries(allBots).filter(([n]) => knownBots.has(n)));
-    const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => n);
+    const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => capitalizeName(n));
     // Show data age so the Captain knows if it's fresh
     const reportTs = data.ts ? new Date(String(data.ts)) : null;
     const ageMs = reportTs ? Date.now() - reportTs.getTime() : null;
@@ -1248,10 +1254,10 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
       total24hOom += oom24;
       // Show bot if active OR has rolling activity in 24h
       if (b.status === 'ACTIVE' || oom24 > 0 || sk24 > 0) {
-        const mem = b.rss_mb != null ? `RSS=${b.rss_mb}/${b.limit_mb ?? '?'}MB` : '';
+        const mem = b.rss_mb != null ? `${b.rss_mb}/${b.limit_mb ?? '?'}MB` : '';
         const stats24 = `24h: SK+${sk24} OOM+${oom24}`;
         const stats7d = r7 ? ` · 7d: SK+${r7.sigkills ?? 0} OOM+${r7.oom_kills ?? 0}` : '';
-        lines.push(`  ${name}: ${b.status} ${mem} ${stats24}${stats7d}`);
+        lines.push(`  ${capitalizeName(name)}: ${b.status} ${mem} ${stats24}${stats7d}`);
       }
     }
     const sess = Number(data.session_total_mb || 0);
@@ -2134,11 +2140,11 @@ async function handleLifecycleCommand(
 
   if (action !== 'dismiss' && action !== 'sleep') {
     if (!isShipCommissioned()) {
-      await reply(conn, `⛔ 📡 ship decommissioned — use !commission first`);
+      await reply(conn, `⛔ ship decommissioned — use !commission first`);
       return;
     }
     try { ensurePodmanReady(); } catch (err) {
-      await reply(conn, `⛔ 📡 podman not ready — ${errStr(err)}`);
+      await reply(conn, `⛔ podman not ready — ${errStr(err)}`);
       return;
     }
   }
@@ -2241,14 +2247,14 @@ async function handleLifecycleCommand(
         const ver = botVersion(root, bot);
         await setBotPip(root, bot, '🟢');
         await step(`🟢 online · ${role}[${rank}] · ${model}${ver}`);
-        const done = `📡 ${name} ${doneVerb}!`;
+        const done = `✅ ${name} ${doneVerb}`;
         await threadReply(conn, threadRoot, done);
         await reply(conn, done);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
         if (!isRestart) await setBotPip(root, bot, '💤');
-        const fail = `⛔ 📡 wake ${name} failed — ${errStr(err)}`;
+        const fail = `⛔ wake ${name} failed — ${errStr(err)}`;
         await step(fail);
         await reply(conn, fail);
       }
@@ -2428,7 +2434,7 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
     }
   } catch (err) {
     log(`metrics: command error: ${errStr(err)}`);
-    await reply(conn, `⛔ 📡 metrics failed — ${errStr(err)}`);
+    await reply(conn, `⛔ metrics failed — ${errStr(err)}`);
   }
 }
 
@@ -2672,10 +2678,12 @@ function registerRelayCommands(): void {
         if (!resolved) { await helpReply(conn, `Unknown ship: ${shipInput}`); return; }
         targetName = resolved;
         targetShip = ships[resolved].hostname;
-        if (!ships[resolved].commissioned) { await reply(conn, `⛔ 📡 ${targetName} decommissioned — use !commission first`); return; }
+        if (!ships[resolved].commissioned) { await reply(conn, `⛔ ${targetName} decommissioned — use !commission first`); return; }
       } catch { targetShip = shipInput; targetName = shipInput; }
       if (liveFleet[bot].ship !== HOSTNAME) return;
-      const tr = await reply(conn, `📡 transport ${capitalizeName(bot)} → ${targetName} ...`);
+      const botEnv = (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })();
+      const botDisplayName = botEnv?.ASSISTANT_NAME || capitalizeName(bot);
+      const tr = await reply(conn, `📡 transport ${botDisplayName} → ${targetName} ...`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         stopBot(bot);
@@ -2686,7 +2694,7 @@ function registerRelayCommands(): void {
         const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetName}`);
         fleetDirty = false;
         if (!result.ok) throw new Error(result.error);
-        await send(`✅ ${capitalizeName(bot)} dematerialized — awaiting materialization on ${targetName}`);
+        await send(`✅ ${botDisplayName} dematerialized — awaiting materialization on ${targetName}`);
       } catch (err) {
         await send(`⛔ transport failed — ${errStr(err)}`);
       }
@@ -2796,7 +2804,7 @@ function registerRelayCommands(): void {
             } else {
               shipStatus = ' · unknown';
             }
-            lines.push(`${shipEmoji}${statusChar} ${shipName} · 🏅${rank}${shipStatus}`);
+            lines.push(`${shipEmoji}${statusChar} **${shipName}** · 🏅${rank}${shipStatus}`);
           }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
@@ -2837,7 +2845,7 @@ function registerRelayCommands(): void {
 
         if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
       } catch (err) {
-        await reply(conn, `⛔ 📡 fleet failed — ${errStr(err)}`);
+        await reply(conn, `⛔ fleet failed — ${errStr(err)}`);
       }
     },
 
@@ -2940,7 +2948,7 @@ function registerRelayCommands(): void {
         const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
         await reply(conn, `📡 mount granted to ${botName}: ${hostPath} (rw, expires ~${expiry}) — restart required`);
       } catch (err) {
-        await reply(conn, `⛔ 📡 allow failed — ${errStr(err)}`);
+        await reply(conn, `⛔ allow failed — ${errStr(err)}`);
       }
     },
 
@@ -2952,9 +2960,9 @@ function registerRelayCommands(): void {
       if (!local.includes(botName.toLowerCase())) return; // not on this ship
       try {
         const removed = revokeMount(botName.toLowerCase(), hostPath);
-        await reply(conn, `📡 ${removed ? `mount revoked: ${hostPath}` : `no mount found: ${hostPath}`}`);
+        await reply(conn, `📡 ${capitalizeName(botName)} ${removed ? `mount revoked: ${hostPath}` : `no mount found: ${hostPath}`}`);
       } catch (err) {
-        await reply(conn, `⛔ 📡 deny failed — ${errStr(err)}`);
+        await reply(conn, `⛔ deny failed — ${errStr(err)}`);
       }
     },
   });
@@ -3384,7 +3392,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               await handleCommand(body, conn, conns);
             } catch (err) {
               log(`${conn.name}: command error: ${errStr(err)}`);
-              await reply(conn, `⛔ 📡 command error — ${errStr(err)}`);
+              await reply(conn, `⛔ command error — ${errStr(err)}`);
             }
           }
         }

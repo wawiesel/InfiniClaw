@@ -315,13 +315,13 @@ describe('formatting', () => {
       status: 'quarters',
       processRunning: true,
     });
-    expect(result).toContain('🟢');
+    expect(result).toContain('◉');
     expect(result).toContain('Cid');
     expect(result).toContain('quarters');
     expect(result).toContain('score');
   });
 
-  it('formatBotMetrics shows red pip when not running', () => {
+  it('formatBotMetrics shows ❓ pip when not running', () => {
     const result = formatBotMetrics({
       name: 'norm',
       score: { day1: 0, day7: 0 },
@@ -330,7 +330,7 @@ describe('formatting', () => {
       status: 'sleep',
       processRunning: false,
     });
-    expect(result).toContain('🔴');
+    expect(result).toContain('❓');
   });
 
   it('formatShipMetrics shows name, uptime, restarts, infra failures', () => {

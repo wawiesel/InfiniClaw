@@ -401,11 +401,11 @@ export function formatOperatorMetrics(m: OperatorMetrics): string {
 }
 
 export function formatBotMetrics(b: BotMetrics): string {
-  const pip = b.processRunning ? '🟢' : '🔴';
+  const pip = b.processRunning ? '◉' : '❓';
   const name = capitalizeName(b.name);
   const score = `score ${b.score.day1}/${b.score.day7}`;
   const crashes = `crashes ${b.crashes.day1}/${b.crashes.day7}`;
-  let line = `  ${pip} **${name}** · ${b.status} · ${score} · ${crashes}`;
+  let line = `  ${pip} ${name} · ${b.status} · ${score} · ${crashes}`;
   if (b.branchBrainSuccess.day1 >= 0 || b.branchBrainSuccess.day7 >= 0) {
     const fmt1 = b.branchBrainSuccess.day1 >= 0 ? `${b.branchBrainSuccess.day1}%` : '—';
     const fmt7 = b.branchBrainSuccess.day7 >= 0 ? `${b.branchBrainSuccess.day7}%` : '—';
