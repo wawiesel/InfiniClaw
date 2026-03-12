@@ -1111,8 +1111,10 @@ function formatCombinedMetrics(
     const uptime = formatDuration(s.shipMetrics.relayUptimeSeconds);
     const syncFail = s.shipMetrics.infraFailures.day1;
     const syncTag = syncFail > 0 ? `⚠️${syncFail} sync/day` : 'sync OK';
-    const rst = s.shipMetrics.relayRestarts;
-    const rstTag = `↻${rst.day1}/${rst.day7}`;
+    const rst = s.shipMetrics.relayRestarts as { day1?: number; day7?: number } | number | undefined;
+    const rst1 = typeof rst === 'object' && rst ? (rst.day1 ?? '?') : (typeof rst === 'number' ? rst : '?');
+    const rst7 = typeof rst === 'object' && rst ? (rst.day7 ?? '?') : '?';
+    const rstTag = `↻${rst1}/${rst7}`;
     lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptime} up · ${rstTag} · ${syncTag}`);
 
     // Build bot list: merge metrics snapshot + health + liveFleet role/rank
