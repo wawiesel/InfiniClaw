@@ -1136,26 +1136,37 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
   }
 
   const lines: string[] = [`🏥 Fleet Health — ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n`];
-  let totalOom = 0;
+  let total24hOom = 0;
   let totalSessions = 0;
 
   for (const { ship, data } of deduped.values()) {
     const bots = (data.bots || {}) as Record<string, Record<string, unknown>>;
     const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => n);
-    const ts = String(data.ts || '?').slice(0, 19);
-    lines.push(`**${ship}** (${ts})`);
+    // Show data age so the Captain knows if it's fresh
+    const reportTs = data.ts ? new Date(String(data.ts)) : null;
+    const ageMs = reportTs ? Date.now() - reportTs.getTime() : null;
+    const age = ageMs != null ? (ageMs < 120_000 ? 'live' : `${Math.round(ageMs / 60_000)}m ago`) : '?';
+    lines.push(`**${ship}** (${age})`);
     lines.push(`  Active: ${active.length > 0 ? active.join(', ') : 'none'}`);
 
-    const trends = (data.trends_24h || {}) as Record<string, { sigkills: number; oom_kills: number }>;
+    // Use 24h rolling data — cumulative totals have no time context
+    const rolling24h = (data.rolling as Record<string, unknown> | undefined)?.[`24h`] as
+      { bots?: Record<string, { sigkills?: number; oom_kills?: number }> } | undefined;
+    const r7d = (data.rolling as Record<string, unknown> | undefined)?.[`7d`] as
+      { bots?: Record<string, { sigkills?: number; oom_kills?: number }> } | undefined;
+
     for (const [name, b] of Object.entries(bots)) {
-      const oom = Number(b.oom_kills || 0);
-      const sk = Number(b.sigkills || 0);
-      totalOom += oom;
-      if (b.status === 'ACTIVE' || oom > 0 || sk > 0) {
+      const r = rolling24h?.bots?.[name];
+      const r7 = r7d?.bots?.[name];
+      const oom24 = r?.oom_kills ?? 0;
+      const sk24 = r?.sigkills ?? 0;
+      total24hOom += oom24;
+      // Show bot if active OR has rolling activity in 24h
+      if (b.status === 'ACTIVE' || oom24 > 0 || sk24 > 0) {
         const mem = b.rss_mb != null ? `RSS=${b.rss_mb}/${b.limit_mb ?? '?'}MB` : '';
-        const t = trends[name];
-        const trend = t ? ` Δ24h: SK+${t.sigkills} OOM+${t.oom_kills}` : '';
-        lines.push(`  ${name}: ${b.status} ${mem} SK=${sk} OOM=${oom}${trend}`);
+        const stats24 = `24h: SK+${sk24} OOM+${oom24}`;
+        const stats7d = r7 ? ` · 7d: SK+${r7.sigkills ?? 0} OOM+${r7.oom_kills ?? 0}` : '';
+        lines.push(`  ${name}: ${b.status} ${mem} ${stats24}${stats7d}`);
       }
     }
     const sess = Number(data.session_total_mb || 0);
@@ -1163,7 +1174,7 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
     lines.push(`  Sessions: ${sess}MB\n`);
   }
 
-  lines.push(`**Totals:** ${deduped.size} ships, ${totalOom} OOM kills, ${Math.round(totalSessions * 10) / 10}MB sessions`);
+  lines.push(`**Totals:** ${deduped.size} ships, OOM+${total24hOom} (24h), ${Math.round(totalSessions * 10) / 10}MB sessions`);
   return lines.join('\n');
 }
 
