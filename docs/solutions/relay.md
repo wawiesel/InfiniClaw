@@ -54,6 +54,24 @@ Look for: crash loops, Matrix 502 errors, "initial sync done" (means connected).
 
 ---
 
+## Code sync fails: "git stash failed: file.md: needs merge"
+
+**Problem:** Relay logs `⚠️ code sync down` with `git stash failed: <file>: needs merge`. Relay keeps running with old code.
+
+**Cause:** A previous `git merge` or `git pull` left unresolved conflicts in the working tree. Git stash refuses to stash a file that is in "needs merge" state (unresolved conflict in the index).
+
+**Fix:** (as of commit 50dd730, the relay handles this automatically — but if the fix itself is on old code that can't be synced, manual intervention is needed)
+```bash
+cd ~/2026-Nanoclaw/InfiniClaw
+git status                     # see which files have conflicts
+git merge --abort              # or: git checkout -- <file>
+git pull --rebase              # sync to origin/main
+```
+
+**Prevention:** The relay now checks for `MERGE_HEAD` before stashing and calls `git merge --abort` automatically.
+
+---
+
 ## Secrets sync push fails: "incorrect old value provided"
 
 **Problem:** Relay logs `secrets sync FAILED: 1 unpushed commit(s), push failed: incorrect old value provided`.
