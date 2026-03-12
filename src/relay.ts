@@ -1181,21 +1181,21 @@ function formatCombinedMetrics(
       const hBot = hBots[bot.name];
       const rss = hBot?.rss_mb != null ? Number(hBot.rss_mb) : 0;
       totalRssMb += rss;
-      const memStr = rss > 0
-        ? (hBot?.limit_mb != null ? `${rss}/${hBot.limit_mb}MB` : `${rss}MB`)
-        : '';
-      const mem = memStr ? ` · mem ${memStr}` : '';
+      const rssStr = rss > 0 ? String(rss) : '?';
+      const limitStr = hBot?.limit_mb != null ? String(hBot.limit_mb) : '?';
+      const mem = ` · mem ${rssStr}/${limitStr}MB`;
       const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
       // Token throughput: prefer health report, fall back to metrics snapshot rolling rate
       const tokData = (health?.tokens as Record<string, { total_24h?: number }> | undefined)?.[bot.name];
       const tok24k = tokData?.total_24h != null ? Math.round(tokData.total_24h / 1000) : null;
       const tokFromMetrics = bot.tokenThroughput?.day1 != null && bot.tokenThroughput.day1 > 0
         ? formatTokens(bot.tokenThroughput.day1) : null;
-      const tokTag = tok24k != null && tok24k > 0
-        ? ` · tok/d ${tok24k}K`
-        : (tokFromMetrics ? ` · tok/d ${tokFromMetrics}` : ` · tok/d ?`);
-      // Response latency (p50) — always show placeholder
-      const latTag = bot.responseLatencyP50 != null ? ` · rsp ${bot.responseLatencyP50}s` : ` · rsp ?`;
+      const tokStr = tok24k != null && tok24k > 0 ? `${tok24k}K` : (tokFromMetrics ?? '?');
+      const tokTag = ` · tok ${tokStr}/day`;
+      // Response latency p50/p95 — always show slot, ? when no data
+      const p50 = bot.responseLatencyP50 != null ? `${bot.responseLatencyP50}s` : '?';
+      const p95 = bot.responseLatencyP95 != null ? `${bot.responseLatencyP95}s` : '?';
+      const latTag = ` · lat ${p50}/${p95} (1d)`;
 
       lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}${tokTag}${latTag}`);
     }
