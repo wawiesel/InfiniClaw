@@ -2325,13 +2325,12 @@ function registerRelayCommands(): void {
 
     fleet: async (cmd, conn) => {
       try {
-        // Create the thread immediately for responsiveness
-        const threadRoot = await reply(conn, '📋 Fleet');
-
-        // Every ship publishes its report, then the speaker assembles
+        // Every ship publishes its report, then only the speaker assembles
         const report = await publishFleetReport();
 
         if (!await electSpeaker()) return;
+
+        const threadRoot = await reply(conn, '📋 Fleet');
 
         const ships = safeLoadShips();
         const allShipNames = Object.keys(ships);
