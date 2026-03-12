@@ -55,7 +55,7 @@ Host machine (macOS / Linux)
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts       → Copy persona skills into container session
 ├── mcp-sync.ts         → Sync MCP server config (persona → session)
-├── metrics.ts          → Fleet metrics: operator interventions (non-command only), bot scores, ship uptime + infra failure rate, fleet availability/autonomy. Publishes to S3. `recordInfraFailure()` tracks sync/build failures via `reportFailure`. Bot-scoped queries return empty on non-owning ships. Formatting uses same badge vocabulary as `!fleet` (◉/❓ not 🟢/🔴).
+├── metrics.ts          → Fleet metrics: operator interventions (non-command only), bot scores, ship uptime + infra failure rate, fleet availability/autonomy. Publishes to S3. `recordInfraFailure()` tracks sync/build failures via `reportFailure`. Bot-scoped queries return empty on non-owning ships. Formatting uses same badge vocabulary as `!fleet` (◉/❓ not 🟢/🔴). `ShipMetrics.relayRestarts` is `RollingMetric` (1d/7d counts via `pm2.restartsSince()`).
 ├── command-registry.ts → Single source of truth for x-command names (includes context-aware !metrics). Help text for !pull says "restart bots" (preserves state, not "wake").
 ├── s3-sync.ts          → S3 backup/restore for cross-machine moves
 ├── podman-bootstrap.ts → Image availability checks, orphan cleanup, delegates recovery to podman-utils

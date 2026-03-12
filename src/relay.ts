@@ -1111,15 +1111,9 @@ function formatCombinedMetrics(
     const uptime = formatDuration(s.shipMetrics.relayUptimeSeconds);
     const syncFail = s.shipMetrics.infraFailures.day1;
     const syncTag = syncFail > 0 ? `⚠️${syncFail} sync/day` : 'sync OK';
-<<<<<<< Updated upstream
-    const r = s.shipMetrics.relayRestarts;
-    const restartTag = `↻${r.day1}/${r.day7}`;
-    lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptime} up · ${restartTag} · ${syncTag}`);
-=======
     const rst = s.shipMetrics.relayRestarts;
     const rstTag = `↻${rst.day1} (1d) ${rst.day7} (7d)`;
     lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptime} up · ${rstTag} · ${syncTag}`);
->>>>>>> Stashed changes
 
     // Build bot list: merge metrics snapshot + health + liveFleet role/rank
     const health = healthByShip.get(s.ship);
@@ -1174,15 +1168,8 @@ function formatCombinedMetrics(
       const sk24 = r24?.sigkills ?? t24?.sigkills ?? 0;
       totalOom24h += oom24;
       const hBot = hBots[bot.name];
-<<<<<<< Updated upstream
-      // mem: current RSS / container limit — snapshot value, not rolling
-      const mem = hBot?.rss_mb != null ? ` · mem ${hBot.rss_mb}/${hBot.limit_mb ?? '?'}MB` : '';
-      // kills: 1d rolling counts — show only when non-zero
-      const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
-=======
       const mem = hBot?.rss_mb != null ? ` · RSS ${hBot.rss_mb}/${hBot.limit_mb ?? '?'}MB` : '';
       const kills = ` · 1d: SK+${sk24} OOM+${oom24}`;
->>>>>>> Stashed changes
 
       lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}`);
     }
