@@ -107,5 +107,6 @@ export async function dispatch(cmd: string, conn: RoomConn, allConns: RoomConn[]
 export function buildHelpText(): string {
   const maxUsage = Math.max(...COMMANDS.map(c => c.usage.length));
   const lines = COMMANDS.map(c => `  ${c.usage.padEnd(maxUsage)} — ${c.description}`);
-  return ['📟 X-commands:', ...lines, `  ${'!'.padEnd(maxUsage)} — this help`].join('\n');
+  const body = [...lines, `  ${'!'.padEnd(maxUsage)} — this help`].join('\n');
+  return `📟 X-commands:\n\`\`\`\n${body}\n\`\`\``;
 }
