@@ -46,11 +46,7 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 
 | Metric | Formula | Good | Alarm | Status |
 |--------|---------|------|-------|--------|
-<<<<<<< Updated upstream
-| **Uptime %** | % of last 24h relay was running (approx: current uptime / 86400s) | > 99% (1d) | < 95% | ✅ Tracked |
-=======
-| **Relay uptime %** | % of last 24h relay was running (approx from continuous uptime since last start) | 100% (1d) | < 90% | ✅ Tracked (approx) |
->>>>>>> Stashed changes
+| **Relay uptime %** | % of last 24h relay was running (approx: current uptime / 86400s) | 100% (1d) | < 90% | ✅ Tracked (approx) |
 | **Response latency** | p50/p95 time from Captain mention to first bot reply | < 30s p50 | > 2min p95 | 🔲 Planned |
 | **Crashes/day** | PM2 restart count per day | 0 | > 2/day | ✅ Tracked |
 | **OOM kills/day** | Container killed by memory limit per day | 0 | Any | ✅ Tracked |
@@ -103,11 +99,7 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 The `!metrics` output uses the same visual language as `!fleet`:
 
 ```
-<<<<<<< Updated upstream
-🦁◉ Herc · 🏅1 · up 99% · ↻2/5 · sync OK
-=======
-🦁◉ HERACLES · 🏅1 · up 91% (1d) · ↻2/5 · sync OK
->>>>>>> Stashed changes
+🦁◉ Herc · 🏅1 · up 91% (1d) · ↻2/5 · sync OK
   ├ ⭐ Cid   · 🎨 Artist   · 🏅1 · mem 120/512MB · SK+0 OOM+0 (1d)
   └ ◉ Norm  · 💬 Normie   · 🏅2 · mem 98/512MB  · SK+0 OOM+0 (1d)
 
