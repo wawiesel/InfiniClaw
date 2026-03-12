@@ -2470,9 +2470,9 @@ function registerRelayCommands(): void {
     fleet: async (cmd, conn) => {
       try {
         // Every ship publishes its report, then only the speaker assembles
-        const report = await publishFleetReport();
-
-        if (!await electSpeaker()) return;
+        // Run publish + election concurrently for instant thread root
+        const [report, isSpeaker] = await Promise.all([publishFleetReport(), electSpeaker()]);
+        if (!isSpeaker) return;
 
         const threadRoot = await reply(conn, '📋 Fleet');
 
@@ -2565,7 +2565,7 @@ function registerRelayCommands(): void {
               shipStatus = ' · unknown';
             }
             const spaceId = sConfig?.spaceId;
-            const shipLink = spaceId ? `[${shipName}](https://matrix.to/#/${encodeURIComponent(spaceId)})` : shipName;
+            const shipLink = spaceId ? `${shipName} [↗](https://matrix.to/#/${encodeURIComponent(spaceId)})` : shipName;
             lines.push(`${shipEmoji}${statusChar} ${shipLink} · 🏅${rank}${shipStatus}`);
           }
 
@@ -2602,7 +2602,7 @@ function registerRelayCommands(): void {
             const qRoom = entry.quartersRoom;
             const namePad = NBSP.repeat(maxName - entry.name.length);
             const nameLink = qRoom
-              ? `[${entry.name}${namePad}](https://matrix.to/#/${encodeURIComponent(qRoom)})`
+              ? `${entry.name}${namePad} [↗](https://matrix.to/#/${encodeURIComponent(qRoom)})`
               : `${entry.name}${namePad}`;
             lines.push(`${prefix} ${badge} ${nameLink} · ${roleDisplay}${rolePad} · 🏅${entry.rank}${entry.gitVersion}`);
           }
@@ -2796,8 +2796,9 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 
 async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[]): Promise<void> {
   // ! (bare) — print help via help account (speaker only, one reply)
+  // Use cached speaker state for instant response; fall back to full election if uncertain.
   if (cmd === '!') {
-    if (!await electSpeaker()) return;
+    if (!(isSpeakerCached || await electSpeaker())) return;
     await helpReply(conn, buildHelpText());
     return;
   }
