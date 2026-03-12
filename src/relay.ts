@@ -2079,8 +2079,7 @@ function registerRelayCommands(): void {
 
       // !operator — each ship reports its own status
       if (!arg) {
-        const status = isOperatorRelayEnabled() ? '✅ on' : '🔇 off';
-        await shipReport(conn, `${thisShipName()}: operator relay ${status}`);
+        await shipReport(conn, `relay operator ${isOperatorRelayEnabled() ? 'on ✅' : 'off 🔇'}`);
         return;
       }
 
