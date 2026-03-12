@@ -65,6 +65,29 @@ Branch brains receive credentials from the bot's env file:
 
 Also inherits: `ANTHROPIC_BASE_URL`, `NODE_EXTRA_CA_CERTS`, `GH_TOKEN` (from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account).
 
+### Branch Brain Upgrade: Full Interactive Session
+
+> **Status:** Not yet implemented. Current implementation uses one-shot `claude --print`.
+
+The planned upgrade replaces one-shot `claude --print` with a full nanoclaw group container session. Upgraded branch brains:
+
+- **Resumable** — session ID stored in todo entry for context recovery on relay restart
+- **Interactive** — receives new messages from the relay via IPC (same mechanism as main brain)
+- **Time-limited** — 10-minute countdown (`BRANCH_BRAIN_TIMEOUT_MS`); relay sends interrupt when expired, branch brain gets ~30s to finalize
+- **Titled** — thread title derived from the todo item content
+
+### Context Injection
+
+> **Status:** Not yet implemented.
+
+When a message arrives on the main timeline, the relay fans it out to all active branch brain IPC queues with:
+
+```
+You are branch brain <title>. Here is a message from main timeline: <msg>. It may not apply to you. If it does, modify your task accordingly.
+```
+
+Branch brain responds in its thread if relevant; ignores silently if not.
+
 ## Lobes
 
 Lobes are MCP tools that spawn non-blocking workers using any provider. Unlike branch brains, lobes do not receive the full conversation context — only what the bot explicitly passes.

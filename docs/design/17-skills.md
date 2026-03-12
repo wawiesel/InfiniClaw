@@ -37,6 +37,26 @@ description: When and how to use this skill.
 ...
 ```
 
+## Planned Skills
+
+### pm (Project Management)
+
+> **Status:** Not yet implemented.
+
+The `pm` skill is planned for engineer-role bots. Capabilities:
+
+- Maintain a WBS (Work Breakdown Structure) JSON at `_runtime/data/wbs-{bot}.json`
+- Render GANTT as HTML and upload to S3 presigned URL for the Captain
+- Track task dependencies
+- Predict time-to-completion from task complexity and historical branch brain durations
+- Generate weekly summaries for the Captain
+
+### retrospective
+
+> **Status:** Not yet implemented.
+
+Prompt template for the retrospective cycle (see [09-roles-and-rooms](09-roles-and-rooms.md#retrospective-cycle)). Lives at `skills/retrospective/SKILL.md`.
+
 ## Creating Skills
 
 Bots with write access to their persona directory can create new skills by writing `SKILL.md` files. Pool-level skills (shared by all bots of a role) require write access to the InfiniClaw repo.

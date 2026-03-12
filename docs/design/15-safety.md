@@ -44,6 +44,14 @@ Podman containers with memory caps, optional CPU limits. No network egress to ar
 
 Agent-runner runs a 5-second check on every remote MCP server at startup. Unreachable servers are dropped. Failure reports go to Engineering automatically.
 
+## Media Download OOM Risk
+
+> **Status:** Known issue (see [#16](https://github.com/wawiesel/InfiniClaw/issues/16)).
+
+`downloadContent()` in `src/channels/matrix.ts` buffers the full file into memory before the 50 MB cap is applied. An adversarial homeserver can send large media repeatedly and spike RSS by hundreds of MB.
+
+**Fix (pending):** Stream `Content-Length` pre-flight check, or streaming download with byte-count abort before buffering completes. Requires matrix-bot-sdk streaming API investigation.
+
 ## Verification
 
 1. **OOM recovery** — Simulate an OOM (kill container with code 137).

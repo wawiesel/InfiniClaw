@@ -125,6 +125,46 @@ Add redundancy endpoints to `fleet.json`:
 
 The relay and bot code should try endpoint[0] first, fall back to endpoint[1] on failure. A simple try/catch wrapper around S3 and git operations is sufficient.
 
+## Multi-Computer Architecture
+
+> **Status:** Designed, not yet implemented. Current code assumes single-machine deployment.
+
+The planned multi-computer system lets bots access resources on multiple machines without changing bot identities or room structure.
+
+### Single-Machine Assumptions (Current)
+
+| Category | Assumption |
+|----------|-----------|
+| Podman | Container runtime on same machine |
+| Volume mounts | All `-v` paths are local filesystem |
+| SQLite | Synchronous local file access |
+| IPC filesystem | `fs.readdirSync` polling of local dirs |
+| Session files | Local `.jsonl` mounted into containers |
+| launchd | macOS-only service manager |
+
+### Migration Plan
+
+| Phase | Subsystem | Approach |
+|-------|-----------|----------|
+| 1 | Service manager | launchd → PM2 (cross-platform, already used for bots) |
+| 2 | IPC | Filesystem polling → Matrix messages (commands become `!ipc` prefixed Matrix messages; bots already communicate via Matrix) |
+| 3 | Container runtime | Local `podman` → `ssh host podman run -i --rm ...` via `host?` field on `RunContainerOpts` |
+| 4 | Volume mounts | Local → NFS (ro home) + local (rw workspace) + Syncthing (persona files) |
+| 5 | Cross-bot DB | Direct file open → proxied via Matrix IPC |
+| 6 | State sync | Manual → Litestream (~450ms p99 replication to S3, disaster recovery) |
+| 7 | Deploy | Local rsync → `ssh host` prefix on deploy commands |
+
+Phases 1-2 can be done on the current single machine as pure improvements.
+
+### Key Decisions
+
+- **Container runtime:** `ssh host podman run` (not `podman --remote` — has broken stdin/stdout pipes)
+- **Volume mounts:** NFS for home (read-only), local for workspace, Syncthing for personas
+- **SQLite:** Single-writer per bot (no concurrent-writer problem), Litestream backup
+- **IPC:** Matrix as the universal transport — eliminates the biggest single-machine assumption
+- **Service manager:** PM2 (`pm2 startup` generates launchd/systemd natively)
+- **Images:** Build locally from shared git repo (already done via `rebuild_image` IPC)
+
 ## Why
 
 Currently, if the machine hosting Gitea or MinIO goes down, the entire fleet loses access to code repos and shared state. Both git and MinIO are designed for replication — we just need a second instance of each on a different machine, with their native replication keeping them in sync. No external HA tooling required.

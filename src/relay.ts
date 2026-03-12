@@ -1805,7 +1805,7 @@ async function handleLifecycleCommand(
       return;
     }
     try { ensurePodmanReady(); } catch (err) {
-      await reply(conn, `relay podman not ready — ${errStr(err)}`);
+      await reply(conn, `⛔ relay podman not ready — ${errStr(err)}`);
       return;
     }
   }

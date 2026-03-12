@@ -161,6 +161,31 @@ Bot learns something during work
 
 The Captain can see what bots are remembering and correct them directly in the Room.
 
+## Retrospective Cycle
+
+> **Status:** Not yet implemented.
+
+After a configurable duty period, the relay forces a bot to quarters for a structured retrospective. This keeps context manageable, surfaces learnings, and keeps `MEMORY.md` current.
+
+### Duty Timer
+
+`ondutyAt` is tracked per bot in `_runtime/data/ipc/{bot}/status.json`. On each branch brain completion or heartbeat, the relay checks if `DUTY_CYCLE_MS` (default: 3600000ms / 1 hour) has elapsed.
+
+### Retrospective Sequence
+
+On duty period expiry:
+
+1. **Force to quarters** — Relay runs `!dismiss → quarters` with `RETROSPECTIVE=1` in the IPC message
+2. **Retrospective questions** — Relay sends these questions to the bot's quarters room as INTERCOM, waiting for a reply before sending the next:
+   - "What went well since your last duty cycle?"
+   - "What didn't go well? Any blockers or mistakes?"
+   - "How could you do better next time?"
+   - "Which parts of your CLAUDE.md helped you achieve your goals? Which parts didn't?"
+   - "Update your CLAUDE.md and MEMORY.md now. Post 'Update complete.' when done."
+3. **Auto-rejoin** — When bot posts "Update complete." (or on timeout `RETROSPECTIVE_TIMEOUT_MS`), relay commits/pushes the bot's memory files, then runs `!report`
+
+The retrospective prompt template lives as a skill: `skills/retrospective/SKILL.md`.
+
 ## Implementation
 
 ### Room IDs
