@@ -24,7 +24,7 @@ Branch brains run on the **host machine** — not inside containers. They are on
 ### How Branching Works
 
 1. Main brain calls `branch_to_thread(objective, thread_id)`
-2. Agent-runner writes a relay task file: `_runtime/relay-tasks/thread-brain-*.json`
+2. Agent-runner writes a relay task file: `_runtime/relay-tasks/branch-brain-*.json`
 3. Relay picks up the file, calls `spawnBranchBrain()`
 4. Relay posts announcement on main timeline: `🧵 Branch Brain: {objective first line}`
 5. Announcement event ID becomes the thread root
@@ -45,7 +45,7 @@ The relay parses `stream-json` format from the Claude CLI:
 
 ### Concurrency Limit
 
-`MAX_THREAD_BRAINS_PER_BOT` (default 3, configurable via env) caps concurrent branch brains per bot. Excess requests are rejected with a warning posted into the triggering thread.
+`MAX_BRANCH_BRAINS_PER_BOT` (default 3, configurable via env) caps concurrent branch brains per bot. Excess requests are rejected with a warning posted into the triggering thread.
 
 ### After Completion
 
@@ -157,7 +157,7 @@ Bots must follow this sequence:
 5. **Thread reactivation** — Reply in a completed thread later.
    *Check:* New branch brain spawns with old context, answers the question.
 
-6. **Concurrency limit** — Trigger more than `MAX_THREAD_BRAINS_PER_BOT` branches.
+6. **Concurrency limit** — Trigger more than `MAX_BRANCH_BRAINS_PER_BOT` branches.
    *Check:* Excess rejected with warning.
 
 7. **Lobe posts to quarters** — Bot delegates to a lobe.

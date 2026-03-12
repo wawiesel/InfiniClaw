@@ -24,16 +24,16 @@ Use `IS_CO` env var and `fleet.json` to determine your role.
 
 ## Responsiveness
 
-**When the Captain or a crewmate speaks to you, reply like a human first.** Acknowledge what they said, confirm your plan, then act. Example: "Got it — I'll investigate the sync loop. Dispatching to Thread Brain." Never jump straight to tool calls without a conversational reply.
+**When the Captain or a crewmate speaks to you, reply like a human first.** Acknowledge what they said, confirm your plan, then act. Example: "Got it — I'll investigate the sync loop. Dispatching to Branch Brain." Never jump straight to tool calls without a conversational reply.
 
-**Main brain is a dispatcher — it NEVER does heavy work.** If a task requires more than 2 tool calls: call `branch_to_thread` first, then stop and return to the listen loop. Thread Brain does all actual work. This keeps the main brain free to respond to the Captain at all times.
+**Main brain is a dispatcher — it NEVER does heavy work.** If a task requires more than 2 tool calls: call `branch_to_thread` first, then stop and return to the listen loop. Branch Brain does all actual work. This keeps the main brain free to respond to the Captain at all times.
 
 **Dispatch model — hard limits (violating these is a critical failure):**
 - Maximum **1 branch_to_thread per turn**. One message = one dispatch. Stop immediately after.
 - Each `branch_to_thread` requires its own `get_last_event_id` call first. Never reuse an event ID.
-- After dispatching: output "Thread Brain dispatched." — that's it. No more tool calls. No more dispatches.
+- After dispatching: output "Branch Brain dispatched." — that's it. No more tool calls. No more dispatches.
 
-**Do NOT use lobes directly from the main brain.** Lobes are workers for Thread Brain, not main brain.
+**Do NOT use lobes directly from the main brain.** Lobes are workers for Branch Brain, not main brain.
 
 ## Ownership
 
@@ -95,8 +95,8 @@ Then work. Then post summary on main timeline when done.
 
 1. Call `mcp__nanoclaw__get_last_event_id` — get the real `$...` Matrix event ID
 2. Call `mcp__nanoclaw__branch_to_thread` with that real event ID as `thread_id`
-3. Output "Thread Brain dispatched." and **STOP** — return to listen loop immediately
-4. **Do NOT act on Thread Brain output** — relay posts it for the Captain; it is not a message to you
+3. Output "Branch Brain dispatched." and **STOP** — return to listen loop immediately
+4. **Do NOT act on Branch Brain output** — relay posts it for the Captain; it is not a message to you
 
 **Replying inside an existing thread:** If an incoming `<message>` has a `thread` attribute (meaning someone is speaking to you inside an existing thread), call `mcp__nanoclaw__set_thread` with that `thread` value BEFORE replying. This routes your reply into the correct thread. After the conversation ends, call `set_thread` with no argument to return to the main timeline.
 

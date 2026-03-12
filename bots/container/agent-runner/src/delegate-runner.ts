@@ -372,23 +372,23 @@ export function registerDelegateTools(
 
   server.tool(
     'branch_to_thread',
-    `Spawn a new Claude thread brain in the background and return immediately.`,
+    `Spawn a new Claude Branch Brain in the background and return immediately.`,
     {
-      objective: z.string().min(1).describe('Objective for the spawned thread brain'),
+      objective: z.string().min(1).describe('Objective for the spawned Branch Brain'),
       thread_id: z.string().min(1).describe('Matrix event ID of the thread root — MUST be a real $... event ID obtained via get_last_event_id immediately after posting the thread title on the main timeline. Do NOT use a custom string or label.'),
     },
     async (args) => {
-      // Write a relay task so the HOST-side relay spawns the Thread Brain as an independent
+      // Write a relay task so the HOST-side relay spawns the Branch Brain as an independent
       // process (BUG-14 fix). Child processes inside the container die on container restart.
       const infiniclawRoot = process.env.INFINICLAW_ROOT || '/workspace/extra/InfiniClaw';
       const relayTasksDir = path.join(infiniclawRoot, '_runtime', 'relay-tasks');
       try {
         fs.mkdirSync(relayTasksDir, { recursive: true });
-        const taskId = `thread-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const taskId = `branch-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const taskFile = path.join(relayTasksDir, `${taskId}.json`);
         const tempPath = `${taskFile}.tmp`;
         const payload = {
-          type: 'thread_brain',
+          type: 'branch_brain',
           thread_id: args.thread_id,
           objective: args.objective,
           bot: process.env.ASSISTANT_NAME || '',
