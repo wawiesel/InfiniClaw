@@ -83,6 +83,14 @@ See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity
 
 See [`docs/design/README.md`](docs/design/README.md) for the architecture document index.
 
+## Testing
+
+```bash
+npx vitest run --root .
+```
+
+Test timeout is configured in `vitest.config.ts` (10s default to accommodate pm2-dependent metrics tests).
+
 ## Notes
 
 - Container images are per-persona: `nanoclaw-cid`, `nanoclaw-johnny5`, `nanoclaw-nora`, `nanoclaw-parker`, `nanoclaw-albert`.
