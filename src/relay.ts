@@ -2223,7 +2223,9 @@ function registerRelayCommands(): void {
 
       // !operator — each ship reports its own status
       if (!arg) {
-        await shipReport(conn, `📡 operator ${isOperatorRelayEnabled() ? 'on ✅' : 'off 🔇'}`);
+        const tr = await reply(conn, `📡 operator`);
+        const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
+        await send(isOperatorRelayEnabled() ? '✅ on' : '🔇 off');
         return;
       }
 
@@ -2234,6 +2236,8 @@ function registerRelayCommands(): void {
       }
       if (targetShip && !isThisShip(targetShip)) return;
 
+      const tr = await reply(conn, `📡 operator ${action}`);
+      const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
@@ -2242,9 +2246,9 @@ function registerRelayCommands(): void {
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `relay ${action} ${me[0]}`);
         log(`operator relay ${action}`);
-        await reply(conn, `📡 operator ${action === 'on' ? 'on ✅' : 'off 🔇'}`);
+        await send(action === 'on' ? '✅ on' : '🔇 off');
       } catch (err) {
-        await reply(conn, `⛔ 📡 operator failed — ${errStr(err)}`);
+        await send(`⛔ failed — ${errStr(err)}`);
       }
     },
 
@@ -2254,13 +2258,15 @@ function registerRelayCommands(): void {
       const branch = 'main';
       const root = resolveRoot();
       const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
+      const tr = await reply(conn, `📡 push ...`);
+      const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         execFileSync('git', ['push', 'origin', branch], execOpts);
         const ver = repoVersion(root);
-        await reply(conn, `📡 pushed ${branch} ${ver}`);
+        await send(`✅ pushed ${branch} ${ver}`);
       } catch (err) {
         log(`!push failed: ${errStr(err)}`);
-        await reply(conn, `⛔ 📡 push failed — ${errStr(err)}`);
+        await send(`⛔ push failed — ${errStr(err)}`);
       }
     },
 
@@ -2270,6 +2276,8 @@ function registerRelayCommands(): void {
     decommission: async (cmd, conn) => {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
+      const tr = await reply(conn, `📡 decommission ...`);
+      const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
@@ -2282,15 +2290,17 @@ function registerRelayCommands(): void {
         me[1].commissioned = false;
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `decommission ${me[0]}`);
-        await reply(conn, `📡 decommissioned — all bots asleep`);
+        await send(`✅ decommissioned — all bots asleep`);
       } catch (err) {
-        await reply(conn, `⛔ 📡 decommission failed — ${errStr(err)}`);
+        await send(`⛔ decommission failed — ${errStr(err)}`);
       }
     },
 
     commission: async (cmd, conn) => {
       const targetShip = cmd.slice('!commission'.length).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
+      const tr = await reply(conn, `📡 commission ...`);
+      const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
@@ -2300,9 +2310,9 @@ function registerRelayCommands(): void {
         secretsGitCommit(['operator/ships.json'], `commission ${me[0]}`);
         ensurePodmanReady();
         const { started } = restartBotsToQuarters(resolveRoot());
-        await reply(conn, `📡 commissioned — started ${started.join(', ') || 'no bots assigned'}`);
+        await send(`✅ commissioned — started ${started.join(', ') || 'no bots assigned'}`);
       } catch (err) {
-        await reply(conn, `⛔ 📡 commission failed — ${errStr(err)}`);
+        await send(`⛔ commission failed — ${errStr(err)}`);
       }
     },
 
@@ -2426,6 +2436,8 @@ function registerRelayCommands(): void {
         if (!ships[resolved].commissioned) { await reply(conn, `⛔ 📡 ${targetName} decommissioned — use !commission first`); return; }
       } catch { targetShip = shipInput; targetName = shipInput; }
       if (liveFleet[bot].ship !== HOSTNAME) return;
+      const tr = await reply(conn, `📡 transport ${capitalizeName(bot)} → ${targetName} ...`);
+      const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         stopBot(bot);
         killStaleContainers(bot);
@@ -2435,9 +2447,9 @@ function registerRelayCommands(): void {
         const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetName}`);
         fleetDirty = false;
         if (!result.ok) throw new Error(result.error);
-        await reply(conn, `📡 ${capitalizeName(bot)} dematerialized — awaiting materialization on ${targetName}`);
+        await send(`✅ ${capitalizeName(bot)} dematerialized — awaiting materialization on ${targetName}`);
       } catch (err) {
-        await reply(conn, `⛔ 📡 transport failed — ${errStr(err)}`);
+        await send(`⛔ transport failed — ${errStr(err)}`);
       }
     },
 
@@ -2703,6 +2715,7 @@ function registerRelayCommands(): void {
 /** Shared promote/demote handler */
 async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isPromote: boolean): Promise<void> {
   const direction = isPromote ? 'up' : 'down';
+  const verb = isPromote ? 'promote' : 'demote';
   const rawTarget = cmd.slice(isPromote ? '!promote '.length : '!demote '.length).trim();
 
   // Try ship name first (case-insensitive)
@@ -2711,14 +2724,16 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   if (shipName) {
     const target = shipName;
     if (!await electSpeaker()) return;
+    const tr = await reply(conn, `📡 ${verb} ${target} ...`);
+    const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
     const result = rankSwap(Object.entries(ships), target, direction);
     if (!result) {
-      await speakerReport(conn, `📡 ${target} already ${isPromote ? 'highest' : 'lowest'} rank ship`);
+      await send(`📡 ${target} already ${isPromote ? 'highest' : 'lowest'} rank ship`);
       return;
     }
     writeShips(ships);
     secretsGitCommit(['operator/ships.json'], `rerank ships: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
-    await speakerReport(conn, `📡 ${result.target} rank ${result.targetRank}, ${result.swap} rank ${result.swapRank}`);
+    await send(`✅ ${result.target} → 🏅${result.targetRank}, ${result.swap} → 🏅${result.swapRank}`);
     return;
   }
 
@@ -2726,11 +2741,13 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const local = getActiveBots();
   if (!local.includes(target)) return;
   if (!liveFleet[target]) { await helpReply(conn, `Unknown bot: ${rawTarget}`); return; }
+  const tr = await reply(conn, `📡 ${verb} ${capitalizeName(target)} ...`);
+  const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
   const role = liveFleet[target].role;
   const sameRole = Object.entries(liveFleet).filter(([_, b]) => b.role === role);
   const result = rankSwap(sameRole, target, direction);
   if (!result) {
-    await reply(conn, `📡 ${capitalizeName(target)} already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
+    await send(`📡 ${capitalizeName(target)} already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
     return;
   }
   fleetUpdate(result.target, { rank: result.targetRank });
@@ -2738,7 +2755,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   writeFleet(liveFleet);
   secretsGitCommit(['bots/fleet.json'], `rerank ${role}: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
   fleetDirty = false;
-  await reply(conn, `📡 ${capitalizeName(result.target)} → rank ${result.targetRank}, ${capitalizeName(result.swap)} → rank ${result.swapRank} (${role})`);
+  await send(`✅ ${capitalizeName(result.target)} → 🏅${result.targetRank}, ${capitalizeName(result.swap)} → 🏅${result.swapRank} (${role})`);
 
   const root = resolveRoot();
   const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
@@ -2749,8 +2766,8 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 
   const targetConn = allConns.find(c => c.name === botRoom) || conn;
   if (targetConn.accessToken) {
-    await reply(targetConn, `📡 ${botDisplayName} reranked → #${result.targetRank}`);
-    await reply(targetConn, `📡 ${swapDisplayName} reranked → #${result.swapRank}`);
+    await reply(targetConn, `📡 ${botDisplayName} reranked → 🏅${result.targetRank}`);
+    await reply(targetConn, `📡 ${swapDisplayName} reranked → 🏅${result.swapRank}`);
   }
   sendLifecycleMsg(target, 'reranked', result.targetRank).catch(() => {});
   sendLifecycleMsg(result.swap, 'reranked', result.swapRank).catch(() => {});
