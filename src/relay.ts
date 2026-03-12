@@ -2277,6 +2277,8 @@ async function handleLifecycleCommand(
         const fail = `⛔ wake ${name} failed — ${errStr(err)}`;
         await step(fail);
         await reply(conn, fail);
+        // Count build/deploy failures in infra metrics
+        recordInfraFailure('wake-build');
       }
     } else {
       // Report: move awake bot to duty room. Skip sleeping bots.
