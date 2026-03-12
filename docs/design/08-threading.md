@@ -152,9 +152,9 @@ Bots must follow this sequence:
    *Check:* Main brain responds immediately.
 
 4. **Merge posts summary** — Branch brain completes.
-   *Check:* One-line summary on main timeline. Completion message in thread.
+   *Check:* Completion message in thread. *(Main timeline summary: not yet implemented.)*
 
-5. **Thread reactivation** — Reply in a completed thread later.
+5. **Thread reactivation** — Reply in a completed thread later. *(Not yet implemented.)*
    *Check:* New branch brain spawns with old context, answers the question.
 
 6. **Concurrency limit** — Trigger more than `MAX_BRANCH_BRAINS_PER_BOT` branches.
