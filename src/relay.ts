@@ -1179,7 +1179,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             // Restart running bots so they pick up new code (skip dismissed)
             const engConn = findEngConn(conns);
             const threadRoot = engConn
-              ? await reply(engConn, `relay git sync: ${result.newCommits} new commit(s) — restarting fleet`)
+              ? await reply(engConn, `📡 git sync: ${result.newCommits} new commit(s) — restarting fleet`)
               : undefined;
             for (const bot of getActiveBots()) {
               if (liveFleet[bot]?.status !== 'onduty') continue;
@@ -1194,11 +1194,11 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               }
             }
             // Post completion summary before relay restarts
-            if (engConn) await reply(engConn, `relay git sync: fleet restarted`);
+            if (engConn) await reply(engConn, `📡 git sync: fleet restarted`);
             // Restart relay itself to pick up new relay code
             try {
               log('git sync: restarting relay to pick up new code');
-              if (engConn && threadRoot) await threadReply(engConn, threadRoot, `relay restarting...`);
+              if (engConn && threadRoot) await threadReply(engConn, threadRoot, `📡 restarting...`);
               execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
             } catch (err) {
               log(`git sync: relay self-restart failed: ${errStr(err)}`);
@@ -1653,7 +1653,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
                 writeCrewStatus(root, bot);
                 for (const c of conns) {
                   if (c.accessToken) {
-                    await reply(c, `relay ${capitalizeName(bot)} materialized`).catch(() => {});
+                    await reply(c, `📡 ${capitalizeName(bot)} materialized`).catch(() => {});
                   }
                 }
               } catch (err) {
@@ -1906,22 +1906,22 @@ async function handleLifecycleCommand(
     if (target && scope === 'present' && liveFleet[target]?.ship === HOSTNAME) {
       const tEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
       const tName = tEnv?.ASSISTANT_NAME || capitalizeName(target);
-      await reply(conn, `relay ${tName} not in this room`);
+      await reply(conn, `📡 ${tName} not in this room`);
       return;
     }
     // Untargeted: only announce in fleet rooms (not quarters).
     const isQuarters = Object.values(liveFleet).some(e => e.quartersRoom === conn.roomId);
-    if (!isQuarters && await electSpeaker()) await reply(conn, `relay no bots here to ${action}`);
+    if (!isQuarters && await electSpeaker()) await reply(conn, `📡 no bots here to ${action}`);
     return;
   }
 
   if (action !== 'dismiss' && action !== 'sleep') {
     if (!isShipCommissioned()) {
-      await reply(conn, `⛔ relay ship decommissioned — use !commission first`);
+      await reply(conn, `⛔ 📡 ship decommissioned — use !commission first`);
       return;
     }
     try { ensurePodmanReady(); } catch (err) {
-      await reply(conn, `⛔ relay podman not ready — ${errStr(err)}`);
+      await reply(conn, `⛔ 📡 podman not ready — ${errStr(err)}`);
       return;
     }
   }
@@ -1931,7 +1931,7 @@ async function handleLifecycleCommand(
   if (action === 'dismiss' || action === 'sleep' || action === 'report') {
     const labelEnv = target ? (() => { try { return loadProfileEnv(root, target); } catch { return null; } })() : null;
     const label = labelEnv?.ASSISTANT_NAME || (target ? capitalizeName(target) : `${bots.length} bot${bots.length !== 1 ? 's' : ''}`);
-    cmdThreadRoot = await reply(conn, `relay ${action} ${label}`);
+    cmdThreadRoot = await reply(conn, `📡 ${action} ${label}`);
   }
 
   for (const bot of bots) {
@@ -1998,7 +1998,7 @@ async function handleLifecycleCommand(
       const doneVerb = isRestart ? 'restarted' : 'awake';
       const startedAt = Date.now();
       const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-      const threadRoot = await reply(conn, `relay ${verb} ${name} ...`);
+      const threadRoot = await reply(conn, `📡 ${verb} ${name} ...`);
       if (!threadRoot) continue;
       let stepN = 0;
       const totalSteps = 4;
@@ -2024,14 +2024,14 @@ async function handleLifecycleCommand(
         const ver = botVersion(root, bot);
         await setBotPip(root, bot, '🟢');
         await step(`🟢 online · ${role}[${rank}] · ${model}${ver}`);
-        const done = `relay ${name} ${doneVerb}!`;
+        const done = `📡 ${name} ${doneVerb}!`;
         await threadReply(conn, threadRoot, done);
         await reply(conn, done);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
         if (!isRestart) await setBotPip(root, bot, '💤');
-        const fail = `⛔ relay wake ${name} failed — ${errStr(err)}`;
+        const fail = `⛔ 📡 wake ${name} failed — ${errStr(err)}`;
         await step(fail);
         await reply(conn, fail);
       }
@@ -2110,7 +2110,7 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
   const bots = resolveBots(targetBot, conn, scope);
   if (bots.length === 0) {
     if (targetBot && scope === 'present' && liveFleet[targetBot]?.ship === HOSTNAME) {
-      await reply(conn, `relay ${capitalizeName(targetBot)} not in this room`);
+      await reply(conn, `📡 ${capitalizeName(targetBot)} not in this room`);
     } else if (targetBot) {
       await helpReply(conn, `No local bot: ${targetBot}`);
     }
@@ -2124,10 +2124,10 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
     try {
       const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
       await botJoinRoom(botToken, homeserver, roomId, conn, botUserId);
-      await reply(conn, `relay ${name} → ${roomName}`);
+      await reply(conn, `📡 ${name} → ${roomName}`);
     } catch (err) {
       log(`!go ${roomName} ${name} failed: ${errStr(err)}`);
-      await reply(conn, `⛔ relay go ${roomName} ${name} failed — ${errStr(err)}`);
+      await reply(conn, `⛔ 📡 go ${roomName} ${name} failed — ${errStr(err)}`);
     }
   }
 }
@@ -2140,17 +2140,17 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
   const bots = resolveBots(target, conn, scope);
   if (bots.length === 0) {
     if (target && scope === 'present' && liveFleet[target]?.ship === HOSTNAME) {
-      await reply(conn, `relay ${capitalizeName(target)} not in this room`);
+      await reply(conn, `📡 ${capitalizeName(target)} not in this room`);
     }
     return;
   }
 
   if (!isShipCommissioned()) {
-    await reply(conn, `⛔ relay ship decommissioned — use !commission first`);
+    await reply(conn, `⛔ 📡 ship decommissioned — use !commission first`);
     return;
   }
   try { ensurePodmanReady(); } catch (err) {
-    await reply(conn, `⛔ relay podman not ready — ${errStr(err)}`);
+    await reply(conn, `⛔ 📡 podman not ready — ${errStr(err)}`);
     return;
   }
 
@@ -2162,7 +2162,7 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
     log(`!refresh ${name}`);
 
     const startedAt = Date.now();
-    const threadRoot = await reply(conn, `relay refreshing ${name} ...`);
+    const threadRoot = await reply(conn, `📡 refreshing ${name} ...`);
     if (!threadRoot) continue;
     let stepN = 0;
     const totalSteps = 2;
@@ -2173,14 +2173,14 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
       refreshBot(root, bot);
       const model = env?.BRAIN_MODEL || '?';
       const ver = botVersion(root, bot);
-      const done = `relay ${name} refreshed!`;
+      const done = `📡 ${name} refreshed!`;
       await step(`✅ done · ${role}[${rank}] · ${model}${ver}`);
       await threadReply(conn, threadRoot, done);
       await reply(conn, done);
       publishFleetReport().catch(() => {});
     } catch (err) {
       log(`!refresh ${name} failed: ${errStr(err)}`);
-      const fail = `⛔ relay refresh ${name} failed — ${errStr(err)}`;
+      const fail = `⛔ 📡 refresh ${name} failed — ${errStr(err)}`;
       await step(fail);
       await reply(conn, fail);
     }
@@ -2246,7 +2246,7 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
     }
   } catch (err) {
     log(`metrics: command error: ${errStr(err)}`);
-    await reply(conn, `⛔ relay metrics failed — ${errStr(err)}`);
+    await reply(conn, `⛔ 📡 metrics failed — ${errStr(err)}`);
   }
 }
 
@@ -2290,7 +2290,7 @@ function registerRelayCommands(): void {
 
       // !operator — each ship reports its own status
       if (!arg) {
-        await shipReport(conn, `relay operator ${isOperatorRelayEnabled() ? 'on ✅' : 'off 🔇'}`);
+        await shipReport(conn, `📡 operator ${isOperatorRelayEnabled() ? 'on ✅' : 'off 🔇'}`);
         return;
       }
 
@@ -2309,9 +2309,9 @@ function registerRelayCommands(): void {
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `relay ${action} ${me[0]}`);
         log(`operator relay ${action}`);
-        await reply(conn, `relay operator ${action === 'on' ? 'on ✅' : 'off 🔇'}`);
+        await reply(conn, `📡 operator ${action === 'on' ? 'on ✅' : 'off 🔇'}`);
       } catch (err) {
-        await reply(conn, `⛔ relay operator failed — ${errStr(err)}`);
+        await reply(conn, `⛔ 📡 operator failed — ${errStr(err)}`);
       }
     },
 
@@ -2324,10 +2324,10 @@ function registerRelayCommands(): void {
       try {
         execFileSync('git', ['push', 'origin', branch], execOpts);
         const ver = repoVersion(root);
-        await reply(conn, `relay pushed ${branch} ${ver}`);
+        await reply(conn, `📡 pushed ${branch} ${ver}`);
       } catch (err) {
         log(`!push failed: ${errStr(err)}`);
-        await reply(conn, `⛔ relay push failed — ${errStr(err)}`);
+        await reply(conn, `⛔ 📡 push failed — ${errStr(err)}`);
       }
     },
 
@@ -2349,9 +2349,9 @@ function registerRelayCommands(): void {
         me[1].commissioned = false;
         writeShips(ships);
         secretsGitCommit(['operator/ships.json'], `decommission ${me[0]}`);
-        await reply(conn, `relay decommissioned — all bots asleep`);
+        await reply(conn, `📡 decommissioned — all bots asleep`);
       } catch (err) {
-        await reply(conn, `⛔ relay decommission failed — ${errStr(err)}`);
+        await reply(conn, `⛔ 📡 decommission failed — ${errStr(err)}`);
       }
     },
 
@@ -2367,9 +2367,9 @@ function registerRelayCommands(): void {
         secretsGitCommit(['operator/ships.json'], `commission ${me[0]}`);
         ensurePodmanReady();
         const { started } = restartBotsToQuarters(resolveRoot());
-        await reply(conn, `relay commissioned — started ${started.join(', ') || 'no bots assigned'}`);
+        await reply(conn, `📡 commissioned — started ${started.join(', ') || 'no bots assigned'}`);
       } catch (err) {
-        await reply(conn, `⛔ relay commission failed — ${errStr(err)}`);
+        await reply(conn, `⛔ 📡 commission failed — ${errStr(err)}`);
       }
     },
 
@@ -2378,7 +2378,7 @@ function registerRelayCommands(): void {
       if (targetShip && !isThisShip(targetShip)) return;
       const startedAt = Date.now();
 
-      const threadRoot = await reply(conn, `relay pull starting ...`);
+      const threadRoot = await reply(conn, `📡 pull starting ...`);
       if (!threadRoot) return;
       const elapsed = () => Date.now() - startedAt;
 
@@ -2490,7 +2490,7 @@ function registerRelayCommands(): void {
         if (!resolved) { await helpReply(conn, `Unknown ship: ${shipInput}`); return; }
         targetName = resolved;
         targetShip = ships[resolved].hostname;
-        if (!ships[resolved].commissioned) { await reply(conn, `⛔ relay ${targetName} decommissioned — use !commission first`); return; }
+        if (!ships[resolved].commissioned) { await reply(conn, `⛔ 📡 ${targetName} decommissioned — use !commission first`); return; }
       } catch { targetShip = shipInput; targetName = shipInput; }
       if (liveFleet[bot].ship !== HOSTNAME) return;
       try {
@@ -2502,9 +2502,9 @@ function registerRelayCommands(): void {
         const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetName}`);
         fleetDirty = false;
         if (!result.ok) throw new Error(result.error);
-        await reply(conn, `relay ${capitalizeName(bot)} dematerialized — awaiting materialization on ${targetName}`);
+        await reply(conn, `📡 ${capitalizeName(bot)} dematerialized — awaiting materialization on ${targetName}`);
       } catch (err) {
-        await reply(conn, `⛔ relay transport failed — ${errStr(err)}`);
+        await reply(conn, `⛔ 📡 transport failed — ${errStr(err)}`);
       }
     },
 
@@ -2639,7 +2639,7 @@ function registerRelayCommands(): void {
 
         if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
       } catch (err) {
-        await reply(conn, `⛔ relay fleet failed — ${errStr(err)}`);
+        await reply(conn, `⛔ 📡 fleet failed — ${errStr(err)}`);
       }
     },
 
@@ -2740,9 +2740,9 @@ function registerRelayCommands(): void {
       try {
         grantMount(botName.toLowerCase(), hostPath, duration);
         const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
-        await reply(conn, `relay mount granted to ${botName}: ${hostPath} (rw, expires ~${expiry}) — restart required`);
+        await reply(conn, `📡 mount granted to ${botName}: ${hostPath} (rw, expires ~${expiry}) — restart required`);
       } catch (err) {
-        await reply(conn, `⛔ relay allow failed — ${errStr(err)}`);
+        await reply(conn, `⛔ 📡 allow failed — ${errStr(err)}`);
       }
     },
 
@@ -2754,9 +2754,9 @@ function registerRelayCommands(): void {
       if (!local.includes(botName.toLowerCase())) return; // not on this ship
       try {
         const removed = revokeMount(botName.toLowerCase(), hostPath);
-        await reply(conn, `relay ${removed ? `mount revoked: ${hostPath}` : `no mount found: ${hostPath}`}`);
+        await reply(conn, `📡 ${removed ? `mount revoked: ${hostPath}` : `no mount found: ${hostPath}`}`);
       } catch (err) {
-        await reply(conn, `⛔ relay deny failed — ${errStr(err)}`);
+        await reply(conn, `⛔ 📡 deny failed — ${errStr(err)}`);
       }
     },
   });
@@ -2775,12 +2775,12 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
     if (!await electSpeaker()) return;
     const result = rankSwap(Object.entries(ships), target, direction);
     if (!result) {
-      await speakerReport(conn, `relay ${target} already ${isPromote ? 'highest' : 'lowest'} rank ship`);
+      await speakerReport(conn, `📡 ${target} already ${isPromote ? 'highest' : 'lowest'} rank ship`);
       return;
     }
     writeShips(ships);
     secretsGitCommit(['operator/ships.json'], `rerank ships: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
-    await speakerReport(conn, `relay ${result.target} rank ${result.targetRank}, ${result.swap} rank ${result.swapRank}`);
+    await speakerReport(conn, `📡 ${result.target} rank ${result.targetRank}, ${result.swap} rank ${result.swapRank}`);
     return;
   }
 
@@ -2792,7 +2792,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const sameRole = Object.entries(liveFleet).filter(([_, b]) => b.role === role);
   const result = rankSwap(sameRole, target, direction);
   if (!result) {
-    await reply(conn, `relay ${capitalizeName(target)} already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
+    await reply(conn, `📡 ${capitalizeName(target)} already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
     return;
   }
   fleetUpdate(result.target, { rank: result.targetRank });
@@ -2800,7 +2800,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   writeFleet(liveFleet);
   secretsGitCommit(['bots/fleet.json'], `rerank ${role}: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
   fleetDirty = false;
-  await reply(conn, `relay ${capitalizeName(result.target)} → rank ${result.targetRank}, ${capitalizeName(result.swap)} → rank ${result.swapRank} (${role})`);
+  await reply(conn, `📡 ${capitalizeName(result.target)} → rank ${result.targetRank}, ${capitalizeName(result.swap)} → rank ${result.swapRank} (${role})`);
 
   const root = resolveRoot();
   const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
@@ -2811,8 +2811,8 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 
   const targetConn = allConns.find(c => c.name === botRoom) || conn;
   if (targetConn.accessToken) {
-    await reply(targetConn, `relay ${botDisplayName} reranked → #${result.targetRank}`);
-    await reply(targetConn, `relay ${swapDisplayName} reranked → #${result.swapRank}`);
+    await reply(targetConn, `📡 ${botDisplayName} reranked → #${result.targetRank}`);
+    await reply(targetConn, `📡 ${swapDisplayName} reranked → #${result.swapRank}`);
   }
   sendLifecycleMsg(target, 'reranked', result.targetRank).catch(() => {});
   sendLifecycleMsg(result.swap, 'reranked', result.swapRank).catch(() => {});
@@ -2832,15 +2832,9 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
   }
 }
 
-/** Build the ship tag with status indicator: [emoji+status name].
- *  Status: ⭐ = commissioned+speaker, ⚓ = commissioned, 🚫 = decommissioned. */
+/** Build the ship tag for relay replies. ⭐ when speaker, otherwise shipTag default (🟢/💤). */
 function replyTag(): string {
-  const found = findShipByHostname();
-  if (!found) return HOSTNAME;
-  const [name, entry] = found;
-  const commissioned = entry.commissioned !== false;
-  const statusChar = !commissioned ? '💤' : isSpeakerCached ? '⭐' : '🟢';
-  return entry.emoji ? `${entry.emoji}${statusChar} ${name}` : `${statusChar} ${name}`;
+  return shipTag(undefined, isSpeakerCached ? '⭐' : undefined);
 }
 
 async function reply(conn: RoomConn, text: string, threadRootId?: string): Promise<string | undefined> {
@@ -3149,7 +3143,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 for (const target of targets) {
                   await reply(target, broadcast);
                 }
-                await reply(conn, `relay broadcast → ${targetNames || 'no other rooms'}`);
+                await reply(conn, `📡 broadcast → ${targetNames || 'no other rooms'}`);
               } else {
                 // Fleet status in this room
                 log(`${conn.name}: @loudspeaker fleet status requested by ${senderName}`);
@@ -3174,7 +3168,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               await handleCommand(body, conn, conns);
             } catch (err) {
               log(`${conn.name}: command error: ${errStr(err)}`);
-              await reply(conn, `⛔ relay command error — ${errStr(err)}`);
+              await reply(conn, `⛔ 📡 command error — ${errStr(err)}`);
             }
           }
         }
