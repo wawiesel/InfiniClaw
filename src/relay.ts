@@ -2612,7 +2612,9 @@ function registerRelayCommands(): void {
             } else {
               shipStatus = ' · unknown';
             }
-            lines.push(`${shipEmoji}${statusChar} ${shipName} · 🏅${rank}${shipStatus}`);
+            const spaceId = sConfig?.spaceId;
+            const shipLink = spaceId ? `[${shipName}](https://matrix.to/#/${encodeURIComponent(spaceId)})` : shipName;
+            lines.push(`${shipEmoji}${statusChar} ${shipLink} · 🏅${rank}${shipStatus}`);
           }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
@@ -2631,9 +2633,12 @@ function registerRelayCommands(): void {
             else badge = '❓';
 
             const roleIcon = ROLE_ICONS[entry.role?.toLowerCase()] ?? '';
-            const roleDisplay = roleIcon ? `${roleIcon} ${entry.role}` : entry.role;
+            const roleCap = entry.role ? entry.role.charAt(0).toUpperCase() + entry.role.slice(1) : '';
+            const roleDisplay = roleIcon ? `${roleIcon} ${roleCap}` : roleCap;
             const prefix = isLast ? '  └' : '  ├';
-            lines.push(`${prefix} ${badge} ${entry.name} · ${roleDisplay} · 🏅${entry.rank}${entry.gitVersion}`);
+            const qRoom = entry.quartersRoom;
+            const nameLink = qRoom ? `[${entry.name}](https://matrix.to/#/${encodeURIComponent(qRoom)})` : entry.name;
+            lines.push(`${prefix} ${badge} ${nameLink} · ${roleDisplay} · 🏅${entry.rank}${entry.gitVersion}`);
           }
         }
 
