@@ -831,8 +831,7 @@ function getS3Client(): { client: S3Client; bucket: string } | null {
   } catch { return null; }
 }
 
-/** Upload an error log to S3 and return a markdown link, or empty string on failure. */
-/** Upload an error log to S3 and return a markdown link (presigned, 7 days), or empty string on failure. */
+/** Upload an error log to S3 and return a presigned markdown link (7 days), or empty string on failure. */
 async function uploadErrorLog(label: string, error: unknown): Promise<string> {
   const s3 = getS3Client();
   if (!s3) return '';
