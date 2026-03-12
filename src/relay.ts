@@ -1984,6 +1984,7 @@ async function handleLifecycleCommand(
           writeFleet(liveFleet);
           clearShipConfigCache();
         }
+        killStaleContainers(bot);
         await setBotPip(root, bot, '🚀');
         await step('🚀 starting');
         bootstrapBot(root, bot);
