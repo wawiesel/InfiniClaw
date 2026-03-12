@@ -385,7 +385,7 @@ function computeBuildContextHash(root: string, bot: string): string {
 }
 
 /** Rebuild the container image for a bot only if the build context changed. */
-function rebuildImageIfChanged(root: string, bot: string): void {
+export function rebuildImageIfChanged(root: string, bot: string): void {
   const hashDir = path.join(root, '_runtime', 'data');
   fs.mkdirSync(hashDir, { recursive: true });
   const hashFile = path.join(hashDir, `image-hash-${bot}`);

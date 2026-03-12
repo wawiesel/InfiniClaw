@@ -73,6 +73,7 @@ import {
   killStaleContainers,
   loadProfileEnv,
   removeStaleProcesses,
+  rebuildImageIfChanged,
 } from './service.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
@@ -1141,18 +1142,15 @@ function formatCombinedMetrics(
       const isLast = i === botsWithMeta.length - 1;
       const prefix = isLast ? '  └' : '  ├';
 
-      // CO detection: highest-rank awake bot of its role (onduty or quarters)
-      const awakeStatuses = ['onduty', 'quarters'];
-      const isCO = awakeStatuses.includes(bot.status) && !botsWithMeta.some(
-        b => b.role === bot.role && awakeStatuses.includes(b.status) && b.rank < bot.rank && b !== bot
-      );
+      // CO = rank-1 bot in its role. Shows ⭐ whenever not sleeping.
+      const isCO = bot.rank === 1;
 
       let badge: string;
       if (bot.status === 'transit') badge = '🚀';
       else if (bot.status === 'sleep') badge = '💤';
       else if (bot.status === 'warn') badge = '⚠️';
-      else if ((bot.status === 'onduty' || bot.status === 'quarters') && !bot.processRunning) badge = '🔴';
       else if (isCO) badge = '⭐';
+      else if ((bot.status === 'onduty' || bot.status === 'quarters') && !bot.processRunning) badge = '🔴';
       else if (bot.status === 'onduty' || bot.status === 'quarters') badge = '◉';
       else badge = '❓';
 
@@ -2628,6 +2626,14 @@ function registerRelayCommands(): void {
           return;
         }
         await s(stageOk('relay + dist rebuilt', relayVersion(root)));
+
+        // Rebuild container images for all local bots (skips if build context unchanged)
+        for (const bot of activeBots) {
+          try { rebuildImageIfChanged(root, bot); } catch (err) {
+            warnings++;
+            log(`!pull: image rebuild failed for ${bot}: ${errStr(err)}`);
+          }
+        }
 
         if (isShipCommissioned()) {
           ensurePodmanReady();
