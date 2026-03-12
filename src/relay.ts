@@ -230,9 +230,8 @@ function writeCrewStatus(root: string, bot: string): void {
     const present = entry.status !== 'sleep';
     let room = 'Quarters';
     if (entry.status === 'onduty') {
-      try {
-        room = loadProfileEnv(root, name).MAIN_GROUP_NAME || 'Duty Room';
-      } catch { room = 'Duty Room'; }
+      const dutyRoom = ROLE_ROOMS[entry.role?.toLowerCase() ?? '']?.room;
+      room = dutyRoom ? capitalizeName(dutyRoom) : 'Duty Room';
     }
     const e: Omit<CrewEntry, 'isCommandingOfficer'> = { name: capitalizeName(name), role: entry.role, rank: entry.rank, room, present };
     if (entry.title) e.title = entry.title;
@@ -771,15 +770,18 @@ function restartBotsToQuarters(root: string): { started: string[]; failed: strin
 
 // ── Bot resolution (multi-ship aware) ───────────────────────────
 
-/** Map local bot name → room name (lowercased) from MAIN_GROUP_NAME in env. */
+/** Get the duty room name (lowercased) for a bot based on its role in ROLE_ROOMS. */
+function botDutyRoom(bot: string): string {
+  return ROLE_ROOMS[liveFleet[bot]?.role?.toLowerCase() ?? '']?.room ?? '';
+}
+
+/** Map local bot name → room name (lowercased) from role via ROLE_ROOMS. */
 function buildBotRoomMap(): Record<string, string> {
-  const root = resolveRoot();
   const map: Record<string, string> = {};
-  for (const bot of getActiveBots()) {
-    try {
-      const env = loadProfileEnv(root, bot);
-      if (env.MAIN_GROUP_NAME) map[bot] = env.MAIN_GROUP_NAME.toLowerCase();
-    } catch { /* skip bots with broken env */ }
+  for (const [bot, entry] of Object.entries(liveFleet)) {
+    if (entry.ship !== HOSTNAME) continue;
+    const room = ROLE_ROOMS[entry.role?.toLowerCase() ?? '']?.room;
+    if (room) map[bot] = room;
   }
   return map;
 }
@@ -813,7 +815,7 @@ function resolveShipName(input: string, ships: Record<string, unknown>): string 
  *   With an explicit target that exists on this ship but is NOT in the room, returns [] so
  *   the caller can emit a "not in this room" warning.
  *
- * scope='assigned': bots assigned to this room by MAIN_GROUP_NAME, regardless of current
+ * scope='assigned': bots assigned to this room by role (via ROLE_ROOMS), regardless of current
  *   location. Use for !report, which must reach bots currently in quarters.
  *   With an explicit target, falls back to any local bot on this ship.
  */
@@ -1878,7 +1880,7 @@ async function sendLifecycleMsg(
     const root = resolveRoot();
     const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
     const botName = env?.ASSISTANT_NAME || capitalizeName(botId);
-    const roomName = (env?.MAIN_GROUP_NAME || '').toLowerCase();
+    const roomName = botDutyRoom(botId);
     const conn = activeConns.find(c => c.name.toLowerCase() === roomName);
     if (!conn?.accessToken) return;
     const rankPart = rank !== undefined ? ` (rank ${rank})` : '';
@@ -2663,7 +2665,7 @@ function registerRelayCommands(): void {
           }
         } catch {
           // Fall back to status.json objective if todos dir unavailable
-          const room = (env?.MAIN_GROUP_NAME || '').toLowerCase();
+          const room = botDutyRoom(bot);
           const statusPath = path.join(root, '_runtime', 'data', 'ipc', room, 'status.json');
           try {
             const snap = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
@@ -2762,7 +2764,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const swapEnv = (() => { try { return loadProfileEnv(root, result.swap); } catch { return null; } })();
   const botDisplayName = botEnv?.ASSISTANT_NAME || capitalizeName(target);
   const swapDisplayName = swapEnv?.ASSISTANT_NAME || capitalizeName(result.swap);
-  const botRoom = (botEnv?.MAIN_GROUP_NAME || '').toLowerCase();
+  const botRoom = botDutyRoom(target);
 
   const targetConn = allConns.find(c => c.name === botRoom) || conn;
   if (targetConn.accessToken) {
