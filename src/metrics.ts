@@ -61,8 +61,6 @@ export interface BotMetrics {
   status: string;
   /** Whether pm2 process is running */
   processRunning: boolean;
-  /** Total tokens (input+output) — snapshot from stats-cache.json */
-  totalTokens?: number;
   /** Response latency p50 in seconds (1d rolling) */
   responseLatencyP50?: number;
   /** Response latency p95 in seconds (1d rolling) */
@@ -368,7 +366,6 @@ function computeBotMetrics(): BotMetrics[] {
       },
       status: entry?.status ?? 'unknown',
       processRunning: pm2?.status === 'online',
-      totalTokens: readBotTokens(botId) || undefined,
       responseLatencyP50: latency.p50 >= 0 ? latency.p50 : undefined,
       responseLatencyP95: latency.p95 >= 0 ? latency.p95 : undefined,
     };
@@ -449,22 +446,6 @@ function botLatencyPercentiles(bot: string, windowDays: number): { p50: number; 
 }
 
 
-/** Read token stats from a bot's stats-cache.json. Returns total tokens or 0. */
-function readBotTokens(botId: string): number {
-  try {
-    const root = resolveRoot();
-    const statsPath = path.join(root, '_runtime', 'instances', botId, 'data', 'sessions', 'main', '.claude', 'stats-cache.json');
-    const raw = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
-    const usage = raw.modelUsage ?? {};
-    let total = 0;
-    for (const model of Object.values(usage) as Array<{ inputTokens?: number; outputTokens?: number }>) {
-      total += (model.inputTokens ?? 0) + (model.outputTokens ?? 0);
-    }
-    return total;
-  } catch {
-    return 0;
-  }
-}
 
 function rollingPointsRate(events: ScoreEvent[], windowDays: number): number {
   const cutoff = Date.now() - windowDays * 86_400_000;

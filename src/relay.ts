@@ -1186,11 +1186,15 @@ function formatCombinedMetrics(
         : '';
       const mem = memStr ? ` · mem ${memStr}` : '';
       const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
-      // Token throughput: prefer health report (cross-ship), fall back to local stats-cache
+      // Token throughput: prefer health report, fall back to metrics snapshot rolling rate
       const tokData = (health?.tokens as Record<string, { total_24h?: number }> | undefined)?.[bot.name];
       const tok24k = tokData?.total_24h != null ? Math.round(tokData.total_24h / 1000) : null;
-      const tokTag = tok24k != null && tok24k > 0 ? ` · tok/d ${tok24k}K` : (bot.totalTokens ? ` · ${formatTokens(bot.totalTokens)} tok` : '');
-      // Response latency (p50)
+      const tokFromMetrics = bot.tokenThroughput?.day1 != null && bot.tokenThroughput.day1 > 0
+        ? formatTokens(bot.tokenThroughput.day1) : null;
+      const tokTag = tok24k != null && tok24k > 0
+        ? ` · tok/d ${tok24k}K`
+        : (tokFromMetrics ? ` · tok/d ${tokFromMetrics}` : ` · tok/d ?`);
+      // Response latency (p50) — always show placeholder
       const latTag = bot.responseLatencyP50 != null ? ` · rsp ${bot.responseLatencyP50}s` : ` · rsp ?`;
 
       lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}${tokTag}${latTag}`);
