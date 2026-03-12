@@ -2554,7 +2554,7 @@ function registerRelayCommands(): void {
             const commissioned = sConfig?.commissioned !== false;
             const isThisShipSpeaker = commissioned && isSpeakerCached && sConfig?.rank != null &&
               Object.values(ships).filter(s => s.commissioned).every(s => (s.rank ?? 99) >= (sConfig?.rank ?? 99));
-            const statusChar = !commissioned ? '💤' : isThisShipSpeaker ? '⭐' : '';
+            const statusChar = !commissioned ? '💤' : isThisShipSpeaker ? '⭐' : '◉';
             const shipEmoji = sConfig?.emoji ?? '';
             let shipStatus: string;
             if (shipReport) {
@@ -2581,7 +2581,7 @@ function registerRelayCommands(): void {
             else if (entry.localStatus === 'sleep') badge = '💤';
             else if (entry.localStatus === 'warn') badge = '⚠️';
             else if (isCO) badge = '⭐';
-            else if (entry.localStatus === 'onduty' || entry.localStatus === 'quarters') badge = '●';
+            else if (entry.localStatus === 'onduty' || entry.localStatus === 'quarters') badge = '◉';
             else badge = '❓';
 
             const roleIcon = ROLE_ICONS[entry.role?.toLowerCase()] ?? '';

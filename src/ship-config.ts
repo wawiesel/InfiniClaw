@@ -234,7 +234,7 @@ export function shipTag(hostname?: string, pip?: string): string {
   const found = findShipByHostname(hostname);
   if (!found) return hostname ?? os.hostname();
   const [name, entry] = found;
-  const statusPip = pip ?? (entry.commissioned !== false ? '' : '💤');
+  const statusPip = pip ?? (entry.commissioned !== false ? '◉' : '💤');
   return entry.emoji ? `${entry.emoji}${statusPip} ${name}` : `${statusPip} ${name}`;
 }
 
