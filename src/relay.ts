@@ -2570,6 +2570,16 @@ function registerRelayCommands(): void {
           }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
+
+          // Compute max display widths for column alignment (nbsp padding)
+          const NBSP = '\u00A0';
+          let maxName = 0;
+          let maxRole = 0;
+          for (const [, entry] of bots) {
+            maxName = Math.max(maxName, entry.name.length);
+            maxRole = Math.max(maxRole, (entry.role ? capitalizeName(entry.role) : '').length);
+          }
+
           for (const [i, [, entry]] of bots.entries()) {
             const isLast = i === bots.length - 1;
             const isCO = entry.status === 'onduty' && !Object.values(allBots).some(
@@ -2585,12 +2595,16 @@ function registerRelayCommands(): void {
             else badge = '❓';
 
             const roleIcon = ROLE_ICONS[entry.role?.toLowerCase()] ?? '';
-            const roleCap = entry.role ? entry.role.charAt(0).toUpperCase() + entry.role.slice(1) : '';
+            const roleCap = entry.role ? capitalizeName(entry.role) : '';
             const roleDisplay = roleIcon ? `${roleIcon} ${roleCap}` : roleCap;
+            const rolePad = NBSP.repeat(maxRole - roleCap.length);
             const prefix = isLast ? '  └' : '  ├';
             const qRoom = entry.quartersRoom;
-            const nameLink = qRoom ? `[${entry.name}](https://matrix.to/#/${encodeURIComponent(qRoom)})` : entry.name;
-            lines.push(`${prefix} ${badge} ${nameLink} · ${roleDisplay} · 🏅${entry.rank}${entry.gitVersion}`);
+            const namePad = NBSP.repeat(maxName - entry.name.length);
+            const nameLink = qRoom
+              ? `[${entry.name}${namePad}](https://matrix.to/#/${encodeURIComponent(qRoom)})`
+              : `${entry.name}${namePad}`;
+            lines.push(`${prefix} ${badge} ${nameLink} · ${roleDisplay}${rolePad} · 🏅${entry.rank}${entry.gitVersion}`);
           }
         }
 
