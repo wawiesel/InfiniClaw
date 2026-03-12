@@ -37,13 +37,13 @@ Two-tier design: read-only everywhere, write access where needed.
 | `/workspace/persona` | `bots/{role}/{persona}/` | rw | Bot can edit own CLAUDE.md |
 | `/workspace/persona/memory` | `secrets/bots/{persona}/memory/` | rw | Persistent memory across sessions |
 | `/workspace/CLAUDE.md` | `bots/{role}/ROOM.md` | ro | Room-level instructions |
-| `/workspace/cache` | `_runtime/data/cache/{group}/` | rw | Per-group persistent cache |
-| `/workspace/ipc` | `_runtime/ipc/{group}/` | rw | Host ↔ container communication |
+| `/workspace/cache` | `_runtime/instances/{bot}/data/cache/{group}/` | rw | Per-group persistent cache |
+| `/workspace/ipc` | `_runtime/instances/{bot}/data/ipc/{group}/` | rw | Host ↔ container communication |
 | `/app/src` | NanoClaw agent-runner source | ro | Agent runner source |
 | `/home/node/.ssh` | `~/.ssh/` | rw | Git SSH keys |
 | `/home/node/.codex` | `~/.codex/` | rw | Codex delegate auth |
 | `/home/node/.gemini` | `~/.gemini/` | rw | Gemini delegate auth |
-| `/home/node/.claude` | `_runtime/data/sessions/{group}/` | rw | Claude Code session state |
+| `/home/node/.claude` | `_runtime/instances/{bot}/data/sessions/{group}/.claude/` | rw | Claude Code session state |
 | `/workspace/extra/*` | Allow-listed paths | rw | Captain-granted mounts |
 
 ## Secrets
