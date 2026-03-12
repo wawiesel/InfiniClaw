@@ -2583,9 +2583,7 @@ function registerRelayCommands(): void {
             } else {
               shipStatus = ' · unknown';
             }
-            const spaceId = sConfig?.spaceId;
-            const shipLink = spaceId ? `[${shipName}](https://matrix.to/#/${encodeURIComponent(spaceId)})` : shipName;
-            lines.push(`${shipEmoji}${statusChar} ${shipLink} · 🏅${rank}${shipStatus}`);
+            lines.push(`${shipEmoji}${statusChar} ${shipName} · 🏅${rank}${shipStatus}`);
           }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
@@ -2618,12 +2616,9 @@ function registerRelayCommands(): void {
             const roleDisplay = roleIcon ? `${roleIcon} ${roleCap}` : roleCap;
             const rolePad = NBSP.repeat(maxRole - roleCap.length);
             const prefix = isLast ? '  └' : '  ├';
-            const qRoom = entry.quartersRoom;
             const namePad = NBSP.repeat(maxName - entry.name.length);
-            const nameLink = qRoom
-              ? `[${entry.name}](https://matrix.to/#/${encodeURIComponent(qRoom)})${namePad}`
-              : `${entry.name}${namePad}`;
-            lines.push(`${prefix} ${badge} ${nameLink} · ${roleDisplay}${rolePad} · 🏅${entry.rank}${entry.gitVersion}`);
+            const nameDisplay = `${entry.name}${namePad}`;
+            lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${entry.rank}${entry.gitVersion}`);
           }
         }
 
