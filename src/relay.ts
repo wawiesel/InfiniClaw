@@ -2077,7 +2077,15 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
 
   const bots = resolveBots(targetBot, conn);
   if (bots.length === 0) {
-    if (targetBot) await helpReply(conn, `No local bot: ${targetBot}`);
+    if (targetBot) {
+      const root = resolveRoot();
+      if (liveFleet[targetBot]?.ship === HOSTNAME) {
+        const env = (() => { try { return loadProfileEnv(root, targetBot); } catch { return null; } })();
+        await reply(conn, `relay ${env?.ASSISTANT_NAME || capitalizeName(targetBot)} not in this room`);
+      } else {
+        await helpReply(conn, `No local bot: ${targetBot}`);
+      }
+    }
     return;
   }
 
