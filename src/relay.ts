@@ -795,16 +795,34 @@ function resolveShipName(input: string, ships: Record<string, unknown>): string 
 }
 
 /** Resolve which local bots are in the given room. Matches by MAIN_GROUP_NAME or quartersRoom. */
-function resolveBots(target: string | undefined, conn: RoomConn): string[] {
+/**
+ * Resolve which bots a command should affect.
+ *
+ * scope='present' (default): bots physically in the room — on duty here, or in their own
+ *   quarters room. Use for lifecycle commands (!sleep, !wake, !refresh, !rejoin, !go).
+ *   With an explicit target that exists on this ship but is NOT in the room, returns [] so
+ *   the caller can emit a "not in this room" warning.
+ *
+ * scope='assigned': bots assigned to this room by MAIN_GROUP_NAME, regardless of current
+ *   location. Use for !report, which must reach bots currently in quarters.
+ *   With an explicit target, falls back to any local bot on this ship.
+ */
+function resolveBots(target: string | undefined, conn: RoomConn, scope: 'present' | 'assigned' = 'present'): string[] {
   const roomName = conn.name.toLowerCase();
   const botRooms = buildBotRoomMap();
   const inRoom = Object.entries(liveFleet)
-    .filter(([bot, e]) => e.ship === HOSTNAME && (botRooms[bot] === roomName || e.quartersRoom === conn.roomId))
+    .filter(([bot, e]) => {
+      if (e.ship !== HOSTNAME) return false;
+      if (e.quartersRoom === conn.roomId) return true;
+      if (scope === 'assigned') return botRooms[bot] === roomName;
+      // presence: bot must be on duty in this room
+      return e.status === 'onduty' && botRooms[bot] === roomName;
+    })
     .map(([bot]) => bot);
   if (target) {
-    // Explicit target: first check room, then check any bot on this ship (e.g. sleeping bots)
     if (inRoom.includes(target)) return [target];
-    if (liveFleet[target]?.ship === HOSTNAME) return [target];
+    // assigned scope: fall back to any local bot (e.g. !report cid from Engineering when Cid is in quarters)
+    if (scope === 'assigned' && liveFleet[target]?.ship === HOSTNAME) return [target];
     return [];
   }
   return inRoom;
@@ -1862,12 +1880,21 @@ async function handleLifecycleCommand(
   conn: RoomConn,
 ): Promise<void> {
   const root = resolveRoot();
-  const bots = resolveBots(target, conn);
+  const scope = action === 'report' ? 'assigned' : 'present';
+  const bots = resolveBots(target, conn, scope);
 
-  // No local bots matched — only announce in fleet rooms (not quarters).
+  // No local bots matched.
   if (bots.length === 0) {
     const isQuarters = Object.values(liveFleet).some(e => e.quartersRoom === conn.roomId);
-    if (!isQuarters && await electSpeaker()) await reply(conn, `relay no bots here to ${action}`);
+    if (isQuarters) return;
+    // Explicit target on this ship but not present in room — warn rather than silently no-op.
+    if (target && liveFleet[target]?.ship === HOSTNAME) {
+      const env = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
+      const name = env?.ASSISTANT_NAME || capitalizeName(target);
+      await reply(conn, `relay ${name} not in this room`);
+      return;
+    }
+    if (await electSpeaker()) await reply(conn, `relay no bots here to ${action}`);
     return;
   }
 
