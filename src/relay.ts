@@ -192,6 +192,8 @@ function isOperatorRelayEnabled(): boolean {
 let fleetDirty = false;
 /** Active intercom connections — set in startRelay so lifecycle helpers can send messages. */
 let activeConns: RoomConn[] = [];
+/** Cached speaker state — updated by electSpeaker() so reply() can include it in the tag synchronously. */
+let isSpeakerCached = false;
 
 function fleetUpdate(bot: string, updates: Partial<FleetEntry>): void {
   if (!liveFleet[bot]) return;
@@ -555,8 +557,10 @@ async function electSpeaker(): Promise<boolean> {
     const atMax = commissioned
       .filter(([, entry]) => (epochs[entry.hostname] ?? 0) >= maxEpoch)
       .sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
-    return atMax.length > 0 && atMax[0][1].hostname === HOSTNAME;
+    isSpeakerCached = atMax.length > 0 && atMax[0][1].hostname === HOSTNAME;
+    return isSpeakerCached;
   } catch {
+    isSpeakerCached = true;
     return true;
   }
 }
@@ -592,6 +596,13 @@ const ROOM_EMOJI: Record<string, string> = {
 };
 const FLEET_LOCATION = '🌌';
 const QUARTERS_EMOJI = '🏠';
+
+/** Role icons derived from duty room icons (engineer→engineering, navigator→bridge, architect→astrometrics). */
+const ROLE_ICONS: Record<string, string> = {
+  engineer:  ROOM_EMOJI.engineering,
+  navigator: ROOM_EMOJI.bridge,
+  architect: ROOM_EMOJI.astrometrics,
+};
 
 /** Ensure all ship spaces, fleet rooms, and quarters rooms have correct emoji-prefixed names. */
 async function ensureRoomNames(): Promise<void> {
@@ -2231,10 +2242,9 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
     const scopeLabel = `📊 metrics${scope !== 'all' ? ` · ${scope}` : ''}`;
     const threadRoot = await reply(conn, scopeLabel);
     if (threadRoot) {
-      await threadReply(conn, threadRoot, text);
+      await threadReply(conn, threadRoot, '```\n' + text + '\n```');
     } else {
-      if (isBTC || qBot) await reply(conn, text);
-      else await reply(conn, text);
+      await reply(conn, text);
     }
   } catch (err) {
     log(`metrics: command error: ${errStr(err)}`);
@@ -2591,7 +2601,11 @@ function registerRelayCommands(): void {
             lines.push('🔧 drydock');
           } else {
             const rank = sConfig?.rank ?? '?';
-            const shipIcon = sConfig?.commissioned ? (sConfig?.emoji ?? '⚓') : '🚫';
+            const commissioned = sConfig?.commissioned !== false;
+            const isThisShipSpeaker = commissioned && isSpeakerCached && sConfig?.rank != null &&
+              Object.values(ships).filter(s => s.commissioned).every(s => (s.rank ?? 99) >= (sConfig?.rank ?? 99));
+            const statusChar = !commissioned ? '🚫' : isThisShipSpeaker ? '⭐' : '⚓';
+            const shipEmoji = sConfig?.emoji ?? '';
             let shipStatus: string;
             if (shipReport) {
               const isFresh = freshReports[shipName] != null;
@@ -2600,7 +2614,7 @@ function registerRelayCommands(): void {
             } else {
               shipStatus = ' · unknown';
             }
-            lines.push(`${shipIcon} ${shipName}[${rank}]${shipStatus}`);
+            lines.push(`${shipEmoji}${statusChar} ${shipName} · 🏅${rank}${shipStatus}`);
           }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
@@ -2618,12 +2632,15 @@ function registerRelayCommands(): void {
             else if (entry.localStatus === 'onduty' || entry.localStatus === 'quarters') badge = '🟢';
             else badge = '❓';
 
-            const prefix = isLast ? '\u00A0\u00A0└' : '\u00A0\u00A0├';
-            lines.push(`${prefix} ${entry.name} ${badge} · ${entry.role}[${entry.rank}]${entry.gitVersion}`);
+            const roleIcon = ROLE_ICONS[entry.role?.toLowerCase()] ?? '';
+            const roleDisplay = roleIcon ? `${roleIcon} ${entry.role}` : entry.role;
+            const prefix = isLast ? '  └' : '  ├';
+            lines.push(`${prefix} ${badge} ${entry.name} · ${roleDisplay} · 🏅${entry.rank}${entry.gitVersion}`);
           }
         }
 
-        if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
+        // Wrap in code block for monospace rendering (aligns tree characters)
+        if (threadRoot) await threadReply(conn, threadRoot, '```\n' + lines.join('\n') + '\n```');
       } catch (err) {
         await reply(conn, `⛔ relay fleet failed — ${errStr(err)}`);
       }
@@ -2710,7 +2727,7 @@ function registerRelayCommands(): void {
         }
         lines.push('');
       }
-      await threadReply(conn, threadRoot, lines.join('\n').trim());
+      await threadReply(conn, threadRoot, '```\n' + lines.join('\n').trim() + '\n```');
     },
 
     allow: async (cmd, conn) => {
@@ -2818,8 +2835,19 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
   }
 }
 
+/** Build the ship tag with status indicator: [emoji+status name].
+ *  Status: ⭐ = commissioned+speaker, ⚓ = commissioned, 🚫 = decommissioned. */
+function replyTag(): string {
+  const found = findShipByHostname();
+  if (!found) return HOSTNAME;
+  const [name, entry] = found;
+  const commissioned = entry.commissioned !== false;
+  const statusChar = !commissioned ? '🚫' : isSpeakerCached ? '⭐' : '⚓';
+  return entry.emoji ? `${entry.emoji}${statusChar} ${name}` : `${statusChar} ${name}`;
+}
+
 async function reply(conn: RoomConn, text: string, threadRootId?: string): Promise<string | undefined> {
-  const tagged = `[${shipTag()}] ${text}`;
+  const tagged = `[${replyTag()}] ${text}`;
   const ls = loadLoudspeakerConfig();
   let eventId: string | undefined;
   if (ls) {
