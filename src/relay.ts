@@ -2143,6 +2143,8 @@ function registerRelayCommands(): void {
             scope = 'all';
           } else if (conn.name === 'Bridge') {
             scope = 'fleet';
+          } else if (conn.name === 'Engineering') {
+            scope = 'engineering';
           } else {
             const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
             scope = qBot ? qBot[0] : 'all';
