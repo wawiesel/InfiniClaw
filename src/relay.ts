@@ -44,6 +44,7 @@ import {
   initMetrics,
   recordOperatorMessage,
   recordScoreReaction,
+  recordBranchBrainResult,
   backfillOperatorEvents,
   publishMetrics,
   computeMetrics,
@@ -1323,6 +1324,7 @@ async function spawnBranchBrain(
   child.on('error', (err) => {
     log(`branchBrain: spawn error: ${errStr(err)}`);
     removeBranchTask(replyThreadId);
+    if (bot) recordBranchBrainResult(bot, false);
     threadReply(conn, replyThreadId, `⚠️ Branch Brain failed to start: ${err.message}`).catch(() => {});
   });
 
@@ -1330,6 +1332,7 @@ async function spawnBranchBrain(
     if (stderrBuf.trim()) log(`branchBrain: stderr: ${stderrBuf.trim().slice(0, 400)}`);
     log(`branchBrain: done exit=${code} posted=${postedCount}`);
     removeBranchTask(replyThreadId);
+    if (bot) recordBranchBrainResult(bot, postedCount > 0);
     if (postedCount === 0) {
       threadReply(conn, replyThreadId, `Branch Brain completed with no output (exit ${code ?? 'null'})`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }

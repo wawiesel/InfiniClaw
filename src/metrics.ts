@@ -50,6 +50,8 @@ export interface BotMetrics {
   score: RollingMetric;
   /** pm2 restart count */
   crashes: RollingMetric;
+  /** Branch brain success rate (0–100%) */
+  branchBrainSuccess: RollingMetric;
   /** Current status from fleet.json */
   status: string;
   /** Whether pm2 process is running */
@@ -67,6 +69,8 @@ export interface ShipMetrics {
 export interface FleetMetrics {
   /** % of assigned bots with running processes */
   availability: number;
+  /** Composite: 100 − (interventions × 10) − (crashes × 5). 1d and 7d rolling. */
+  autonomyScore: RollingMetric;
 }
 
 export interface MetricsSnapshot {
@@ -94,11 +98,20 @@ interface ScoreEvent {
   points: number;
 }
 
+interface BranchBrainEvent {
+  ts: number;
+  bot: string;
+  success: boolean; // true if posted output, false if errored/no output
+}
+
 /** Accumulated operator messages (non-BTC). Fed by relay sync loops. */
 const operatorEvents: MetricsEvent[] = [];
 
 /** Accumulated score reactions. Fed by relay sync loops. */
 const scoreEvents: ScoreEvent[] = [];
+
+/** Accumulated branch brain completions. Fed by relay spawnBranchBrain. */
+const branchBrainEvents: BranchBrainEvent[] = [];
 
 /** BTC room ID — set by relay on startup. */
 let behindTheCurtainRoomId: string | null = null;
@@ -160,6 +173,18 @@ export function recordScoreReaction(reactorId: string, emoji: string, botName: s
 }
 
 /**
+ * Record a branch brain completion (success or failure).
+ * Called from relay when a branch brain process exits.
+ */
+export function recordBranchBrainResult(bot: string, success: boolean, ts?: number): void {
+  branchBrainEvents.push({ ts: ts ?? Date.now(), bot, success });
+  const cutoff = Date.now() - 8 * 86_400_000;
+  while (branchBrainEvents.length > 0 && branchBrainEvents[0].ts < cutoff) {
+    branchBrainEvents.shift();
+  }
+}
+
+/**
  * Back-fill operator events from Matrix room history.
  * Called once on relay startup to seed metrics from historical data.
  */
@@ -210,6 +235,7 @@ export async function backfillOperatorEvents(
 export function resetMetrics(): void {
   operatorEvents.length = 0;
   scoreEvents.length = 0;
+  branchBrainEvents.length = 0;
   behindTheCurtainRoomId = null;
   operatorUserId = null;
   captainUserId = null;
@@ -258,10 +284,23 @@ function computeBotMetrics(): BotMetrics[] {
         day1: pm2 ? pm2.restartsSince(1) : 0,
         day7: pm2 ? pm2.restartsSince(7) : 0,
       },
+      branchBrainSuccess: {
+        day1: branchBrainSuccessRate(botId, 1),
+        day7: branchBrainSuccessRate(botId, 7),
+      },
       status: entry?.status ?? 'unknown',
       processRunning: pm2?.status === 'online',
     };
   });
+}
+
+/** Branch brain success rate (0–100%) for a bot in the given window. -1 if no data. */
+function branchBrainSuccessRate(bot: string, windowDays: number): number {
+  const cutoff = Date.now() - windowDays * 86_400_000;
+  const inWindow = branchBrainEvents.filter(e => e.bot === bot && e.ts >= cutoff);
+  if (inWindow.length === 0) return -1; // no data
+  const successes = inWindow.filter(e => e.success).length;
+  return Math.round((successes / inWindow.length) * 100);
 }
 
 function rollingPointsRate(events: ScoreEvent[], windowDays: number): number {
@@ -280,13 +319,27 @@ function computeShipMetrics(): ShipMetrics {
   };
 }
 
-function computeFleetMetrics(bots: BotMetrics[]): FleetMetrics {
+function computeFleetMetrics(bots: BotMetrics[], operator: OperatorMetrics): FleetMetrics {
   const assigned = bots.filter(b => b.status !== 'sleep' && b.status !== 'transit');
   const running = assigned.filter(b => b.processRunning);
+
+  // Autonomy score: 100 − (interventions × 10) − (crashes × 5)
+  // Clamped to [0, 100]. Uses total crashes across all bots.
+  const totalCrashes1d = bots.reduce((sum, b) => sum + b.crashes.day1, 0);
+  const totalCrashes7d = bots.reduce((sum, b) => sum + b.crashes.day7, 0);
+  const autonomy1d = Math.max(0, Math.min(100,
+    100 - (operator.interventions.day1 * 10) - (totalCrashes1d * 5)));
+  const autonomy7d = Math.max(0, Math.min(100,
+    100 - (operator.interventions.day7 * 10) - (totalCrashes7d * 5)));
+
   return {
     availability: assigned.length > 0
       ? Math.round((running.length / assigned.length) * 100)
       : 100,
+    autonomyScore: {
+      day1: Math.round(autonomy1d * 10) / 10,
+      day7: Math.round(autonomy7d * 10) / 10,
+    },
   };
 }
 
@@ -294,14 +347,15 @@ function computeFleetMetrics(bots: BotMetrics[]): FleetMetrics {
 
 /** Compute a full metrics snapshot for this ship. */
 export function computeMetrics(): MetricsSnapshot {
+  const operator = computeOperatorMetrics();
   const bots = computeBotMetrics();
   return {
     ship: thisShipName(),
     ts: Date.now(),
-    operator: computeOperatorMetrics(),
+    operator,
     bots,
     shipMetrics: computeShipMetrics(),
-    fleet: computeFleetMetrics(bots),
+    fleet: computeFleetMetrics(bots, operator),
   };
 }
 
@@ -333,11 +387,18 @@ export function formatOperatorMetrics(m: OperatorMetrics): string {
 export function formatBotMetrics(b: BotMetrics): string {
   const pip = b.processRunning ? '🟢' : '🔴';
   const name = capitalizeName(b.name);
-  return [
+  const lines = [
     `**${name}** ${pip} · ${b.status}`,
     `  Score: ${fmtRolling(b.score, ' pts/day')}`,
     `  Crashes: ${fmtRolling(b.crashes)}`,
-  ].join('\n');
+  ];
+  // Only show branch brain success if there's data
+  if (b.branchBrainSuccess.day1 >= 0 || b.branchBrainSuccess.day7 >= 0) {
+    const fmt1 = b.branchBrainSuccess.day1 >= 0 ? `${b.branchBrainSuccess.day1}%` : '—';
+    const fmt7 = b.branchBrainSuccess.day7 >= 0 ? `${b.branchBrainSuccess.day7}%` : '—';
+    lines.push(`  Branch success: ${fmt1} (1d) · ${fmt7} (7d)`);
+  }
+  return lines.join('\n');
 }
 
 export function formatShipMetrics(m: ShipMetrics): string {
@@ -353,7 +414,7 @@ export function formatShipMetrics(m: ShipMetrics): string {
 }
 
 export function formatFleetMetrics(m: FleetMetrics): string {
-  return `🌌 **Fleet** — availability: ${m.availability}%`;
+  return `🌌 **Fleet** — availability: ${m.availability}% · autonomy: ${fmtRolling(m.autonomyScore, '')}`;
 }
 
 export function formatAllMetrics(snapshot: MetricsSnapshot): string {

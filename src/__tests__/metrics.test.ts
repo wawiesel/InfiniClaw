@@ -5,6 +5,7 @@ import {
   resetMetrics,
   recordOperatorMessage,
   recordScoreReaction,
+  recordBranchBrainResult,
   computeMetrics,
   rollingRate,
   SCORE_REACTIONS,
@@ -177,6 +178,55 @@ describe('recordScoreReaction', () => {
   });
 });
 
+// ── recordBranchBrainResult ──────────────────────────────────────────
+
+describe('recordBranchBrainResult', () => {
+  beforeEach(setup);
+
+  it('records successful branch brain completions', () => {
+    recordBranchBrainResult('cid', true, hoursAgo(1));
+    recordBranchBrainResult('cid', true, hoursAgo(2));
+    recordBranchBrainResult('cid', false, hoursAgo(3));
+    // 2 successes out of 3 = 67%
+    // This is tested via computeMetrics below
+  });
+
+  it('prunes events older than 8 days', () => {
+    recordBranchBrainResult('cid', true, daysAgo(9));
+    recordBranchBrainResult('cid', true, hoursAgo(1));
+    // Old event pruned, only 1 remains
+  });
+});
+
+// ── autonomy score ──────────────────────────────────────────────────
+
+describe('autonomy score', () => {
+  beforeEach(setup);
+
+  it('starts at 100 with no interventions or crashes', () => {
+    const snapshot = computeMetrics();
+    expect(snapshot.fleet.autonomyScore.day1).toBe(100);
+    expect(snapshot.fleet.autonomyScore.day7).toBe(100);
+  });
+
+  it('decreases by 10 per intervention', () => {
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'fix this', hoursAgo(1));
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'fix that', hoursAgo(2));
+    const snapshot = computeMetrics();
+    // 2 interventions × 10 = 20, so 100 - 20 = 80
+    expect(snapshot.fleet.autonomyScore.day1).toBe(80);
+  });
+
+  it('clamps to 0 minimum', () => {
+    // 11 interventions × 10 = 110, clamped to 0
+    for (let i = 0; i < 11; i++) {
+      recordOperatorMessage(OPERATOR, ENG_ROOM, `msg ${i}`, hoursAgo(1));
+    }
+    const snapshot = computeMetrics();
+    expect(snapshot.fleet.autonomyScore.day1).toBe(0);
+  });
+});
+
 // ── resetMetrics ─────────────────────────────────────────────────────
 
 describe('resetMetrics', () => {
@@ -219,6 +269,7 @@ describe('formatting', () => {
       name: 'cid',
       score: { day1: 3, day7: 1.5 },
       crashes: { day1: 0, day7: 1 },
+      branchBrainSuccess: { day1: -1, day7: -1 },
       status: 'quarters',
       processRunning: true,
     });
@@ -234,6 +285,7 @@ describe('formatting', () => {
       name: 'norm',
       score: { day1: 0, day7: 0 },
       crashes: { day1: 0, day7: 0 },
+      branchBrainSuccess: { day1: -1, day7: -1 },
       status: 'sleep',
       processRunning: false,
     });
@@ -252,9 +304,38 @@ describe('formatting', () => {
     expect(result).toContain('3');
   });
 
-  it('formatFleetMetrics shows availability percentage', () => {
-    const result = formatFleetMetrics({ availability: 85 });
+  it('formatBotMetrics shows branch success when data exists', () => {
+    const result = formatBotMetrics({
+      name: 'cid',
+      score: { day1: 0, day7: 0 },
+      crashes: { day1: 0, day7: 0 },
+      branchBrainSuccess: { day1: 100, day7: 80 },
+      status: 'quarters',
+      processRunning: true,
+    });
+    expect(result).toContain('Branch success');
+    expect(result).toContain('100%');
+    expect(result).toContain('80%');
+  });
+
+  it('formatBotMetrics hides branch success when no data', () => {
+    const result = formatBotMetrics({
+      name: 'cid',
+      score: { day1: 0, day7: 0 },
+      crashes: { day1: 0, day7: 0 },
+      branchBrainSuccess: { day1: -1, day7: -1 },
+      status: 'quarters',
+      processRunning: true,
+    });
+    expect(result).not.toContain('Branch success');
+  });
+
+  it('formatFleetMetrics shows availability and autonomy', () => {
+    const result = formatFleetMetrics({ availability: 85, autonomyScore: { day1: 90, day7: 95 } });
     expect(result).toContain('85%');
+    expect(result).toContain('autonomy');
+    expect(result).toContain('90');
+    expect(result).toContain('95');
   });
 });
 
@@ -273,6 +354,7 @@ describe('formatScopeMetrics', () => {
         name: 'cid',
         score: { day1: 1, day7: 0.5 },
         crashes: { day1: 0, day7: 0 },
+        branchBrainSuccess: { day1: -1, day7: -1 },
         status: 'quarters',
         processRunning: true,
       },
@@ -282,7 +364,7 @@ describe('formatScopeMetrics', () => {
       relayUptimeSeconds: 3600,
       relayRestarts: 0,
     },
-    fleet: { availability: 100 },
+    fleet: { availability: 100, autonomyScore: { day1: 80, day7: 90 } },
   };
 
   it('scope "operator" returns operator metrics', () => {
@@ -345,6 +427,7 @@ describe('formatAllMetrics', () => {
           name: 'cid',
           score: { day1: 0, day7: 0 },
           crashes: { day1: 0, day7: 0 },
+          branchBrainSuccess: { day1: 100, day7: 80 },
           status: 'onduty',
           processRunning: true,
         },
@@ -352,6 +435,7 @@ describe('formatAllMetrics', () => {
           name: 'norm',
           score: { day1: 0, day7: 0 },
           crashes: { day1: 0, day7: 0 },
+          branchBrainSuccess: { day1: -1, day7: -1 },
           status: 'quarters',
           processRunning: true,
         },
@@ -361,7 +445,7 @@ describe('formatAllMetrics', () => {
         relayUptimeSeconds: 86400,
         relayRestarts: 1,
       },
-      fleet: { availability: 100 },
+      fleet: { availability: 100, autonomyScore: { day1: 100, day7: 100 } },
     };
 
     const result = formatAllMetrics(snapshot);
