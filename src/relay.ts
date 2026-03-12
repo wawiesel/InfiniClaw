@@ -1801,7 +1801,7 @@ async function handleLifecycleCommand(
 
   if (action !== 'dismiss' && action !== 'sleep') {
     if (!isShipCommissioned()) {
-      await reply(conn, `relay ship decommissioned — use !commission first`);
+      await reply(conn, `⛔ relay ship decommissioned — use !commission first`);
       return;
     }
     try { ensurePodmanReady(); } catch (err) {
@@ -1998,7 +1998,7 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
   if (bots.length === 0) return;
 
   if (!isShipCommissioned()) {
-    await reply(conn, `relay ship decommissioned — use !commission first`);
+    await reply(conn, `⛔ relay ship decommissioned — use !commission first`);
     return;
   }
   try { ensurePodmanReady(); } catch (err) {
