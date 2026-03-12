@@ -62,7 +62,11 @@ export interface ShipMetrics {
   name: string;
   /** Relay pm2 uptime in seconds */
   relayUptimeSeconds: number;
+<<<<<<< Updated upstream
   /** Relay pm2 restarts (rolling 1d / 7d) */
+=======
+  /** Relay pm2 restart count (rolling 1d/7d) */
+>>>>>>> Stashed changes
   relayRestarts: RollingMetric;
   /** Infra sync/build failures (1d and 7d rolling) */
   infraFailures: RollingMetric;
