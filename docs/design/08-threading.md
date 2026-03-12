@@ -25,8 +25,8 @@ Branch brains run on the **host machine** — not inside containers. They are on
 
 1. Main brain calls `branch_to_thread(objective, thread_id)`
 2. Agent-runner writes a relay task file: `_runtime/relay-tasks/thread-brain-*.json`
-3. Relay picks up the file, calls `spawnThreadBrain()`
-4. Relay posts announcement on main timeline: `🧵 Branch: {objective first line}`
+3. Relay picks up the file, calls `spawnBranchBrain()`
+4. Relay posts announcement on main timeline: `🧵 Branch Brain: {objective first line}`
 5. Announcement event ID becomes the thread root
 6. Relay spawns: `claude --print --verbose --output-format stream-json`
 7. Branch brain streams output — each message posted into the Matrix thread
