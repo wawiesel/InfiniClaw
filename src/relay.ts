@@ -1018,7 +1018,7 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
       const sk = Number(b.sigkills || 0);
       totalOom += oom;
       if (b.status === 'ACTIVE' || oom > 0 || sk > 0) {
-        const mem = b.rss_mb != null ? `RSS=${b.rss_mb}/${b.limit_mb}MB` : '';
+        const mem = b.rss_mb != null ? `RSS=${b.rss_mb}/${b.limit_mb ?? '?'}MB` : '';
         const t = trends[name];
         const trend = t ? ` Δ24h: SK+${t.sigkills} OOM+${t.oom_kills}` : '';
         lines.push(`  ${name}: ${b.status} ${mem} SK=${sk} OOM=${oom}${trend}`);
