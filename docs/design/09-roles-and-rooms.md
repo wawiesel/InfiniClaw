@@ -84,7 +84,9 @@ A bot is **always** in its quarters room. It can be in at most one additional ro
 | `sleep` | Quarters only | — | `never` | Stopped |
 | `transit` | — | — | `never` | Stopped |
 
-Quarters and onduty are functionally identical environments — same brain, same lobes, same thread brains. The only differences are which rooms the bot is in and `triggerType`. A bot in quarters is transferrable to another ship without reboot.
+Quarters and onduty are functionally identical environments — same brain, same lobes, same branch brains. The only differences are which rooms the bot is in and `triggerType`. A bot in quarters is transferrable to another ship without reboot.
+
+Quarters is also a place for retrospective work — a bot can use its quarters room to collect learnings, write up session notes, and update `MEMORY.md` without cluttering the duty rooms.
 
 A bot cannot be `onduty` on a decommissioned ship, but can be awake in `quarters`.
 
