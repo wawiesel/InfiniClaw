@@ -2851,11 +2851,14 @@ async function reply(conn: RoomConn, text: string, threadRootId?: string): Promi
     const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
     if (token) {
       eventId = await relaySend(ls.homeserver, token, conn.roomId, tagged, threadRootId);
-      // Mirror non-thread command output to BehindTheCurtain
-      if (!threadRootId && curtainRoomId && conn.roomId !== curtainRoomId) {
-        relaySend(ls.homeserver, token, curtainRoomId, tagged).catch(() => {});
+      if (eventId) {
+        // Mirror non-thread command output to BehindTheCurtain
+        if (!threadRootId && curtainRoomId && conn.roomId !== curtainRoomId) {
+          relaySend(ls.homeserver, token, curtainRoomId, tagged).catch(() => {});
+        }
+        return eventId;
       }
-      return eventId;
+      // Loudspeaker send failed (e.g. not in BTC room) — fall through to conn.accessToken
     }
   }
   if (!conn.accessToken) return undefined;
