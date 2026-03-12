@@ -578,8 +578,9 @@ async function electSpeaker(): Promise<boolean> {
     isSpeakerCached = sorted.length > 0 && sorted[0][1].hostname === HOSTNAME;
     return isSpeakerCached;
   } catch {
-    isSpeakerCached = true;
-    return true;
+    // Fail-safe: on error, don't claim speaker status — prefer silence over false authority
+    isSpeakerCached = false;
+    return false;
   }
 }
 
