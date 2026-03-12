@@ -2244,7 +2244,7 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
     const scopeLabel = `📊 metrics${scope !== 'all' ? ` · ${scope}` : ''}`;
     const threadRoot = await reply(conn, scopeLabel);
     if (threadRoot) {
-      await threadReply(conn, threadRoot, '```\n' + text + '\n```');
+      await threadReply(conn, threadRoot, text);
     } else {
       await reply(conn, text);
     }
@@ -2641,8 +2641,7 @@ function registerRelayCommands(): void {
           }
         }
 
-        // Wrap in code block for monospace rendering (aligns tree characters)
-        if (threadRoot) await threadReply(conn, threadRoot, '```\n' + lines.join('\n') + '\n```');
+        if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
       } catch (err) {
         await reply(conn, `⛔ relay fleet failed — ${errStr(err)}`);
       }
@@ -2729,7 +2728,7 @@ function registerRelayCommands(): void {
         }
         lines.push('');
       }
-      await threadReply(conn, threadRoot, '```\n' + lines.join('\n').trim() + '\n```');
+      await threadReply(conn, threadRoot, lines.join('\n').trim());
     },
 
     allow: async (cmd, conn) => {
