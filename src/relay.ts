@@ -47,6 +47,8 @@ import {
   recordScoreReaction,
   recordBranchBrainResult,
   recordInfraFailure,
+  recordMessageDelivery,
+  recordBotReply,
   backfillOperatorEvents,
   publishMetrics,
   computeMetrics,
@@ -114,6 +116,13 @@ function formatDuration(ms: number): string {
   if (min < 60) return `${min}m`;
   const hrs = (ms / 3_600_000).toFixed(1).replace(/\.0$/, '');
   return `${hrs}h`;
+}
+
+/** Format token count: 1234 → "1.2K", 1234567 → "1.2M" */
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
 function formatTimestamp(): string {
@@ -1174,12 +1183,14 @@ function formatCombinedMetrics(
       totalRssMb += rss;
       const mem = rss > 0 ? ` · mem ${rss}/${hBot?.limit_mb ?? '?'}MB` : '';
       const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
-      // Token throughput from health report
+      // Token throughput: prefer health report (cross-ship), fall back to local stats-cache
       const tokData = (health?.tokens as Record<string, { total_24h?: number }> | undefined)?.[bot.name];
       const tok24k = tokData?.total_24h != null ? Math.round(tokData.total_24h / 1000) : null;
-      const tokStr = tok24k != null && tok24k > 0 ? ` · tok ${tok24k}K (1d)` : '';
+      const tokTag = tok24k != null && tok24k > 0 ? ` · tok ${tok24k}K (1d)` : (bot.totalTokens ? ` · ${formatTokens(bot.totalTokens)} tok` : '');
+      // Response latency p50/p95
+      const latTag = bot.responseLatencyP50 != null ? ` · lat ${bot.responseLatencyP50}s/${bot.responseLatencyP95 ?? '?'}s` : '';
 
-      lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}${tokStr}`);
+      lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}${tokTag}${latTag}`);
     }
 
     totalInterventions.day1 += s.operator.interventions.day1;
@@ -3325,6 +3336,28 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             if (event.type !== 'm.room.message') continue;
             if (event.content?.msgtype !== 'm.text') continue;
             const body = event.content.body?.trim() || '';
+
+            // ── Response latency tracking ──
+            // Extract sender's local username (strip @...:domain)
+            const senderLocal = event.sender?.startsWith('@')
+              ? event.sender.slice(1, event.sender.indexOf(':'))
+              : '';
+            const evTs = event.origin_server_ts ?? Date.now();
+            if (senderLocal && liveFleet[senderLocal]) {
+              // Bot message — stop the latency clock
+              recordBotReply(senderLocal, evTs);
+            } else if (event.sender === captainUserId && conn.userId !== event.sender) {
+              // Captain message in a duty/quarters room — start latency clock for local bots in this room
+              for (const [bot, entry] of Object.entries(liveFleet)) {
+                if (entry.ship !== HOSTNAME) continue;
+                if (entry.status !== 'onduty' && entry.status !== 'quarters') continue;
+                const dutyRoom = ROLE_ROOMS[entry.role?.toLowerCase() ?? '']?.room ?? '';
+                const quartersRoom = entry.quartersRoom ?? bot;
+                if (conn.name === dutyRoom || conn.name === quartersRoom) {
+                  recordMessageDelivery(bot, evTs);
+                }
+              }
+            }
 
             // 📡 — relay received acknowledgement for Captain messages
             if (event.sender === captainUserId && event.event_id && conn.accessToken) {

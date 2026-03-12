@@ -14,6 +14,7 @@ import { logger } from 'nanoclaw/logger.js';
 import { capitalizeName } from './formatting.js';
 import { matrixGetMessages } from './matrix-api.js';
 import { uploadContent } from './s3-sync.js';
+import { resolveRoot } from './service.js';
 import {
   loadShipConfig,
   thisShipName,
@@ -58,6 +59,12 @@ export interface BotMetrics {
   status: string;
   /** Whether pm2 process is running */
   processRunning: boolean;
+  /** Total tokens (input+output) — snapshot from stats-cache.json */
+  totalTokens?: number;
+  /** Response latency p50 in seconds (1d rolling) */
+  responseLatencyP50?: number;
+  /** Response latency p95 in seconds (1d rolling) */
+  responseLatencyP95?: number;
 }
 
 export interface ShipMetrics {
@@ -119,6 +126,12 @@ const branchBrainEvents: BranchBrainEvent[] = [];
 
 /** Accumulated infra failures (secrets sync, code sync, code build). Fed by reportFailure. */
 const infraFailureEvents: { ts: number; system: string }[] = [];
+
+/** Accumulated response latency samples. Fed by relay when a bot replies. */
+const responseLatencyEvents: { ts: number; bot: string; latencyMs: number }[] = [];
+
+/** Pending message deliveries — tracks when a message was delivered to a bot's room. */
+const pendingDeliveries: Map<string, number> = new Map();
 
 /** BTC room ID — set by relay on startup. */
 let behindTheCurtainRoomId: string | null = null;
@@ -238,6 +251,31 @@ export async function backfillOperatorEvents(
   operatorEvents.sort((a, b) => a.ts - b.ts);
 }
 
+/**
+ * Record that a message was delivered to a bot's room. Starts the latency clock.
+ * Called by relay when a non-bot message arrives in a bot's room.
+ */
+export function recordMessageDelivery(bot: string, ts: number): void {
+  pendingDeliveries.set(bot, ts);
+}
+
+/**
+ * Record that a bot replied. Stops the latency clock and records the sample.
+ * Called by relay when a bot message is seen in its room.
+ */
+export function recordBotReply(bot: string, ts: number): void {
+  const deliveryTs = pendingDeliveries.get(bot);
+  if (!deliveryTs) return;
+  pendingDeliveries.delete(bot);
+  const latencyMs = ts - deliveryTs;
+  if (latencyMs < 0 || latencyMs > 600_000) return; // ignore nonsense (>10min)
+  responseLatencyEvents.push({ ts, bot, latencyMs });
+  const cutoff = Date.now() - 8 * 86_400_000;
+  while (responseLatencyEvents.length > 0 && responseLatencyEvents[0].ts < cutoff) {
+    responseLatencyEvents.shift();
+  }
+}
+
 /** Record an infra failure event (secrets sync, code sync, code build). */
 export function recordInfraFailure(system: string): void {
   infraFailureEvents.push({ ts: Date.now(), system });
@@ -251,6 +289,8 @@ export function resetMetrics(): void {
   scoreEvents.length = 0;
   branchBrainEvents.length = 0;
   infraFailureEvents.length = 0;
+  responseLatencyEvents.length = 0;
+  pendingDeliveries.clear();
   behindTheCurtainRoomId = null;
   operatorUserId = null;
   captainUserId = null;
@@ -308,6 +348,7 @@ function computeBotMetrics(): BotMetrics[] {
     const score1d = rollingPointsRate(botScores, 1);
     const score7d = rollingPointsRate(botScores, 7);
 
+    const latency = botLatencyPercentiles(botId, 1);
     return {
       name: botId,
       score: { day1: score1d, day7: score7d },
@@ -321,6 +362,9 @@ function computeBotMetrics(): BotMetrics[] {
       },
       status: entry?.status ?? 'unknown',
       processRunning: pm2?.status === 'online',
+      totalTokens: readBotTokens(botId) || undefined,
+      responseLatencyP50: latency.p50 >= 0 ? latency.p50 : undefined,
+      responseLatencyP95: latency.p95 >= 0 ? latency.p95 : undefined,
     };
   });
 }
@@ -332,6 +376,41 @@ function branchBrainSuccessRate(bot: string, windowDays: number): number {
   if (inWindow.length === 0) return -1; // no data
   const successes = inWindow.filter(e => e.success).length;
   return Math.round((successes / inWindow.length) * 100);
+}
+
+/** Compute percentile from an array of numbers. Returns -1 if empty. */
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) return -1;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, idx)];
+}
+
+/** Compute response latency p50/p95 for a bot in the given window (returns seconds). */
+function botLatencyPercentiles(bot: string, windowDays: number): { p50: number; p95: number } {
+  const cutoff = Date.now() - windowDays * 86_400_000;
+  const samples = responseLatencyEvents
+    .filter(e => e.bot === bot && e.ts >= cutoff)
+    .map(e => Math.round(e.latencyMs / 1000));
+  return { p50: percentile(samples, 50), p95: percentile(samples, 95) };
+}
+
+
+/** Read token stats from a bot's stats-cache.json. Returns total tokens or 0. */
+function readBotTokens(botId: string): number {
+  try {
+    const root = resolveRoot();
+    const statsPath = path.join(root, '_runtime', 'instances', botId, 'data', 'sessions', 'main', '.claude', 'stats-cache.json');
+    const raw = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
+    const usage = raw.modelUsage ?? {};
+    let total = 0;
+    for (const model of Object.values(usage) as Array<{ inputTokens?: number; outputTokens?: number }>) {
+      total += (model.inputTokens ?? 0) + (model.outputTokens ?? 0);
+    }
+    return total;
+  } catch {
+    return 0;
+  }
 }
 
 function rollingPointsRate(events: ScoreEvent[], windowDays: number): number {

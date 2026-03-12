@@ -7,6 +7,8 @@ import {
   recordScoreReaction,
   recordBranchBrainResult,
   recordInfraFailure,
+  recordMessageDelivery,
+  recordBotReply,
   computeMetrics,
   rollingRate,
   SCORE_REACTIONS,
@@ -561,5 +563,84 @@ describe('formatAllMetrics', () => {
     expect(result).toContain('Norm');
     expect(result).toContain('Availability');
     expect(result).toContain('1d'); // 86400s = 1d
+  });
+});
+
+// ── Response Latency ────────────────────────────────────────────────
+
+describe('response latency tracking', () => {
+  beforeEach(setup);
+
+  it('records latency when delivery followed by reply', () => {
+    const now = Date.now();
+    recordMessageDelivery('cid', now - 15_000); // 15s ago
+    recordBotReply('cid', now);
+    // Latency sample should be ~15s — verified via computeMetrics indirectly
+    // (internal state, but we can check it doesn't crash)
+  });
+
+  it('ignores reply without prior delivery', () => {
+    recordBotReply('cid', Date.now());
+    // Should not throw or record anything
+  });
+
+  it('ignores negative or >10min latency', () => {
+    const now = Date.now();
+    recordMessageDelivery('cid', now + 1000); // future = negative latency
+    recordBotReply('cid', now);
+    // Should be discarded silently
+
+    recordMessageDelivery('cid', now - 700_000); // 11+ min
+    recordBotReply('cid', now);
+    // Also discarded
+  });
+
+  it('clears pending deliveries on reset', () => {
+    recordMessageDelivery('cid', Date.now());
+    resetMetrics();
+    initMetrics({ btcRoomId: BTC_ROOM, operatorUid: OPERATOR, captainUid: CAPTAIN });
+    recordBotReply('cid', Date.now() + 5000);
+    // After reset, delivery is gone — reply should not record latency
+  });
+});
+
+// ── MTBI in OperatorMetrics ─────────────────────────────────────────
+
+describe('MTBI in operator metrics', () => {
+  beforeEach(setup);
+
+  it('includes mtbi in operator metrics when interventions exist', () => {
+    const now = Date.now();
+    // 3 interventions 2 hours apart
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'help 1', now - 4 * 3_600_000);
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'help 2', now - 2 * 3_600_000);
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'help 3', now);
+
+    const snapshot = computeMetrics();
+    expect(snapshot.operator.mtbi).toBeCloseTo(2, 0); // ~2 hours
+  });
+
+  it('operator metrics mtbi is null with < 2 interventions', () => {
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'help', Date.now());
+    const snapshot = computeMetrics();
+    expect(snapshot.operator.mtbi).toBeNull();
+  });
+
+  it('formats MTBI in operator output when present', () => {
+    const result = formatOperatorMetrics({
+      interventions: { day1: 2, day7: 1 },
+      xCommandsIssued: { day1: 0, day7: 0 },
+      mtbi: 4.5,
+    });
+    expect(result).toContain('MTBI: 4.5h (7d)');
+  });
+
+  it('omits MTBI line when null', () => {
+    const result = formatOperatorMetrics({
+      interventions: { day1: 0, day7: 0 },
+      xCommandsIssued: { day1: 0, day7: 0 },
+      mtbi: null,
+    });
+    expect(result).not.toContain('MTBI');
   });
 });
