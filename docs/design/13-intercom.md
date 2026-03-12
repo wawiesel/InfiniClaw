@@ -42,9 +42,9 @@ The relay on each ship connects to Matrix as the intercom accounts (same credent
 
 Echo loops are impossible because the relay never sends `!`-prefixed messages itself.
 
-## Operator Callout (`!relay`)
+## Operator Callout (`@ <text>`)
 
-The Captain can send commands to an operator's tmux session from any Matrix room by typing `!relay <text>`. The text is sent as keystrokes to the `operator` tmux session on each ship. If no session exists, one is created with `claude` as the initial command. Captain/intercom only.
+The Captain can address the operator from any room the relay watches by prefixing a message with `@ `. The text is sent as keystrokes to the `operator` tmux session on each ship with `[RoomName | roomId]` prepended. If no session exists, one is created with `claude` as the initial command. BehindTheCurtain messages forward automatically without the `@` prefix. Captain/operator only.
 
 ## Verification
 

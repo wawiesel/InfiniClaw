@@ -14,11 +14,11 @@ npm run build
 npm run cli relay start
 ```
 
-**Prevention:** Always `git pull && npm run build` before starting the relay after a fleet update. The `!refit` command does this automatically for running ships.
+**Prevention:** Always `git pull && npm run build` before starting the relay after a fleet update. The `!pull` command does this automatically for running ships.
 
 ---
 
-## Relay won't respond to !refit or any commands
+## Relay won't respond to !pull or any commands
 
 **Problem:** Commands are sent but relay never replies or acts.
 
@@ -34,13 +34,13 @@ Look for: crash loops, Matrix 502 errors, "initial sync done" (means connected).
 
 ---
 
-## !relay status only shows for the speaker ship
+## !operator status only shows for the speaker ship
 
-**Problem:** Sending `!relay` reports status from one ship but other ships are silent.
+**Problem:** Sending `!operator` reports status from one ship but other ships are silent.
 
 **Cause:** Status handler was gated on `isSpeaker()`, so only the lowest-rank active ship replied. Non-speaker ships ignored the command entirely.
 
-**Fix:** Each ship reports its own state via `shipReport()` (not `speakerReport()`). The `!relay` handler should never be gated on speaker status — every ship should respond for itself.
+**Fix:** Each ship reports its own state via `shipReport()` (not `speakerReport()`). The `!operator` handler should never be gated on speaker status — every ship should respond for itself.
 
 ---
 

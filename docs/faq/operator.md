@@ -39,7 +39,7 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 |---------|--------|
 | `!commission [ship]` / `!decommission [ship]` | Ship lifecycle (no arg = all) |
 | `!provision [target]` | Sync repos (secrets, infiniclaw, or any paths.json name) |
-| `!refit [ship]` | Full overhaul: sync, rebuild, restart bots + relay |
+| `!pull [ship]` | Full overhaul: pull repos, rebuild, restart bots |
 
 ### Fleet Commands
 
@@ -47,7 +47,7 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 |---------|--------|
 | `!fleet` / `!fleet room` | Fleet status — each ship reports local bots |
 | `!health` | Fleet health summary via S3 (speaker replies) |
-| `!relay <text>` | Send text to operator tmux session |
+| `!operator [on\|off] [ship]` | Show or toggle operator relay on ship(s) |
 
 ### Multi-ship fan-out
 
