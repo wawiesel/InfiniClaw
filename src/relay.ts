@@ -1108,14 +1108,15 @@ function formatCombinedMetrics(
     const commissioned = cfg?.commissioned !== false;
     const statusChar = commissioned ? '◉' : '💤';
     const shipEmoji = cfg?.emoji ?? '';
-    const uptime = formatDuration(s.shipMetrics.relayUptimeSeconds);
+    const uptimePct = Math.min(100, Math.round(s.shipMetrics.relayUptimeSeconds / 864));  // % of 24h
+    const uptimeTag = `up ${uptimePct}%`;
     const infraRaw = s.shipMetrics.infraFailures as { day1?: number; day7?: number } | number;
     const syncFail = typeof infraRaw === 'number' ? infraRaw : (infraRaw?.day1 ?? 0);
     const syncTag = syncFail > 0 ? `⚠️${syncFail} sync/day` : 'sync OK';
     const rstRaw = s.shipMetrics.relayRestarts as { day1?: number; day7?: number } | number;
     const rst = typeof rstRaw === 'number' ? { day1: rstRaw, day7: rstRaw } : { day1: rstRaw?.day1 ?? 0, day7: rstRaw?.day7 ?? 0 };
     const rstTag = `↻${rst.day1}/${rst.day7}`;
-    lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptime} up · ${rstTag} · ${syncTag}`);
+    lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptimeTag} · ${rstTag} · ${syncTag}`);
 
     // Build bot list: merge metrics snapshot + health + liveFleet role/rank
     const health = healthByShip.get(s.ship);

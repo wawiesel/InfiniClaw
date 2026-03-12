@@ -32,7 +32,7 @@ Snapshots (no suffix) are point-in-time values. All rates are per-day.
 
 | Metric | Formula | Good | Alarm | Status |
 |--------|---------|------|-------|--------|
-| **Uptime %** | % of window (1d/7d) bot process was running | > 99% (1d) | < 95% | 🔲 Planned |
+| **Uptime %** | % of last 24h relay was running (approx: current uptime / 86400s) | > 99% (1d) | < 95% | ✅ Tracked |
 | **Response latency** | p50/p95 time from Captain mention to first bot reply | < 30s p50 | > 2min p95 | 🔲 Planned |
 | **Crashes/day** | PM2 restart count per day | 0 | > 2/day | ✅ Tracked |
 | **OOM kills/day** | Container killed by memory limit per day | 0 | Any | ✅ Tracked |
@@ -85,7 +85,7 @@ Snapshots (no suffix) are point-in-time values. All rates are per-day.
 The `!metrics` output uses the same visual language as `!fleet`:
 
 ```
-🦁◉ Herc · 🏅1 · 2.1h up · ↻2/5 · sync OK
+🦁◉ Herc · 🏅1 · up 99% · ↻2/5 · sync OK
   ├ ⭐ Cid   · 🎨 Artist   · 🏅1 · mem 120/512MB · SK+0 OOM+0 (1d)
   └ ◉ Norm  · 💬 Normie   · 🏅2 · mem 98/512MB  · SK+0 OOM+0 (1d)
 
@@ -125,14 +125,6 @@ The relay records a timestamp when a Captain message enters a bot's context (�
 - **p50 < 30s** = normal for a working bot
 - **p95 > 2min** = bot is struggling (large context, slow model, stuck)
 - Display as `lat 12s p50 · 45s p95 (1d)` per bot in `!metrics`
-
-### Uptime %
-
-Record relay/bot start timestamps. Compute `(window_ms − downtime_ms) / window_ms × 100%`. Downtime = sum of gaps between a stop event and the next start event within the window.
-
-- **> 99% (1d)** = healthy
-- **< 95% (7d)** = frequent crashes
-- Replaces "2.1h up" with a fraction that's meaningful across restarts
 
 ### Task Completion Rate
 
