@@ -103,6 +103,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`resolveReplyThread`**: Scans messages in reverse for `thread_id` from non-bot senders. Returns `workThreadIds` override if set. Cleared after each response turn.
 - **`storeOutgoing`**: Must set `is_bot_message: true` — otherwise outgoing messages are re-detected as new human messages by `getNewMessages`, causing echo loops in quarters rooms.
 - **Turn timeout kill**: Must use `podman stop` (not `proc.kill('SIGTERM')`) — podman does not relay SIGTERM to the container process. Without this, containers survive the kill and run for minutes/hours.
+- **`killStaleContainers` on wake**: `!wake` calls `killStaleContainers(bot)` before `bootstrapBot` — same as `!sleep` and `!refresh`. Ensures no orphaned podman containers on restart.
 - **Branch brain GitHub auth**: `GH_TOKEN` injected from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account, not the host user.
 - **Branch brain limit**: `MAX_BRANCH_BRAINS_PER_BOT` (default 3) caps concurrent branch brains per bot. Rejection posts a warning into the triggering Matrix thread so the bot knows to wait.
 - **Error strings**: Always use `errStr(err)` from `utils.ts` instead of inline `err instanceof Error ? err.message : String(err)`. Imported in all source files (including `service.ts`, `matrix-api.ts`, `s3-sync.ts`).

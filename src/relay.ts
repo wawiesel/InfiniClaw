@@ -1987,6 +1987,7 @@ async function handleLifecycleCommand(
         killStaleContainers(bot);
         await setBotPip(root, bot, '🚀');
         await step('🚀 starting');
+        killStaleContainers(bot);
         bootstrapBot(root, bot);
         writeCrewStatus(root, bot);
         await setBotPip(root, bot, '🟡');
