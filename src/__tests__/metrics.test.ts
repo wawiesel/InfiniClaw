@@ -337,7 +337,7 @@ describe('formatting', () => {
     const result = formatShipMetrics({
       name: 'Herc',
       relayUptimeSeconds: 7200,
-      relayRestarts: 3,
+      relayRestarts: { day1: 3, day7: 1 },
       infraFailures: { day1: 2, day7: 0.4 },
     });
     expect(result).toContain('Herc');
@@ -405,7 +405,7 @@ describe('formatScopeMetrics', () => {
     shipMetrics: {
       name: 'Herc',
       relayUptimeSeconds: 3600,
-      relayRestarts: 0, infraFailures: { day1: 0, day7: 0 },
+      relayRestarts: { day1: 0, day7: 0 }, infraFailures: { day1: 0, day7: 0 },
     },
     fleet: { availability: 100, autonomyScore: { day1: 80, day7: 90 } },
   };
@@ -496,7 +496,7 @@ describe('formatAllMetrics', () => {
       shipMetrics: {
         name: 'Herc',
         relayUptimeSeconds: 86400,
-        relayRestarts: 1, infraFailures: { day1: 0, day7: 0 },
+        relayRestarts: { day1: 1, day7: 0 }, infraFailures: { day1: 0, day7: 0 },
       },
       fleet: { availability: 100, autonomyScore: { day1: 100, day7: 100 } },
     };

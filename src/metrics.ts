@@ -62,8 +62,8 @@ export interface ShipMetrics {
   name: string;
   /** Relay pm2 uptime in seconds */
   relayUptimeSeconds: number;
-  /** Relay pm2 restart count */
-  relayRestarts: number;
+  /** Relay pm2 restarts (rolling 1d / 7d) */
+  relayRestarts: RollingMetric;
   /** Infra sync/build failures (1d and 7d rolling) */
   infraFailures: RollingMetric;
 }
@@ -331,7 +331,10 @@ function computeShipMetrics(): ShipMetrics {
   return {
     name: thisShipName(),
     relayUptimeSeconds: relay?.uptimeMs ? Math.round(relay.uptimeMs / 1000) : 0,
-    relayRestarts: relay?.restarts ?? 0,
+    relayRestarts: {
+      day1: relay?.restartsSince(1) ?? 0,
+      day7: relay?.restartsSince(7) ?? 0,
+    },
     infraFailures: rolling(infraFailureEvents),
   };
 }
@@ -422,7 +425,7 @@ export function formatShipMetrics(m: ShipMetrics): string {
   return [
     `**${tag}**`,
     `  Relay uptime: ${uptime}`,
-    `  Relay restarts: ${m.relayRestarts}`,
+    `  Relay restarts: ${fmtRolling(m.relayRestarts)}`,
     `  Sync/build failures: ${fmtRolling(m.infraFailures)}`,
   ].join('\n');
 }
