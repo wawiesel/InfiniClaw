@@ -56,7 +56,7 @@ Host machine (macOS / Linux)
 ├── skill-sync.ts       → Copy persona skills into container session
 ├── mcp-sync.ts         → Sync MCP server config (persona → session)
 ├── metrics.ts          → Fleet metrics: operator interventions, bot scores, ship uptime, fleet availability. Publishes to S3. Back-fills from Matrix history on startup. `formatBotMetrics` capitalizes bot name; `formatShipMetrics` resolves emoji+name from `m.name` (ship key, e.g. 'Herc') via `safeLoadShips()`.
-├── command-registry.ts → Single source of truth for x-command names (includes context-aware !metrics)
+├── command-registry.ts → Single source of truth for x-command names (includes context-aware !metrics). Help text for !pull says "restart bots" (preserves state, not "wake").
 ├── s3-sync.ts          → S3 backup/restore for cross-machine moves
 ├── podman-bootstrap.ts → Image availability checks, orphan cleanup, delegates recovery to podman-utils
 ├── history-export.ts   → Periodic S3 export of conversation history (JSONL by date)
