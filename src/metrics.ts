@@ -17,7 +17,7 @@ import { uploadContent } from './s3-sync.js';
 import {
   loadShipConfig,
   thisShipName,
-  shipTag,
+  safeLoadShips,
   type BotEntry,
 } from './ship-config.js';
 import { errStr } from './utils.js';
@@ -342,8 +342,11 @@ export function formatBotMetrics(b: BotMetrics): string {
 
 export function formatShipMetrics(m: ShipMetrics): string {
   const uptime = formatDuration(m.relayUptimeSeconds);
+  const ships = safeLoadShips();
+  const entry = ships[m.name];
+  const tag = entry?.emoji ? `${entry.emoji} ${m.name}` : m.name;
   return [
-    `**${shipTag()}**`,
+    `**${tag}**`,
     `  Relay uptime: ${uptime}`,
     `  Relay restarts: ${m.relayRestarts}`,
   ].join('\n');

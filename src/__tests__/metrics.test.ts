@@ -262,7 +262,7 @@ describe('formatting', () => {
 
 describe('formatScopeMetrics', () => {
   const mockSnapshot: MetricsSnapshot = {
-    ship: 'HERACLES',
+    ship: 'Herc',
     ts: Date.now(),
     operator: {
       interventions: { day1: 2, day7: 1 },
@@ -278,7 +278,7 @@ describe('formatScopeMetrics', () => {
       },
     ],
     shipMetrics: {
-      name: 'HERACLES',
+      name: 'Herc',
       relayUptimeSeconds: 3600,
       relayRestarts: 0,
     },
@@ -334,7 +334,7 @@ describe('formatScopeMetrics', () => {
 describe('formatAllMetrics', () => {
   it('includes all sections', () => {
     const snapshot: MetricsSnapshot = {
-      ship: 'HERACLES',
+      ship: 'Herc',
       ts: Date.now(),
       operator: {
         interventions: { day1: 0, day7: 0 },
@@ -357,7 +357,7 @@ describe('formatAllMetrics', () => {
         },
       ],
       shipMetrics: {
-        name: 'HERACLES',
+        name: 'Herc',
         relayUptimeSeconds: 86400,
         relayRestarts: 1,
       },
