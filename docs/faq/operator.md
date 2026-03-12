@@ -4,7 +4,7 @@
 
 There are **4 layers** of communication, each serving a different purpose:
 
-1. **Relay** — Matrix lifecycle commands (`!report`, `!dismiss`, `!rejoin`, `!refresh`, `!fleet`, `!transport`, etc.)
+1. **Relay** — Matrix lifecycle commands (`!report`, `!dismiss`, `!wake`, `!sleep`, `!fleet`, `!transport`, etc.)
 2. **Loudspeaker** — relay's reply voice in fleet rooms
 3. **Operator account** — operator's direct Matrix presence (BehindTheCurtain + fleet rooms)
 4. **Intercom** — write-only broadcast channels the relay polls for incoming commands
@@ -29,8 +29,7 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 | `!sleep [bot]` | Stop container, leave all rooms except quarters |
 | `!report [bot]` | Send awake bot(s) to duty room |
 | `!dismiss [bot]` | Back to quarters (bot keeps running), update fleet.json |
-| `!rejoin [bot]` | Dismiss + report (full lifecycle reset) |
-| `!refresh [bot]` | Rebuild + restart (pick up new code, no brain/room changes) |
+| `!wake [bot]` | Start container in quarters (restart if already running) |
 | `!transport <bot> <ship>` | Beam bot to another ship |
 | `!promote <target>` / `!demote <target>` | Swap rank (bot within role, or ship) |
 | `!allow <bot> <path> [min]` / `!deny <bot> <path>` | Mount grants |
@@ -52,7 +51,7 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 
 ### Multi-ship fan-out
 
-Every `!` command is broadcast to all ships. When you say `!rejoin cid` in Engineering, every ship's relay sees it. Each checks if `cid` is local (via fleet.json). Only the owning ship acts — the rest silently ignore.
+Every `!` command is broadcast to all ships. When you say `!wake cid` in Engineering, every ship's relay sees it. Each checks if `cid` is local (via fleet.json). Only the owning ship acts — the rest silently ignore.
 
 ### Speaker election
 

@@ -36,7 +36,7 @@ Relays reply to x-commands via the `@loudspeaker` account. All replies are prefi
 
 The relay on each ship connects to Matrix as the intercom accounts (same credentials as `send`). X-commands (messages starting with `!`) are always processed, even from self. This is how operator-sent x-commands reach all relays:
 
-1. Operator sends `!rejoin cid` via `bash operator/matrix send bridge "!rejoin cid"`
+1. Operator sends `!wake cid` via `bash operator/matrix send bridge "!wake cid"`
 2. Message arrives in Bridge room from `bridge-intercom`
 3. Every ship's relay polls Bridge as `bridge-intercom` (different device IDs)
 4. All relays see the `!` message and process it

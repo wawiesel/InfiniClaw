@@ -100,8 +100,7 @@ Three clean axes: **lifecycle** (`!wake`/`!sleep`), **duty** (`!report`/`!dismis
 !report cid    → quarters → onduty (join duty room, triggerType=callout)
 !dismiss cid   → onduty → quarters (leave duty room, triggerType=always)
 !go lounge cid → move to lounge (no attribute change)
-!rejoin cid    → dismiss + report (full lifecycle reset)
-!refresh cid   → same status (stop + rebuild + start, no attribute changes)
+!wake cid      → stop + kill + restart in quarters (picks up new code)
 ```
 
 ### !wake

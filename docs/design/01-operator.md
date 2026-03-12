@@ -69,8 +69,8 @@ Every operator message outside BehindTheCurtain is an intervention — a sign th
 
 **How to intervene (escalating):**
 - **Mild**: Message the bot directly — `bash operator/matrix send <room> "@<bot> <message>"`
-- **Medium**: X-commands — `!rejoin <bot>`, `!dismiss <bot>`, `!report <bot>`
-- **Heavy**: Edit persona/config, then `!rejoin <bot>`
+- **Medium**: X-commands — `!wake <bot>`, `!dismiss <bot>`, `!report <bot>`
+- **Heavy**: Edit persona/config, then `!wake <bot>`
 - **Fallback**: Restart the relay
 
 **When NOT to intervene:**
@@ -84,7 +84,7 @@ Every operator message outside BehindTheCurtain is an intervention — a sign th
 |--------|-----------------|--------|--------|
 | **Interventions** | `@operator` messages sent to any room except BehindTheCurtain | 0/day | 1-day, 7-day rolling |
 | **X-commands issued** | X-commands sent by operator (not Captain) | Decreasing | 1-day, 7-day rolling |
-| **Bot restarts** | Operator-triggered `!wake`/`!rejoin`/`!refresh` vs automatic | Ratio → 0 | 1-day, 7-day rolling |
+| **Bot restarts** | Operator-triggered `!wake` vs automatic | Ratio → 0 | 1-day, 7-day rolling |
 | **Mean time between interventions** | Time gap between consecutive operator interventions | Increasing | 7-day rolling |
 
 Interventions is the primary metric. A day with zero interventions outside BehindTheCurtain means the fleet ran autonomously. Track by counting `@operator:a-gis.org` sends per room per day from Matrix history. Report both 1-day (yesterday) and 7-day rolling averages.

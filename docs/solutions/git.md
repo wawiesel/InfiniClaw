@@ -44,4 +44,4 @@ For `ships.json`/`fleet.json`, prefer the version with more complete data (e.g. 
 
 **Cause:** `CAPTAIN_USER_ID` was removed from individual bot env files and moved to `secrets/captain`. Bot start scripts must source `secrets/captain` to inject it. Old start scripts (before the fix in `src/service.ts`) don't do this.
 
-**Fix:** Restart the bot via `!rejoin <bot>` — the relay regenerates the start script from current `service.ts` which sources `secrets/captain` automatically.
+**Fix:** Restart the bot via `!wake <bot>` — the relay regenerates the start script from current `service.ts` which sources `secrets/captain` automatically.
