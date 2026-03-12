@@ -234,8 +234,6 @@ Mentioning `@operator` requests operator assistance. The relay detects the menti
 
 ### @loudspeaker
 
-> **Status:** Not yet implemented. The relay does not currently parse `@loudspeaker` mentions from bots.
-
 Two behaviors depending on message format:
 
 | Pattern | Who can use | Behavior |
