@@ -165,7 +165,6 @@ async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> 
   const conn = findEngConn(conns);
   if (!conn?.accessToken) return;
   const recoveryMsg = statusLine('✅', system, 'operational', Date.now() - state.startedAt);
-  await threadReply(conn, state.threadRootId, recoveryMsg);
   await reply(conn, recoveryMsg);
 }
 
