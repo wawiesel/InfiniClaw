@@ -18,10 +18,8 @@ Commands work from any room the operator account has joined — duty rooms (via 
 | `!report [bot]` | Send awake bot(s) to duty room. Skips sleeping bots. |
 | `!dismiss [bot]` | Remove from duty, back to quarters. |
 | `!go [room] [bot]` | Send bot to a non-duty room (e.g. lounge). No args = list rooms. |
-| `!wake [bot]` | Start container in quarters (full brain). |
+| `!wake [bot]` | Start or restart container (sleeping → wake; awake → stop+rebuild+restart). |
 | `!sleep [bot]` | Stop container, leave all rooms except quarters. |
-| `!rejoin [bot]` | Dismiss + report (full lifecycle reset). |
-| `!refresh [bot]` | Rebuild + restart (pick up new code, no brain/room changes). |
 | `!transport <bot> <ship>` | Beam bot to another ship (dematerialize/materialize). |
 | `!promote <target>` | Raise rank (bot within role, or ship). |
 | `!demote <target>` | Lower rank (bot within role, or ship). |

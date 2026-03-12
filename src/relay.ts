@@ -59,7 +59,6 @@ import {
   bootstrapBot,
   deployBot,
   stopBot,
-  refreshBot,
   restartBotForRoom,
   ensurePodmanReady,
   killStaleContainers,
@@ -2132,61 +2131,6 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
   }
 }
 
-/** Lightweight refresh: stop → rebuild → start. No brain/lobe/room changes. */
-async function handleRefresh(target: string | undefined, conn: RoomConn): Promise<void> {
-  const root = resolveRoot();
-  const isBTC = conn.roomId === curtainRoomId;
-  const scope = isBTC ? 'assigned' : 'present' as const;
-  const bots = resolveBots(target, conn, scope);
-  if (bots.length === 0) {
-    if (target && scope === 'present' && liveFleet[target]?.ship === HOSTNAME) {
-      await reply(conn, `📡 ${capitalizeName(target)} not in this room`);
-    }
-    return;
-  }
-
-  if (!isShipCommissioned()) {
-    await reply(conn, `⛔ 📡 ship decommissioned — use !commission first`);
-    return;
-  }
-  try { ensurePodmanReady(); } catch (err) {
-    await reply(conn, `⛔ 📡 podman not ready — ${errStr(err)}`);
-    return;
-  }
-
-  for (const bot of bots) {
-    const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-    const name = env?.ASSISTANT_NAME || capitalizeName(bot);
-    const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-    const rank = liveFleet[bot]?.rank ?? 99;
-    log(`!refresh ${name}`);
-
-    const startedAt = Date.now();
-    const threadRoot = await reply(conn, `📡 refreshing ${name} ...`);
-    if (!threadRoot) continue;
-    let stepN = 0;
-    const totalSteps = 2;
-    const step = (text: string) => threadReply(conn, threadRoot, `[${++stepN}/${totalSteps} ${formatDuration(Date.now() - startedAt)}] ${text}`);
-
-    try {
-      await step('🔄 refreshing');
-      refreshBot(root, bot);
-      const model = env?.BRAIN_MODEL || '?';
-      const ver = botVersion(root, bot);
-      const done = `📡 ${name} refreshed!`;
-      await step(`✅ done · ${role}[${rank}] · ${model}${ver}`);
-      await threadReply(conn, threadRoot, done);
-      await reply(conn, done);
-      publishFleetReport().catch(() => {});
-    } catch (err) {
-      log(`!refresh ${name} failed: ${errStr(err)}`);
-      const fail = `⛔ 📡 refresh ${name} failed — ${errStr(err)}`;
-      await step(fail);
-      await reply(conn, fail);
-    }
-  }
-}
-
 // ── Combined metrics + health handler ────────────────────────────
 
 /** Handle !metrics and !health (alias). Both run the same combined observability output. */
@@ -2264,17 +2208,6 @@ function registerRelayCommands(): void {
     },
     go: async (cmd, conn) => {
       await handleGoCommand(cmd, conn);
-    },
-    rejoin: async (cmd, conn) => {
-      const parsed = parseTarget(cmd, '!rejoin');
-      if (parsed.matched) {
-        await handleLifecycleCommand('dismiss', parsed.target, conn);
-        await handleLifecycleCommand('report', parsed.target, conn);
-      }
-    },
-    refresh: async (cmd, conn) => {
-      const parsed = parseTarget(cmd, '!refresh');
-      if (parsed.matched) await handleRefresh(parsed.target, conn);
     },
     sleep: async (cmd, conn) => {
       const parsed = parseTarget(cmd, '!sleep');
