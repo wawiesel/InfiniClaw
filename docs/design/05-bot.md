@@ -39,7 +39,7 @@ Every bot has runtime attributes that determine its behavior. Commands and event
 | `triggerType` | `always` · `callout` · `never` | Relay on room moves | `fleet.json` |
 | `rank` | number | `!promote` / `!demote` | `fleet.json` |
 | `ship` | hostname | `!transport` | `fleet.json` |
-| `activeBrainModel` | model ID | runtime model switch | `fleet.json` (not yet written) |
+| `activeBrainModel` | model ID | runtime model switch | `fleet.json` |
 
 ### triggerType
 

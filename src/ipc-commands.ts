@@ -13,7 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from './env-utils.js';
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
-import { loadShipConfig, shipTag } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, shipTag } from './ship-config.js';
 import { logger } from 'nanoclaw/logger.js';
 import { errStr } from './utils.js';
 import { gitSyncRepo } from './git-utils.js';
@@ -157,26 +157,33 @@ function applyBrainMode(
     throw new Error(`Missing profile env: ${envFile}`);
   }
 
+  let effectiveModel: string;
   if (mode === 'anthropic') {
-    upsertEnvLine(envFile, 'BRAIN_MODEL', model || 'claude-sonnet-4-6');
+    effectiveModel = model || 'claude-sonnet-4-6';
+    upsertEnvLine(envFile, 'BRAIN_MODEL', effectiveModel);
     upsertEnvLine(envFile, 'BRAIN_BASE_URL', '');
     upsertEnvLine(envFile, 'BRAIN_AUTH_TOKEN', '');
     upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
-    const effectiveModel = model || 'claude-sonnet-4-6';
-    return `Updated ${bot} to anthropic/${effectiveModel}. Restart required.`;
+  } else {
+    effectiveModel = model || 'devstral-small-2-fast:latest';
+    upsertEnvLine(envFile, 'BRAIN_MODEL', effectiveModel);
+    upsertEnvLine(
+      envFile,
+      'BRAIN_BASE_URL',
+      'http://host.containers.internal:11434',
+    );
+    upsertEnvLine(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
+    upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
+    upsertEnvLine(envFile, 'BRAIN_OAUTH_TOKEN', '');
   }
-
-  const effectiveModel = model || 'devstral-small-2-fast:latest';
-  upsertEnvLine(envFile, 'BRAIN_MODEL', effectiveModel);
-  upsertEnvLine(
-    envFile,
-    'BRAIN_BASE_URL',
-    'http://host.containers.internal:11434',
-  );
-  upsertEnvLine(envFile, 'BRAIN_AUTH_TOKEN', 'ollama');
-  upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
-  upsertEnvLine(envFile, 'BRAIN_OAUTH_TOKEN', '');
-  return `Updated ${bot} to ollama/${effectiveModel}. Restart required.`;
+  // Persist model switch to fleet.json so activeBrainModel stays in sync
+  try {
+    const fleet = loadFleet();
+    if (fleet[bot]) { fleet[bot].activeBrainModel = effectiveModel; writeFleet(fleet); }
+  } catch (err) {
+    logger.warn({ err, bot }, 'applyBrainMode: could not update activeBrainModel in fleet.json');
+  }
+  return `Updated ${bot} to ${mode}/${effectiveModel}. Restart required.`;
 }
 
 export function readBrainMode(bot: string): { mode: 'anthropic' | 'ollama' | 'unknown'; model: string } {

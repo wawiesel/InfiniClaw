@@ -27,6 +27,7 @@ export interface BotEntry {
   triggerType?: TriggerType;
   title?: string;
   quartersRoom?: string;
+  activeBrainModel?: string;
 }
 
 export interface ShipConfig {
