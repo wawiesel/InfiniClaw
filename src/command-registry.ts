@@ -61,7 +61,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'demote',        usage: '!demote <target>',          description: 'lower rank (bot or ship)',             match: startsWith('demote') },
   { name: 'commission',    usage: '!commission [ship]',        description: 'commission ship, start bots',          match: prefix('commission') },
   { name: 'decommission',  usage: '!decommission [ship]',     description: 'stop all bots, keep relay',            match: prefix('decommission') },
-  { name: 'pull',           usage: '!pull [ship]',               description: 'pull repos, rebuild, restart bots',      match: prefix('pull') },
+  { name: 'pull',           usage: '!pull [ship]',               description: 'pull repos, rebuild, redeploy bots',     match: prefix('pull') },
   { name: 'push',          usage: '!push [ship]',               description: 'git push InfiniClaw to origin',         match: prefix('push') },
   { name: 'allow',         usage: '!allow <bot> <path> [min]', description: 'grant rw mount (authorized)',          match: startsWith('allow') },
   { name: 'deny',          usage: '!deny <bot> <path>',        description: 'revoke rw mount (authorized)',         match: startsWith('deny') },

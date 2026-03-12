@@ -32,7 +32,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 |---------|--------|
 | `!commission [ship]` | Commission ship(s), start assigned bots. No arg = all. |
 | `!decommission [ship]` | Stop all bots on ship(s), keep relay running. No arg = all. |
-| `!pull [ship]` | Sync secrets + code, rebuild, restart bots to quarters. No arg = this ship. |
+| `!pull [ship]` | Sync secrets + code, rebuild, restart active bots in place. No arg = this ship. |
 | `!push [ship]` | Push InfiniClaw to origin. No arg = all ships. |
 
 ### Fleet Commands
