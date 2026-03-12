@@ -34,6 +34,8 @@ export interface OperatorMetrics {
   interventions: RollingMetric;
   /** X-commands issued by operator (not Captain) per day */
   xCommandsIssued: RollingMetric;
+  /** Mean time between interventions in hours (7d window). null if < 2 events. */
+  mtbi?: number | null;
 }
 
 /** Score reactions: 👍(+1) 👎(−1) 💯(+3) ❌(−3) */
@@ -267,6 +269,18 @@ function rolling(events: { ts: number }[]): RollingMetric {
   return { day1: rollingRate(events, 1), day7: rollingRate(events, 7) };
 }
 
+/** Mean time between interventions in hours over the 7d window. null if < 2 events. */
+function computeMtbi(): number | null {
+  const cutoff = Date.now() - 7 * 86_400_000;
+  const events = operatorEvents
+    .filter(e => e.roomId !== behindTheCurtainRoomId && !e.isXCommand && e.ts >= cutoff)
+    .sort((a, b) => a.ts - b.ts);
+  if (events.length < 2) return null;
+  let totalMs = 0;
+  for (let i = 1; i < events.length; i++) totalMs += events[i].ts - events[i - 1].ts;
+  return Math.round((totalMs / (events.length - 1) / 3_600_000) * 10) / 10;
+}
+
 function computeOperatorMetrics(): OperatorMetrics {
   const nonBtc = operatorEvents.filter(e => e.roomId !== behindTheCurtainRoomId);
   const xCmds = nonBtc.filter(e => e.isXCommand);
@@ -276,6 +290,7 @@ function computeOperatorMetrics(): OperatorMetrics {
   return {
     interventions: rolling(interventions),
     xCommandsIssued: rolling(xCmds),
+    mtbi: computeMtbi(),
   };
 }
 
@@ -397,10 +412,12 @@ function fmtRolling(m: RollingMetric, unit = '/day'): string {
 }
 
 export function formatOperatorMetrics(m: OperatorMetrics): string {
-  return [
+  const lines = [
     `  Interventions: ${fmtRolling(m.interventions)}`,
     `  X-commands issued: ${fmtRolling(m.xCommandsIssued)}`,
-  ].join('\n');
+  ];
+  if (m.mtbi != null) lines.push(`  MTBI: ${m.mtbi}h (7d)`);
+  return lines.join('\n');
 }
 
 export function formatBotMetrics(b: BotMetrics): string {

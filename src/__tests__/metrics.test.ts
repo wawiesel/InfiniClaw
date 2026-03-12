@@ -270,6 +270,59 @@ describe('autonomy score', () => {
   });
 });
 
+// ── MTBI (Mean Time Between Interventions) ───────────────────────────
+
+describe('MTBI', () => {
+  beforeEach(setup);
+
+  it('returns null with fewer than 2 intervention events', () => {
+    const snapshot = computeMetrics();
+    expect(snapshot.operator.mtbi).toBeNull();
+  });
+
+  it('returns null with only 1 intervention', () => {
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'fix this', hoursAgo(1));
+    const snapshot = computeMetrics();
+    expect(snapshot.operator.mtbi).toBeNull();
+  });
+
+  it('computes mean gap between 2 interventions in hours', () => {
+    // Two events 4 hours apart → MTBI should be 4h
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'first', hoursAgo(4));
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'second', hoursAgo(0));
+    const snapshot = computeMetrics();
+    expect(snapshot.operator.mtbi).toBeGreaterThan(3.5);
+    expect(snapshot.operator.mtbi).toBeLessThan(4.5);
+  });
+
+  it('computes mean gap across multiple interventions', () => {
+    // 4 events: 12h, 8h, 4h, 0h ago → gaps: 4h, 4h, 4h → mean = 4h
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'a', hoursAgo(12));
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'b', hoursAgo(8));
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'c', hoursAgo(4));
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'd', hoursAgo(0));
+    const snapshot = computeMetrics();
+    expect(snapshot.operator.mtbi).toBeGreaterThan(3.5);
+    expect(snapshot.operator.mtbi).toBeLessThan(4.5);
+  });
+
+  it('excludes x-commands from MTBI calculation', () => {
+    // Only x-commands — no interventions
+    recordOperatorMessage(OPERATOR, ENG_ROOM, '!wake cid', hoursAgo(4));
+    recordOperatorMessage(OPERATOR, ENG_ROOM, '!fleet', hoursAgo(0));
+    const snapshot = computeMetrics();
+    expect(snapshot.operator.mtbi).toBeNull();
+  });
+
+  it('excludes events older than 7 days', () => {
+    // One event > 7d ago + one recent — only 1 event in window → null
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'old', daysAgo(8));
+    recordOperatorMessage(OPERATOR, ENG_ROOM, 'recent', hoursAgo(1));
+    const snapshot = computeMetrics();
+    expect(snapshot.operator.mtbi).toBeNull();
+  });
+});
+
 // ── resetMetrics ─────────────────────────────────────────────────────
 
 describe('resetMetrics', () => {

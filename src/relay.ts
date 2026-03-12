@@ -1177,8 +1177,12 @@ function formatCombinedMetrics(
       totalRssMb += rss;
       const mem = rss > 0 ? ` · mem ${rss}/${hBot?.limit_mb ?? '?'}MB` : '';
       const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
+      // Token throughput from health report
+      const tokData = (health?.tokens as Record<string, { total_24h?: number }> | undefined)?.[bot.name];
+      const tok24k = tokData?.total_24h != null ? Math.round(tokData.total_24h / 1000) : null;
+      const tokStr = tok24k != null && tok24k > 0 ? ` · tok ${tok24k}K (1d)` : '';
 
-      lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}`);
+      lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}${tokStr}`);
     }
 
     totalInterventions.day1 += s.operator.interventions.day1;
@@ -1193,10 +1197,12 @@ function formatCombinedMetrics(
   const running = assigned.filter(b => b.processRunning);
   const availability = assigned.length > 0 ? Math.round((running.length / assigned.length) * 100) : 100;
   const avgAutonomy1d = sorted.reduce((sum, s) => sum + s.fleet.autonomyScore.day1, 0) / sorted.length;
-  const avgAutonomy7d = sorted.reduce((sum, s) => sum + s.fleet.autonomyScore.day7, 0) / sorted.length;
+  // Collect MTBI from all ships — use minimum (most frequent intervention ship drives the metric)
+  const mtbiValues = sorted.map(s => s.operator.mtbi).filter((v): v is number => v != null);
+  const mtbiStr = mtbiValues.length > 0 ? ` · MTBI ${Math.min(...mtbiValues)}h (7d)` : '';
   lines.push(
     `**Fleet** · ${sorted.length} ships · avail ${availability}% · autonomy ${r1(avgAutonomy1d)}% (1d) · OOM+${totalOom24h} (24h) · RSS ${totalRssMb}MB`,
-    `**Operator** · interventions ${r1(totalInterventions.day1)}/day (1d) · x-cmds ${r1(totalXCmds.day1)}/day (1d)`,
+    `**Operator** · interventions ${r1(totalInterventions.day1)}/day (1d) · x-cmds ${r1(totalXCmds.day1)}/day (1d)${mtbiStr}`,
   );
 
   return lines.join('\n');

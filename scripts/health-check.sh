@@ -258,6 +258,68 @@ if os.path.exists(history_file):
     if r7d:
         report["rolling"]["7d"] = r7d
 
+# ── Token throughput from session JSONL files ─────────────────────────────────
+report["tokens"] = {}
+tok_cutoff_24h = now - timedelta(hours=24)
+tok_cutoff_7d = now - timedelta(days=7)
+
+def read_token_usage(bot_name):
+    """Sum input/output tokens from Claude session JSONL files for this bot."""
+    sessions_path = os.path.join(instances_dir, bot_name, "data", "sessions")
+    if not os.path.isdir(sessions_path):
+        return None
+    in_24h = out_24h = in_7d = out_7d = 0
+    found_any = False
+    for dirpath, _, filenames in os.walk(sessions_path):
+        for fn in filenames:
+            if not fn.endswith('.jsonl'):
+                continue
+            fp = os.path.join(dirpath, fn)
+            try:
+                with open(fp, 'r', errors='replace') as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line or '"usage"' not in line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if obj.get('type') != 'assistant':
+                            continue
+                        usage = (obj.get('message') or {}).get('usage') or {}
+                        inp = int(usage.get('input_tokens') or 0)
+                        out = int(usage.get('output_tokens') or 0)
+                        if inp == 0 and out == 0:
+                            continue
+                        found_any = True
+                        ts_str = obj.get('timestamp', '')
+                        try:
+                            ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                            if ts >= tok_cutoff_7d:
+                                in_7d += inp
+                                out_7d += out
+                            if ts >= tok_cutoff_24h:
+                                in_24h += inp
+                                out_24h += out
+                        except (ValueError, AttributeError):
+                            # No usable timestamp — count in both windows
+                            in_24h += inp; out_24h += out
+                            in_7d += inp; out_7d += out
+            except Exception:
+                pass
+    if not found_any:
+        return None
+    return {
+        "in_24h": in_24h, "out_24h": out_24h, "total_24h": in_24h + out_24h,
+        "in_7d": in_7d, "out_7d": out_7d, "total_7d": in_7d + out_7d,
+    }
+
+for bot in sorted(bots):
+    tok = read_token_usage(bot)
+    if tok:
+        report["tokens"][bot] = tok
+
 # Output
 if json_mode:
     print(json.dumps(report))
