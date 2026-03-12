@@ -1108,8 +1108,14 @@ function formatCombinedMetrics(
     const commissioned = cfg?.commissioned !== false;
     const statusChar = commissioned ? '◉' : '💤';
     const shipEmoji = cfg?.emoji ?? '';
+<<<<<<< Updated upstream
     const uptimePct = Math.min(100, Math.round(s.shipMetrics.relayUptimeSeconds / 864));  // % of 24h
     const uptimeTag = `up ${uptimePct}%`;
+=======
+    // Uptime %: % of last 24h the relay was running (approximated from continuous uptime since last start)
+    const uptimePct = Math.min(Math.round(s.shipMetrics.relayUptimeSeconds / 864), 100);
+    const uptimeTag = `up ${uptimePct}% (1d)`;
+>>>>>>> Stashed changes
     const infraRaw = s.shipMetrics.infraFailures as { day1?: number; day7?: number } | number;
     const syncFail = typeof infraRaw === 'number' ? infraRaw : (infraRaw?.day1 ?? 0);
     const syncTag = syncFail > 0 ? `⚠️${syncFail} sync/day` : 'sync OK';

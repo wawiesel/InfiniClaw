@@ -10,6 +10,20 @@ Snapshots (no suffix) are point-in-time values. All rates are per-day.
 
 ---
 
+## Metric Taxonomy
+
+Five categories. A mature fleet scores well on all five. A fleet in crisis will lag on one or more.
+
+| Category | Question answered | Example |
+|----------|------------------|---------|
+| **Productivity** | Are bots getting work done? | messages/day, token I/O |
+| **Quality** | Is the work good? | score/day, branch success % |
+| **Responsiveness** | How fast do bots react? | response latency p50/p95 |
+| **Reliability** | Are bots stable and available? | uptime %, crash rate |
+| **Autonomy** | Does the fleet need humans? | interventions/day |
+
+---
+
 ## Productivity — Is the fleet doing work?
 
 | Metric | Formula | Good | Alarm | Status |
@@ -32,14 +46,18 @@ Snapshots (no suffix) are point-in-time values. All rates are per-day.
 
 | Metric | Formula | Good | Alarm | Status |
 |--------|---------|------|-------|--------|
+<<<<<<< Updated upstream
 | **Uptime %** | % of last 24h relay was running (approx: current uptime / 86400s) | > 99% (1d) | < 95% | ✅ Tracked |
+=======
+| **Relay uptime %** | % of last 24h relay was running (approx from continuous uptime since last start) | 100% (1d) | < 90% | ✅ Tracked (approx) |
+>>>>>>> Stashed changes
 | **Response latency** | p50/p95 time from Captain mention to first bot reply | < 30s p50 | > 2min p95 | 🔲 Planned |
 | **Crashes/day** | PM2 restart count per day | 0 | > 2/day | ✅ Tracked |
 | **OOM kills/day** | Container killed by memory limit per day | 0 | Any | ✅ Tracked |
 | **SIGKILL/day** | Forced process termination per day | 0 | > 0 | ✅ Tracked |
 | **RSS / limit** | Current RSS vs container memory cap (snapshot) | < 80% | > 90% | ✅ Tracked |
 
-**Uptime %** is more useful than "2.1h up" — it tells you what fraction of the day the bot was actually available. "2.1h up" could mean the bot just restarted or has been stable for 2 hours. "99.5% (7d)" means it was down for only ~50 minutes total last week. Requires recording relay start/stop timestamps.
+**Relay uptime %** is approximated as `min(uptimeSeconds, 86400) / 86400 × 100`. If the relay has been continuously running for 22h, that's 92%. If it just restarted, it's near 0%. Displayed as `up 91% (1d)` in `!metrics`. This understates reliability if the relay restarts quickly, but a low % always means something went wrong recently. The precise implementation (recording stop/start timestamps) is planned — see below.
 
 **Response latency** measures the user experience — how long does the Captain wait? A bot that's running but slow to respond is as useless as one that's down. Source: relay tracks the delta between curtainLoop event timestamp and first bot reply.
 
@@ -85,7 +103,11 @@ Snapshots (no suffix) are point-in-time values. All rates are per-day.
 The `!metrics` output uses the same visual language as `!fleet`:
 
 ```
+<<<<<<< Updated upstream
 🦁◉ Herc · 🏅1 · up 99% · ↻2/5 · sync OK
+=======
+🦁◉ HERACLES · 🏅1 · up 91% (1d) · ↻2/5 · sync OK
+>>>>>>> Stashed changes
   ├ ⭐ Cid   · 🎨 Artist   · 🏅1 · mem 120/512MB · SK+0 OOM+0 (1d)
   └ ◉ Norm  · 💬 Normie   · 🏅2 · mem 98/512MB  · SK+0 OOM+0 (1d)
 
@@ -145,6 +167,7 @@ Timestamp each intervention event. Compute average gap between consecutive inter
 ## Accuracy Notes
 
 - **Restart approximation**: PM2 only tracks cumulative restarts, not per-event timestamps. Rolling counts use an approximation: if the process started within the window, all restarts are counted as in-window. If running longer than the window, count shows 0 until next restart.
+- **Uptime % approximation**: `min(uptimeSeconds, 86400) / 86400`. Underestimates stability if relay restarts briefly multiple times. Overestimates if relay crashed and stayed down but just recovered.
 - **Sync failures**: Counted per `reportFailure()` call — a build that fails 3× in one day counts as 3.
 - **Interventions**: Counted from relay's `backfillOperatorEvents()` on startup plus in-memory accumulation. Accuracy depends on Matrix history availability.
 
