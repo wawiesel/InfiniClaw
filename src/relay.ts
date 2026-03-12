@@ -1917,11 +1917,21 @@ async function handleLifecycleCommand(
     }
   }
 
+  // Thread root for dismiss/sleep/report — one root per command invocation, results as thread replies.
+  let cmdThreadRoot: string | undefined;
+  if (action === 'dismiss' || action === 'sleep' || action === 'report') {
+    const labelEnv = target ? (() => { try { return loadProfileEnv(root, target); } catch { return null; } })() : null;
+    const label = labelEnv?.ASSISTANT_NAME || (target ? capitalizeName(target) : `${bots.length} bot${bots.length !== 1 ? 's' : ''}`);
+    cmdThreadRoot = await reply(conn, `relay ${action} ${label}`);
+  }
+
   for (const bot of bots) {
     const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
     const name = env?.ASSISTANT_NAME || capitalizeName(bot);
     const rank = liveFleet[bot]?.rank ?? 99;
     log(`!${action} ${name}`);
+    // Thread reply helper — falls back to main reply if root unavailable.
+    const tr = (text: string) => cmdThreadRoot ? threadReply(conn, cmdThreadRoot, text) : reply(conn, text);
 
     // Resolve ship room IDs for room management
     const loungeId = findShipByHostname()?.[1]?.loungeId as string | undefined;
@@ -1944,12 +1954,12 @@ async function handleLifecycleCommand(
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
         restartBotForRoom(root, bot);
         writeCrewStatus(root, bot);
-        await reply(conn, `relay ${name} dismissed`);
+        await tr(`✅ ${name} dismissed`);
         sendLifecycleMsg(bot, 'stopped').catch(() => {});
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!dismiss ${name} failed: ${errStr(err)}`);
-        await reply(conn, `⛔ relay dismiss ${name} failed — ${errStr(err)}`);
+        await tr(`⛔ ${name} dismiss failed — ${errStr(err)}`);
       }
     } else if (action === 'sleep') {
       try {
@@ -1966,11 +1976,11 @@ async function handleLifecycleCommand(
         } catch { /* non-fatal */ }
         fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         writeFleet(liveFleet);
-        await reply(conn, `relay ${name} asleep`);
+        await tr(`✅ ${name} asleep`);
         sendLifecycleMsg(bot, 'stopped').catch(() => {});
         publishFleetReport().catch(() => {});
       } catch (err) {
-        await reply(conn, `⛔ relay sleep ${name} failed — ${errStr(err)}`);
+        await tr(`⛔ ${name} sleep failed — ${errStr(err)}`);
       }
     } else if (action === 'wake') {
       // Wake sleeping bot or restart already-awake bot (preserves current status)
@@ -2023,7 +2033,7 @@ async function handleLifecycleCommand(
         continue;
       }
       if (liveFleet[bot]?.status === 'onduty') {
-        await reply(conn, `relay ${name} already on duty`);
+        await tr(`⚠️ ${name} already on duty`);
         continue;
       }
       try {
@@ -2034,7 +2044,7 @@ async function handleLifecycleCommand(
           await botJoinRoom(botToken, homeserver, dutyRoomId, conn, botUserId);
         } catch (roomErr) {
           log(`${name}: room move failed: ${errStr(roomErr)}`);
-          await reply(conn, `⛔ relay report ${name} failed — ${errStr(roomErr)}`);
+          await tr(`⛔ ${name} report failed — ${errStr(roomErr)}`);
           continue;
         }
         fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME });
@@ -2043,12 +2053,12 @@ async function handleLifecycleCommand(
         // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild)
         restartBotForRoom(root, bot);
         writeCrewStatus(root, bot);
-        await reply(conn, `relay ${name} on duty`);
+        await tr(`✅ ${name} on duty`);
         sendLifecycleMsg(bot, 'started', rank).catch(() => {});
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!report ${name} failed: ${errStr(err)}`);
-        await reply(conn, `⛔ relay report ${name} failed — returned to quarters`);
+        await tr(`⛔ ${name} report failed — returned to quarters`);
       }
     }
   }
@@ -2168,6 +2178,70 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
   }
 }
 
+// ── Combined metrics + health handler ────────────────────────────
+
+/** Handle !metrics and !health (alias). Both run the same combined observability output. */
+async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
+  try {
+    // Scope resolution: !health defaults to 'fleet', !metrics is context-aware.
+    const isHealthAlias = cmd.startsWith('!health');
+    let scope = isHealthAlias
+      ? cmd.slice('!health'.length).trim() || 'fleet'
+      : cmd.slice('!metrics'.length).trim();
+    if (!scope) {
+      if (conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId) {
+        scope = 'all';
+      } else if (conn.name === 'Bridge') {
+        scope = 'fleet';
+      } else if (conn.name === 'Engineering') {
+        scope = 'engineering';
+      } else {
+        const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
+        scope = qBot ? qBot[0] : 'all';
+      }
+    }
+
+    const snapshot = computeMetrics();
+    publishMetrics().catch(err => log(`metrics: publish error: ${errStr(err)}`));
+    let text = formatScopeMetrics(snapshot, scope);
+
+    // For fleet/all scopes: run and upload health check on every ship.
+    const wantsHealth = scope === 'fleet' || scope === 'all';
+    if (wantsHealth) {
+      const healthReport = runHealthCheck();
+      if (healthReport) uploadHealthToS3(healthReport).catch(() => {});
+    }
+
+    const isBTC = conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId;
+    const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
+    const isLocal = isBTC || !!qBot;
+    const speaker = !isLocal && await electSpeaker();
+    if (!isLocal && !speaker) return;
+
+    // Speaker appends health summary to fleet/all output.
+    if (wantsHealth && (isBTC || speaker)) {
+      await sleep(3_000);
+      const healthReports = await fetchAllHealthReports();
+      if (healthReports.length > 0) {
+        text += '\n\n' + formatHealthSummary(healthReports);
+      }
+    }
+
+    // Post as a thread: root is the scope label, content as thread reply.
+    const scopeLabel = `📊 metrics${scope !== 'all' ? ` · ${scope}` : ''}`;
+    const threadRoot = await reply(conn, scopeLabel);
+    if (threadRoot) {
+      await threadReply(conn, threadRoot, text);
+    } else {
+      if (isBTC || qBot) await reply(conn, text);
+      else await reply(conn, text);
+    }
+  } catch (err) {
+    log(`metrics: command error: ${errStr(err)}`);
+    await reply(conn, `⛔ relay metrics failed — ${errStr(err)}`);
+  }
+}
+
 // ── Register command handlers with the registry ──────────────────
 
 function registerRelayCommands(): void {
@@ -2249,54 +2323,8 @@ function registerRelayCommands(): void {
       }
     },
 
-    health: async (_cmd, conn) => {
-      const report = runHealthCheck();
-      if (report) await uploadHealthToS3(report);
-      if (await electSpeaker()) {
-        await sleep(3_000);
-        const reports = await fetchAllHealthReports();
-        const summary = formatHealthSummary(reports);
-        await speakerReport(conn, summary);
-      }
-    },
-
-    metrics: async (cmd, conn) => {
-      try {
-        // Context-aware scope resolution
-        let scope = cmd.slice('!metrics'.length).trim();
-        if (!scope) {
-          if (conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId) {
-            scope = 'all';
-          } else if (conn.name === 'Bridge') {
-            scope = 'fleet';
-          } else if (conn.name === 'Engineering') {
-            scope = 'engineering';
-          } else {
-            const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
-            scope = qBot ? qBot[0] : 'all';
-          }
-        }
-
-        const snapshot = computeMetrics();
-        // Publish to S3 in background (don't block the reply)
-        publishMetrics().catch(err => log(`metrics: publish error: ${errStr(err)}`));
-        const text = formatScopeMetrics(snapshot, scope);
-        // BTC/quarters: always reply. Fleet rooms: speaker only.
-        if (conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId) {
-          await reply(conn, text);
-        } else {
-          const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
-          if (qBot) {
-            await shipReport(conn, text);
-          } else if (await electSpeaker()) {
-            await speakerReport(conn, text);
-          }
-        }
-      } catch (err) {
-        log(`metrics: command error: ${errStr(err)}`);
-        await reply(conn, `⛔ relay metrics failed — ${errStr(err)}`);
-      }
-    },
+    metrics: async (cmd, conn) => { await handleMetricsHealth(cmd, conn); },
+    health:  async (cmd, conn) => { await handleMetricsHealth(cmd, conn); },
 
     decommission: async (cmd, conn) => {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;
