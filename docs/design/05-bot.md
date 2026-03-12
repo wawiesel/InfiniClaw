@@ -39,7 +39,7 @@ Every bot has runtime attributes that determine its behavior. Commands and event
 | `triggerType` | `always` · `callout` · `never` | Relay on room moves | `fleet.json` |
 | `rank` | number | `!promote` / `!demote` | `fleet.json` |
 | `ship` | hostname | `!transport` | `fleet.json` |
-| `activeBrainModel` | model ID | `!wake` / `!report` | `fleet.json` |
+| `activeBrainModel` | model ID | runtime model switch | `fleet.json` (not yet written) |
 
 ### triggerType
 
@@ -192,7 +192,7 @@ Each step updates the bot's display name pip to match the current stage. `!wake`
 `!report` and `!dismiss` are **instant** — just room moves on a running bot:
 
 ```
-[🦁 Herc] relay Cid reporting for duty
+[🦁 Herc] relay Cid on duty
 [🦁 Herc] relay Cid dismissed
 ```
 

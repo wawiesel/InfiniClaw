@@ -13,7 +13,7 @@ Architecture and behavior are specified in `docs/design/` — this README docume
 | [05-bot](../docs/design/05-bot.md) | `main.ts`, `infini-config.ts`, `message-filtering.ts` |
 | [06-brain](../docs/design/06-brain.md) | `brain-management.ts`, `container-spawn.ts` |
 | [07-ipc](../docs/design/07-ipc.md) | `ipc-watcher.ts`, `ipc-commands.ts` |
-| [08-threading](../docs/design/08-threading.md) | `relay.ts` (branch brains), `container-spawn.ts` (lobes) |
+| [08-threading](../docs/design/08-threading.md) | `relay.ts` (branch brains); lobes not yet implemented |
 
 ## Architecture
 

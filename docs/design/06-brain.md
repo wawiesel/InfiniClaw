@@ -31,6 +31,8 @@ See [08-threading](08-threading.md) for the branching protocol and implementatio
 
 ## Lobe Brain
 
+> **Status:** Not yet implemented. See [08-threading](08-threading.md) for full lobe protocol.
+
 An MCP tool that spawns a non-blocking worker using any provider. The lobe does not receive the full conversation context — only what the bot explicitly passes.
 
 - **Posts to quarters** — lobe progress appears in a thread in the bot's quarters room via loudspeaker, regardless of which room the bot is currently in.
