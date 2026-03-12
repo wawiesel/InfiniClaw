@@ -12,6 +12,14 @@
 | Move between machines | Transporter skill: S3 sync + Matrix coordination |
 | Update own instructions | Edit persona CLAUDE.md via writable mount |
 | Add/modify skills | Write SKILL.md to persona skills directory |
+| Request peer verification | IPC task `request_verification` — asks another bot to verify work against criteria |
+| Submit verification result | IPC task `submit_verification` — pass/fail verdict with evidence |
+
+## Peer Verification
+
+Bots can request independent verification of their work from other bots. The requesting bot writes a `request_verification` IPC task with a task description, acceptance criteria, and the assigned verifier. The host syncs the verification record (`verifications.json`) to all active bot instances. The verifying bot reads the request, checks the work, and calls `submit_verification` with a pass/fail verdict and evidence. Results are available via `check_verification` and `list_verifications`.
+
+This enables quality gates without operator intervention: a bot can block its own merge or deployment pending peer sign-off.
 
 ## Self-Healing Loop
 
