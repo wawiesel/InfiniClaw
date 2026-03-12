@@ -33,15 +33,12 @@ Measured per bot, rolled up to ship level.
 | **OOM kills** | Container memory-limit evictions per day | 0 | > 1/day |
 | **SIGKILL** | Forced process kills per day (container/PM2 stop) | 0 | > 0 |
 | **RSS / limit** | Current resident memory vs container memory limit | < 80% | > 90% |
-| **Session data** | Total JSONL conversation data size for this bot | < 200MB | > 500MB |
 
 **OOM kills** happen when a container hits its memory limit. Each kill terminates the bot mid-thought. Zero is the target. If a bot OOMs repeatedly, increase its memory limit or reduce its context load.
 
 **SIGKILL** is a forced process termination — not a graceful stop. Zero is the target. SIGKILLs that aren't operator-initiated suggest a container is being killed externally (OOM at the host level, podman issue, or a bot requesting self-restart).
 
-**RSS / limit** is a snapshot of current memory usage. It is not rolling — it reflects right now. If a bot is at > 80% of its limit, it is at risk of an OOM kill on the next large context operation.
-
-**Session data** is the total size of all JSONL conversation files for this bot. A typical active bot generates 20–100MB per day. 5GB across a 4-bot fleet over several months is normal. The metric is useful for spotting runaway log growth or an unusually active bot, not as a daily health signal.
+**RSS / limit** is a snapshot of current memory usage. It is not rolling — it reflects right now. If a bot is at > 80% of its limit, it is at risk of an OOM kill on the next large context operation. This is the primary memory health signal — how much headroom does the bot have?
 
 ## Ship Metrics
 

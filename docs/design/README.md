@@ -36,7 +36,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `17-skills.md` — Pooled capability modules per role
 - `18-deployment.md` — Code pipeline, holodeck simulation gates
 - `19-infrastructure.md` — Ships as VMs, Gitea/MinIO redundancy
-- `20-metrics.md` — All metrics defined: formulas, targets, alarm thresholds, display semantics (availability, autonomy, OOM kills, RSS, session data, sync failures, restarts). All windows are rolling 1d/7d — no cumulative totals.
+- `20-metrics.md` — All metrics defined: formulas, targets, alarm thresholds, display semantics (availability, autonomy, OOM kills, fleet RSS total, sync failures, restarts, response time, uptime %). All windows are rolling 1d/7d — no cumulative totals. Session file size removed (not a health metric — use per-bot mem headroom).
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
 

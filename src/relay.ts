@@ -1098,7 +1098,7 @@ function formatCombinedMetrics(
 
   const lines: string[] = [];
   let totalOom24h = 0;
-  let totalSessions = 0;
+  let totalRssMb = 0;
   let totalInterventions = { day1: 0, day7: 0 };
   let totalXCmds = { day1: 0, day7: 0 };
 
@@ -1171,15 +1171,12 @@ function formatCombinedMetrics(
       const sk24 = r24?.sigkills ?? t24?.sigkills ?? 0;
       totalOom24h += oom24;
       const hBot = hBots[bot.name];
-      const mem = hBot?.rss_mb != null ? ` · mem ${hBot.rss_mb}/${hBot.limit_mb ?? '?'}MB` : '';
+      const rss = hBot?.rss_mb != null ? Number(hBot.rss_mb) : 0;
+      totalRssMb += rss;
+      const mem = rss > 0 ? ` · mem ${rss}/${hBot?.limit_mb ?? '?'}MB` : '';
       const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
 
       lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}`);
-    }
-
-    if (health) {
-      const sess = Number(health.session_total_mb || 0);
-      totalSessions += sess;
     }
 
     totalInterventions.day1 += s.operator.interventions.day1;
@@ -1196,7 +1193,7 @@ function formatCombinedMetrics(
   const avgAutonomy1d = sorted.reduce((sum, s) => sum + s.fleet.autonomyScore.day1, 0) / sorted.length;
   const avgAutonomy7d = sorted.reduce((sum, s) => sum + s.fleet.autonomyScore.day7, 0) / sorted.length;
   lines.push(
-    `**Fleet** · ${sorted.length} ships · avail ${availability}% · autonomy ${r1(avgAutonomy1d)}% (1d) · OOM+${totalOom24h} (24h) · ${Math.round(totalSessions * 10) / 10}MB sessions`,
+    `**Fleet** · ${sorted.length} ships · avail ${availability}% · autonomy ${r1(avgAutonomy1d)}% (1d) · OOM+${totalOom24h} (24h) · RSS ${totalRssMb}MB`,
     `**Operator** · interventions ${r1(totalInterventions.day1)}/day (1d) · x-cmds ${r1(totalXCmds.day1)}/day (1d)`,
   );
 
@@ -1231,8 +1228,6 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
 
   const lines: string[] = [`## 4 · Health — ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n`];
   let total24hOom = 0;
-  let totalSessions = 0;
-
   for (const { ship, data } of deduped.values()) {
     const allBots = (data.bots || {}) as Record<string, Record<string, unknown>>;
     // Filter to known fleet bots only — ignore stale entries from prior configurations
@@ -1265,12 +1260,9 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
         lines.push(`  ${capitalizeName(name)}: ${b.status} ${mem} ${stats24}${stats7d}`);
       }
     }
-    const sess = Number(data.session_total_mb || 0);
-    totalSessions += sess;
-    lines.push(`  Sessions: ${sess}MB\n`);
   }
 
-  lines.push(`**Totals:** ${deduped.size} ships, OOM+${total24hOom} (24h), ${Math.round(totalSessions * 10) / 10}MB sessions`);
+  lines.push(`**Totals:** ${deduped.size} ships · OOM+${total24hOom} (24h)`);
   return lines.join('\n');
 }
 
