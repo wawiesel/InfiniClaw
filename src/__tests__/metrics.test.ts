@@ -311,7 +311,7 @@ describe('formatting', () => {
     const result = formatShipMetrics({
       name: 'Herc',
       relayUptimeSeconds: 7200,
-      relayRestarts: 3,
+      relayRestarts: 3, infraFailures: { day1: 0, day7: 0 },
     });
     // shipTag() resolves to emoji+name from ships.json (e.g. "🦁 Herc")
     expect(result).toContain('Herc');
@@ -377,7 +377,7 @@ describe('formatScopeMetrics', () => {
     shipMetrics: {
       name: 'Herc',
       relayUptimeSeconds: 3600,
-      relayRestarts: 0,
+      relayRestarts: 0, infraFailures: { day1: 0, day7: 0 },
     },
     fleet: { availability: 100, autonomyScore: { day1: 80, day7: 90 } },
   };
@@ -468,7 +468,7 @@ describe('formatAllMetrics', () => {
       shipMetrics: {
         name: 'Herc',
         relayUptimeSeconds: 86400,
-        relayRestarts: 1,
+        relayRestarts: 1, infraFailures: { day1: 0, day7: 0 },
       },
       fleet: { availability: 100, autonomyScore: { day1: 100, day7: 100 } },
     };

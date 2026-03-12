@@ -45,6 +45,7 @@ import {
   recordOperatorMessage,
   recordScoreReaction,
   recordBranchBrainResult,
+  recordInfraFailure,
   backfillOperatorEvents,
   publishMetrics,
   computeMetrics,
@@ -138,6 +139,7 @@ async function reportFailure(system: string, detail: string, conns: RoomConn[]):
 
   const existing = failureStates[system];
   if (!existing) {
+    recordInfraFailure(system);
     // First failure — create thread
     const rootId = await reply(conn, statusLine('⚠️', system, 'down', 0));
     if (!rootId) return;

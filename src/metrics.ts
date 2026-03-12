@@ -64,6 +64,8 @@ export interface ShipMetrics {
   relayUptimeSeconds: number;
   /** Relay pm2 restart count */
   relayRestarts: number;
+  /** Infra sync/build failures (1d and 7d rolling) */
+  infraFailures: RollingMetric;
 }
 
 export interface FleetMetrics {
@@ -112,6 +114,9 @@ const scoreEvents: ScoreEvent[] = [];
 
 /** Accumulated branch brain completions. Fed by relay spawnBranchBrain. */
 const branchBrainEvents: BranchBrainEvent[] = [];
+
+/** Accumulated infra failures (secrets sync, code sync, code build). Fed by reportFailure. */
+const infraFailureEvents: { ts: number; system: string }[] = [];
 
 /** BTC room ID — set by relay on startup. */
 let behindTheCurtainRoomId: string | null = null;
@@ -232,10 +237,18 @@ export async function backfillOperatorEvents(
 }
 
 /** Reset all metrics state. For testing only. */
+/** Record an infra failure event (secrets sync, code sync, code build). */
+export function recordInfraFailure(system: string): void {
+  infraFailureEvents.push({ ts: Date.now(), system });
+  const cutoff = Date.now() - 8 * 86_400_000;
+  while (infraFailureEvents.length > 0 && infraFailureEvents[0].ts < cutoff) infraFailureEvents.shift();
+}
+
 export function resetMetrics(): void {
   operatorEvents.length = 0;
   scoreEvents.length = 0;
   branchBrainEvents.length = 0;
+  infraFailureEvents.length = 0;
   behindTheCurtainRoomId = null;
   operatorUserId = null;
   captainUserId = null;
@@ -319,6 +332,7 @@ function computeShipMetrics(): ShipMetrics {
     name: thisShipName(),
     relayUptimeSeconds: relay?.uptimeMs ? Math.round(relay.uptimeMs / 1000) : 0,
     relayRestarts: relay?.restarts ?? 0,
+    infraFailures: rolling(infraFailureEvents),
   };
 }
 
@@ -413,6 +427,7 @@ export function formatShipMetrics(m: ShipMetrics): string {
     `**${tag}**`,
     `  Relay uptime: ${uptime}`,
     `  Relay restarts: ${m.relayRestarts}`,
+    `  Sync/build failures: ${fmtRolling(m.infraFailures)}`,
   ].join('\n');
 }
 
