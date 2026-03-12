@@ -1,6 +1,8 @@
 # 11 — X-Commands
 
-The Captain controls the fleet via x-commands (`!`-prefixed) typed in Matrix. Commands are processed by a lightweight **relay** process (one per ship), not by each bot's host process. Each ship's relay only acts on its local bots. Untargeted commands (e.g. `!dismiss` with no bot name) are scoped to the room — only bots whose `MAIN_GROUP_NAME` matches the room are affected on each ship.
+The Captain controls the fleet via x-commands (`!`-prefixed) typed in Matrix. Commands are processed by a lightweight **relay** process (one per ship), not by each bot's host process. Each ship's relay only acts on its local bots.
+
+**Targeting:** Untargeted commands affect bots physically in the room — on duty there, or in their own quarters room. Exception: `!report` is assignment-based (finds bots assigned to this room even if currently in quarters). Named targets work from any room on the ship; if the named bot is not present in the room, the relay warns instead of silently acting.
 
 Commands work from any room the operator account has joined — duty rooms (via intercom), BehindTheCurtain, and quarters rooms.
 
