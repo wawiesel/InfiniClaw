@@ -37,7 +37,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, formatBotDisplayName } from './formatting.js';
 import {
@@ -589,22 +589,18 @@ function relayAck(homeserver: string, token: string, roomId: string, eventId: st
   matrixSendReaction(homeserver, token, roomId, eventId, '📡', log).catch(() => {});
 }
 
-/** Room emoji map for the double-emoji naming scheme: <location><room> Name. */
+/** Room emoji map for the double-emoji naming scheme: <location><room> Name. Duty rooms derived from ROLE_ROOMS. */
 const ROOM_EMOJI: Record<string, string> = {
-  bridge: '🌉', engineering: '⚙️', astrometrics: '🔭',
+  ...Object.fromEntries(Object.values(ROLE_ROOMS).map(r => [r.room, r.icon])),
   lounge: '🛋️', curtain: '🎭',
 };
 const FLEET_LOCATION = '🌌';
 const QUARTERS_EMOJI = '🏠';
 
-/** Role icons derived from duty room icons (engineer→engineering, navigator→bridge, architect→astrometrics).
- *  Normie has no duty room — uses 🦋. */
-const ROLE_ICONS: Record<string, string> = {
-  engineer:  ROOM_EMOJI.engineering,
-  navigator: ROOM_EMOJI.bridge,
-  architect: ROOM_EMOJI.astrometrics,
-  normie:    '🦋',
-};
+/** Role icon lookup derived from ROLE_ROOMS — single source of truth. */
+const ROLE_ICONS: Record<string, string> = Object.fromEntries(
+  Object.entries(ROLE_ROOMS).map(([role, { icon }]) => [role, icon])
+);
 
 /** Ensure all ship spaces, fleet rooms, and quarters rooms have correct emoji-prefixed names. */
 async function ensureRoomNames(): Promise<void> {
@@ -2606,7 +2602,7 @@ function registerRelayCommands(): void {
             const commissioned = sConfig?.commissioned !== false;
             const isThisShipSpeaker = commissioned && isSpeakerCached && sConfig?.rank != null &&
               Object.values(ships).filter(s => s.commissioned).every(s => (s.rank ?? 99) >= (sConfig?.rank ?? 99));
-            const statusChar = !commissioned ? '🚫' : isThisShipSpeaker ? '⭐' : '⚓';
+            const statusChar = !commissioned ? '💤' : isThisShipSpeaker ? '⭐' : '🟢';
             const shipEmoji = sConfig?.emoji ?? '';
             let shipStatus: string;
             if (shipReport) {
@@ -2843,7 +2839,7 @@ function replyTag(): string {
   if (!found) return HOSTNAME;
   const [name, entry] = found;
   const commissioned = entry.commissioned !== false;
-  const statusChar = !commissioned ? '🚫' : isSpeakerCached ? '⭐' : '⚓';
+  const statusChar = !commissioned ? '💤' : isSpeakerCached ? '⭐' : '🟢';
   return entry.emoji ? `${entry.emoji}${statusChar} ${name}` : `${statusChar} ${name}`;
 }
 

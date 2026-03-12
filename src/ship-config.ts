@@ -218,12 +218,24 @@ export function isShipCommissioned(): boolean {
   return thisShip()?.commissioned !== false;
 }
 
-/** Short display tag: "🦁 Herc" or fallback to hostname. */
-export function shipTag(hostname?: string): string {
+/** Role definitions: duty room and icon. Single source of truth for role→room→icon. */
+export const ROLE_ROOMS: Record<string, { room: string; icon: string }> = {
+  navigator: { room: 'bridge',       icon: '🌉' },
+  engineer:  { room: 'engineering',  icon: '⚙️' },
+  architect: { room: 'astrometrics', icon: '🔭' },
+  normie:    { room: 'lounge',       icon: '🦋' },
+};
+
+/**
+ * Short display tag: "🦁🟢 Herc" with status pip.
+ * pip overrides the auto-derived status (🟢 commissioned, 💤 decommissioned).
+ */
+export function shipTag(hostname?: string, pip?: string): string {
   const found = findShipByHostname(hostname);
   if (!found) return hostname ?? os.hostname();
   const [name, entry] = found;
-  return entry.emoji ? `${entry.emoji} ${name}` : name;
+  const statusPip = pip ?? (entry.commissioned !== false ? '🟢' : '💤');
+  return entry.emoji ? `${entry.emoji}${statusPip} ${name}` : `${statusPip} ${name}`;
 }
 
 /** Clear cached config (for testing or reload). */

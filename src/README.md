@@ -35,7 +35,7 @@ Host machine (macOS / Linux)
 ├── cli.ts              → CLI entry point (start/stop/chat/send)
 ├── service.ts          → Deploy, start, stop bots via pm2; seeds quarters or duty room based on fleet status; restartBotForRoom for lightweight room switches
 ├── matrix-api.ts       → Shared fetch-based Matrix operations (login, send, sendReaction, sync, invite, join, leave, setDisplayName, setRoomName)
-├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, room transitions, help account. `resolveBots(target, conn)` finds bots in a room by MAIN_GROUP_NAME or quartersRoom. X-commands in curtainLoop are allowed (not filtered as own messages). `ensureShipSpaceNames()` sets the ship's Matrix space name to "emoji shipName" on startup. Wires metrics: `initMetrics()` on startup, `recordOperatorMessage()` from curtainLoop, `backfillOperatorEvents()` from Matrix history, `metricsLoop()` publishes to S3 every 5min, `!metrics` handler with context-aware scope resolution.
+├── relay.ts            → Supervisor relay: Matrix watcher (duty rooms + quarters + BehindTheCurtain), bot lifecycle, room transitions, help account. `resolveBots(target, conn)` finds bots in a room by MAIN_GROUP_NAME or quartersRoom. X-commands in curtainLoop are allowed (not filtered as own messages). `ensureShipSpaceNames()` sets the ship's Matrix space name to "emoji shipName" on startup. Wires metrics: `initMetrics()` on startup, `recordOperatorMessage()` from curtainLoop, `backfillOperatorEvents()` from Matrix history, `metricsLoop()` publishes to S3 every 5min, `!metrics` handler with context-aware scope resolution. `ROOM_EMOJI` derives duty room entries from `ROLE_ROOMS` (ship-config.ts). `ROLE_ICONS` derived from `ROLE_ROOMS`. `replyTag()` shows ⭐/🟢/💤 pip via `isSpeakerCached`. Fleet display: code block for monospace, pip before name, 🏅rank, role icon from ROLE_ICONS.
 ├── main.ts             → Message loop, indicators, reaction acks (👀/🔔), container lifecycle
 ├── container-spawn.ts  → Container orchestration: secrets, mounts, podman args, stale cleanup, IPC setup
 ├── container-mounts.ts → Volume mount assembly (ro home + rw workspace)
@@ -44,7 +44,7 @@ Host machine (macOS / Linux)
 ├── channels/
 │   └── matrix.ts       → Matrix SDK: connect, send, edit, react, sync, mention pills
 ├── infini-config.ts    → InfiniClaw-specific env config (removed from upstream)
-├── ship-config.ts      → Fleet/ship config, shared constants. `shipTag()` returns emoji+name for display. `findShipByHostname()` resolves hostname→ship entry.
+├── ship-config.ts      → Fleet/ship config, shared constants. `ROLE_ROOMS` is the single source of truth for role→duty room→icon (navigator/engineer/architect/normie). `shipTag()` returns emoji+pip+name (🦁🟢 Herc) with auto-derived or caller-supplied status pip. `findShipByHostname()` resolves hostname→ship entry.
 ├── allow-list.ts       → Validate mounts against host-side allowlist (~/.config/infiniclaw/allow-list.json)
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
 ├── ipc-commands.ts     → Handle refresh_bot, stop_bot, send_reaction, rebuild_image, git_push, etc.
