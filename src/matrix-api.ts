@@ -7,6 +7,7 @@ import path from 'path';
 
 import { marked } from 'marked';
 import { loadShipConfig } from './ship-config.js';
+import { errStr } from './utils.js';
 
 // ── Constants ───────────────────────────────────────────────────────
 
@@ -220,7 +221,7 @@ export async function matrixSendReaction(
     }
     return true;
   } catch (err) {
-    if (log) log(`reaction error in ${roomId}: ${err instanceof Error ? err.message : String(err)}`);
+    if (log) log(`reaction error in ${roomId}: ${errStr(err)}`);
     return false;
   }
 }

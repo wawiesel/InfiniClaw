@@ -66,7 +66,7 @@ import {
   loadProfileEnv,
   removeStaleProcesses,
 } from './service.js';
-import { sleep, shellQuote, errStr, envInt } from './utils.js';
+import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 
 // ── Config ─────────────────────────────────────────────────────────
@@ -2885,7 +2885,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           for (const [bot, entry] of Object.entries(liveFleet)) {
             if (entry.status !== 'sleep' || entry.ship !== HOSTNAME) continue;
             const name = capitalizeName(bot);
-            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const escaped = escapeRegex(name);
             const mentioned =
               new RegExp(`<m>${escaped}</m>`, 'i').test(body) ||
               new RegExp(`@${escaped}\\b`, 'i').test(body) ||

@@ -16,7 +16,7 @@ import { capitalizeName } from './formatting.js';
 import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 
 import { loadShipConfig, loadFleet, isValidBotName } from './ship-config.js';
-import { shellQuote } from './utils.js';
+import { shellQuote, errStr } from './utils.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ export function collectBotMatrixUserIds(): Set<string> {
       const env = parseEnvFile(envFile);
       if (env.MATRIX_USER_ID) ids.add(env.MATRIX_USER_ID);
     }
-  } catch (err) { console.warn('Failed to read bot matrix user IDs:', err instanceof Error ? err.message : err); }
+  } catch (err) { console.warn(`Failed to read bot matrix user IDs: ${errStr(err)}`); }
   return ids;
 }
 

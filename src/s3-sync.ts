@@ -19,6 +19,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { logger } from 'nanoclaw/logger.js';
 import { loadShipConfig, isValidBotName } from './ship-config.js';
 import { instanceDir } from './service.js';
+import { errStr } from './utils.js';
 
 // Files/dirs to sync per bot, relative to instance dir
 const SYNC_PATHS = [
@@ -172,7 +173,7 @@ export async function pushBot(root: string, bot: string): Promise<void> {
           await uploadFile(s3.client, s3.bucket, key, path.join(fullPath, relFile));
           count++;
         } catch (err) {
-          console.warn(`${bot}: failed to upload ${key} — ${err instanceof Error ? err.message : err}`);
+          console.warn(`${bot}: failed to upload ${key} — ${errStr(err)}`);
         }
       }
     } else {
@@ -181,7 +182,7 @@ export async function pushBot(root: string, bot: string): Promise<void> {
         await uploadFile(s3.client, s3.bucket, key, fullPath);
         count++;
       } catch (err) {
-        console.warn(`${bot}: failed to upload ${key} — ${err instanceof Error ? err.message : err}`);
+        console.warn(`${bot}: failed to upload ${key} — ${errStr(err)}`);
       }
     }
   }
@@ -240,7 +241,7 @@ export async function pullBot(root: string, bot: string): Promise<void> {
             await downloadFile(s3.client, s3.bucket, obj.Key, localPath);
             count++;
           } catch (err) {
-            console.warn(`${bot}: failed to download ${obj.Key} — ${err instanceof Error ? err.message : err}`);
+            console.warn(`${bot}: failed to download ${obj.Key} — ${errStr(err)}`);
           }
         }
       }
@@ -260,7 +261,7 @@ export async function pushAll(root: string): Promise<void> {
     try {
       await pushBot(root, bot);
     } catch (err) {
-      console.warn(`${bot}: S3 push failed — ${err instanceof Error ? err.message : err}`);
+      console.warn(`${bot}: S3 push failed — ${errStr(err)}`);
     }
   }
 }
@@ -273,7 +274,7 @@ export async function pullAll(root: string): Promise<void> {
     try {
       await pullBot(root, bot);
     } catch (err) {
-      console.warn(`${bot}: S3 pull failed — ${err instanceof Error ? err.message : err}`);
+      console.warn(`${bot}: S3 pull failed — ${errStr(err)}`);
     }
   }
 }
