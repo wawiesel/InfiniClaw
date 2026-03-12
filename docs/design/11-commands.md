@@ -2,7 +2,7 @@
 
 The Captain controls the fleet via x-commands (`!`-prefixed) typed in Matrix. Commands are processed by a lightweight **relay** process (one per ship), not by each bot's host process. Each ship's relay only acts on its local bots.
 
-**Targeting:** Untargeted commands affect bots physically in the room — on duty there, or in their own quarters room. Exception: `!report` is assignment-based (finds bots assigned to this room even if currently in quarters). Named targets work from any room on the ship; if the named bot is not present in the room, the relay warns instead of silently acting.
+**Targeting:** Untargeted commands affect bots physically in the room — on duty there, or in their own quarters room. Exception: `!report` is assignment-based (finds bots assigned to this room even if currently in quarters). Named targets not present in the room produce a no-op warning (`relay Name not in this room`). BehindTheCurtain is a universal command room — all bots on the ship are reachable regardless of status.
 
 Commands work from any room the operator account has joined — duty rooms (via intercom), BehindTheCurtain, and quarters rooms.
 
