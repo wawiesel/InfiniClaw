@@ -432,7 +432,7 @@ export function formatAllMetrics(snapshot: MetricsSnapshot): string {
 
 export function formatScopeMetrics(snapshot: MetricsSnapshot, scope: string): string {
   if (scope === 'operator') return formatOperatorMetrics(snapshot.operator);
-  if (scope === 'ship') return formatShipMetrics(snapshot.shipMetrics);
+  if (scope === 'ship' || scope === 'engineering') return formatShipMetrics(snapshot.shipMetrics);
   if (scope === 'fleet') return formatFleetMetrics(snapshot.fleet);
   if (scope === 'all') return formatAllMetrics(snapshot);
 
