@@ -80,18 +80,13 @@ Every operator message outside BehindTheCurtain is an intervention — a sign th
 
 ## Metrics
 
-Interventions is the primary operator metric — a day with zero interventions outside BehindTheCurtain means the fleet ran autonomously.
+See [20-metrics.md](20-metrics.md) for complete definitions, targets, and alarm thresholds for all metrics.
 
-| Metric | What it measures | Target | Window |
-|--------|-----------------|--------|--------|
-| **Interventions** | `@operator` messages sent to any room except BehindTheCurtain | 0/day | 1d, 7d rolling |
-| **X-commands issued** | X-commands sent by operator (not Captain) | 0/day | 1d, 7d rolling |
-
-See [20-metrics](20-metrics.md) for full definitions, good/bad thresholds, and all metric fields.
+**Interventions** is the primary operator metric — `@operator` messages sent outside BehindTheCurtain per day. Target is 0. A day with zero interventions means the fleet ran autonomously. X-commands (`!fleet`, `!metrics`, `!wake`) are management queries, not interventions, and are tracked separately.
 
 **Storage:** Metrics are computed by each ship's relay and published to S3 (`metrics/<ship>.json`). The speaker aggregates all ships for fleet-wide totals.
 
-**Access:** `!metrics [scope]` x-command (context-aware — defaults based on room). See [11-commands](11-commands.md) for scope details.
+**Access:** `!metrics [scope]` x-command (context-aware — defaults based on room), `get_metrics` MCP tool for bots. See [11-commands](11-commands.md) for scope details.
 
 ## Monitoring
 

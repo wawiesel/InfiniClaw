@@ -41,14 +41,13 @@ This guarantees exactly one reply per `!fleet` command, with live process data f
 
 ## Metrics
 
-| Metric | What it measures | Target | Window |
-|--------|-----------------|--------|--------|
-| **Availability** | % of active (non-sleep, non-transit) bots with running processes | 100% | live |
-| **Autonomy score** | `100 − (interventions × 10) − (crashes × 5)`, clamped 0–100 | 100 | 1d, 7d rolling |
+See [20-metrics.md](20-metrics.md) for complete definitions, targets, alarm thresholds, and display semantics for all fleet, ship, bot, and operator metrics.
 
-Availability answers "how many bots that *should* be running *are* running?" The autonomy score is a composite that penalizes operator interventions (heavy weight) and bot crashes (lighter weight). A score of 100 means fully autonomous operation.
+Key fleet metrics:
+- **Availability** — % of assigned (non-sleeping) bots with running processes. Target: 100%.
+- **Autonomy score** — `100 − (interventions × 10) − (crashes × 5)`. Target: 100. Below 50 = investigate.
 
-See [20-metrics](20-metrics.md) for full definitions, good/bad thresholds, and all metric fields.
+All metrics use rolling 1d/7d windows. No cumulative totals.
 
 ## Verification
 
