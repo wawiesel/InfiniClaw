@@ -1123,36 +1123,47 @@ function formatCombinedMetrics(
     const syncTag = syncFail1d > 0 ? `⚠️ ${syncFail1d} sync fail/day` : 'sync OK';
     out.push(`**${sectionNum}. ${tag}** — relay ${uptime} ↻${s.shipMetrics.relayRestarts} · ${syncTag}`);
 
-    // Bot metrics (score, status) from metrics snapshot
+    // Merge bot metrics (from metrics snapshot) + health (from health reports) into one line per bot
+    const health = healthByShip.get(s.ship);
+    const hBots = health ? (health.bots || {}) as Record<string, Record<string, unknown>> : {};
+    const trends = health ? (health.trends_24h || {}) as Record<string, { sigkills: number; oom_kills: number }> : {};
+    const rolling24h = health ? (health.rolling as Record<string, unknown> | undefined)?.['24h'] as
+      { bots?: Record<string, { sigkills?: number; oom_kills?: number }> } | undefined : undefined;
+    const metricsBotNames = new Set(s.bots.map(b => b.name));
+
+    // Helper: get 24h kill stats for a bot
+    const getKills = (name: string) => {
+      const r = rolling24h?.bots?.[name];
+      const t = trends[name];
+      const oom24 = r?.oom_kills ?? t?.oom_kills ?? 0;
+      const sk24 = r?.sigkills ?? t?.sigkills ?? 0;
+      totalOom24h += oom24;
+      totalSk24h += sk24;
+      return { sk24, oom24 };
+    };
+
+    // Bots from metrics snapshot (active/quarters) — combined with health data
     for (const bot of s.bots) {
       const pip = bot.processRunning ? '🟢' : '💤';
       const score = bot.score.day1 > 0 ? ` · ${bot.score.day1} pts/day` : '';
-      out.push(`  ${capitalizeName(bot.name)} ${pip} ${bot.status}${score}`);
+      const hBot = hBots[bot.name];
+      const mem = hBot?.rss_mb != null ? ` · ${hBot.rss_mb}MB` : '';
+      const { sk24, oom24 } = getKills(bot.name);
+      const kills = (sk24 || oom24) ? ` · 24h: ${sk24} SK ${oom24} OOM` : '';
+      out.push(`  ${capitalizeName(bot.name)} ${pip} ${bot.status}${score}${mem}${kills}`);
     }
 
-    // Bot process health (memory, kills) from health reports — merged per ship
-    const health = healthByShip.get(s.ship);
-    if (health) {
-      const hBots = (health.bots || {}) as Record<string, Record<string, unknown>>;
-      const trends = (health.trends_24h || {}) as Record<string, { sigkills: number; oom_kills: number }>;
-      const rolling24h = (health.rolling as Record<string, unknown> | undefined)?.['24h'] as
-        { bots?: Record<string, { sigkills?: number; oom_kills?: number }> } | undefined;
-
-      for (const [name, b] of Object.entries(hBots)) {
-        if (name === 'relay') continue; // relay shown in ship header
-        const r = rolling24h?.bots?.[name];
-        const t = trends[name];
-        const oom24 = r?.oom_kills ?? t?.oom_kills ?? 0;
-        const sk24 = r?.sigkills ?? t?.sigkills ?? 0;
-        totalOom24h += oom24;
-        totalSk24h += sk24;
-        // Only show bots with 24h activity or ACTIVE status
-        if (b.status === 'ACTIVE' || oom24 > 0 || sk24 > 0) {
-          const mem = b.rss_mb != null ? `${b.rss_mb}MB` : '';
-          out.push(`  ${name}: ${mem} 24h: ${sk24} SK ${oom24} OOM`);
-        }
+    // Health-only bots (sleeping/stale, not in metrics but with 24h activity)
+    for (const [name, b] of Object.entries(hBots)) {
+      if (name === 'relay' || metricsBotNames.has(name)) continue;
+      const { sk24, oom24 } = getKills(name);
+      if (sk24 > 0 || oom24 > 0) {
+        const mem = b.rss_mb != null ? `${b.rss_mb}MB` : '';
+        out.push(`  ${name}: ${mem} 24h: ${sk24} SK ${oom24} OOM`);
       }
+    }
 
+    if (health) {
       const sess = Number(health.session_total_mb || 0);
       totalSessions += sess;
       out.push(`  Sessions: ${Math.round(sess)}MB`);
