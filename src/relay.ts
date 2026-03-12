@@ -597,11 +597,13 @@ const ROOM_EMOJI: Record<string, string> = {
 const FLEET_LOCATION = '🌌';
 const QUARTERS_EMOJI = '🏠';
 
-/** Role icons derived from duty room icons (engineer→engineering, navigator→bridge, architect→astrometrics). */
+/** Role icons derived from duty room icons (engineer→engineering, navigator→bridge, architect→astrometrics).
+ *  Normie has no duty room — uses 🦋. */
 const ROLE_ICONS: Record<string, string> = {
   engineer:  ROOM_EMOJI.engineering,
   navigator: ROOM_EMOJI.bridge,
   architect: ROOM_EMOJI.astrometrics,
+  normie:    '🦋',
 };
 
 /** Ensure all ship spaces, fleet rooms, and quarters rooms have correct emoji-prefixed names. */
