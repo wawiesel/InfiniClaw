@@ -2195,7 +2195,7 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
 
     const isBTC = conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId;
     const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
-    const isLocal = isBTC || !!qBot;
+    const isLocal = !!qBot; // quarters-room commands are always local; BTC goes through speaker check
     const speaker = !isLocal && await electSpeaker();
     if (!isLocal && !speaker) return;
 
