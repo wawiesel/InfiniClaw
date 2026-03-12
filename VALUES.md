@@ -6,7 +6,7 @@ These are the Captain's guiding principles. Every decision — in UX, code, and 
 
 **Simplicity**: The right solution is the minimum needed. Three lines of similar code beats a premature abstraction. No backwards-compatibility shims, no hedged defaults, no feature flags for simple changes. If you can say it in one rule, don't write three.
 
-**Consistency**: The same thing must look and behave the same everywhere. One format for ship tags (`[🦁 Herc]`), one format for status messages (`⚠️ system (Ship) down (HH:MM)`), one canonical command name. Inconsistencies are bugs.
+**Consistency**: The same thing must look and behave the same everywhere. One format for ship tags (`[🦁 Herc]`), one format for status messages (`relay <name> <action>`), one canonical command name. Inconsistencies are bugs.
 
 **Functionality**: Features must actually work. An unimplemented spec item must be marked `> **Status:** Not yet implemented.` — never silently missing. A beautiful system that partially works is worse than a smaller system that works completely.
 
@@ -45,3 +45,13 @@ No `Co-Authored-By` in commits. No decorative preamble in messages. No filler. O
 ## 10. Beautiful UX Is a Hard Requirement
 
 The Captain must want to use this system. That means: emoji reactions that work, consistent message formatting, a clear fleet status at a glance, and zero noise. A feature that works but feels ugly is incomplete.
+
+## Decision Filter
+
+Before any change, ask:
+
+1. Is this simpler than what we have?
+2. Is this consistent with everything else?
+3. Does this make the system more functional?
+
+If yes to all three — do it. If no to any — reconsider. **Ship rank resolves operator ties** — rank 1 has final say.
