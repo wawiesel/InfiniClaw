@@ -1112,7 +1112,7 @@ function formatCombinedMetrics(
     const syncFail = s.shipMetrics.infraFailures.day1;
     const syncTag = syncFail > 0 ? `⚠️${syncFail} sync/day` : 'sync OK';
     const rst = s.shipMetrics.relayRestarts;
-    const rstTag = `↻${rst.day1} (1d) ${rst.day7} (7d)`;
+    const rstTag = `↻${rst.day1}/${rst.day7}`;
     lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptime} up · ${rstTag} · ${syncTag}`);
 
     // Build bot list: merge metrics snapshot + health + liveFleet role/rank
@@ -1151,6 +1151,7 @@ function formatCombinedMetrics(
       if (bot.status === 'transit') badge = '🚀';
       else if (bot.status === 'sleep') badge = '💤';
       else if (bot.status === 'warn') badge = '⚠️';
+      else if ((bot.status === 'onduty' || bot.status === 'quarters') && !bot.processRunning) badge = '🔴';
       else if (isCO) badge = '⭐';
       else if (bot.status === 'onduty' || bot.status === 'quarters') badge = '◉';
       else badge = '❓';
@@ -1168,8 +1169,8 @@ function formatCombinedMetrics(
       const sk24 = r24?.sigkills ?? t24?.sigkills ?? 0;
       totalOom24h += oom24;
       const hBot = hBots[bot.name];
-      const mem = hBot?.rss_mb != null ? ` · RSS ${hBot.rss_mb}/${hBot.limit_mb ?? '?'}MB` : '';
-      const kills = ` · 1d: SK+${sk24} OOM+${oom24}`;
+      const mem = hBot?.rss_mb != null ? ` · mem ${hBot.rss_mb}/${hBot.limit_mb ?? '?'}MB` : '';
+      const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
 
       lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}`);
     }
@@ -1193,7 +1194,7 @@ function formatCombinedMetrics(
   const avgAutonomy1d = sorted.reduce((sum, s) => sum + s.fleet.autonomyScore.day1, 0) / sorted.length;
   const avgAutonomy7d = sorted.reduce((sum, s) => sum + s.fleet.autonomyScore.day7, 0) / sorted.length;
   lines.push(
-    `**Fleet** · ${sorted.length} ships · availability ${availability}% · autonomy ${r1(avgAutonomy1d)}% (1d) · OOM+${totalOom24h} (24h) · ${Math.round(totalSessions * 10) / 10}MB sessions`,
+    `**Fleet** · ${sorted.length} ships · avail ${availability}% · autonomy ${r1(avgAutonomy1d)}% (1d) · OOM+${totalOom24h} (24h) · ${Math.round(totalSessions * 10) / 10}MB sessions`,
     `**Operator** · interventions ${r1(totalInterventions.day1)}/day (1d) · x-cmds ${r1(totalXCmds.day1)}/day (1d)`,
   );
 

@@ -404,7 +404,7 @@ export function formatOperatorMetrics(m: OperatorMetrics): string {
 }
 
 export function formatBotMetrics(b: BotMetrics): string {
-  const pip = b.processRunning ? '◉' : '❓';
+  const pip = b.processRunning ? '◉' : '🔴';
   const name = capitalizeName(b.name);
   const score = `score ${b.score.day1}/${b.score.day7}`;
   const crashes = `crashes ${b.crashes.day1}/${b.crashes.day7}`;
