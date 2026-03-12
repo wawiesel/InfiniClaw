@@ -1940,7 +1940,7 @@ async function handleLifecycleCommand(
           await botJoinRoom(botToken, homeserver, dutyRoomId, conn, botUserId);
         } catch (roomErr) {
           log(`${name}: room move failed: ${errStr(roomErr)}`);
-          await reply(conn, `relay ${name} failed to report — ${errStr(roomErr)}`);
+          await reply(conn, `⛔ relay report ${name} failed — ${errStr(roomErr)}`);
           continue;
         }
         fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME });
@@ -1953,7 +1953,7 @@ async function handleLifecycleCommand(
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!report ${name} failed: ${errStr(err)}`);
-        await reply(conn, `relay ${name} failed to report — returned to quarters`);
+        await reply(conn, `⛔ relay report ${name} failed — returned to quarters`);
       }
     }
   }

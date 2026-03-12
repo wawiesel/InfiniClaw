@@ -414,7 +414,7 @@ export function formatShipMetrics(m: ShipMetrics): string {
 }
 
 export function formatFleetMetrics(m: FleetMetrics): string {
-  return `🌌 **Fleet** — availability: ${m.availability}% · autonomy: ${fmtRolling(m.autonomyScore, '')}`;
+  return `🌌 **Fleet** — availability: ${m.availability}% · autonomy: ${fmtRolling(m.autonomyScore, '%')}`;
 }
 
 export function formatAllMetrics(snapshot: MetricsSnapshot): string {
@@ -422,11 +422,11 @@ export function formatAllMetrics(snapshot: MetricsSnapshot): string {
     formatOperatorMetrics(snapshot.operator),
     '',
     formatShipMetrics(snapshot.shipMetrics),
-    '',
-    ...snapshot.bots.map(formatBotMetrics),
-    '',
-    formatFleetMetrics(snapshot.fleet),
   ];
+  if (snapshot.bots.length > 0) {
+    sections.push('', ...snapshot.bots.map(formatBotMetrics));
+  }
+  sections.push('', formatFleetMetrics(snapshot.fleet));
   return sections.join('\n');
 }
 

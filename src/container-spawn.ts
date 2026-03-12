@@ -11,6 +11,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { parseEnvLine } from './env-utils.js';
+import { capitalizeName } from './formatting.js';
 import { envInt } from './utils.js';
 import {
   buildBotDirectory,
@@ -95,7 +96,7 @@ function collectContainerSecrets(projectRoot: string): Record<string, string> {
   const name = secrets['ASSISTANT_NAME'];
   const matrixUser = process.env['MATRIX_USERNAME'];
   if (name) {
-    const displayName = name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+    const displayName = capitalizeName(name);
     const email = matrixUser ? `${matrixUser}@a-gis.org` : `${name.toLowerCase()}@a-gis.org`;
     if (!secrets['GIT_AUTHOR_NAME']) secrets['GIT_AUTHOR_NAME'] = displayName;
     if (!secrets['GIT_AUTHOR_EMAIL']) secrets['GIT_AUTHOR_EMAIL'] = email;
