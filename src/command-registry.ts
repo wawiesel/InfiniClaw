@@ -103,7 +103,7 @@ export async function dispatch(cmd: string, conn: RoomConn, allConns: RoomConn[]
   return false;
 }
 
-/** Generate help text for the ! command. */
+/** Generate help text for the ! command (code block for fixed-width alignment). */
 export function buildHelpText(): string {
   const maxUsage = Math.max(...COMMANDS.map(c => c.usage.length));
   const lines = COMMANDS.map(c => `  ${c.usage.padEnd(maxUsage)} — ${c.description}`);
