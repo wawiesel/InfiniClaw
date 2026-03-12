@@ -38,7 +38,6 @@ A Node.js process (`src/relay.ts`) that runs on **every ship** via pm2 as `infin
 | Command | Action |
 |---------|--------|
 | `!commission [ship]` / `!decommission [ship]` | Ship lifecycle (no arg = all) |
-| `!provision [target]` | Sync repos (secrets, infiniclaw, or any paths.json name) |
 | `!pull [ship]` | Full overhaul: pull repos, rebuild, restart bots |
 
 ### Fleet Commands
