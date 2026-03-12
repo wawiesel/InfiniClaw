@@ -3204,6 +3204,9 @@ async function main(): Promise<void> {
   refreshLocalCommitEpoch();
   log(`relay commit epoch: ${localCommitEpoch}`);
   publishCommitEpoch().catch(() => {});
+  // Eagerly elect speaker on startup so isSpeakerCached is warm before any commands arrive.
+  // This ensures '!' help responds instantly even on the first call after restart.
+  electSpeaker().catch(() => {});
   registerRelayCommands();
 
   const intercom = loadIntercomConfig();
