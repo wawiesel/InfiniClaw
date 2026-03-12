@@ -1068,7 +1068,8 @@ function formatCombinedMetrics(snapshots: MetricsSnapshot[]): string {
   if (snapshots.length === 0) return '';
   const sections: string[] = [];
 
-  // Aggregate operator metrics across all ships
+  // Aggregate operator metrics across all ships (round to 1 decimal)
+  const r1 = (n: number) => Math.round(n * 10) / 10;
   const totalInterventions = { day1: 0, day7: 0 };
   const totalXCmds = { day1: 0, day7: 0 };
   for (const s of snapshots) {
@@ -1077,6 +1078,10 @@ function formatCombinedMetrics(snapshots: MetricsSnapshot[]): string {
     totalXCmds.day1 += s.operator.xCommandsIssued.day1;
     totalXCmds.day7 += s.operator.xCommandsIssued.day7;
   }
+  totalInterventions.day1 = r1(totalInterventions.day1);
+  totalInterventions.day7 = r1(totalInterventions.day7);
+  totalXCmds.day1 = r1(totalXCmds.day1);
+  totalXCmds.day7 = r1(totalXCmds.day7);
   sections.push(formatOperatorMetrics({ interventions: totalInterventions, xCommandsIssued: totalXCmds }));
 
   // Per-ship metrics
@@ -1109,11 +1114,32 @@ function formatCombinedMetrics(snapshots: MetricsSnapshot[]): string {
 
 function formatHealthSummary(reports: Array<{ ship: string; data: Record<string, unknown> }>): string {
   if (reports.length === 0) return '⚠️ No health reports available.';
+
+  // Deduplicate: resolve all ship identifiers to canonical names, keep newest per ship
+  const ships = safeLoadShips();
+  const hostnameToName = new Map<string, string>();
+  for (const [name, entry] of Object.entries(ships)) {
+    if (entry.hostname) hostnameToName.set(entry.hostname, name);
+    hostnameToName.set(name, name); // canonical name maps to itself
+  }
+  const deduped = new Map<string, { ship: string; data: Record<string, unknown> }>();
+  for (const report of reports) {
+    const canonical = hostnameToName.get(report.ship) ?? report.ship;
+    const emoji = ships[canonical]?.emoji;
+    const displayName = emoji ? `${emoji} ${canonical}` : canonical;
+    const existing = deduped.get(canonical);
+    const reportTs = Number(report.data.ts || 0);
+    const existingTs = Number(existing?.data.ts || 0);
+    if (!existing || reportTs > existingTs) {
+      deduped.set(canonical, { ship: displayName, data: report.data });
+    }
+  }
+
   const lines: string[] = [`🏥 Fleet Health — ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n`];
   let totalOom = 0;
   let totalSessions = 0;
 
-  for (const { ship, data } of reports) {
+  for (const { ship, data } of deduped.values()) {
     const bots = (data.bots || {}) as Record<string, Record<string, unknown>>;
     const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => n);
     const ts = String(data.ts || '?').slice(0, 19);
@@ -1137,7 +1163,7 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
     lines.push(`  Sessions: ${sess}MB\n`);
   }
 
-  lines.push(`**Totals:** ${reports.length} ships, ${totalOom} OOM kills, ${totalSessions}MB sessions`);
+  lines.push(`**Totals:** ${deduped.size} ships, ${totalOom} OOM kills, ${Math.round(totalSessions * 10) / 10}MB sessions`);
   return lines.join('\n');
 }
 
@@ -2243,11 +2269,12 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
       ? cmd.slice('!health'.length).trim() || 'fleet'
       : cmd.slice('!metrics'.length).trim();
     if (!scope) {
+      const roomName = conn.name.toLowerCase();
       if (conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId) {
         scope = 'all';
-      } else if (conn.name === 'Bridge') {
+      } else if (roomName === 'bridge') {
         scope = 'fleet';
-      } else if (conn.name === 'Engineering') {
+      } else if (roomName === 'engineering') {
         scope = 'engineering';
       } else {
         const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
