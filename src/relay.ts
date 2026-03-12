@@ -571,23 +571,11 @@ async function electSpeaker(): Promise<boolean> {
     if (commissioned.length === 0) return true;
     if (!commissioned.some(([, e]) => e.hostname === HOSTNAME)) return false;
 
-    const epochs = await fetchCommitEpochs();
-    let maxEpoch = 0;
-    for (const [, entry] of commissioned) {
-      const e = epochs[entry.hostname] ?? 0;
-      if (e > maxEpoch) maxEpoch = e;
-    }
-
-    const myEpoch = epochs[HOSTNAME] ?? localCommitEpoch;
-    if (myEpoch < maxEpoch) {
-      log(`speaker: deferring — local commit ${myEpoch} < newest ${maxEpoch}`);
-      return false;
-    }
-
-    const atMax = commissioned
-      .filter(([, entry]) => (epochs[entry.hostname] ?? 0) >= maxEpoch)
-      .sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
-    isSpeakerCached = atMax.length > 0 && atMax[0][1].hostname === HOSTNAME;
+    // Speaker = lowest-rank commissioned ship. Rank is the sole tiebreaker.
+    // Epoch-based deferral was removed: it caused rank-3 ships to become speaker
+    // when they had the freshest code, and dropped commands during rolling deploys.
+    const sorted = commissioned.sort((a, b) => (a[1].rank ?? 99) - (b[1].rank ?? 99));
+    isSpeakerCached = sorted.length > 0 && sorted[0][1].hostname === HOSTNAME;
     return isSpeakerCached;
   } catch {
     isSpeakerCached = true;
