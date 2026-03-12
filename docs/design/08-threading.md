@@ -143,7 +143,7 @@ Bots must follow this sequence:
 ## Verification
 
 1. **Branch creates thread** — Send a complex request.
-   *Check:* Thread appears in current room with `🧵 Branch: <title>`.
+   *Check:* Thread appears in current room with `🧵 Branch Brain: <title>`.
 
 2. **Branch posts in thread** — Branch brain works on the task.
    *Check:* Progress appears inside the thread, not on main timeline.
