@@ -2239,26 +2239,30 @@ function registerRelayCommands(): void {
         }
         await s(stageOk('relay + dist rebuilt', relayVersion(root)));
 
-        ensurePodmanReady();
-        removeStaleProcesses();
+        if (isShipCommissioned()) {
+          ensurePodmanReady();
+          removeStaleProcesses();
 
-        // Refit returns all bots to quarters
-        const result = restartBotsToQuarters(root);
-        for (const bot of result.started) {
-          const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-          await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restarted (quarters)`));
-        }
-        for (const bot of result.failed) {
-          errors++;
-          const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-          await s(stageFail(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restart`, ''));
-        }
-        // Report sleeping bots
-        for (const bot of activeBots) {
-          if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status) && liveFleet[bot]?.status !== 'transit') {
+          // Refit returns all bots to quarters
+          const result = restartBotsToQuarters(root);
+          for (const bot of result.started) {
             const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-            await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} stays ${liveFleet[bot]?.status}`));
+            await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restarted (quarters)`));
           }
+          for (const bot of result.failed) {
+            errors++;
+            const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+            await s(stageFail(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} restart`, ''));
+          }
+          // Report sleeping bots
+          for (const bot of activeBots) {
+            if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status) && liveFleet[bot]?.status !== 'transit') {
+              const bEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+              await s(stageOk(`${bEnv?.ASSISTANT_NAME || capitalizeName(bot)} stays ${liveFleet[bot]?.status}`));
+            }
+          }
+        } else {
+          await s(stageOk('ship decommissioned — skipping bot startup'));
         }
 
         persistFleet();
