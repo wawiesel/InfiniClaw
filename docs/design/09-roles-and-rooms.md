@@ -71,7 +71,7 @@ The pip reflects **operational status**, not which room the bot is in. A bot's r
 | 🟢 | online | Running, responding |
 | ⭐ | CO | Commanding officer (special online) |
 
-Display name format: `<name> <pip> (<ship>)`. CO is elected automatically — lowest-rank active bot in a duty room.
+Display name format: `<pip> <name> <shipEmoji>` (e.g. `🟢 Cid 🦁`). CO is elected automatically — lowest-rank active bot in a duty room.
 
 ### Room assignment
 
