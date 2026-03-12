@@ -20,6 +20,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
+import { collectHealthData, sessionCleanup } from './health-check.js';
 import { upsertEnvLine } from './env-utils.js';
 import {
   matrixLogin,
@@ -300,14 +301,10 @@ function rebuildInfiniClaw(): string {
   try {
     const nodeBinDir = path.dirname(process.execPath);
     const execOpts = { cwd: root, encoding: 'utf-8' as const, stdio: 'pipe' as const, env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` } };
-    // Use rebuild script (pulled via git, so it's always up to date)
-    const script = path.join(root, 'scripts', 'rebuild.sh');
-    if (fs.existsSync(script)) {
-      execSync(`bash ${shellQuote(script)}`, { ...execOpts, timeout: 300_000 });
-    } else {
-      // Fallback for repos without the script
-      execSync('npm run build', { ...execOpts, timeout: 120_000 });
-    }
+    // Install deps, build workspace package, then compile TypeScript
+    execSync('npm install --ignore-scripts', { ...execOpts, timeout: 120_000 });
+    execSync('npm run build -w nanoclaw', { ...execOpts, timeout: 120_000 });
+    execSync('npx tsc', { ...execOpts, timeout: 180_000 });
     try { installGitHooks(); } catch { /* best effort */ }
     // Deploy dist files to active bot instances
     const distDir = path.join(root, 'dist');
@@ -980,16 +977,16 @@ async function publishFleetReport(): Promise<FleetReport> {
 
 function runHealthCheck(): string | null {
   const root = resolveRoot();
-  const script = path.join(root, 'scripts', 'health-check.sh');
-  if (!fs.existsSync(script)) return null;
   try {
-    return execSync(`bash ${shellQuote(script)} --json`, {
-      encoding: 'utf-8',
-      timeout: 30_000,
-      env: { ...process.env, MACHINE_NAME: HOSTNAME },
-    }).trim();
+    const report = collectHealthData(
+      path.join(root, '_runtime', 'logs'),
+      path.join(root, '_runtime', 'instances'),
+      path.join(root, '_runtime', 'data', 'health-history.jsonl'),
+      HOSTNAME,
+    );
+    return JSON.stringify(report);
   } catch (err) {
-    log(`health-check.sh failed: ${errStr(err)}`);
+    log(`health check failed: ${errStr(err)}`);
     return null;
   }
 }
@@ -1974,17 +1971,16 @@ function computeHealthDeltas(historyFile: string, currentBots: Record<string, Re
   return result;
 }
 
-/** Run session cleanup to prune old JSONL files and telemetry. */
+/** Prune old session JSONL files and telemetry directories. */
 function runSessionCleanup(): void {
   const root = resolveRoot();
-  const script = path.join(root, 'scripts', 'session-cleanup.sh');
-  if (!fs.existsSync(script)) return;
   try {
-    const output = execSync(`bash "${script}" --keep 5`, {
-      cwd: root, encoding: 'utf-8', timeout: 30_000, stdio: 'pipe',
-    }).trim();
-    if (output.includes('Freed') && !output.includes('Freed ~0KB')) {
-      log(`session cleanup: ${output.split('\n').pop()}`);
+    const { freedBytes, cleaned } = sessionCleanup(
+      path.join(root, '_runtime', 'instances'), 5
+    );
+    if (freedBytes > 0) {
+      const kb = Math.round(freedBytes / 1024);
+      log(`session cleanup: freed ${kb}KB (${cleaned.length} files)`);
     }
   } catch (err) {
     log(`session cleanup error: ${errStr(err)}`);
