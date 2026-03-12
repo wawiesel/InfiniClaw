@@ -23,7 +23,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `10-fleet.md` — fleet.json, transport protocol, S3 coordination, fleet metrics (availability, autonomy score)
 - `11-commands.md` — X-commands (`!`-prefixed fleet control), `!pull`/`!push` ship commands, `!operator` toggle, `!metrics` (context-aware, 1d/7d rolling), status formats, alert threads
 - `12-co.md` — Commanding Officer election and delegation
-- `13-intercom.md` — Intercom broadcast accounts, loudspeaker replies, @room cross-room mentions
+- `13-intercom.md` — Intercom accounts (bridge/engineering/astrometrics), loudspeaker replies (`[emoji Ship]` prefix), `@loudspeaker:` bot broadcast (implemented), `@room:` targeted routing (not yet implemented)
 
 ## Resilience
 
