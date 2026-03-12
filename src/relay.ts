@@ -417,6 +417,26 @@ function markProcessed(eventId: string): boolean {
   return true;
 }
 
+
+/** Load persisted Matrix sync token for a named loop. Returns null if not found. */
+function loadSyncToken(key: string): string | null {
+  try {
+    const file = path.join(resolveRoot(), '_runtime', 'data', `sync-token-${key}.txt`);
+    if (!fs.existsSync(file)) return null;
+    const tok = fs.readFileSync(file, 'utf-8').trim();
+    return tok || null;
+  } catch { return null; }
+}
+
+/** Persist Matrix sync token to disk so restarts replay missed events. */
+function saveSyncToken(key: string, token: string): void {
+  try {
+    const dir = path.join(resolveRoot(), '_runtime', 'data');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `sync-token-${key}.txt`), token, 'utf-8');
+  } catch { /* non-fatal */ }
+}
+
 /** Is this ship the "speaker" — lowest-rank active ship? Used to avoid duplicate replies. */
 // ── Git version helper ────────────────────────────────────────────
 
@@ -2906,14 +2926,16 @@ async function curtainLoop(captainUserId: string): Promise<void> {
   log(`curtain: watching BehindTheCurtain as ${userId}`);
 
   const filterId = await matrixCreateFilter(homeserver, accessToken, userId).catch(() => null);
-  let syncToken: string | null = null;
+  // Resume from persisted token so commands sent during restart are replayed
+  let syncToken: string | null = loadSyncToken('curtain');
   let retryDelay = RETRY_DELAY_BASE;
 
-  // Initial sync to skip old messages
+  // Initial sync: if no saved token, skip old messages; otherwise resume from saved token
   while (!syncToken) {
     try {
       const initial = await matrixSync(homeserver, accessToken, null, filterId, 0);
       syncToken = initial.next_batch;
+      saveSyncToken('curtain', syncToken);
       log('curtain: initial sync done, watching for Captain messages');
       retryDelay = RETRY_DELAY_BASE;
     } catch (err) {
@@ -2927,6 +2949,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
     try {
       const data = await matrixSync(homeserver, accessToken, syncToken, filterId, SYNC_TIMEOUT);
       syncToken = data.next_batch;
+      saveSyncToken('curtain', syncToken);
       retryDelay = RETRY_DELAY_BASE;
 
       const joinedRooms = data.rooms?.join;
@@ -3044,12 +3067,16 @@ async function connectRoom(conn: RoomConn): Promise<void> {
 async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: string, conns: RoomConn[]): Promise<void> {
   let retryDelay = RETRY_DELAY_BASE;
 
-  // Initial sync to get the since token (discard old events)
+  // Resume from persisted token so commands sent during restart are replayed
+  conn.syncToken = loadSyncToken(`dialtone-${conn.name}`);
+
+  // Initial sync: if no saved token, skip old messages; otherwise resume from saved token
   while (!conn.syncToken) {
     try {
       await connectRoom(conn);
       const initial = await matrixSync(conn.homeserver, conn.accessToken!, conn.syncToken, conn.filterId, 0);
       conn.syncToken = initial.next_batch;
+      saveSyncToken(`dialtone-${conn.name}`, conn.syncToken);
       retryDelay = RETRY_DELAY_BASE;
       log(`${conn.name}: initial sync done, watching for commands`);
     } catch (err) {
@@ -3071,6 +3098,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
 
       const data = await matrixSync(conn.homeserver, conn.accessToken!, conn.syncToken, conn.filterId, SYNC_TIMEOUT);
       conn.syncToken = data.next_batch;
+      saveSyncToken(`dialtone-${conn.name}`, conn.syncToken);
       retryDelay = RETRY_DELAY_BASE; // reset on success
 
       // Process timeline events
