@@ -2912,6 +2912,31 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               continue;
             }
 
+            // @loudspeaker: <message> — on-duty bot broadcasts to all duty rooms
+            // @loudspeaker (alone) — relay responds with fleet status in this room
+            const lsCallout = /^@loudspeaker(?::\s*(.+))?$/is.exec(body);
+            if (lsCallout && event.sender !== captainUserId && event.sender !== operatorUserId && event.sender !== conn.userId) {
+              const message = lsCallout[1]?.trim();
+              const senderName = event.sender.startsWith('@') ? event.sender.slice(1, event.sender.indexOf(':')) : event.sender;
+              if (message) {
+                // Broadcast to all other duty rooms
+                const targets = conns.filter(t => t.roomId !== conn.roomId);
+                const targetNames = targets.map(t => t.name).join(', ');
+                log(`${conn.name}: @loudspeaker broadcast from ${senderName}: ${message.slice(0, 80)}`);
+                const broadcast = `${capitalizeName(senderName)} (${conn.name}): ${message}`;
+                for (const target of targets) {
+                  await reply(target, broadcast);
+                }
+                await reply(conn, `relay broadcast → ${targetNames || 'no other rooms'}`);
+              } else {
+                // Fleet status in this room
+                log(`${conn.name}: @loudspeaker fleet status requested by ${senderName}`);
+                const fleetConn: RoomConn = { ...conn };
+                await handleCommand('!fleet', fleetConn, conns);
+              }
+              continue;
+            }
+
             if (!body.startsWith('!')) continue;
 
             if (!isAuthorized(event.sender, captainUserId, operatorUserId)) {

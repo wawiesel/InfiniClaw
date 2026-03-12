@@ -245,8 +245,6 @@ Two behaviors depending on message format:
 
 Off-duty bots (lounge, quarters, sleep) cannot use the loudspeaker. The relay silently ignores their mentions.
 
-> **Planned:** Bot-initiated @loudspeaker mention handling is not yet implemented in the relay. Currently `@loudspeaker` mentions from bots pass through as ordinary text. The `@loudspeaker: <message>` broadcast and fleet status response are the priority items.
-
 ### @room intercom
 
 > **Status:** Not yet implemented. The relay does not currently parse `@room` cross-room routing from bots.
