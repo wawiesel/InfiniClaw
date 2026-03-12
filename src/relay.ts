@@ -2002,7 +2002,7 @@ async function handleRefresh(target: string | undefined, conn: RoomConn): Promis
     return;
   }
   try { ensurePodmanReady(); } catch (err) {
-    await reply(conn, `relay podman not ready — ${errStr(err)}`);
+    await reply(conn, `⛔ relay podman not ready — ${errStr(err)}`);
     return;
   }
 
@@ -2323,7 +2323,7 @@ function registerRelayCommands(): void {
         if (!resolved) { await helpReply(conn, `Unknown ship: ${shipInput}`); return; }
         targetName = resolved;
         targetShip = ships[resolved].hostname;
-        if (!ships[resolved].commissioned) { await reply(conn, `relay ${targetName} is decommissioned`); return; }
+        if (!ships[resolved].commissioned) { await reply(conn, `relay ${targetName} decommissioned — use !commission first`); return; }
       } catch { targetShip = shipInput; targetName = shipInput; }
       if (liveFleet[bot].ship !== HOSTNAME) return;
       try {
