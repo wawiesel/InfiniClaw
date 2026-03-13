@@ -1413,7 +1413,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               ? await reply(engConn, `📡 git sync: ${result.newCommits} new commit(s) — restarting fleet`)
               : undefined;
             for (const bot of getActiveBots()) {
-              if (liveFleet[bot]?.status !== 'onduty') continue;
+              if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status)) continue;
               try {
                 bootstrapBot(resolveRoot(), bot);
                 writeCrewStatus(resolveRoot(), bot);
