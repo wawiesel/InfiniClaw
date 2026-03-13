@@ -57,7 +57,12 @@ import {
   formatShipMetrics,
   formatBotMetrics,
   formatFleetMetrics,
+  computeBotHealthGrade,
+  computeFleetHealthGrade,
+  gradeEmoji,
+  activityIcon,
   type MetricsSnapshot,
+  type HealthGrade,
 } from './metrics.js';
 import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
@@ -911,7 +916,7 @@ type FleetReport = {
   ship: string;
   ts: number;
   relayVersion: string;
-  bots: Record<string, { name: string; badge: string; role: string; rank: number; status: string; gitVersion: string }>;
+  bots: Record<string, { name: string; badge: string; role: string; rank: number; status: string; gitVersion: string; grade?: string; activity?: string }>;
 };
 
 /** Build and publish this ship's fleet report to S3. Returns the report. */
@@ -938,12 +943,16 @@ async function publishFleetReport(): Promise<FleetReport> {
   } catch { /* empty */ }
 
   const relayVer = relayVersion(root);
+  const metrics = computeMetrics();
   const botReports: FleetReport['bots'] = {};
   for (const [botId, entry] of Object.entries(liveFleet)) {
     if (entry.ship !== HOSTNAME) continue;
     const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
     const name = env?.ASSISTANT_NAME || capitalizeName(botId);
     const running = localRunning.has(botId);
+    const botMetrics = metrics.bots.find(b => b.name === botId);
+    const grade = botMetrics ? computeBotHealthGrade(botMetrics) : undefined;
+    const tokPerDay = botMetrics?.tokenThroughput?.day1 ?? -1;
     botReports[botId] = {
       name,
       badge: '',
@@ -951,6 +960,8 @@ async function publishFleetReport(): Promise<FleetReport> {
       rank: entry.rank,
       status: entry.status,
       gitVersion: botVersion(root, botId),
+      grade,
+      activity: activityIcon(tokPerDay),
     };
     if ((RUNNING_STATUSES as readonly string[]).includes(entry.status) && !running) {
       botReports[botId].status = 'warn';
@@ -2732,7 +2743,8 @@ function registerRelayCommands(): void {
         const [report, isSpeaker] = await Promise.all([publishFleetReport(), electSpeaker()]);
         if (!isSpeaker) return;
 
-        const threadRoot = await reply(conn, '📋 Fleet');
+        // Fleet health grade computed after assembling all reports
+        let threadRoot: string | undefined;
 
         const ships = safeLoadShips();
         const allShipNames = Object.keys(ships);
@@ -2770,7 +2782,7 @@ function registerRelayCommands(): void {
         const allReports: Record<string, FleetReport> = { ...staleReports, ...freshReports };
 
         // Assemble output
-        const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; localStatus: string }> = {};
+        const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; localStatus: string; grade?: string; activity?: string }> = {};
         for (const [botId, entry] of Object.entries(liveFleet)) {
           allBots[botId] = { ...entry, name: capitalizeName(botId), gitVersion: '', localStatus: entry.status };
         }
@@ -2780,6 +2792,8 @@ function registerRelayCommands(): void {
               allBots[botId].name = botData.name;
               allBots[botId].gitVersion = botData.gitVersion;
               allBots[botId].localStatus = botData.status;
+              allBots[botId].grade = botData.grade;
+              allBots[botId].activity = botData.activity;
             }
           }
         }
@@ -2793,6 +2807,13 @@ function registerRelayCommands(): void {
           (byShip[s] ??= []).push([botId, entry]);
         }
         for (const s of Object.keys(ships)) { byShip[s] ??= []; }
+
+        // Compute aggregate fleet health grade
+        const botGrades = Object.values(allBots)
+          .filter(b => b.localStatus !== 'sleep' && b.localStatus !== 'transit' && b.grade)
+          .map(b => b.grade as HealthGrade);
+        const fleetGrade = botGrades.length > 0 ? computeFleetHealthGrade(botGrades) : 'A' as HealthGrade;
+        threadRoot = await reply(conn, `📋 Fleet · ${gradeEmoji(fleetGrade)}${fleetGrade}`);
 
         const shipOrder = Object.keys(byShip).sort((a, b) => {
           if (a === 'drydock') return 1;
@@ -2814,15 +2835,7 @@ function registerRelayCommands(): void {
               Object.values(ships).filter(s => s.commissioned).every(s => (s.rank ?? 99) >= (sConfig?.rank ?? 99));
             const statusChar = !commissioned ? '💤' : isThisShipSpeaker ? '⭐' : '◉';
             const shipEmoji = sConfig?.emoji ?? '';
-            let shipStatus: string;
-            if (shipReport) {
-              const isFresh = freshReports[shipName] != null;
-              const rv = shipReport.relayVersion ?? '';
-              shipStatus = isFresh ? rv : ` · last seen ${formatDuration(Date.now() - shipReport.ts)} ago${rv}`;
-            } else {
-              shipStatus = ' · unknown';
-            }
-            lines.push(`${shipEmoji}${statusChar} **${shipName}** · 🏅${rank}${shipStatus}`);
+            lines.push(`${shipEmoji}${statusChar} **${shipName}** · 🏅${rank}`);
           }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
@@ -2839,17 +2852,21 @@ function registerRelayCommands(): void {
           for (const [i, [, entry]] of bots.entries()) {
             const isLast = i === bots.length - 1;
             const awakeStatuses = ['onduty', 'quarters'];
-            const isCO = awakeStatuses.includes(entry.status) && !Object.values(allBots).some(
-              e => e.role === entry.role && awakeStatuses.includes(e.status) && e.rank < entry.rank && e !== entry
+            const isCO = awakeStatuses.includes(entry.localStatus) && !Object.values(allBots).some(
+              e => e.role === entry.role && awakeStatuses.includes(e.localStatus) && e.rank < entry.rank && e !== entry
             );
 
             let badge: string;
             if (entry.localStatus === 'transit') badge = '🚀';
             else if (entry.localStatus === 'sleep') badge = '💤';
             else if (entry.localStatus === 'warn') badge = '⚠️';
-            else if (isCO) badge = '⭐';
-            else if (entry.localStatus === 'onduty' || entry.localStatus === 'quarters') badge = '◉';
-            else badge = '❓';
+            else if (entry.grade) {
+              const g = entry.grade as HealthGrade;
+              const act = entry.activity || '·';
+              badge = isCO ? `${gradeEmoji(g)}${g}⭐${act}` : `${gradeEmoji(g)}${g}${act}`;
+            } else {
+              badge = isCO ? '⭐' : '◉';
+            }
 
             const roleIcon = ROLE_ICONS[entry.role?.toLowerCase()] ?? '';
             const roleCap = entry.role ? capitalizeName(entry.role) : '';
@@ -2858,7 +2875,7 @@ function registerRelayCommands(): void {
             const prefix = isLast ? '  └' : '  ├';
             const namePad = NBSP.repeat(maxName - entry.name.length);
             const nameDisplay = `${entry.name}${namePad}`;
-            lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${entry.rank}${entry.gitVersion}`);
+            lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${entry.rank}`);
           }
         }
 

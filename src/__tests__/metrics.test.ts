@@ -18,8 +18,13 @@ import {
   formatShipMetrics,
   formatFleetMetrics,
   formatAllMetrics,
+  computeBotHealthGrade,
+  computeFleetHealthGrade,
+  activityIcon,
+  gradeEmoji,
   type MetricsSnapshot,
   type RollingMetric,
+  type BotMetrics,
 } from '../metrics.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -649,5 +654,95 @@ describe('MTBI in operator metrics', () => {
       mtbi: null,
     });
     expect(result).not.toContain('MTBI');
+  });
+});
+
+// ── Health grade ─────────────────────────────────────────────────────
+
+describe('computeBotHealthGrade', () => {
+  const baseBotMetrics: BotMetrics = {
+    name: 'cid',
+    score: { day1: 0, day7: 0 },
+    crashes: { day1: 0, day7: 0 },
+    branchBrainSuccess: { day1: -1, day7: -1 },
+    tokenThroughput: { day1: 0, day7: 0 },
+    status: 'quarters',
+    processRunning: true,
+  };
+
+  it('returns A for healthy running bot', () => {
+    expect(computeBotHealthGrade(baseBotMetrics)).toBe('A');
+  });
+
+  it('returns F when process not running for awake bot', () => {
+    expect(computeBotHealthGrade({ ...baseBotMetrics, processRunning: false })).toBe('F');
+  });
+
+  it('returns A for sleeping bot regardless of metrics', () => {
+    expect(computeBotHealthGrade({ ...baseBotMetrics, status: 'sleep', processRunning: false })).toBe('A');
+  });
+
+  it('returns B for 1-2 crashes per day', () => {
+    expect(computeBotHealthGrade({ ...baseBotMetrics, crashes: { day1: 1, day7: 3 } })).toBe('B');
+  });
+
+  it('returns C for >2 crashes per day', () => {
+    expect(computeBotHealthGrade({ ...baseBotMetrics, crashes: { day1: 3, day7: 5 } })).toBe('C');
+  });
+
+  it('returns C when OOM kills present', () => {
+    expect(computeBotHealthGrade(baseBotMetrics, { oomKills1d: 1 })).toBe('C');
+  });
+
+  it('returns B when memory >70%', () => {
+    expect(computeBotHealthGrade(baseBotMetrics, { memPct: 75 })).toBe('B');
+  });
+
+  it('returns C when memory >85%', () => {
+    expect(computeBotHealthGrade(baseBotMetrics, { memPct: 90 })).toBe('C');
+  });
+});
+
+describe('computeFleetHealthGrade', () => {
+  it('returns A when all bots are healthy', () => {
+    expect(computeFleetHealthGrade(['A', 'A', 'A'])).toBe('A');
+  });
+
+  it('returns worst grade', () => {
+    expect(computeFleetHealthGrade(['A', 'B', 'A'])).toBe('B');
+    expect(computeFleetHealthGrade(['A', 'C', 'B'])).toBe('C');
+    expect(computeFleetHealthGrade(['A', 'F'])).toBe('F');
+  });
+});
+
+describe('activityIcon', () => {
+  it('returns · for no/low activity', () => {
+    expect(activityIcon(0)).toBe('·');
+    expect(activityIcon(-1)).toBe('·');
+    expect(activityIcon(4999)).toBe('·');
+  });
+
+  it('returns 🔹 for moderate activity', () => {
+    expect(activityIcon(5000)).toBe('🔹');
+    expect(activityIcon(49999)).toBe('🔹');
+  });
+
+  it('returns ⚡ for active', () => {
+    expect(activityIcon(50000)).toBe('⚡');
+    expect(activityIcon(499999)).toBe('⚡');
+  });
+
+  it('returns 🔥 for high activity', () => {
+    expect(activityIcon(500000)).toBe('🔥');
+    expect(activityIcon(1000000)).toBe('🔥');
+  });
+});
+
+describe('gradeEmoji', () => {
+  it('maps grades to colored circles', () => {
+    expect(gradeEmoji('A')).toBe('🟢');
+    expect(gradeEmoji('B')).toBe('🟡');
+    expect(gradeEmoji('C')).toBe('🟠');
+    expect(gradeEmoji('F')).toBe('🔴');
   });
 });

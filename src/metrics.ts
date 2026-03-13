@@ -84,6 +84,54 @@ export interface FleetMetrics {
   autonomyScore: RollingMetric;
 }
 
+// ── Health grade & activity ───────────────────────────────────────────
+
+export type HealthGrade = 'A' | 'B' | 'C' | 'F';
+
+const GRADE_EMOJI: Record<HealthGrade, string> = { A: '🟢', B: '🟡', C: '🟠', F: '🔴' };
+
+export function gradeEmoji(grade: HealthGrade): string {
+  return GRADE_EMOJI[grade];
+}
+
+/** Compute health grade for a single bot based on metrics + optional health data. */
+export function computeBotHealthGrade(bot: BotMetrics, opts?: { oomKills1d?: number; memPct?: number }): HealthGrade {
+  // F: should be running but isn't
+  if ((bot.status === 'onduty' || bot.status === 'quarters') && !bot.processRunning) return 'F';
+  // Not gradeable if sleeping/transit
+  if (bot.status === 'sleep' || bot.status === 'transit') return 'A'; // healthy by definition
+
+  const crashes1d = bot.crashes.day1;
+  const oomKills = opts?.oomKills1d ?? 0;
+  const memPct = opts?.memPct ?? 0;
+  const p95 = bot.responseLatencyP95 ?? -1;
+
+  // C: significant issues
+  if (crashes1d > 2 || oomKills > 0 || memPct > 85 || (p95 > 120 && p95 > 0)) return 'C';
+  // B: minor issues
+  if (crashes1d > 0 || (memPct > 70) || (p95 > 60 && p95 > 0)) return 'B';
+  // A: healthy
+  return 'A';
+}
+
+/** Fleet-level aggregate grade: worst grade among all non-sleeping bots. */
+export function computeFleetHealthGrade(grades: HealthGrade[]): HealthGrade {
+  const order: HealthGrade[] = ['F', 'C', 'B', 'A'];
+  for (const g of order) {
+    if (grades.includes(g)) return g;
+  }
+  return 'A';
+}
+
+/** Activity icon based on tokens per day. */
+export function activityIcon(tokensPerDay: number): string {
+  if (tokensPerDay <= 0) return '·';
+  if (tokensPerDay >= 500_000) return '🔥';
+  if (tokensPerDay >= 50_000) return '⚡';
+  if (tokensPerDay >= 5_000) return '🔹';
+  return '·';
+}
+
 export interface MetricsSnapshot {
   ship: string;
   ts: number;
