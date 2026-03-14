@@ -41,7 +41,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 |---------|--------|
 | `!fleet` | Fleet status — each ship reports its local bots. |
 | `!fleet room` | Bots in this room only. _(not yet implemented — same as `!fleet`)_ |
-| `!health` | Fleet health summary from S3 (speaker replies). |
+| `!health` | Fleet health summary from S3 (speaker replies). Alias for `!metrics fleet`. |
 | `!metrics [scope]` | Metrics (1d/7d rolling). Context-aware — see below. |
 | `!operator [on|off] [ship]` | Show or toggle operator relay on/off for ship(s). |
 
@@ -51,7 +51,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 
 | Room | Default scope | What it shows |
 |------|--------------|---------------|
-| Bot quarters | `bot <botname>` | That bot's score, response latency, crashes, branch brain success, timeouts |
+| Bot quarters | bot name (e.g. `parker`) | That bot's score, response latency, crashes, branch brain success, timeouts |
 | Engineering | `engineering` | Relay uptime, warnings/errors, cumulative time bots running stale code, deploy success |
 | Bridge | `fleet` | Fleet availability, autonomy score, transport success, cross-ship sync lag |
 | BehindTheCurtain | `all` | Everything — operator, bot, ship, fleet |
@@ -63,7 +63,7 @@ Explicit scope overrides the default: `!metrics operator` from any room shows op
 | `operator` | Interventions outside BTC, x-commands issued, restart ratio, MTBI |
 | `bot [name]` | Score (points/day), response latency, crashes, branch brain success, turn timeout rate, self-healing ratio |
 | `ship [name]` | Relay uptime, sync failures, x-command latency, deploy success, speaker stability |
-| `engineering` | Relay uptime, warnings/errors per day, cumulative stale-code bot-hours, deploy success |
+| `engineering` / `ship` | Relay uptime, warnings/errors per day, cumulative stale-code bot-hours, deploy success |
 | `fleet` | Availability, autonomy score, transport success, cross-ship sync lag |
 | `all` | All of the above |
 
@@ -111,12 +111,12 @@ Version info follows a standard form:
 Examples:
 
 ```
-· 2a9cc64 (5m) ↑0      ← committed 5m ago, matches HEAD
-· f25432f (2h) ↓3       ← commit is 2h old, 3 commits behind HEAD
-· f814482 (10m) ↑1      ← commit is 10m old, 1 unpushed commit
+· 📦 [2a9cc64](url) (5m) ↑0      ← committed 5m ago, matches HEAD
+· 📦 [f25432f](url) (2h) ↓3       ← commit is 2h old, 3 commits behind HEAD
+· 📦 [f814482](url) (10m) ↑1      ← commit is 10m old, 1 unpushed commit
 ```
 
-Implemented by `gitVersionStr()`, `repoVersion()`, `relayVersion()`, `botVersion()` in the relay module.
+Implemented by `fmtVersion()`, `repoVersion()`, `relayVersion()`, `botVersion()` in the relay module.
 
 ## Status Threads
 
