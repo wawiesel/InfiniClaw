@@ -1437,6 +1437,17 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
                 if (engConn && threadRoot) await threadReply(engConn, threadRoot, `⛔ ${bot} restart failed: ${errStr(err).slice(0, 100)}`);
               }
             }
+            // Deploy dist to sleeping bots so they have current code when they wake
+            for (const bot of getActiveBots()) {
+              if (liveFleet[bot]?.status !== 'sleep') continue;
+              try {
+                deployBot(resolveRoot(), bot);
+                log(`git sync: deployed ${bot} (sleeping)`);
+                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${bot} deployed (sleeping)`);
+              } catch (err) {
+                log(`git sync: failed to deploy ${bot}: ${errStr(err)}`);
+              }
+            }
             // Post completion summary before relay restarts
             if (engConn) await reply(engConn, `📡 git sync: fleet restarted`);
             // Restart relay itself to pick up new relay code

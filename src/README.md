@@ -9,7 +9,7 @@ Architecture and behavior are specified in `docs/design/` — this README docume
 | [00-overview](../docs/design/00-overview.md) | Core principles, code structure |
 | [02-matrix](../docs/design/02-matrix.md) | `channels/matrix.ts`, `matrix-api.ts`, `intercom-relay.ts` |
 | [03-container](../docs/design/03-container.md) | `container-spawn.ts`, `container-mounts.ts`, `container-secrets.ts`, `run-container.ts` |
-| [04-ship](../docs/design/04-ship.md) | `ship-config.ts`, `relay.ts`, `s3-sync.ts` |
+| [04-ship](../docs/design/04-ship.md) | `ship-config.ts`, `relay.ts`, `s3-sync.ts`, `git-utils.ts` |
 | [05-bot](../docs/design/05-bot.md) | `main.ts`, `infini-config.ts`, `message-filtering.ts` |
 | [06-brain](../docs/design/06-brain.md) | `brain-management.ts`, `container-spawn.ts` |
 | [07-ipc](../docs/design/07-ipc.md) | `ipc-watcher.ts`, `ipc-commands.ts` |
