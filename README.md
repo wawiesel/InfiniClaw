@@ -78,7 +78,7 @@ See `bots/README.md` for full structure.
 
 ## Values
 
-See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity, consistency, functionality. See [`NEXT.md`](NEXT.md) for the prioritized task queue (all 21 design docs reviewed; 13 fix PRs + feat/wbs-relay PR pending operator merge; NAS Tailscale IP confirmed 100.88.101.126; operator room M_FORBIDDEN needs loudspeaker invite). Infrastructure documentation (networking, NAS, services) is maintained by the fleet in [`workspace/persona/docs/`](workspace/persona/docs/).
+See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity, consistency, functionality. See [`NEXT.md`](NEXT.md) for the prioritized task queue (all 21 design docs reviewed; 13 doc fix PRs + feat/wbs-relay + fix/lobe-result-injection pending operator merge). Infrastructure documentation (networking, NAS, services) is maintained by the fleet in [`workspace/persona/docs/`](workspace/persona/docs/).
 
 ## Design
 

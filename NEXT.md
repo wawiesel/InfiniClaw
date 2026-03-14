@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14 20:28 (Branch Brain monitor — fleet healthy; new operator room M_FORBIDDEN issue; Tali active on System_Review)
+Last curated: 2026-03-14 ~16:35 (Branch Brain monitor — item #10 partial fix PR open: lobe_result IPC injection)
 
 ---
 
@@ -138,10 +138,12 @@ Full architecture docs now exist in `workspace/persona/docs/` (architecture-over
 
 ## 🟢 Lower Priority
 
-### 10. Lobe end-to-end workflow
-`delegate_to_lobe` tool exists but the full workflow (quarters thread posting, completion notification, bot pickup) is not production-ready.
+### 10. Lobe end-to-end workflow — partial fix PR open
+**Fixed (2026-03-14):** `delegate_to_lobe` is fire-and-forget — result arrives via `result-{lobeId}.json` IPC file. `drainIpcInput()` was silently dropping it (checked `data.text`, but lobe results have `data.output`). Bot never received the result. Fix injects it as `[System: Lobe {id} completed]` on next turn.
+**Remaining:** Quarters thread posting and completion notification on quarters main timeline still not implemented per design.
+**PR:** https://github.com/wawiesel/InfiniClaw/pull/new/fix/lobe-result-injection
 **Design:** `06-brain.md` — Lobe section.
-**Who:** Parker or Cid (when HERACLES active).
+**Who:** Operator merge for partial fix; Parker or Cid for remaining quarters integration. 🔑
 
 ### 11. Branch brain upgrade: full interactive session
 Replace one-shot `claude --print` with a full nanoclaw group container session. Enables resumable, interactive, time-limited branch brains.
