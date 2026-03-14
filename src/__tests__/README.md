@@ -26,5 +26,6 @@ Integration and unit tests for InfiniClaw source modules that don't live next to
 | `routing.test.ts` | Message routing logic |
 | `metrics.test.ts` | Fleet metrics: rollingRate, SCORE_REACTIONS, operator/bot/ship/fleet metrics, autonomy score (x-commands excluded), infra failure tracking, branch brain success, tokenThroughput rolling metric, response latency tracking, MTBI in operator metrics, scope routing, formatting, health grades (A/B/C/F from crashes/OOM/mem/latency), fleet aggregate grade, activity icons (tok/day tiers), gradeEmoji mapping, score attribution per bot (empty name vs named), latency/throughput in BotMetrics types. |
 | `wbs.test.ts` | WBS lifecycle: assign, reabsorb, completeItem (dependency unblocking), autoAssign, nextReadyItem priority ordering, wbsToTodos conversion (16 tests). |
+| `formatting.test.ts` | Unified display format: `formatBotLine` at short/medium/long verbosity. Covers spec examples (Albert/Nora), all roles/locations, boot stages, chief display, idle activity, rank medals, name capitalization (18 tests). |
 
 Run with: `npx vitest run --root .`
