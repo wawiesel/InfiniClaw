@@ -18,7 +18,7 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 | `parker` | Engineer | Engineering | Health metrics, monitoring, diagnostics |
 | `albert` | Architect | Astrometrics | Architecture, refactoring, AEGIS |
 
-See [NEXT.md](NEXT.md) for the prioritized task queue.
+See [NEXT.md](NEXT.md) for the prioritized task queue (curated by operator).
 
 ## Quick start
 

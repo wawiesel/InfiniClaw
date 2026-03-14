@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14
+Last curated: 2026-03-14 10:05
 
 ---
 
@@ -13,11 +13,8 @@ Branch `docs/fix-04-ship-relay-accuracy` is open. Fixes: speaker election algori
 **Who:** Operator reviews + merges.
 **Blocked by:** Nothing.
 
-### 2. Deploy dist to sleeping bots on git sync (code changes)
-**Issue:** When a rebuild happens, only `onduty` and `quarters` bots get restarted (`RUNNING_STATUSES`). Sleeping bots have stale dist. When they wake up, they run old code until the next sync cycle rebuilds again (3 min gap). Captain said: "Even when they're sleeping they need to participate in sync."
-**Fix:** In `gitSyncLoop` after rebuild, also call `deployBot(root, bot)` for `sleep`-status bots that belong to this ship (no restart, just deploy dist).
-**Who:** Parker or operator.
-**File:** `src/relay.ts` ~L1428 in gitSyncLoop.
+### ~~2. Deploy dist to sleeping bots on git sync~~ ✅ DONE (6a741d5)
+`gitSyncLoop` now calls `deployBot()` for sleep-status bots after each rebuild — they'll have current code the moment they wake.
 
 ---
 
@@ -83,6 +80,6 @@ Pooled capability modules per role. Not yet implemented. Big feature.
 
 ## 📋 Housekeeping
 
-- Inbox item "Wake Parker" is stale — Parker is already onduty. Mark done in `secrets/operator/inbox.md`.
+- ~~Inbox item "Wake Parker"~~ — marked done in secrets inbox.
 - Git push to GitHub is failing with `ETIMEDOUT` (last seen 13:55). Likely transient network. Monitor relay logs; if persists, check network and retry `!push`.
 - HERACLES relay status unknown — Cid and Albert are on HERACLES. Verify HERACLES is online before assigning them work.
