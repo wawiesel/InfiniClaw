@@ -45,7 +45,7 @@ A bot in its quarters room is a **primary** — it owns the room. Trigger behavi
 | Status | triggerType | Responds to |
 |--------|------------|-------------|
 | `quarters` (awake) | `always` | Anyone — every message triggers |
-| `onduty` | `callout` | Explicit `<m>Name</m>`, participating thread, or CO |
+| `onduty` | `callout` | Explicit `<m>Name</m>`, participating thread, or Chief fallback |
 | `sleep` | `never` | Nothing — but captain/operator mentions auto-wake |
 
 When a sleeping bot receives a captain/operator mention, the relay auto-wakes it (transitions `sleep` → `quarters`, `triggerType` → `always`), delivers the message, then the bot stays awake until explicitly put back to sleep.
@@ -93,9 +93,9 @@ The pip reflects **operational status**, not which room the bot is in. A bot's r
 | 🚀 | starting | Transient — container spawning |
 | 🟡 | waiting | Transient — waiting for first output |
 | 🟢 | online | Running, responding |
-| ⭐ | CO | Commanding officer (special online) |
+| ⭐ | Chief | Room lead — highest-rank active bot in duty room |
 
-Display name format: `<pip> <name> <shipEmoji>` (e.g. `🟢 Cid 🦁`). CO is elected automatically — lowest-rank active bot in a duty room.
+Display name format: `<pip> <name> <shipEmoji>` (e.g. `🟢 Cid 🦁`). Chief is elected automatically — lowest-rank-number active bot in a duty room (see [12-co](12-co.md)).
 
 ### Room assignment
 
@@ -253,7 +253,7 @@ Ship space IDs in `ships.json`:
 3. **triggerType on dismiss** — Dismissed bot switches to `always` trigger.
    *Check:* fleet.json shows `triggerType: "always"` after dismiss. Brain model unchanged.
 
-4. **CO election** — Two bots in Engineering, lowest rank gets ⭐.
+4. **Chief election** — Two bots in Engineering, lowest rank number gets ⭐.
    *Check:* Lower-ranked bot's display name shows ⭐. Higher-ranked shows 🟢.
 
 5. **Bot room memory** — Bot posts a learning to its quarters room.
