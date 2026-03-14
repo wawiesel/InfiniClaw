@@ -6,11 +6,11 @@ Bots receive instructions from three CLAUDE.md files:
 
 | Layer | Source | Bot can edit? | Container path |
 |-------|--------|---------------|----------------|
-| Base | `bots/CLAUDE.md` | No | Concatenated into instance CLAUDE.md |
+| Base | `bots/CLAUDE.md` | No | `/workspace/extra/InfiniClaw/bots/CLAUDE.md` (ro, via allow-list mount) |
 | Persona | `bots/{role}/{bot}/CLAUDE.md` | Yes | `/workspace/persona/CLAUDE.md` (rw) |
 | Room | `bots/{role}/ROOM.md` | No | `/workspace/CLAUDE.md` (ro) |
 
-Base + persona are concatenated into the instance-level CLAUDE.md. Room context is mounted read-only at `/workspace/CLAUDE.md` — Claude CLI finds it via directory traversal from the working directory.
+The three CLAUDE.md files are separate — they are **not** concatenated. Claude Code runs from `/workspace/persona/temp` and loads persona and room via upward directory traversal. The base is accessible at the allow-list mount path but is not in the traversal path; bots reach it via explicit file reads when needed.
 
 ## MCP Configuration
 
@@ -79,5 +79,5 @@ Sent automatically to each bot's main room on every boot, wrapped in a collapsib
 3. **MCP connected** — Bot has access to MCP tools defined in role's `mcp.json`.
    *Check:* Startup log shows MCP servers connected (or dropped with preflight failure).
 
-4. **Startup checklist posted** — Bot posts collapsible checklist on boot.
-   *Check:* Message appears in bot's main room with correct role-specific sections.
+4. **Resume message injected** — On boot, host injects a system resume message with active todos and last 5 messages.
+   *Check:* Bot processes "You were restarted" message and resumes in-progress work or reports idle.
