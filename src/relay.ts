@@ -1730,8 +1730,12 @@ async function spawnBranchBrain(
     if (bot && getActiveBots().includes(bot)) {
       const existing = branchBrainRestartTimers.get(bot);
       if (existing) clearTimeout(existing);
+      const brainSucceeded = postedCount > 0;
       const timer = setTimeout(() => {
         branchBrainRestartTimers.delete(bot);
+        // Post main-timeline summary so Captain sees completion without watching thread
+        const status = brainSucceeded ? '✅ done' : '⛔ failed';
+        reply(conn, `🧵 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
         log(`branchBrain: restarting ${bot} to pick up findings`);
         try {
           bootstrapBot(resolveRoot(), bot);
