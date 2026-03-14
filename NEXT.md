@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14 19:28 (Branch Brain monitor — doc #11 PR open; relay git sync fixed; fleet stable)
+Last curated: 2026-03-14 19:45 (Branch Brain monitor — doc #12 PR open; WBS status corrected; 5 doc PRs pending merge)
 
 ---
 
@@ -31,20 +31,23 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 **Alternative:** bring up HERACLES machine (where Cid lives) and run `!wake cid` from there.
 **Who:** Operator. 🔑
 
-### 1. Design doc review cycle — four PRs open, all need merge
+### 1. Design doc review cycle — five PRs open, all need merge
 - **docs #7+#8:** Branch `docs/fix-07-ipc-08-threading-accuracy`. All 181 tests pass.
 - **doc #9:** Branch `docs/fix-09-roles-and-rooms-accuracy`. All 181 tests pass.
 - **doc #10:** Branch `docs/fix-10-fleet-accuracy`. All 181 tests pass.
 - **doc #11:** Branch `docs/fix-11-commands-accuracy` (pushed 2026-03-14 ~19:25). 199 tests pass.
   - `gitVersionStr()` → `fmtVersion()` (function didn't exist), version format shows `📦 [sha](url)`, `!health` alias noted, `engineering`/`ship` scope clarified, bot-quarters default scope corrected
-- **Next doc:** #12 (12-co.md) — Parker to continue.
+- **doc #12:** Branch `docs/fix-12-co-accuracy` (pushed 2026-03-14 ~19:45). 199 tests pass.
+  - WBS status block updated: relay integration is implemented (startup inject, reabsorb, heartbeat auto-assign, wbs_complete); Chief content management still pending
+- **Next doc:** #13 (13-intercom.md) — Parker to continue.
 
-**Who:** Operator to merge PRs. Parker to continue with doc #12 (12-co.md).
+**Who:** Operator to merge PRs. Parker to continue with doc #13 (13-intercom.md).
 **PRs:**
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-07-ipc-08-threading-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-09-roles-and-rooms-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-10-fleet-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-11-commands-accuracy
+- https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-12-co-accuracy
 
 ---
 
