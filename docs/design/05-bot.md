@@ -251,7 +251,7 @@ A sleeping bot can be woken by an explicit `<m>name</m>` callout in any room whe
 
 When a bot restarts (crash, deploy, or manual restart):
 
-1. Synthetic resume message injected into SQLite with last 10 messages as context
+1. Synthetic resume message injected into SQLite with last 5 messages as context
 2. Active todos included if available
 3. Trigger patterns stripped from context to prevent false activation
 4. Container spawns to process the resume message
