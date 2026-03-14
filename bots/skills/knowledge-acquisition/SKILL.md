@@ -10,7 +10,9 @@ description: Explore, organize, and extract knowledge using WKSM MCP tools. Use 
 WKSM is your primary tool for filesystem and knowledge operations. Use it instead of Read/Bash for bulk exploration.
 
 ### Search & Discovery
-- `wksm_search` — semantic search across indexed content
+- `wksm_search` — search indexed content. Two indexes:
+  - Default (`main`): BM25 lexical, ~6500 docs. Use for exact names, file paths, known terms.
+  - `semantic`: sentence-transformer embeddings, ~100 docs (InfiniClaw bots, skills, design). Use for concept queries (e.g. "how do bots stay busy", "coding rules DRY"). Pass `index_name="semantic"`.
 - `wksm_monitor_check` — check if a path is monitored/indexed
 - `wksm_monitor_sync` — force-update a file/directory into the monitor database
 - `wksm_index_auto` — index a URI for search
