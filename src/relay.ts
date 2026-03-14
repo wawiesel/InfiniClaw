@@ -40,7 +40,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { capitalizeName, formatBotDisplayName } from './formatting.js';
+import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, shipHeaderLine, botTreeLine } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -623,11 +623,6 @@ const ROOM_EMOJI: Record<string, string> = {
 const FLEET_LOCATION = '🌌';
 const QUARTERS_EMOJI = '🏠';
 
-/** Role icon lookup derived from ROLE_ROOMS — single source of truth. */
-const ROLE_ICONS: Record<string, string> = Object.fromEntries(
-  Object.entries(ROLE_ROOMS).map(([role, { icon }]) => [role, icon])
-);
-
 /** Ensure all ship spaces, fleet rooms, and quarters rooms have correct emoji-prefixed names. */
 async function ensureRoomNames(): Promise<void> {
   const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
@@ -761,10 +756,9 @@ async function setBotPip(root: string, bot: string, pip: string): Promise<void> 
 /** Sync display names for ALL bots on this ship (including sleeping ones). */
 async function syncBotDisplayNames(): Promise<void> {
   const root = resolveRoot();
-  const pipForStatus: Record<string, string> = { onduty: '🟢', quarters: '🟢', sleep: '💤', transit: '🔄' };
   for (const [bot, entry] of Object.entries(liveFleet)) {
     if (entry.ship !== HOSTNAME) continue;
-    const pip = pipForStatus[entry.status] || '💤';
+    const pip = PIP_FOR_STATUS[entry.status] || '💤';
     await setBotPip(root, bot, pip);
   }
 }
@@ -1115,8 +1109,8 @@ function formatCombinedMetrics(
     const cfg = ships[s.ship];
     const rank = cfg?.rank ?? '?';
     const commissioned = cfg?.commissioned !== false;
-    const statusChar = commissioned ? '◉' : '💤';
-    const shipEmoji = cfg?.emoji ?? '';
+    const isThisShipSpeaker = commissioned && isSpeakerCached && cfg?.rank != null &&
+      Object.values(ships).filter(sh => sh.commissioned).every(sh => (sh.rank ?? 99) >= (cfg?.rank ?? 99));
     // Uptime %: % of last 24h the relay was running (approximated from continuous uptime since last start)
     const uptimePct = Math.min(Math.round(s.shipMetrics.relayUptimeSeconds / 864), 100);
     const uptimeTag = `up ${uptimePct}% (1d)`;
@@ -1127,7 +1121,7 @@ function formatCombinedMetrics(
     const rst = typeof rstRaw === 'number' ? { day1: rstRaw, day7: rstRaw } : { day1: rstRaw?.day1 ?? 0, day7: rstRaw?.day7 ?? 0 };
     const rstTag = `↻${rst.day1}/${rst.day7}`;
     const codeVer = s.shipMetrics.codeVersion || '';
-    lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptimeTag} · ${rstTag} · ${syncTag}${codeVer}`);
+    lines.push(`${shipHeaderLine(cfg?.emoji ?? '', s.ship, rank, commissioned, isThisShipSpeaker)} · ${uptimeTag} · ${rstTag} · ${syncTag}${codeVer}`);
 
     // Build bot list: merge metrics snapshot + health + liveFleet role/rank
     const health = healthByShip.get(s.ship);
@@ -1152,26 +1146,22 @@ function formatCombinedMetrics(
       maxRole = Math.max(maxRole, roleCap.length);
     }
 
+    // Build flat list for CO detection (all bots across all ships)
+    const allBotList = sorted.flatMap(ss => ss.bots.map(b => ({
+      role: liveFleet[b.name]?.role ?? '',
+      rank: liveFleet[b.name]?.rank ?? 99,
+      status: b.status,
+    })));
+
     for (const [i, bot] of botsWithMeta.entries()) {
       const isLast = i === botsWithMeta.length - 1;
-      const prefix = isLast ? '  └' : '  ├';
 
-      // CO = rank-1 bot in its role. Shows ⭐ whenever not sleeping.
-      const isCO = bot.rank === 1;
-
-      let badge: string;
-      if (bot.status === 'transit') badge = '🚀';
-      else if (bot.status === 'sleep') badge = '💤';
-      else if (bot.status === 'warn') badge = '⚠️';
-      else if (isCO) badge = '⭐';
-      else if ((bot.status === 'onduty' || bot.status === 'quarters') && !bot.processRunning) badge = '🔴';
-      else if (bot.status === 'onduty' || bot.status === 'quarters') badge = '◉';
-      else badge = '❓';
+      const co = isBotCO(bot.role, bot.rank, bot.status, allBotList);
+      const badge = botBadge(bot.status, co, bot.processRunning ?? null);
 
       const nameDisplay = capitalizeName(bot.name) + NBSP.repeat(maxName - capitalizeName(bot.name).length);
       const roleCap = bot.role ? capitalizeName(bot.role) : '';
       const roleIcon = ROLE_ICONS[bot.role?.toLowerCase()] ?? '';
-      const roleDisplay = roleIcon ? `${roleIcon} ${roleCap}` : roleCap;
       const rolePad = NBSP.repeat(maxRole - roleCap.length);
 
       // Health data
@@ -1199,7 +1189,7 @@ function formatCombinedMetrics(
       const p95 = bot.responseLatencyP95 != null ? `${bot.responseLatencyP95}s` : '?';
       const latTag = ` · lat ${p50}/${p95} (1d)`;
 
-      lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${bot.rank}${mem}${kills}${tokTag}${latTag}`);
+      lines.push(botTreeLine(isLast, badge, nameDisplay, roleCap, roleIcon, bot.rank, rolePad, `${mem}${kills}${tokTag}${latTag}`));
     }
 
     totalInterventions.day1 += s.operator.interventions.day1;
@@ -1481,6 +1471,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
                 log(`git sync: ${bot} dist unchanged, skipping restart`);
                 continue;
               }
+              const botName = capitalizeName(bot);
               if (!threadRoot && engConn) {
                 threadRoot = await reply(engConn, `📡 git sync: ${result.newCommits} new commit(s) — restarting changed bots`);
               }
@@ -1489,10 +1480,10 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
                 writeCrewStatus(resolveRoot(), bot);
                 restarted++;
                 log(`git sync: restarted ${bot}`);
-                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${bot} restarted${botVersion(resolveRoot(), bot)}`);
+                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${botName} restarted${botVersion(resolveRoot(), bot)}`);
               } catch (err) {
                 log(`git sync: failed to restart ${bot}: ${errStr(err)}`);
-                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `⛔ ${bot} restart failed: ${errStr(err).slice(0, 100)}`);
+                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `⛔ ${botName} restart failed: ${errStr(err).slice(0, 100)}`);
               }
             }
             // Deploy dist to sleeping bots so they have current code when they wake
@@ -1501,7 +1492,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               try {
                 deployBot(resolveRoot(), bot);
                 log(`git sync: deployed ${bot} (sleeping)`);
-                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${bot} deployed (sleeping)`);
+                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${capitalizeName(bot)} deployed (sleeping)`);
               } catch (err) {
                 log(`git sync: failed to deploy ${bot}: ${errStr(err)}`);
               }
@@ -2913,9 +2904,7 @@ function registerRelayCommands(): void {
             const commissioned = sConfig?.commissioned !== false;
             const isThisShipSpeaker = commissioned && isSpeakerCached && sConfig?.rank != null &&
               Object.values(ships).filter(s => s.commissioned).every(s => (s.rank ?? 99) >= (sConfig?.rank ?? 99));
-            const statusChar = !commissioned ? '💤' : isThisShipSpeaker ? '⭐' : '◉';
-            const shipEmoji = sConfig?.emoji ?? '';
-            lines.push(`${shipEmoji}${statusChar} **${shipName}** · 🏅${rank}`);
+            lines.push(shipHeaderLine(sConfig?.emoji ?? '', shipName, rank, commissioned, isThisShipSpeaker));
           }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
@@ -2929,33 +2918,19 @@ function registerRelayCommands(): void {
             maxRole = Math.max(maxRole, (entry.role ? capitalizeName(entry.role) : '').length);
           }
 
+          // Build flat list for CO detection
+          const allBotList = Object.values(allBots).map(e => ({ role: e.role, rank: e.rank, status: e.localStatus }));
+
           for (const [i, [, entry]] of bots.entries()) {
             const isLast = i === bots.length - 1;
-            const awakeStatuses = ['onduty', 'quarters'];
-            const isCO = awakeStatuses.includes(entry.localStatus) && !Object.values(allBots).some(
-              e => e.role === entry.role && awakeStatuses.includes(e.localStatus) && e.rank < entry.rank && e !== entry
-            );
-
-            let badge: string;
-            if (entry.localStatus === 'transit') badge = '🚀';
-            else if (entry.localStatus === 'sleep') badge = '💤';
-            else if (entry.localStatus === 'warn') badge = '⚠️';
-            else if (entry.grade) {
-              const g = entry.grade as HealthGrade;
-              const act = entry.activity || '·';
-              badge = isCO ? `${gradeEmoji(g)}${g}⭐${act}` : `${gradeEmoji(g)}${g}${act}`;
-            } else {
-              badge = isCO ? '⭐' : '◉';
-            }
-
+            const co = isBotCO(entry.role, entry.rank, entry.localStatus, allBotList);
+            const badge = botBadge(entry.localStatus, co, null, entry.grade, entry.activity);
             const roleIcon = ROLE_ICONS[entry.role?.toLowerCase()] ?? '';
             const roleCap = entry.role ? capitalizeName(entry.role) : '';
-            const roleDisplay = roleIcon ? `${roleIcon} ${roleCap}` : roleCap;
             const rolePad = NBSP.repeat(maxRole - roleCap.length);
-            const prefix = isLast ? '  └' : '  ├';
             const namePad = NBSP.repeat(maxName - entry.name.length);
             const nameDisplay = `${entry.name}${namePad}`;
-            lines.push(`${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${entry.rank}`);
+            lines.push(botTreeLine(isLast, badge, nameDisplay, roleCap, roleIcon, entry.rank, rolePad, ''));
           }
         }
 
