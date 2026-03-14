@@ -276,9 +276,30 @@ Use this after making code changes that require a process restart.`,
 
   server.tool(
     'check_health',
-    'Check the host system health and status. Returns bot status, active containers, group activity, and queue state. The host writes this snapshot every 30 seconds.',
-    {},
-    async () => {
+    'Check health. scope="local" (default): reads local status.json updated every 30s. scope="fleet": reads fleet-health.json cached by relay every 5 min — shows all machines with LIVE/STALE/OFFLINE status, relay uptime, and sync errors.',
+    { scope: z.enum(['local', 'fleet']).optional().default('local') },
+    async ({ scope }) => {
+      if (scope === 'fleet') {
+        // fleet-health.json is written by beaconFlushLoop every BEACON_INTERVAL
+        // ipcDir = <runtime>/instances/<bot>/data/ipc/<folder>  →  up 5 = <runtime>
+        const runtimeDir = path.resolve(ipcDir, '..', '..', '..', '..', '..');
+        const fleetPath = path.join(runtimeDir, 'data', 'fleet-health.json');
+        if (!fs.existsSync(fleetPath)) {
+          return {
+            content: [{ type: 'text' as const, text: 'Fleet health not yet cached. The relay writes fleet-health.json every 5 min. Try again shortly or use scope="local".' }],
+          };
+        }
+        try {
+          const raw = fs.readFileSync(fleetPath, 'utf-8');
+          return { content: [{ type: 'text' as const, text: raw }] };
+        } catch (err) {
+          return {
+            content: [{ type: 'text' as const, text: `Failed to read fleet health: ${errMsg(err)}` }],
+            isError: true,
+          };
+        }
+      }
+
       const statusPath = path.join(ipcDir, 'status.json');
       if (!fs.existsSync(statusPath)) {
         return {
