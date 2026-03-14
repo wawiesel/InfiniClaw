@@ -23,14 +23,14 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `10-fleet.md` — fleet.json, transport protocol, S3 coordination, fleet metrics (availability, autonomy score)
 - `11-commands.md` — X-commands (`!`-prefixed fleet control), room-scoped targeting (presence-based for most commands, assignment-based for !report, universal from BTC), `!pull [ship]` (no arg = all ships) / `!push [ship]` commands, `!operator` toggle, `!metrics` (context-aware, 1d/7d rolling), status formats, alert threads. `!rejoin` and `!refresh` removed — `!wake` handles both restart and wake.
 - `12-co.md` — Chain of command (CO/XO/Chief), Chief election and delegation, Work Breakdown Structure (WBS) — per-room task list with dependencies, auto-assignment on bot startup, reabsorption on off-duty
-- `13-intercom.md` — Intercom accounts (bridge/engineering/astrometrics), loudspeaker replies (`[emoji Ship]` prefix), `@loudspeaker:` bot broadcast (implemented), `@loudspeaker` alone = fleet status, `@room:` targeted routing (not yet implemented), operator `@` callout is Captain-only
+- `13-intercom.md` — Intercom accounts (bridge/engineering/astrometrics) used by relay to listen/reply; operators send as `@operator` account; loudspeaker replies (`[emoji pip Ship]` prefix), `@loudspeaker:` bot broadcast (implemented), `@loudspeaker` alone = fleet status, `@room:` targeted routing (not yet implemented), `@ <text>` callout is Captain-only
 
 ## Resilience
 
 - `14-configuration.md` — CLAUDE.md layers (base/persona/room), MCP per-role config, startup checklist (skills/MCP/todos/ship health/weekly goals by role)
 - `15-safety.md` — OOM handling, memory limits, rate limiting
 - `16-autonomy.md` — Bot capabilities (rebuild, git push, peer verification), self-healing loop, holodeck
-- `21-cross-machine-health.md` — Cross-machine health protocol: 5-min beacon flush (vs 30-min full), `HealthReport` extensions (`relay_uptime_s`, `secrets_sync`, `git_sync`), staleness classification (LIVE/STALE/OFFLINE), fleet aggregation via S3 pull model, `check_health` scope param (`local`/`fleet`), Matrix alerting on machine status transitions. Status: **Designed, not yet implemented.**
+- `21-cross-machine-health.md` — Cross-machine health protocol: 5-min beacon flush (vs 30-min full), `HealthReport` extensions (`relay_uptime_s`, `secrets_sync`, `git_sync`), staleness classification (LIVE/STALE/OFFLINE), fleet aggregation via S3 pull model, `check_health` scope param (`local`/`fleet`), Matrix alerting on machine status transitions. Status: **Implemented** (all 6 steps, `feat/wbs-relay` branch).
 
 ## Higher Features
 
