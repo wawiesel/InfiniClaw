@@ -22,7 +22,7 @@ MCP: `wksm__wksm__wksm_search`
 
 **Indexes available:**
 - `main` — lexical BM25, 6163 docs, 55215 chunks. Best for exact names, file paths, specific terms.
-- `semantic` — sentence-transformers embeddings, ~40 high-priority docs (after htmd exclusion). Best for concept queries. Includes path-segment boost: if a query term matches a directory/filename segment, that doc scores higher.
+- `semantic` — sentence-transformers embeddings, ~135 high-priority docs (min_priority ≥ 10.0, .htmd excluded). Best for concept queries. Includes path-segment boost: if a query term matches a directory/filename segment, that doc scores higher.
 - `images_semantic` — CLIP embeddings, 283 images.
 
 Use `--index semantic` for meaning-based queries. Use default (`main`) for exact-term lookups.
@@ -103,17 +103,22 @@ SCALE and similar tools generate `*.htmd/` directories with hundreds of HTML fil
 
 This is already set on Herm. To add it on other machines, edit `~/.wks/config.json`.
 
-After adding, resync monitored dirs and rebuild embeddings:
+After adding, clean stale DB entries and rebuild embeddings. The sync now retroactively removes excluded entries from the DB as it processes files (WKS commit `ff31fe1`). For large cleanups, directly purge MongoDB:
 ```bash
-wksc monitor sync ~/  # re-scan with new exclusions
-wksc index embed semantic  # purge stale embeddings
+python3 -c "
+from pymongo import MongoClient
+c = MongoClient('mongodb://localhost:27017/')
+r = c['wks']['nodes'].delete_many({'\$regex': r'.htmd/'})
+print(f'Deleted {r.deleted_count}')
+"
+wksc index embed semantic
 ```
 
 ## Known issues (from ~/2025-WKS/ISSUES.md)
 
 - **Noisy main index** — PDFs, generated artifacts, HTML compete with source files. Fix: `min_priority` cutoff + `exclude_globs` for generated output.
-- **Repo identity underweighted** — query for a known repo name doesn't reliably surface that repo. Fix: path-boost in `wks/api/search/cmd.py` (implemented by Murdock, pending commit).
-- **Semantic index is small** — only indexes `min_priority >= 10.0` docs (~200). Many SKILL.md/RULE.md files may be excluded. Fix: lower threshold or rebuild with `min_priority: 5.0`.
+- **Repo identity underweighted** — fixed via path-segment score boost in `wks/api/search/cmd.py` (WKS commit `61444eb`). Query terms matching directory/filename path segments get a 0.2× score boost per match.
+- **Semantic index size** — 135 chunks at min_priority ≥ 10.0. Grows as new high-priority files are synced. Monitor sync now sorts files newest-first (WKS commit `ff31fe1`) so recent content indexes first.
 
 ## Useful search patterns for bots
 
