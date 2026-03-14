@@ -89,7 +89,7 @@ async function handleTextMessage(
 ): Promise<void> {
   // Cross-room messages go through intercom relay
   if (data.crossRoom && data.senderName) {
-    const text = `${data.senderName}: ${data.text}`;
+    const text = `${data.senderName} (${sourceGroup}): ${data.text}`;
     const sent = await sendViaIntercom(data.chatJid, text);
     if (sent) {
       logger.info({ chatJid: data.chatJid, senderName: data.senderName, sourceGroup }, 'Cross-room message relayed via intercom');
