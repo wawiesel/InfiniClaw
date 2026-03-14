@@ -35,7 +35,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 ## Higher Features
 
 - `17-skills.md` — Pooled capability modules per role; skills symlinked to session `.claude/skills/` at spawn; per-bot custom skills dir not yet implemented
-- `18-deployment.md` — Code pipeline, holodeck simulation gates
+- `18-deployment.md` — Code pipeline, holodeck simulation gates; Stage 1 (type-check) and Stage 2 (test) enforced by pre-push hook; Stage 3 (holodeck simulation) and merge gate aspirational
 - `19-infrastructure.md` — Ships as VMs, Gitea/MinIO redundancy
 - `20-metrics.md` — Full metrics taxonomy: Productivity (messages/day, token throughput, score, task completion), Reliability (uptime %, response latency, crashes, OOM, RSS), Autonomy (interventions, autonomy score, MTBI), Infrastructure (relay restarts, sync failures, fleet RSS). Marks ✅ tracked vs 🔲 planned. Uptime as rolling % (not duration). All rolling 1d/7d — no cumulative totals.
 

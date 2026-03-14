@@ -1,5 +1,7 @@
 # 18 — Deployment Chain
 
+> **Status:** Stages 1 (build) and 2 (test) are enforced by the pre-push git hook (type-checks + `npm test`). Stage 3 (holodeck simulation) is not yet implemented — the holodeck IPC tasks exist but the full simulation workflow (synthetic secrets, fake crew, isolation enforcement) is not built. The deployment chain as a gated merge requirement is aspirational.
+
 Engineers and architects work on git worktrees, never on main. Code does not merge to main until it passes a full deployment chain that proves it works end-to-end in a self-contained simulation.
 
 ## Who Uses This
