@@ -96,12 +96,12 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 
 ## Displaying Metrics
 
-The `!metrics` output uses the same visual language as `!fleet`:
+The `!metrics` output uses the **medium** verbosity of the [unified display format](05-bot.md#unified-display-format):
 
 ```
-🦁◉ Herc · 🏅1 · up 91% (1d) · ↻2/5 · sync OK
-  ├ ⭐ Cid   · 🎨 Artist   · 🏅1 · mem 120/512MB · SK+0 OOM+0 (1d)
-  └ ◉ Norm  · 💬 Normie   · 🏅2 · mem 98/512MB  · SK+0 OOM+0 (1d)
+🦁Herc · 🏅1 · up 91% (1d) · ↻2/5 · sync OK
+  ├ 🦁⚙️·🟢🔥·Cid·⚙️⭐ · mem 120/512MB · SK+0 OOM+0 (1d)
+  └ 🦁⚙️·🟢·Norm·💬🥈 · mem 98/512MB  · SK+0 OOM+0 (1d)
 
 Fleet · 2 ships · avail 100% · autonomy 85% (1d) · OOM+0 (24h) · RSS 218MB
 Operator · interventions 0/day (1d) · x-cmds 2/day (1d)

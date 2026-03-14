@@ -151,26 +151,59 @@ Before routing, messages pass through filtering:
 - **Operator pill:** Captain messages starting with `📞` are operator-directed — bots ignore them
 - **Help account:** Bots ignore messages from `@help` (`IGNORE_SENDERS` env) — help text is Captain-only feedback
 
-## Display Name
+## Unified Display Format
 
-Bots set their Matrix display name to show status at a glance:
+Every bot/ship display uses the same field order:
 
 ```
-<pip> <name> <shipEmoji>
+<ship><location>·<health><activity>·Name·<role><rank>
+```
+
+**Examples:**
+- `🦁⚙️·🟢🔥·Albert·⚙️🥇` — Albert, engineer on Herc, healthy+active, rank 1 (not chief)
+- `🦁⚙️·🟢🔥·Albert·⚙️⭐` — same, but chief of Engineering (on duty)
+- `🔱🏠·💤·Nora·🧭🥈` — Nora, navigator on Posi, sleeping, rank 2
+
+### Fields
+
+| Field | Values | Notes |
+|-------|--------|-------|
+| **ship** | Ship emoji (🦁 🔱 etc.) | From `ships.json` |
+| **location** | Room emoji (⚙️=Engineering, 🧭=Bridge, 🔭=Astrometrics, 🏠=Quarters) | Current room, not role |
+| **health** | 🟢=A, 🟡=B, 🟠=C, 🔴=F, 💤=sleep, 🔄=building, 🚀=starting, 🟡=waiting | Grade or boot stage |
+| **activity** | 🔥=active (responding/working), blank=idle | Only shown when bot is actively working |
+| **Name** | Bot name (capitalized) | Always shown |
+| **role** | Role emoji (⚙️=engineer, 🧭=navigator, 🔭=architect, 💬=normie) | From `fleet.json` role |
+| **rank** | 🥇=1, 🥈=2, 🥉=3+ **or** ⭐=chief (on duty, lowest rank in room) | Chief replaces medal when on duty |
+
+### Verbosity Levels
+
+Every display context chooses a verbosity — **short**, **medium**, or **long** — applied uniformly to all fields:
+
+| Field | Short | Medium | Long |
+|-------|-------|--------|------|
+| ship | 🦁 | 🦁Herc | 🦁Herc[ship] |
+| location | ⚙️ | ⚙️Eng | ⚙️Engineering[loc] |
+| health | 🟢 | 🟢A | 🟢A[health] |
+| activity | 🔥 | 🔥active | 🔥active[activity] |
+| Name | Cid | Cid | Cid |
+| role | ⚙️ | ⚙️eng | ⚙️engineer[role] |
+| rank | 🥇 | 🥇1 | 🥇rank1 |
+
+**Where each level is used:**
+- **Short** — Matrix display name (space constrained), pips, compact badges
+- **Medium** — `!fleet` output, metrics displays, thread summaries
+- **Long** — Detailed diagnostics, `!fleet --verbose`, health reports
+
+### Matrix Display Name
+
+The bot's Matrix display name uses the **short** format:
+
+```
+<health> <Name> <ship>
 ```
 
 Examples: `🟢 Cid 🦁`, `⭐ Parker 🦁`, `💤 Nora 🔱`
-
-The pip reflects **operational status**, not which room the bot is in. See [09-roles-and-rooms](09-roles-and-rooms.md) for the full status model.
-
-| Pip | Status |
-|-----|--------|
-| 💤 | Sleep — container stopped |
-| 🔄 | Building — transient boot stage |
-| 🚀 | Starting — transient boot stage |
-| 🟡 | Waiting — transient boot stage |
-| 🟢 | Online — running, responding |
-| ⭐ | Chief — room lead (lowest-rank-number active bot in duty room) |
 
 > **Status:** Dynamic pip transitions (🔄 → 🚀 → 🟡 → 🟢) during boot are not yet implemented. `setStatusPip()` is currently a no-op in `channels/matrix.ts`. The relay sets pips at lifecycle boundaries (💤 on sleep, 🟢 on wake completion, ⭐ on Chief) but not during boot stages. See [#27](https://github.com/wawiesel/InfiniClaw/issues/27).
 
