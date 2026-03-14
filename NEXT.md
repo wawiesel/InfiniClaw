@@ -31,7 +31,7 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 **Alternative:** bring up HERACLES machine (where Cid lives) and run `!wake cid` from there.
 **Who:** Operator. 🔑
 
-### 1. Design doc review cycle — seven PRs open, all need merge
+### 1. Design doc review cycle — eight PRs open, all need merge
 - **docs #7+#8:** Branch `docs/fix-07-ipc-08-threading-accuracy`. All 181 tests pass.
 - **doc #9:** Branch `docs/fix-09-roles-and-rooms-accuracy`. All 181 tests pass.
 - **doc #10:** Branch `docs/fix-10-fleet-accuracy`. All 181 tests pass.
@@ -43,9 +43,11 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
   - `@` callout corrected to Captain-only; `@loudspeaker` alone → fleet status; operator uses `@operator` not intercom; reply format `[emoji pip Ship]`
 - **doc #14:** Branch `docs/fix-14-configuration-accuracy` (pushed 2026-03-14 ~15:57). 199 tests pass.
   - Startup checklist marked aspirational — actual boot is `injectResumeMessage()` (active todos + last 5 messages), not Skills/MCP/Ship Health tables
-- **Next doc:** #15 (15-safety.md) — Parker to continue.
+- **doc #15:** Branch `docs/fix-15-safety-accuracy` (pushed 2026-03-14 ~16:00). 199 tests pass.
+  - OOM env var names corrected: `KILL_137_MAX_CONSECUTIVE`/`KILL_137_COOLDOWN_MS`; MCP preflight marked aspirational
+- **Next doc:** #16 (16-autonomy.md) — Parker to continue.
 
-**Who:** Operator to merge PRs. Parker to continue with doc #15 (15-safety.md).
+**Who:** Operator to merge PRs. Parker to continue with doc #16 (16-autonomy.md).
 **PRs:**
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-07-ipc-08-threading-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-09-roles-and-rooms-accuracy
@@ -54,6 +56,7 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-12-co-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-13-intercom-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-14-configuration-accuracy
+- https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-15-safety-accuracy
 
 ---
 
