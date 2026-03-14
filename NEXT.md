@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14 16:23 (Branch Brain monitor — doc #20 PR open; 13 doc PRs pending merge; ALL docs reviewed)
+Last curated: 2026-03-14 20:28 (Branch Brain monitor — fleet healthy; new operator room M_FORBIDDEN issue; Tali active on System_Review)
 
 ---
 
@@ -89,9 +89,11 @@ Committed on `feat/wbs-relay` (commit `b49c731`). `MatrixChannelOpts.pipFormatte
 **PR:** https://github.com/wawiesel/InfiniClaw/pull/new/feat/wbs-relay (same PR as WBS + item #2)
 **Who:** Operator merge. 🔑
 
-### 4. Invite `@loudspeaker` to BehindTheCurtain room — M_FORBIDDEN noise
-Root cause found: `relay.ts:3158` mirrors command output to BehindTheCurtain using `@loudspeaker:a-gis.org`, but that account is not in the room. Code handles it gracefully (falls through, `matrix-api.ts:185` logs "send failed"), so the main Engineering room sends work fine. The errors are noisy but non-fatal.
-**Fix:** Operator invites `@loudspeaker:a-gis.org` to `!dqIeOQH0GAZWhrajUz:a-gis.org` (BehindTheCurtain). One Matrix command: `/invite @loudspeaker:a-gis.org` in BTC.
+### 4. Invite `@loudspeaker` to BehindTheCurtain AND Operator rooms — M_FORBIDDEN noise
+Root cause found: `relay.ts:3158` mirrors command output to BehindTheCurtain using `@loudspeaker:a-gis.org`, but that account is not in the room. **Also confirmed 2026-03-14 20:28:** relay cannot send to operator room `!7tIuIx9AiD5jUO1hTX:a-gis.org` either — `!wake tali` and `!allow tali ~/2026-System_Review 60` commands were processed but confirmation replies silently failed. Captain may think commands didn't work.
+**Fix:** Operator invites `@loudspeaker:a-gis.org` to both:
+- `!dqIeOQH0GAZWhrajUz:a-gis.org` (BehindTheCurtain)
+- `!7tIuIx9AiD5jUO1hTX:a-gis.org` (Operator room)
 **Who:** Operator. 🔑
 
 ### 5. @room cross-room routing from bots
@@ -127,9 +129,10 @@ Full architecture docs now exist in `workspace/persona/docs/` (architecture-over
 - Disk count, individual disk models, RAID configuration (needs DSM Storage Manager SSH or UI)
 - Backup/Hyper Backup config (API returned 103/403) — flagged CRITICAL in backups.md
 - Synology Drive sync config (which clients sync to which dirs)
-- [x] ~~How matrix.a-gis.org routes to conduwuit~~ — **CORRECTED** (Branch Brain, 2026-03-14): Prior note was wrong. Eero forwards port 443 → NAS (not Poseidon). NAS runs nginx (port 443) as the real public TLS terminator. NAS nginx proxies `matrix.a-gis.org → Poseidon:6167` (conduwuit) and `s3.a-gis.org → Poseidon:9000` (MinIO) via LAN. Caddy on Poseidon handles only local/Tailscale clients for `a-gis.org` and `matrix.a-gis.org`. **`networking.md` still needs correction — the public traffic path goes through NAS nginx, not Caddy.**
-- [x] ~~`s3.a-gis.org` routing~~ — **RESOLVED** same investigation: NAS nginx proxies `s3.a-gis.org → Poseidon:9000` (MinIO). Confirmed via `x-amz-id-2` hash match between NAS:443 direct and public access.
-**Who:** Operator/Tali — update networking.md to reflect NAS nginx as public entry point. Low urgency.
+- [x] ~~How matrix.a-gis.org routes to conduwuit~~ — NAS nginx confirmed public entry point; networking.md corrected (2026-03-14)
+- [x] ~~`s3.a-gis.org` routing~~ — NAS nginx → Poseidon:9000 (MinIO); networking.md confirmed correct
+- [x] ~~NAS Tailscale IP~~ — `100.88.101.126` confirmed; networking.md table updated (2026-03-14)
+**Who:** Operator/Tali — DSM Storage Manager for disk/RAID/backup details still needed (operator UI access required).
 
 ---
 
@@ -178,7 +181,10 @@ Research complete (Branch Brain, 2026-03-14). Plans documented in `nas-synology.
 - **Relay M_FORBIDDEN (`!dqIeOQH0GAZWhrajUz`):** `@loudspeaker` not in BTC room (item #4). Non-fatal.
 - **Portainer credentials were in plaintext task prompt** — operator must rotate Portainer admin password and store in vault.
 - **feat/wbs-relay PR open:** items #2 (resume context 10→5), #3 (setStatusPip), plus WBS wiring (5 commits). **Item #8** (per-task model selection) still on separate `feat/per-task-model-selection` branch — needs its own PR.
-- Parker: PM2 online (pid 1378939), 0 restarts. Relay: PM2 online (pid 1377294), 4 restarts. Tali: PM2 online (pid 1380009), 0 restarts.
+- Parker: PM2 online (pid 1378939), 0 restarts. Relay: PM2 online (pid 1377294), 4 restarts. Tali: PM2 online (pid 1380009), 0 restarts (as of 2026-03-14 20:28).
+- **Git sync**: Intermittent `spawnSync /bin/sh ETIMEDOUT` on push but self-recovering (pushed at 20:00, 20:13, 20:27 UTC). Monitor; may need investigation if push failure windows widen.
+- **Operator room M_FORBIDDEN**: `@loudspeaker` not in `!7tIuIx9AiD5jUO1hTX`. Captain's `!wake tali` + `!allow tali ~/2026-System_Review 60` ran at 20:28 UTC — commands processed silently. See item #4.
+- **Tali active**: Captain gave `!allow tali ~/2026-System_Review 60` — Tali is working on System_Review task.
 - **conduwuit** (Matrix): running on Poseidon via podman. **minio** (S3): running on Poseidon via podman.
 - **Gitea:** container stopped on NAS, DNS NXDOMAIN. See item #13 for full repair steps.
 - NAS docs complete in `workspace/persona/docs/`. Portainer/DSM creds must be vaulted.

@@ -117,8 +117,8 @@ Tailscale provides a WireGuard-based mesh VPN across all machines regardless of 
 | Machine | Tailscale IP |
 |---|---|
 | Poseidon (Ubuntu) | `100.99.145.27` |
-| Mount-Olympus (NAS) | (Tailscale installed as DSM package v1.58.2; IP not recorded — check `tailscale ip` on NAS) |
-| Portainer UI | accessible at `http://100.88.101.126:9000` (this IP may be the NAS Tailscale addr) |
+| Mount-Olympus (NAS) | `100.88.101.126` (confirmed — Portainer accessible at this addr; DSM package v1.58.2) |
+| Portainer UI | `http://100.88.101.126:9000` (NAS Tailscale addr, confirmed) |
 
 Tailscale is used for:
 - Fleet bot access to NAS services
@@ -144,7 +144,7 @@ Internal Docker networking on Mount-Olympus:
 
 ## Open Issues
 
-- [x] ~~Confirm Tailscale IP of Mount-Olympus~~ — `100.88.101.126` (confirmed via Portainer access)
+- [x] ~~Confirm Tailscale IP of Mount-Olympus~~ — `100.88.101.126` (confirmed; table updated)
 - [x] ~~Verify s3.a-gis.org and matrix.a-gis.org routing~~ — NAS nginx confirmed as public entry point (2026-03-14)
 - [ ] Remove SMB port forwards from Eero (security critical)
 - [ ] Verify TLS cert renewal for all proxied subdomains (managed by NAS DSM, not Caddy)
