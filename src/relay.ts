@@ -41,7 +41,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, shipHeaderLine, botTreeLine } from './formatting.js';
+import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, rankMedal, shipHeaderLine, botTreeLine } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -1163,7 +1163,7 @@ function formatCombinedMetrics(
       const isLast = i === botsWithMeta.length - 1;
 
       const co = isBotCO(bot.role, bot.rank, bot.status, allBotList);
-      const badge = botBadge(bot.status, co, bot.processRunning ?? null);
+      const badge = botBadge(bot.status, bot.processRunning ?? null);
 
       const nameDisplay = capitalizeName(bot.name) + NBSP.repeat(maxName - capitalizeName(bot.name).length);
       const roleCap = bot.role ? capitalizeName(bot.role) : '';
@@ -1195,7 +1195,7 @@ function formatCombinedMetrics(
       const p95 = bot.responseLatencyP95 != null ? `${bot.responseLatencyP95}s` : '?';
       const latTag = ` · lat ${p50}/${p95} (1d)`;
 
-      lines.push(botTreeLine(isLast, badge, nameDisplay, roleCap, roleIcon, bot.rank, rolePad, `${mem}${kills}${tokTag}${latTag}`));
+      lines.push(botTreeLine(isLast, badge, nameDisplay, roleCap, roleIcon, bot.rank, co, rolePad, `${mem}${kills}${tokTag}${latTag}`));
     }
 
     totalInterventions.day1 += s.operator.interventions.day1;
@@ -2937,13 +2937,13 @@ function registerRelayCommands(): void {
           for (const [i, [, entry]] of bots.entries()) {
             const isLast = i === bots.length - 1;
             const co = isBotCO(entry.role, entry.rank, entry.localStatus, allBotList);
-            const badge = botBadge(entry.localStatus, co, null, entry.grade, entry.activity);
+            const badge = botBadge(entry.localStatus, null, entry.grade, entry.activity);
             const roleIcon = ROLE_ICONS[entry.role?.toLowerCase()] ?? '';
             const roleCap = entry.role ? capitalizeName(entry.role) : '';
             const rolePad = NBSP.repeat(maxRole - roleCap.length);
             const namePad = NBSP.repeat(maxName - entry.name.length);
             const nameDisplay = `${entry.name}${namePad}`;
-            lines.push(botTreeLine(isLast, badge, nameDisplay, roleCap, roleIcon, entry.rank, rolePad, ''));
+            lines.push(botTreeLine(isLast, badge, nameDisplay, roleCap, roleIcon, entry.rank, co, rolePad, ''));
           }
         }
 
@@ -3158,7 +3158,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   writeFleet(liveFleet);
   secretsGitCommit(['bots/fleet.json'], `rerank ${role}: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
   fleetDirty = false;
-  await send(`✅ ${capitalizeName(result.target)} → 🏅${result.targetRank}, ${capitalizeName(result.swap)} → 🏅${result.swapRank} (${role})`);
+  await send(`✅ ${capitalizeName(result.target)} → ${rankMedal(result.targetRank, false)}, ${capitalizeName(result.swap)} → ${rankMedal(result.swapRank, false)} (${role})`);
 
   const root = resolveRoot();
   const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
@@ -3169,8 +3169,8 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 
   const targetConn = allConns.find(c => c.name === botRoom) || conn;
   if (targetConn.accessToken) {
-    await reply(targetConn, `📡 ${botDisplayName} reranked → 🏅${result.targetRank}`);
-    await reply(targetConn, `📡 ${swapDisplayName} reranked → 🏅${result.swapRank}`);
+    await reply(targetConn, `📡 ${botDisplayName} reranked → ${rankMedal(result.targetRank, false)}`);
+    await reply(targetConn, `📡 ${swapDisplayName} reranked → ${rankMedal(result.swapRank, false)}`);
   }
   sendLifecycleMsg(target, 'reranked', result.targetRank).catch(() => {});
   sendLifecycleMsg(result.swap, 'reranked', result.swapRank).catch(() => {});

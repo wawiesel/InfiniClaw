@@ -66,7 +66,7 @@ Host machine (macOS / Linux)
 ├── status.ts           → Bot status reporting
 ├── status-cli.ts       → Status display for CLI and MCP server
 ├── todo.ts             → Read Claude Code task state from session files
-├── formatting.ts       → Message formatting helpers: capitalizeName, escapeHtml, statusMessage, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, shipHeaderLine, botTreeLine
+├── formatting.ts       → Message formatting helpers: capitalizeName, escapeHtml, statusMessage, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, rankMedal, botBadge, isBotCO, shipHeaderLine, botTreeLine
 ├── git-utils.ts        → Shared git helpers: gitOpts(), execErrOutput(), gitSyncRepo() (stash→rebase→pop, conflict hard-reset)
 ├── utils.ts            → Shared utilities: isRecord, sleep, shellQuote, errStr, envInt, escapeRegex, readJson, writeJson
 └── version.ts          → Git version resolution (prefers stamped GIT_VERSION file)
@@ -116,9 +116,10 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Env var integers**: Use `envInt(name, default)` from `utils.ts` instead of `parseInt(process.env.VAR || 'X', 10)`.
 - **Bot name capitalization**: Use `capitalizeName(name)` from `formatting.ts` — single source of truth. Never inline `charAt(0).toUpperCase() + slice(1)`. All `ASSISTANT_NAME || botId` fallbacks must use `capitalizeName(botId)`.
 - **Bot display names**: Use `formatBotDisplayName(bot, pip)` from `formatting.ts` — single source of truth for the `pip Name shipEmoji` format. Both `relay.ts:setBotPip` and `main.ts:botDisplayName` use it.
-- **Bot badges in fleet/metrics displays**: Use `botBadge(status, isCO, processRunning, grade?, activity?)` from `formatting.ts`. Single source of truth for pip/badge logic in tree-structured displays. CO detection via `isBotCO()` — checks awake status (onduty/quarters) and rank across all bots, not just rank==1.
-- **Ship header lines**: Use `shipHeaderLine(emoji, name, rank, commissioned, isSpeaker)` from `formatting.ts`. Single source of truth for `🦁⭐ **Herc** · 🏅1` format. Used by both `!fleet` and `!metrics`.
-- **Bot tree lines**: Use `botTreeLine(isLast, badge, nameDisplay, role, roleIcon, rank, rolePad, suffix)` from `formatting.ts`. Consistent `├`/`└` prefix, badge, name, role, rank layout.
+- **Rank medals**: Use `rankMedal(rank, isChief)` from `formatting.ts`. Returns ⭐ for chief (lowest-rank active bot in room), 🥇/🥈/🥉 for ranked bots. Single source of truth for bot rank display — replaces inline `🏅${rank}`.
+- **Bot badges in fleet/metrics displays**: Use `botBadge(status, processRunning, grade?, activity?)` from `formatting.ts`. Single source of truth for health/activity badge logic. Chief status is shown via `rankMedal`, not in the badge. Chief detection via `isBotCO()` — checks awake status (onduty/quarters) and rank across all bots.
+- **Ship header lines**: Use `shipHeaderLine(emoji, name, rank, commissioned, isSpeaker)` from `formatting.ts`. Single source of truth for `🦁⭐ **Herc** · 🏅1` format. Used by both `!fleet` and `!metrics`. Ship ranks use 🏅 (not bot rank medals).
+- **Bot tree lines**: Use `botTreeLine(isLast, badge, nameDisplay, role, roleIcon, rank, isChief, rolePad, suffix)` from `formatting.ts`. Consistent `├`/`└` prefix, badge, name, role, rank medal layout.
 - **Role icons**: Use `ROLE_ICONS` from `formatting.ts` (derived from `ROLE_ROOMS` in `ship-config.ts`). Never hardcode role→icon mappings.
 - **Display name pips**: Use `PIP_FOR_STATUS` from `formatting.ts` for bot Matrix display name pips. Maps: onduty→🟢, quarters→🟢, sleep→💤, transit→🚀. Bot self-updates display name pip via `setStatusPip()` on response (🟢), idle (💤), shutdown (🔴) — requires `pipFormatter` wired in `MatrixChannel` opts. Relay sets boot-stage pips (🔄🚀🟡) via `setBotPip`; bot takes over from 🟢 onward.
 - **Ship commissioned flag**: `isShipCommissioned()` from `ship-config.ts` checks the ship-level `commissioned` boolean (distinct from per-bot `status`). Renamed from `active`/`isShipActive()` for consistency with `!commission`/`!decommission` commands. Guards both relay startup bootstrap and `!pull` bot restart phase — decommissioned ships sync code but never start bots. `!pull` preserves bot status (onduty stays onduty, quarters stays quarters) — `restartRunningBots()` replaces old `restartBotsToQuarters()` which forced all bots to quarters.
