@@ -26,6 +26,8 @@ Operators on each ship use intercom to issue x-commands that all relays receive.
 
 Any on-duty bot can broadcast to all duty rooms via `@loudspeaker: <message>`. The relay detects this pattern, sends to all other duty rooms, and replies with confirmation. Messages appear as `BotName (SourceRoom): <message>`. Captain and operator messages are excluded from this path.
 
+`@loudspeaker` alone (no colon or message) requests fleet status in the current room — equivalent to `!fleet` but callable by bots.
+
 > **Status:** `@room:` targeting (sending to a specific room) is not yet implemented — `@loudspeaker:` broadcasts to all duty rooms only. See [02-matrix](02-matrix.md).
 
 ### Relays → Rooms
@@ -46,7 +48,7 @@ Echo loops are impossible because the relay never sends `!`-prefixed messages it
 
 ## Operator Callout (`@ <text>`)
 
-The Captain can address the operator from any room the relay watches by prefixing a message with `@ `. The text is sent as keystrokes to the `operator` tmux session on each ship with `[RoomName | roomId]` prepended. If no session exists, one is created with `claude` as the initial command. BehindTheCurtain messages forward automatically without the `@` prefix. Captain/operator only.
+The Captain can address the operator from any room the relay watches by prefixing a message with `@ `. The text is sent as keystrokes to the `operator` tmux session on each ship with `[RoomName | roomId]` prepended. If no session exists, one is created with `claude` as the initial command. BehindTheCurtain messages forward automatically without the `@` prefix. Captain only.
 
 ## Verification
 
