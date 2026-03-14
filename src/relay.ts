@@ -2201,7 +2201,9 @@ async function healthLoop(): Promise<void> {
   }
 }
 
-/** Beacon flush loop — re-uploads last health payload every 5 min with fresh uptime/sync fields. */
+/** Beacon flush loop — re-uploads last health payload every 5 min with fresh uptime/sync fields.
+ *  Also caches fleet health from S3 to _runtime/data/fleet-health.json for container tool access.
+ */
 async function beaconFlushLoop(): Promise<void> {
   await sleep(BEACON_INTERVAL);
   while (true) {
@@ -2210,6 +2212,17 @@ async function beaconFlushLoop(): Promise<void> {
         const beacon = enrichBeaconFields(lastHealthPayload);
         await uploadHealthToS3(beacon);
       }
+      // Fetch and cache fleet health snapshot so containers can read it without S3 access
+      try {
+        const reports = await fetchAllHealthReports();
+        if (reports.length > 0) {
+          const fleetHealthPath = path.join(resolveRoot(), '_runtime', 'data', 'fleet-health.json');
+          fs.writeFileSync(fleetHealthPath, JSON.stringify({
+            as_of: new Date().toISOString(),
+            machines: Object.fromEntries(reports.map(r => [r.ship, r.data])),
+          }));
+        }
+      } catch { /* non-critical */ }
     } catch (err) {
       log(`beacon flush error: ${errStr(err)}`);
     }
