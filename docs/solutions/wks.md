@@ -71,7 +71,9 @@ Shows recent changes to a file.
 
 ## Semantic index (active on Herm)
 
-Already configured in `~/.wks/config.json`. If embeddings need to be rebuilt:
+Already configured in `~/.wks/config.json`. The daemon auto-rebuilds embeddings every 10 minutes (`embed_interval_secs: 600.0` in `daemon` config). No manual intervention needed.
+
+If embeddings need to be rebuilt immediately:
 ```bash
 ~/2025-WKS/main/venv/bin/wksc index embed semantic
 ```
