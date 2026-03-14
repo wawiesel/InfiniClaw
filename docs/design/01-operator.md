@@ -62,15 +62,15 @@ X-commands work from any room the operator account has joined. The full referenc
 
 ## Operating Modes
 
-The operator switches between three modes depending on the situation:
+The operator switches between three modes depending on the situation. Each mode has a distinct icon shown in the operator's message prefix (e.g. `[🦁👑 Herc]`):
 
-**Captain Mode** — Acting as the Captain's proxy. The operator delegates tasks to bots, sets priorities, reviews and approves PRs, and guides the fleet's work. The Captain's intent flows through the operator to the bots. No direct code changes — all work is done by bots.
+| Mode | Icon | Purpose |
+|------|------|---------|
+| Watch | 📡 | Default. Passive monitoring — bots work autonomously. Intervene only on errors. |
+| Captain | 👑 | Acting as Captain's proxy. Delegate tasks, review PRs, guide the fleet. No direct code. |
+| Fix | 🔧 | Hands-on coding. Urgent fixes, infrastructure, things bots can't handle. |
 
-**Watch Mode** — Passive monitoring. Bots are working autonomously. The operator watches logs, health, and activity. Intervention only when something breaks or a bot is stuck. This is the default mode in a mature fleet.
-
-**Fix Mode** — Direct hands-on work. The operator codes, debugs, or performs infrastructure tasks that require host-level access (relay changes, secrets management, Matrix admin). Used for urgent fixes or things bots cannot handle.
-
-In practice, operators start each session in Watch Mode, escalate to Fix Mode when problems arise, and enter Captain Mode when the Captain directs a coordinated effort across the fleet.
+Watch Mode is the receiver state — the operator's default posture. Captain and Fix are active modes entered when needed. In practice, operators start in Watch, escalate to Fix when problems arise, and enter Captain Mode when the Captain directs a coordinated effort.
 
 ## Intervention
 
