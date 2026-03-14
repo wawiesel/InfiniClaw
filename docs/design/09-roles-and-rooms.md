@@ -56,6 +56,30 @@ When a sleeping bot receives a captain/operator mention, the relay auto-wakes it
 - **Bots** are regular members (power 0).
 - **Intercom accounts** are never in ship rooms — they only operate in duty rooms.
 
+## Command Hierarchy
+
+The fleet has a clear chain of command:
+
+```
+Captain
+  └── Operator (Co until fleet is fully crewed)
+        └── XO (Chief Navigator — highest rank on Bridge)
+              └── Chiefs (highest-rank active bot per duty room)
+                    └── Crew
+```
+
+**Chief** — The highest-rank active bot in a duty room is that room's Chief. The Chief leads the room: sets direction, delegates work, reviews results.
+
+| Duty Room | Title |
+|-----------|-------|
+| Bridge | **XO** (Executive Officer — special title for Chief Navigator) |
+| Engineering | **Chief Engineer** |
+| Astrometrics | **Chief of Astrometrics** |
+
+When fully crewed, Captain's commands go to the Bridge. The XO (Chief Navigator) distributes them across the fleet via the Chiefs.
+
+The Operator currently acts as Co until a dedicated XO is in place.
+
 ## Bot Status
 
 The pip reflects **operational status**, not which room the bot is in. A bot's room assignment is a separate axis.
