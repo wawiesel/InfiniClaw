@@ -151,9 +151,11 @@ export function restoreMentionPrefixes(body: string, formattedBody: string): str
 
   let result = body;
   for (const name of displayNames) {
-    // Wrap bare name in <m> markers. Skip if already wrapped or @-prefixed.
+    // Wrap bare name or @name in <m> markers. The pill confirms it's an
+    // intentional mention, so consume the optional @ prefix. Case-insensitive
+    // because body may have lowercase while pill display name is capitalized.
     const escaped = escapeRegex(name);
-    const re = new RegExp(`(?<!@)(?<!<m>)\\b${escaped}\\b(?!</m>)`, 'g');
+    const re = new RegExp(`(?:@)?(?<!<m>)\\b${escaped}\\b(?!</m>)`, 'gi');
     result = result.replace(re, `<m>${name}</m>`);
   }
   return result;

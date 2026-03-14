@@ -2168,7 +2168,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         const env = loadProfileEnv(root, bot);
         const name = env?.ASSISTANT_NAME || capitalizeName(bot);
         await relaySend(conn.homeserver, conn.accessToken, conn.roomId,
-          `${name}, check GitHub issues and work on the highest priority item you can act on.`);
+          `<m>${name}</m>, check GitHub issues and work on the highest priority item you can act on.`);
         log(`heartbeat: nudged ${name} in ${roomName}`);
       }
     } catch (err) {

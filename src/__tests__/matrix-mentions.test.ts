@@ -25,10 +25,16 @@ describe('restoreMentionPrefixes', () => {
     expect(restoreMentionPrefixes(body, html)).toBe('<m>Cid</m> hello');
   });
 
-  it('does not wrap names already @-prefixed', () => {
+  it('wraps @-prefixed names when backed by a pill', () => {
     const body = '@Cid hello';
     const html = '<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a> hello';
-    expect(restoreMentionPrefixes(body, html)).toBe('@Cid hello');
+    expect(restoreMentionPrefixes(body, html)).toBe('<m>Cid</m> hello');
+  });
+
+  it('wraps case-insensitive @name from pill', () => {
+    const body = '@cid do something';
+    const html = '<a href="https://matrix.to/#/@cid-bot:a-gis.org">Cid</a> do something';
+    expect(restoreMentionPrefixes(body, html)).toBe('<m>Cid</m> do something');
   });
 
   it('returns body unchanged when no mention pills in HTML', () => {
