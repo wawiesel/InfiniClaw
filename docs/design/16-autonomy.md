@@ -9,7 +9,7 @@
 | Push code to remote | IPC task `git_push` |
 | Fix broken MCP config | Edit persona `.mcp.json`, request restart |
 | Monitor health | Collect metrics, report via Matrix |
-| Move between machines | Transporter skill: S3 sync + Matrix coordination |
+| Move between machines | Transporter skill: S3 sync + Matrix coordination — **not yet implemented** |
 | Update own instructions | Edit persona CLAUDE.md via writable mount |
 | Add/modify skills | Write SKILL.md to persona skills directory |
 | Request peer verification | IPC task `request_verification` — asks another bot to verify work against criteria |
@@ -20,6 +20,8 @@
 Bots can request independent verification of their work from other bots. The requesting bot writes a `request_verification` IPC task with a task description, acceptance criteria, and the assigned verifier. The host syncs the verification record (`verifications.json`) to all active bot instances. The verifying bot reads the request, checks the work, and calls `submit_verification` with a pass/fail verdict and evidence. Results are available via `check_verification` and `list_verifications`.
 
 This enables quality gates without operator intervention: a bot can block its own merge or deployment pending peer sign-off.
+
+> **Status:** `request_verification` and `submit_verification` IPC tasks are implemented. `check_verification` and `list_verifications` are not yet implemented — verifiers must read `verifications.json` directly via the filesystem tools available in their container.
 
 ## Self-Healing Loop
 
@@ -37,9 +39,9 @@ Bot detects problem (MCP down, health check fails, OOM)
 
 ## Holodeck
 
-Architects can test changes in isolation before deploying to production. The holodeck creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), and runs as its own pm2 process in terminal-only mode (no Matrix). CLI commands: `holodeck create|chat|teardown|promote`.
+Architects can test changes in isolation before deploying to production. The holodeck creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), and runs as its own pm2 process.
 
-Engineers must use the holodeck as part of the deployment chain — code cannot merge to main until it passes a full end-to-end simulation with a fake crew. See [18-deployment](18-deployment.md) for the full spec.
+> **Status:** Holodeck core is implemented. Bots trigger it via IPC tasks: `holodeck_create`, `holodeck_teardown`, `holodeck_promote`, `holodeck_send`, `holodeck_read`, `holodeck_status`. There are no CLI commands for holodeck — the CLI only handles relay management. Terminal-only mode (no Matrix) is not yet enforced: the holodeck instance inherits the live bot's Matrix configuration. The deployment gate requiring holodeck sign-off before merging to main (fake crew simulation, merge block) is aspirational — see [18-deployment](18-deployment.md).
 
 ## Verification
 
