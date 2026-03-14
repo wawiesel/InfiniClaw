@@ -22,7 +22,7 @@ MCP: `wksm__wksm__wksm_search`
 
 **Indexes available:**
 - `main` — lexical BM25, 6163 docs, 55215 chunks. Best for exact names, file paths, specific terms.
-- `semantic` — sentence-transformers embeddings, 200 high-priority docs. Best for concept queries.
+- `semantic` — sentence-transformers embeddings, ~40 high-priority docs (after htmd exclusion). Best for concept queries. Includes path-segment boost: if a query term matches a directory/filename segment, that doc scores higher.
 - `images_semantic` — CLIP embeddings, 283 images.
 
 Use `--index semantic` for meaning-based queries. Use default (`main`) for exact-term lookups.
