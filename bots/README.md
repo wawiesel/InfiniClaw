@@ -4,7 +4,7 @@ Bot personas, roles, skills, and container definitions.
 
 - `CLAUDE.md` — Shared bot instructions: communication, `<m>` mention format, reactions via `send_reaction`, IPC, idle work via GitHub issues, 3-deep todo list requirement on startup
 - `build.sh` — Container image build script (discovers bots dynamically from Dockerfiles)
-- `container/agent-runner/` — In-container agent code (COPY'd into images at build time)
+- `container/agent-runner/` — In-container agent code (COPY'd into images at build time); handles IPC message injection including lobe_result files
 - `{role}/` — One directory per role (normie, navigator, engineer, architect)
 - `skills/` — Shared skill pool (see `skills/README.md`)
 
