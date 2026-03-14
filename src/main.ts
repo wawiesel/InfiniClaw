@@ -1370,7 +1370,7 @@ async function injectResumeMessage(): Promise<void> {
       taskBlock = `\n\nActive tasks:\n${taskLines.join('\n')}`;
     }
 
-    const recent = getRecentMessages(chatJid, ASSISTANT_NAME, 10).reverse();
+    const recent = getRecentMessages(chatJid, ASSISTANT_NAME, 5).reverse();
     let contextBlock = '';
     if (recent.length > 0) {
       // Strip trigger mentions from context so the resume message doesn't
@@ -1579,6 +1579,7 @@ async function main(): Promise<void> {
   ) {
     matrix = new MatrixChannel({
       displayName: botDisplayName(initialBadge),
+      pipFormatter: (emoji) => botDisplayName(emoji),
       onMessage: (_chatJid, msg) => {
         const safeMsg = normalizeInboundMessage(msg);
         if (!safeMsg) {
