@@ -126,19 +126,24 @@ export function loadProfileEnv(root: string, bot: string): Record<string, string
   return parseEnvFile(envFile);
 }
 
-/** Collect MATRIX_USER_ID from all bot env files in the secrets directory. */
-export function collectBotMatrixUserIds(): Set<string> {
+/** Collect MATRIX_USER_ID → bot name mapping from all bot env files in the secrets directory. */
+export function collectBotMatrixUserMap(): Map<string, string> {
   const config = loadShipConfig();
-  const ids = new Set<string>();
+  const map = new Map<string, string>();
   try {
     for (const bot of fs.readdirSync(path.join(config.secretsPath, 'bots'))) {
       const envFile = path.join(config.secretsPath, 'bots', bot, 'env');
       if (!fs.existsSync(envFile)) continue;
       const env = parseEnvFile(envFile);
-      if (env.MATRIX_USER_ID) ids.add(env.MATRIX_USER_ID);
+      if (env.MATRIX_USER_ID) map.set(env.MATRIX_USER_ID, bot);
     }
   } catch (err) { console.warn(`Failed to read bot matrix user IDs: ${errStr(err)}`); }
-  return ids;
+  return map;
+}
+
+/** Collect MATRIX_USER_ID from all bot env files in the secrets directory. */
+export function collectBotMatrixUserIds(): Set<string> {
+  return new Set(collectBotMatrixUserMap().keys());
 }
 
 export function applyBrainEnv(env: Record<string, string>): Record<string, string> {

@@ -80,6 +80,7 @@ import {
   removeStaleProcesses,
   rebuildImageIfChanged,
   syncDistToInstance,
+  collectBotMatrixUserMap,
 } from './service.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
@@ -217,6 +218,10 @@ let fleetDirty = false;
 let activeConns: RoomConn[] = [];
 /** Cached speaker state — updated by electSpeaker() so reply() can include it in the tag synchronously. */
 let isSpeakerCached = false;
+/** Map Matrix userId → bot name for resolving reaction targets. Built once at startup. */
+let botUserIdMap: Map<string, string> = new Map();
+/** Cache of recent Matrix event IDs → bot name for score reaction enrichment. Capped at 500. */
+const recentBotEventIds = new Map<string, string>();
 
 function fleetUpdate(bot: string, updates: Partial<FleetEntry>): void {
   if (!liveFleet[bot]) return;
@@ -3320,17 +3325,28 @@ async function curtainLoop(captainUserId: string): Promise<void> {
 
       for (const [rid, roomData] of Object.entries(joinedRooms)) {
         for (const event of (roomData as any).timeline?.events || []) {
+          // Cache bot message event IDs for score reaction enrichment
+          if (event.type === 'm.room.message' && event.event_id && event.sender) {
+            const botName = botUserIdMap.get(event.sender);
+            if (botName) {
+              recentBotEventIds.set(event.event_id, botName);
+              // Cap cache at 500 entries
+              if (recentBotEventIds.size > 500) {
+                const oldest = recentBotEventIds.keys().next().value;
+                if (oldest) recentBotEventIds.delete(oldest);
+              }
+            }
+          }
           // Record operator messages for metrics (before any filtering)
           if (event.type === 'm.room.message' && event.content?.msgtype === 'm.text' && event.content?.body) {
             recordOperatorMessage(event.sender, rid, String(event.content.body), event.origin_server_ts ?? Date.now());
           }
-          // Record scoring reactions for metrics
+          // Record scoring reactions for metrics — resolve bot name from cached event IDs
           if (event.type === 'm.reaction') {
             const relates = event.content?.['m.relates_to'];
             if (relates?.key) {
-              // Determine which bot the reacted-to message belongs to
-              // For now, record with empty bot — enriched when we have bot sender info
-              recordScoreReaction(event.sender, relates.key, '', event.origin_server_ts ?? Date.now());
+              const botName = recentBotEventIds.get(relates.event_id) ?? '';
+              recordScoreReaction(event.sender, relates.key, botName, event.origin_server_ts ?? Date.now());
             }
           }
 
@@ -3692,6 +3708,9 @@ async function main(): Promise<void> {
 
   // Sync all bot display names to current format
   syncBotDisplayNames().catch((err) => log(`syncBotDisplayNames failed: ${errStr(err)}`));
+
+  // Build userId → botName map for score reaction enrichment
+  botUserIdMap = collectBotMatrixUserMap();
 
   // Back-fill operator metrics from Matrix history
   {
