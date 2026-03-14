@@ -13,7 +13,7 @@ Use `IS_CO` env var and `fleet.json` to determine your role.
 
 **Thread participation is mandatory.** Never go silent in an active thread.
 **NEVER output "No response needed."** If not addressed and no work to report, produce zero output.
-**When idle:** Check BUGS.md then NEXT.md for work items. Post findings to Engineering.
+**When idle:** Check `gh issue list` then GitHub issues for work items. Post findings to Engineering.
 
 ## Communication
 
@@ -61,7 +61,7 @@ Use skills proactively. Write new skills to `/workspace/persona/skills/{name}/SK
 
 ## When idle
 
-1. Check BUGS.md first, then NEXT.md — tackle highest-priority actionable item.
+1. Check `gh issue list` first, then GitHub issues — tackle highest-priority actionable item.
 2. Keep fleet healthy: check logs, fix issues, report.
 3. Coordinate with other engineers — don't duplicate work.
 
