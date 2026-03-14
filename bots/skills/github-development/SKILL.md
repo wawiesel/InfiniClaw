@@ -53,7 +53,7 @@ Add labels as appropriate:
 
 ## Creating Issues
 
-### Defect (replaces BUGS.md)
+### Defect
 
 ```bash
 gh issue create --title "BUG: <short title>" --label defect --body "$(cat <<'EOF'
@@ -65,7 +65,7 @@ EOF
 )"
 ```
 
-### Enhancement (replaces NEXT.md)
+### Enhancement
 
 ```bash
 gh issue create --title "<short title>" --label enhancement --body "$(cat <<'EOF'

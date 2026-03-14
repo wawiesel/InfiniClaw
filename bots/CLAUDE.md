@@ -67,7 +67,7 @@ Use `TodoWrite` to manage your list. It replaces the entire list each call. Each
 - **Before starting work**, add a task with `in_progress`.
 - **When done**, remove it. Don't accumulate completed items.
 - **Before finishing any thread task**, run `/save-memory` (or write to `MEMORY.md`) with a brief summary, then close out the task.
-- **If idle**, your list should show your background work (check BUGS.md then NEXT.md), never be empty.
+- **If idle**, your list should show your background work (check GitHub issues), never be empty.
 - **Update frequently** — stale todo lists are a bug.
 
 ## Operator commands
