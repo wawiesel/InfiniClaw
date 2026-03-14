@@ -119,18 +119,20 @@ A bot cannot be `onduty` on a decommissioned ship, but can be awake in `quarters
 Three clean axes: **lifecycle** (`!wake`/`!sleep`), **duty** (`!report`/`!dismiss`), **roaming** (`!go`).
 
 ```
-!wake cid      → sleep → quarters (start container, triggerType=always)
+!wake cid      → sleep→quarters (start, triggerType=always) | awake→restart (preserves status)
 !sleep cid     → any → sleep (stop container, triggerType=never)
-!report cid    → quarters → onduty (join duty room, triggerType=callout)
-!dismiss cid   → onduty → quarters (leave duty room, triggerType=always)
+!report cid    → quarters → onduty (join duty room, triggerType=callout, lightweight restart)
+!dismiss cid   → onduty → quarters (leave duty room, triggerType=always, lightweight restart)
 !go lounge cid → move to lounge (no attribute change)
-!wake cid      → stop + kill + restart in quarters (picks up new code)
 ```
 
 ### !wake
 
-1. Update fleet.json: `status=quarters`, `triggerType=always`
-2. Build and start the bot process (in quarters, full brain)
+If waking from sleep: update fleet.json: `status=quarters`, `triggerType=always`.
+If already awake (restart): fleet.json status preserved — no change to `status` or `triggerType`.
+
+1. Stop process, kill stale containers
+2. Rebuild image if needed and start the bot process (lightweight — no rebuild for restart)
 3. Pip stages: 💤 → 🔄 → 🚀 → 🟡 → 🟢
 
 ### !sleep
@@ -141,22 +143,24 @@ Three clean axes: **lifecycle** (`!wake`/`!sleep`), **duty** (`!report`/`!dismis
 
 ### !report
 
-Sends awake bot(s) to their duty room. Skips sleeping bots. **Instant** — no rebuild or restart.
+Sends awake bot(s) to their duty room. Skips sleeping bots and already-onduty bots. Lightweight restart — no rebuild.
 
 From a duty room: pull bot(s) into THIS duty room.
 From a non-duty room: send bot(s) to their RESPECTIVE duty rooms.
 
 1. Leave any non-quarters room, join duty room
 2. Update fleet.json: `status=onduty`, `triggerType=callout`
-3. `relay <Name> on duty` or `relay <Name> failed to report — <error>`
+3. Lightweight restart so bot monitors duty room
+4. `✅ <Name> on duty` or `⛔ <Name> report failed — <error>`
 
 ### !dismiss
 
-**Instant** — bot keeps running in quarters with full capabilities.
+Lightweight restart — no rebuild. Bot resumes in quarters monitoring its quarters room.
 
-1. Leave duty room
+1. Leave duty room (and lounge if present)
 2. Update fleet.json: `status=quarters`, `triggerType=always`
-3. `relay <Name> dismissed`
+3. Lightweight restart so bot monitors quarters
+4. `✅ <Name> dismissed`
 
 ### !go
 
