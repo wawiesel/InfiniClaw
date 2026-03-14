@@ -15,7 +15,7 @@ Each bot has a secrets env file (`secrets/bots/{name}/env`) and a persona direct
 - `ASSISTANT_ROLE` — Role category for persona lookup
 - `MAIN_GROUP_NAME` — Primary duty room name
 - `BRAIN_MODEL` — Override LLM model
-- `IGNORE_TRIGGERS` — Comma-separated bot names to skip
+- `IGNORE_TRIGGERS` — Comma-separated name patterns; messages whose content matches are skipped (word-boundary, case-insensitive)
 - `IGNORE_SENDERS` — Comma-separated sender IDs to skip
 
 **Persona directory:**
@@ -172,9 +172,7 @@ The pip reflects **operational status**, not which room the bot is in. See [09-r
 | 🟢 | Online — running, responding |
 | ⭐ | CO — commanding officer |
 
-> **Status:** Dynamic pip transitions (🔄 → 🚀 → 🟡 → 🟢) during boot are not yet implemented. `setStatusPip()` is currently a no-op in `channels/matrix.ts`. The relay sets pips at lifecycle boundaries (💤 on sleep, 🟢 on wake completion, ⭐ on CO) but not during boot stages.
-
-During boot, the pip changes through 🔄 → 🚀 → 🟡 → 🟢 so the current stage is visible at a glance.
+> **Status:** Dynamic pip transitions (🔄 → 🚀 → 🟡 → 🟢) during boot are not yet implemented. `setStatusPip()` is currently a no-op in `channels/matrix.ts`. The relay sets pips at lifecycle boundaries (💤 on sleep, 🟢 on wake completion, ⭐ on CO) but not during boot stages. See [#27](https://github.com/wawiesel/InfiniClaw/issues/27).
 
 ### Boot Progress Messages
 
@@ -202,7 +200,7 @@ Each step updates the bot's display name pip to match the current stage. `!wake`
 
 ```
 User message → Matrix → host message loop → SQLite → trigger check
-  → [TRIGGERED] container spawns → main brain processes conversation
+  → [TRIGGERED] IPC inject if container active; else container spawns → main brain processes conversation
     → [IF COMPLEX] main brain calls branch_to_thread(objective)
       → Host creates thread: "🧵 Branch: <title>"
       → Host spawns branch brain (claude --print on host, not container)
