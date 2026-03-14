@@ -89,10 +89,30 @@ To add the semantic index on a new machine, add under `index.indexes` in `~/.wks
 }
 ```
 
+## Excluding generated artifacts
+
+SCALE and similar tools generate `*.htmd/` directories with hundreds of HTML files that pollute the index. The monitor filter excludes these via `exclude_globs`:
+
+```json
+"monitor": {
+  "filter": {
+    "exclude_globs": ["**/*.htmd/**"]
+  }
+}
+```
+
+This is already set on Herm. To add it on other machines, edit `~/.wks/config.json`.
+
+After adding, resync monitored dirs and rebuild embeddings:
+```bash
+wksc monitor sync ~/  # re-scan with new exclusions
+wksc index embed semantic  # purge stale embeddings
+```
+
 ## Known issues (from ~/2025-WKS/ISSUES.md)
 
-- **Noisy main index** — PDFs, generated artifacts, HTML compete with source files. Fix: lower `min_priority` cutoff or add `exclude_globs`.
-- **Repo identity underweighted** — query for a known repo name doesn't reliably surface that repo. Fix: path-boost in `wks/api/search/cmd.py`.
+- **Noisy main index** — PDFs, generated artifacts, HTML compete with source files. Fix: `min_priority` cutoff + `exclude_globs` for generated output.
+- **Repo identity underweighted** — query for a known repo name doesn't reliably surface that repo. Fix: path-boost in `wks/api/search/cmd.py` (implemented by Murdock, pending commit).
 - **Semantic index is small** — only indexes `min_priority >= 10.0` docs (~200). Many SKILL.md/RULE.md files may be excluded. Fix: lower threshold or rebuild with `min_priority: 5.0`.
 
 ## Useful search patterns for bots
