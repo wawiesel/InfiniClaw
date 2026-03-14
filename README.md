@@ -78,7 +78,7 @@ See `bots/README.md` for full structure.
 
 ## Values
 
-See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity, consistency, functionality. See [`NEXT.md`](NEXT.md) for the prioritized task queue (design docs #7–#16 reviewed, #17 next). Infrastructure documentation (networking, NAS, services) is maintained by the fleet in [`workspace/persona/docs/`](workspace/persona/docs/).
+See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity, consistency, functionality. See [`NEXT.md`](NEXT.md) for the prioritized task queue (design docs #7–#17 reviewed, #18 next). Infrastructure documentation (networking, NAS, services) is maintained by the fleet in [`workspace/persona/docs/`](workspace/persona/docs/).
 
 ## Design
 
