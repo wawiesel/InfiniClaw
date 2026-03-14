@@ -34,8 +34,8 @@ Transport uses git (not Matrix) because it must survive relay restarts and netwo
 `!fleet` uses a two-phase S3 protocol so the speaker can assemble data from all ships:
 
 1. **Every ship** publishes its local fleet data to `fleet-report/<ship>.json` — relay version, per-bot status (including live process checks), names, and git versions.
-2. **The speaker** polls S3 for up to 5s, waiting for all active ships to report. Reports older than 10s are ignored (stale from a previous invocation).
-3. **Assembly**: The speaker merges all ship reports with its in-memory `liveFleet` as fallback for any ship that didn't report in time, then emits a single formatted response.
+2. **The speaker** polls S3 for up to 5s, waiting for all active ships to report. Reports newer than 10s are classified as *fresh*; reports older than 10s are classified as *stale* (likely from a previous `!fleet` invocation) and used as fallback only if no fresh report arrives.
+3. **Assembly**: The speaker merges all reports — fresh reports win over stale, stale over in-memory `liveFleet` — then emits a single formatted response.
 
 This guarantees exactly one reply per `!fleet` command, with live process data from every reachable ship.
 
@@ -44,7 +44,7 @@ This guarantees exactly one reply per `!fleet` command, with live process data f
 See [20-metrics.md](20-metrics.md) for complete definitions, targets, alarm thresholds, and display semantics for all fleet, ship, bot, and operator metrics.
 
 Key fleet metrics:
-- **Availability** — % of assigned (non-sleeping) bots with running processes. Target: 100%.
+- **Availability** — % of assigned (non-sleeping, non-transit) bots with running processes. Target: 100%.
 - **Autonomy score** — `100 − (interventions × 10) − (crashes × 5)`. Target: 100. Below 50 = investigate.
 
 All metrics use rolling 1d/7d windows. No cumulative totals.
