@@ -83,9 +83,10 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 | InfiniClaw repo sync | `GIT_SYNC_INTERVAL` | 3 min | Pull, rebuild on new commits, redeploy dist, restart bots |
 | Secrets repo sync | `SECRETS_SYNC_INTERVAL` | 30s | Pull, detect transport materializations, check inbox |
 | Health check | `HEALTH_INTERVAL` | 30 min | Run `health-check.sh`, upload to S3 |
-| Heartbeat | — | built-in | Publish relay liveness |
+| Heartbeat | `HEARTBEAT_INTERVAL_MS` | 30 min | Nudge idle onduty bots to check NEXT.md and do autonomous work |
 | Relay tasks | — | built-in | Poll `_runtime/relay-tasks/` for host-side operations |
-| Curtain | — | built-in | Watch operator-joined rooms (BehindTheCurtain, quarters), process x-commands, forward Captain messages to operator tmux |
+| Curtain | — | built-in | Watch all operator-joined rooms via operator account; process x-commands and mention-wakes from any room; forward BehindTheCurtain Captain messages to operator tmux |
+| Metrics | `METRICS_INTERVAL_MS` | 5 min | Publish metrics snapshot to S3 |
 
 **InfiniClaw sync** detects source changes (TypeScript, package.json, Dockerfiles, tsconfig) and triggers a rebuild → deploy dist → restart bots → restart relay.
 
@@ -93,13 +94,12 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 
 ### Speaker Election
 
-Every relay publishes its InfiniClaw HEAD commit epoch to S3 (`relay/<hostname>.json`) at startup and after rebuilds. The **speaker** is the active ship running the newest code; ties are broken by ship rank (lowest wins). This ensures the most up-to-date relay formats aggregate responses.
+Every relay publishes its InfiniClaw HEAD commit epoch to S3 (`relay/<hostname>.json`) at startup and after rebuilds. The **speaker** is the lowest-rank commissioned ship. Rank is the sole tiebreaker — epoch-based deferral was removed because it caused higher-rank ships to become speaker when they had newer code and dropped commands during rolling deploys.
 
 Election algorithm:
-1. Fetch commit epochs from S3 for all active ships
-2. Find the maximum epoch across active ships
-3. If local epoch is older, defer (not speaker)
-4. Among ships at max epoch, lowest rank wins
+1. Load all commissioned ships from `ships.json`
+2. If this ship is not commissioned, it is not the speaker
+3. Sort commissioned ships by rank (ascending); lowest rank wins
 
 The speaker result is cached and triggers async re-election in the background. Speaker election runs before aggregate commands (`!fleet`, `!health`, `!promote`/`!demote` for ships).
 
