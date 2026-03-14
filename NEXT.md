@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14 16:17 (Branch Brain monitor — doc #18 PR open; 11 doc PRs pending merge)
+Last curated: 2026-03-14 16:20 (Branch Brain monitor — doc #19 PR open; 12 doc PRs pending merge)
 
 ---
 
@@ -31,7 +31,7 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 **Alternative:** bring up HERACLES machine (where Cid lives) and run `!wake cid` from there.
 **Who:** Operator. 🔑
 
-### 1. Design doc review cycle — eleven PRs open, all need merge
+### 1. Design doc review cycle — twelve PRs open, all need merge
 - **docs #7+#8:** Branch `docs/fix-07-ipc-08-threading-accuracy`. All 181 tests pass.
 - **doc #9:** Branch `docs/fix-09-roles-and-rooms-accuracy`. All 181 tests pass.
 - **doc #10:** Branch `docs/fix-10-fleet-accuracy`. All 181 tests pass.
@@ -51,9 +51,11 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
   - Per-bot skills not auto-loaded; pm skill WBS path corrected to `wbs-{room}.json`; verification note re: startup checklist aspirational
 - **doc #18:** Branch `docs/fix-18-deployment-accuracy` (pushed 2026-03-14 ~16:17). 199 tests pass.
   - Stages 1+2 (type-check + test) enforced by pre-push hook; Stage 3 (holodeck simulation) aspirational
-- **Next doc:** #19 (19-infrastructure.md) — Parker to continue.
+- **doc #19:** Branch `docs/fix-19-infrastructure-accuracy` (pushed 2026-03-14 ~16:20). 199 tests pass.
+  - Entire doc aspirational; Phase 1 (launchd→PM2) marked done; fleet.json uses single `endpoint` not array; Gitea stopped
+- **Next doc:** #20 (20-metrics.md) — Parker to continue.
 
-**Who:** Operator to merge PRs. Parker to continue with doc #19 (19-infrastructure.md).
+**Who:** Operator to merge PRs. Parker to continue with doc #20 (20-metrics.md).
 **PRs:**
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-07-ipc-08-threading-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-09-roles-and-rooms-accuracy
@@ -66,6 +68,7 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-16-autonomy-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-17-skills-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-18-deployment-accuracy
+- https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-19-infrastructure-accuracy
 
 ---
 
