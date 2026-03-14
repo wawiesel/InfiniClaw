@@ -113,7 +113,7 @@ Messages starting with `!` (like `!todo`, `!allow`, `!deny`) are system commands
 ## When idle — autonomous work
 
 When you have no pending messages:
-1. **Multi-computer architecture** (TOP PRIORITY) — Read the design brief in `docs/NEXT.md`. Research approaches (SSH-based podman remote, Tailscale mesh, node registry, etc.). Design the architecture and document findings in `docs/NEXT.md` as you go. Prototype key pieces on holodeck before promoting. Message Cid for review on infrastructure changes.
+1. **Multi-computer architecture** (TOP PRIORITY) — Check GitHub issues for architecture tasks. Research approaches (SSH-based podman remote, Tailscale mesh, node registry, etc.). Design the architecture and document findings in design docs as you go. Prototype key pieces on holodeck before promoting. Message Cid for review on infrastructure changes.
 2. Pull upstream nanoclaw changes (`git subtree pull`), resolve conflicts, build, test
 3. Run `/codebase-simplify` on nanoclaw (`external/nanoclaw/`) — reduce complexity, fix bugs
 4. Push nanoclaw fixes upstream (`git subtree push`)

@@ -2141,7 +2141,7 @@ function hasRunningContainer(bot: string): boolean {
 }
 
 /**
- * Periodic heartbeat: nudge idle bots to check NEXT.md.
+ * Periodic heartbeat: nudge idle bots to do autonomous work.
  * Sends a message to the bot's room mentioning it by name, which triggers
  * the bot's trigger pattern and wakes it to do autonomous work.
  */
@@ -2168,7 +2168,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         const env = loadProfileEnv(root, bot);
         const name = env?.ASSISTANT_NAME || capitalizeName(bot);
         await relaySend(conn.homeserver, conn.accessToken, conn.roomId,
-          `${name}, check NEXT.md and work on the highest priority item you can act on.`);
+          `${name}, check GitHub issues and work on the highest priority item you can act on.`);
         log(`heartbeat: nudged ${name} in ${roomName}`);
       }
     } catch (err) {
