@@ -944,6 +944,7 @@ async function publishFleetReport(): Promise<FleetReport> {
 
   const relayVer = relayVersion(root);
   const metrics = computeMetrics();
+  metrics.shipMetrics.codeVersion = relayVer;
   const botReports: FleetReport['bots'] = {};
   for (const [botId, entry] of Object.entries(liveFleet)) {
     if (entry.ship !== HOSTNAME) continue;
@@ -1124,7 +1125,8 @@ function formatCombinedMetrics(
     const rstRaw = s.shipMetrics.relayRestarts as { day1?: number; day7?: number } | number;
     const rst = typeof rstRaw === 'number' ? { day1: rstRaw, day7: rstRaw } : { day1: rstRaw?.day1 ?? 0, day7: rstRaw?.day7 ?? 0 };
     const rstTag = `↻${rst.day1}/${rst.day7}`;
-    lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptimeTag} · ${rstTag} · ${syncTag}`);
+    const codeVer = s.shipMetrics.codeVersion || '';
+    lines.push(`${shipEmoji}${statusChar} **${s.ship}** · 🏅${rank} · ${uptimeTag} · ${rstTag} · ${syncTag}${codeVer}`);
 
     // Build bot list: merge metrics snapshot + health + liveFleet role/rank
     const health = healthByShip.get(s.ship);
@@ -2406,6 +2408,7 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
     }
 
     const snapshot = computeMetrics();
+    snapshot.shipMetrics.codeVersion = relayVersion(resolveRoot());
     publishMetrics().catch(err => log(`metrics: publish error: ${errStr(err)}`));
 
     // For fleet/all scopes: run and upload health check on every ship.

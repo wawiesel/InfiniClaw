@@ -75,6 +75,8 @@ export interface ShipMetrics {
   relayRestarts: RollingMetric;
   /** Infra sync/build failures (1d and 7d rolling) */
   infraFailures: RollingMetric;
+  /** Code version string (populated by relay, not metrics) */
+  codeVersion?: string;
 }
 
 export interface FleetMetrics {
