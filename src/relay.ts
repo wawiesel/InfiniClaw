@@ -1043,6 +1043,15 @@ async function uploadHealthToS3(report: string): Promise<boolean> {
   }
 }
 
+function classifyBeaconAge(data: Record<string, unknown>): { beacon_age_min: number; machine_status: 'LIVE' | 'STALE' | 'OFFLINE' } {
+  const ts = data.ts ? new Date(String(data.ts)).getTime() : 0;
+  const beacon_age_min = ts > 0 ? Math.floor((Date.now() - ts) / 60_000) : 9999;
+  const machine_status: 'LIVE' | 'STALE' | 'OFFLINE' =
+    beacon_age_min < 10 ? 'LIVE' :
+    beacon_age_min < 20 ? 'STALE' : 'OFFLINE';
+  return { beacon_age_min, machine_status };
+}
+
 async function fetchAllHealthReports(): Promise<Array<{ ship: string; data: Record<string, unknown> }>> {
   const s3 = getS3Client();
   if (!s3) return [];
@@ -1060,7 +1069,7 @@ async function fetchAllHealthReports(): Promise<Array<{ ship: string; data: Reco
         for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
         const data = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
         const ship = obj.Key.replace(`${HEALTH_S3_PREFIX}/`, '').replace('.json', '');
-        results.push({ ship, data });
+        results.push({ ship, data: { ...data, ...classifyBeaconAge(data) } });
       } catch { /* skip corrupt reports */ }
     }
   } catch (err) {
@@ -1276,11 +1285,27 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
     // Filter to known fleet bots only — ignore stale entries from prior configurations
     const bots = Object.fromEntries(Object.entries(allBots).filter(([n]) => knownBots.has(n)));
     const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => capitalizeName(n));
-    // Show data age so the Captain knows if it's fresh
-    const reportTs = data.ts ? new Date(String(data.ts)) : null;
-    const ageMs = reportTs ? Date.now() - reportTs.getTime() : null;
-    const age = ageMs != null ? (ageMs < 120_000 ? 'live' : `${Math.round(ageMs / 60_000)}m ago`) : '?';
-    lines.push(`**${ship}** (${age})`);
+    // Use pre-classified staleness from fetchAllHealthReports; fall back to live computation
+    const machineStatus = String(data.machine_status ?? (() => {
+      const reportTs = data.ts ? new Date(String(data.ts)).getTime() : 0;
+      const ageMin = reportTs > 0 ? Math.floor((Date.now() - reportTs) / 60_000) : 9999;
+      return ageMin < 10 ? 'LIVE' : ageMin < 20 ? 'STALE' : 'OFFLINE';
+    })());
+    const beaconAgeMin = typeof data.beacon_age_min === 'number' ? data.beacon_age_min : null;
+    const ageStr = beaconAgeMin != null
+      ? (beaconAgeMin < 2 ? 'live' : `${beaconAgeMin}m ago`)
+      : (data.ts ? `${Math.round((Date.now() - new Date(String(data.ts)).getTime()) / 60_000)}m ago` : '?');
+    const statusIcon = machineStatus === 'LIVE' ? '🟢' : machineStatus === 'STALE' ? '🟡' : '🔴';
+    const uptimeStr = typeof data.relay_uptime_s === 'number'
+      ? ` relay↑${Math.floor(data.relay_uptime_s / 3600)}h` : '';
+    lines.push(`**${ship}** ${statusIcon} ${machineStatus} (${ageStr})${uptimeStr}`);
+
+    // Show sync status if beacon fields present
+    const gitSync = data.git_sync as { status?: string; last_err_msg?: string } | undefined;
+    const secretsSync = data.secrets_sync as { status?: string; last_err_msg?: string } | undefined;
+    if (gitSync?.status === 'err') lines.push(`  ⚠️ git sync ERR: ${gitSync.last_err_msg ?? '?'}`);
+    if (secretsSync?.status === 'err') lines.push(`  ⚠️ secrets sync ERR: ${secretsSync.last_err_msg ?? '?'}`);
+
     lines.push(`  Active: ${active.length > 0 ? active.join(', ') : 'none'}`);
 
     // Use 24h rolling data — cumulative totals have no time context
