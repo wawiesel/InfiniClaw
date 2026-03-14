@@ -38,6 +38,8 @@ export interface MatrixChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
   /** Display name to set on connect (e.g. "Nora ⭐" for commanding officer). */
   displayName?: string;
+  /** Format a full display name from a pip emoji. Used by setStatusPip. */
+  pipFormatter?: (emoji: string) => string;
 }
 
 interface MatrixLoginResponse {
@@ -1403,8 +1405,9 @@ export class MatrixChannel implements Channel {
     }
   }
 
-  async setStatusPip(_jid: string, _emoji: string): Promise<void> {
-    // Pip reactions disabled
+  async setStatusPip(_jid: string, emoji: string): Promise<void> {
+    if (!this.opts.pipFormatter) return;
+    await this.setDisplayName(this.opts.pipFormatter(emoji));
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
