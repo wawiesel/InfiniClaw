@@ -11,12 +11,14 @@ bots/skills/
   web-recon/SKILL.md
   ...
 bots/{role}/skills.json          # lists which skills this role loads
-bots/{role}/{bot}/skills/        # per-bot custom skills (writable)
+bots/{role}/{bot}/skills/        # per-bot custom skills (writable) — not yet auto-loaded
 ```
 
 ## Loading
 
-Skills are listed in each role's `skills.json`. At container spawn, the listed `SKILL.md` files are injected into the bot's context. Bots can also have persona-level skills in their writable directory.
+Skills are listed in each role's `skills.json`. At container spawn, the listed `SKILL.md` files are symlinked from the pool into the session's `.claude/skills/` directory where Claude Code reads them automatically.
+
+> **Status:** Role-level skills loading is implemented. Per-bot custom skills (`bots/{role}/{bot}/skills/`) are not yet auto-loaded — bots can write skill files to their persona directory, but those are not currently injected into the session.
 
 ## Skill File Format
 
@@ -45,7 +47,7 @@ description: When and how to use this skill.
 
 The `pm` skill is planned for engineer-role bots. Capabilities:
 
-- Maintain a WBS (Work Breakdown Structure) JSON at `_runtime/data/wbs-{bot}.json`
+- Maintain a WBS (Work Breakdown Structure) JSON at `_runtime/data/wbs-{room}.json`
 - Render GANTT as HTML and upload to S3 presigned URL for the Captain
 - Track task dependencies
 - Predict time-to-completion from task complexity and historical branch brain durations
@@ -64,7 +66,7 @@ Bots with write access to their persona directory can create new skills by writi
 ## Verification
 
 1. **Skills loaded** — Bot starts with skills from its role's `skills.json`.
-   *Check:* Startup checklist shows skills table with all expected skills.
+   *Check:* Skills appear symlinked in the session `.claude/skills/` directory at spawn. Note: the startup checklist described in `14-configuration.md` is aspirational; skills are loaded regardless.
 
 2. **Skill affects behavior** — Bot has `github-development` skill and receives a PR task.
    *Check:* Bot follows the branch naming, commit, and PR workflow from the skill.
