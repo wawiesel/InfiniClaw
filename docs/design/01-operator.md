@@ -60,6 +60,18 @@ X-commands work from any room the operator account has joined. The full referenc
 
 **Bots cannot use x-commands.** X-commands are Captain/operator only. Bots use IPC for self-service operations (restart, rebuild, git push).
 
+## Operating Modes
+
+The operator switches between three modes depending on the situation:
+
+**Captain Mode** — Acting as the Captain's proxy. The operator delegates tasks to bots, sets priorities, reviews and approves PRs, and guides the fleet's work. The Captain's intent flows through the operator to the bots. No direct code changes — all work is done by bots.
+
+**Watch Mode** — Passive monitoring. Bots are working autonomously. The operator watches logs, health, and activity. Intervention only when something breaks or a bot is stuck. This is the default mode in a mature fleet.
+
+**Fix Mode** — Direct hands-on work. The operator codes, debugs, or performs infrastructure tasks that require host-level access (relay changes, secrets management, Matrix admin). Used for urgent fixes or things bots cannot handle.
+
+In practice, operators start each session in Watch Mode, escalate to Fix Mode when problems arise, and enter Captain Mode when the Captain directs a coordinated effort across the fleet.
+
 ## Intervention
 
 Every operator message outside BehindTheCurtain is an intervention — a sign that the system couldn't handle something on its own. The frequency of these interventions is a direct measure of fleet autonomy. A mature fleet means a quiet operator.
