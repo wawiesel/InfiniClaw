@@ -32,6 +32,8 @@ The host tracks per-room state: current objective, last progress, last completio
 
 ## Startup Checklist
 
+> **Status:** Not yet implemented as described. On boot the host injects a system resume message ("You were restarted. Review your active tasks and resume any in-progress work.") with the bot's current todo list and the last 5 messages as context. The role-specific Skills/MCP/Ship Health/Weekly Goals tables described below are aspirational — the resume message is the current boot experience.
+
 Sent automatically to each bot's main room on every boot, wrapped in a collapsible `<details>` block so it doesn't dominate the timeline.
 
 ### Sections by role
