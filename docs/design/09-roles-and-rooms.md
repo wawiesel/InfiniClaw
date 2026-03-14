@@ -184,28 +184,56 @@ Bot learns something during work
 
 The Captain can see what bots are remembering and correct them directly in the Room.
 
-## Retrospective Cycle
+## Duty Cycle
 
 > **Status:** Not yet implemented.
 
-After a configurable duty period, the relay forces a bot to quarters for a structured retrospective. This keeps context manageable, surfaces learnings, and keeps `MEMORY.md` current.
+A bot's operational life is a repeating **duty cycle**. The relay manages transitions mechanically — no operator intervention needed for normal operation.
+
+### Cycle Phases
+
+```
+quarters → report → ON DUTY → dismiss → quarters → retrospective → sleep → dream → ready
+    ↑                                                                                 │
+    └─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Phase | Where | What happens | Duration |
+|-------|-------|-------------|----------|
+| **Quarters** | Quarters room | Idle, ready for assignment. `triggerType=always`. | Until `!report` or WBS assignment |
+| **On duty** | Duty room | Working WBS items, responding to callouts. `triggerType=callout`. **No code resyncs.** | `DUTY_CYCLE_MS` (configurable) |
+| **Retrospective** | Quarters room | Save memory, update CLAUDE.md, distill learnings. | Until complete or timeout |
+| **Sleep** | Quarters room | Container stopped. `triggerType=never`. | Until deferred syncs complete |
+| **Dream** | — | Deferred code changes apply (git sync, rebuild). Persona/skill updates land. | Automatic |
+| **Ready** | Quarters room | Container starts fresh with latest code. `triggerType=always`. | Immediate → next cycle |
+
+### No Resync While On Duty
+
+**Critical rule:** The git sync loop must NOT restart a bot that is on duty. Code changes detected during a duty cycle are **queued** and applied during the Dream phase. Only an emergency override (`!wake --force`) can interrupt an active duty cycle.
+
+Change classification:
+- **Runtime** (`src/*.ts`, `package.json`, `Dockerfile`): queued until Dream phase
+- **Persona** (`bots/*/CLAUDE.md`, `skills/*`): queued until Dream phase
+- **No-op** (`README.md`, `docs/*`, test files): never trigger restarts
 
 ### Duty Timer
 
-`ondutyAt` is tracked per bot in `_runtime/data/ipc/{bot}/status.json`. On each branch brain completion or heartbeat, the relay checks if `DUTY_CYCLE_MS` (default: 3600000ms / 1 hour) has elapsed.
+`ondutyAt` is tracked per bot in `_runtime/data/ipc/{bot}/status.json`. On each branch brain completion or heartbeat, the relay checks if `DUTY_CYCLE_MS` has elapsed.
 
 ### Retrospective Sequence
 
 On duty period expiry:
 
-1. **Force to quarters** — Relay runs `!dismiss → quarters` with `RETROSPECTIVE=1` in the IPC message
-2. **Retrospective questions** — Relay sends these questions to the bot's quarters room as INTERCOM, waiting for a reply before sending the next:
+1. **Dismiss to quarters** — Relay runs `!dismiss` with `RETROSPECTIVE=1` in the IPC message
+2. **Retrospective questions** — Relay sends to the bot's quarters room, waiting for each reply:
    - "What went well since your last duty cycle?"
    - "What didn't go well? Any blockers or mistakes?"
    - "How could you do better next time?"
    - "Which parts of your CLAUDE.md helped you achieve your goals? Which parts didn't?"
    - "Update your CLAUDE.md and MEMORY.md now. Post 'Update complete.' when done."
-3. **Auto-rejoin** — When bot posts "Update complete." (or on timeout `RETROSPECTIVE_TIMEOUT_MS`), relay commits/pushes the bot's memory files, then runs `!report`
+3. **Sleep** — Relay runs `!sleep`, container stops
+4. **Dream** — Deferred code changes apply (git sync, rebuild image if needed)
+5. **Ready** — Relay runs `!wake`, bot starts fresh with latest code and updated persona
 
 The retrospective prompt template lives as a skill: `skills/retrospective/SKILL.md`.
 
