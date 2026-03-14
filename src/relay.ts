@@ -1595,10 +1595,10 @@ function removeBranchTask(threadId: string): void {
  * and posting results to the specified Matrix thread.
  */
 async function spawnBranchBrain(
-  task: { thread_id: string; objective: string; chat_jid: string; bot?: string },
+  task: { thread_id: string; objective: string; chat_jid: string; bot?: string; model?: string },
   conns: RoomConn[],
 ): Promise<void> {
-  const { thread_id, objective, chat_jid, bot } = task;
+  const { thread_id, objective, chat_jid, bot, model } = task;
   log(`branchBrain: spawning for thread=${thread_id.slice(0, 20)}`);
 
   // Find the connection for this room (strip matrix: prefix if present)
@@ -1636,6 +1636,9 @@ async function spawnBranchBrain(
   if (botEnv?.ANTHROPIC_BASE_URL) childEnv['ANTHROPIC_BASE_URL'] = botEnv.ANTHROPIC_BASE_URL;
   if (botEnv?.ANTHROPIC_AUTH_TOKEN) childEnv['ANTHROPIC_AUTH_TOKEN'] = botEnv.ANTHROPIC_AUTH_TOKEN;
   if (botEnv?.NODE_EXTRA_CA_CERTS) childEnv['NODE_EXTRA_CA_CERTS'] = botEnv.NODE_EXTRA_CA_CERTS;
+  // Forward model: explicit task model > bot's BRAIN_MODEL > relay process default
+  const brainModel = model || botEnv?.BRAIN_MODEL || '';
+  if (brainModel) childEnv['ANTHROPIC_MODEL'] = brainModel;
   // Prevent nested Claude Code rejection
   delete childEnv['CLAUDECODE'];
   // Use fleet GitHub bot for PR reviews so comments appear as the bot, not the Captain
@@ -1789,6 +1792,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
               const objective = typeof data['objective'] === 'string' ? data['objective'] : '';
               const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
               const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
+              const model = typeof data['model'] === 'string' ? data['model'] : undefined;
               if (thread_id && objective) {
                 const botKey = bot ?? '__relay__';
                 const count = activeBranchBrainCount.get(botKey) ?? 0;
@@ -1801,7 +1805,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                   }
                 } else {
                   activeBranchBrainCount.set(botKey, count + 1);
-                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot }, conns).finally(() => {
+                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot, model }, conns).finally(() => {
                     const n = activeBranchBrainCount.get(botKey) ?? 1;
                     if (n <= 1) activeBranchBrainCount.delete(botKey);
                     else activeBranchBrainCount.set(botKey, n - 1);

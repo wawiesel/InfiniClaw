@@ -376,6 +376,7 @@ export function registerDelegateTools(
     {
       objective: z.string().min(1).describe('Objective for the spawned Branch Brain'),
       thread_id: z.string().min(1).describe('Matrix event ID of the thread root — MUST be a real $... event ID obtained via get_last_event_id immediately after posting the thread title on the main timeline. Do NOT use a custom string or label.'),
+      model: z.string().optional().describe('Model ID for the Branch Brain (e.g. claude-sonnet-4-5, claude-haiku-4-5-20251001). Defaults to this bot\'s BRAIN_MODEL.'),
     },
     async (args) => {
       // Write a relay task so the HOST-side relay spawns the Branch Brain as an independent
@@ -394,6 +395,7 @@ export function registerDelegateTools(
           bot: process.env.ASSISTANT_NAME || '',
           chat_jid: ctx.chatJid,
           timestamp: new Date().toISOString(),
+          ...(args.model ? { model: args.model } : {}),
         };
         fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2));
         fs.renameSync(tempPath, taskFile);

@@ -35,7 +35,7 @@ This is the **in-container agent runner**: the process that spawns inside each b
 
 - **`delegate_to_lobe`**: Spawns codex/gemini/claude/ollama as a subprocess. Since `7c56ab7`, all lobes are prohibited from using `send_message`/`send_image`/intercom tools — output goes to delegate thread automatically.
 - **`delegatedObjective`**: The full objective passed to lobes. Includes execution constraints prepended (no venvs in /workspace/persona, no cache pollution, no communication tools).
-- **`branch_to_thread`**: Opens a Matrix thread and runs work in that thread. Fire-and-forget — returns immediately, lobe result comes back via IPC result file on the next turn.
+- **`branch_to_thread`**: Opens a Matrix thread and runs work in that thread. Fire-and-forget — returns immediately. Accepts optional `model` param to override the Branch Brain's model (e.g. `claude-haiku-4-5-20251001` for fast tasks). Precedence: tool arg > bot BRAIN_MODEL > relay default.
 - **Tool tool restriction**: `index.ts` has a `BLOCKED_TOOLS` set (SendMessage, TeamCreate, TeamDelete in staging) — prevents certain Claude Code built-ins from being called by bots.
 - **Claude CLI args**: `--print --verbose --output-format stream-json --dangerously-skip-permissions --model {model} --add-dir {cwd}`. Objective passed via stdin.
 - **Lobe result delivery**: On lobe exit, writes `result-{lobeId}.json` to IPC input dir. Main brain picks it up on next turn and posts it to the delegate thread.
