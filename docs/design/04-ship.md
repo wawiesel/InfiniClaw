@@ -83,7 +83,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 | InfiniClaw repo sync | `GIT_SYNC_INTERVAL` | 3 min | Pull, rebuild on new commits, redeploy dist, restart bots |
 | Secrets repo sync | `SECRETS_SYNC_INTERVAL` | 30s | Pull, detect transport materializations, check inbox |
 | Health check | `HEALTH_INTERVAL` | 30 min | Run `health-check.sh`, upload to S3 |
-| Heartbeat | `HEARTBEAT_INTERVAL_MS` | 30 min | Nudge idle onduty bots to check NEXT.md and do autonomous work |
+| Heartbeat | `HEARTBEAT_INTERVAL_MS` | 30 min | Nudge idle onduty bots to check GitHub issues and do autonomous work |
 | Relay tasks | — | built-in | Poll `_runtime/relay-tasks/` for host-side operations |
 | Curtain | — | built-in | Watch all operator-joined rooms via operator account; process x-commands and mention-wakes from any room; forward BehindTheCurtain Captain messages to operator tmux |
 | Metrics | `METRICS_INTERVAL_MS` | 5 min | Publish metrics snapshot to S3 |
