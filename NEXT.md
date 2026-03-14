@@ -184,6 +184,7 @@ Research complete (Branch Brain, 2026-03-14). Plans documented in `nas-synology.
 - **Relay M_FORBIDDEN (`!dqIeOQH0GAZWhrajUz`):** `@loudspeaker` not in BTC room (item #4). Non-fatal.
 - **Portainer credentials were in plaintext task prompt** — operator must rotate Portainer admin password and store in vault.
 - **feat/wbs-relay PR open:** items #2 (resume context 10→5), #3 (setStatusPip), plus WBS wiring (5 commits). **Item #8** (per-task model selection) still on separate `feat/per-task-model-selection` branch — needs its own PR.
+- **fix/cross-room-message-format PR needed:** Parker's fix — cross-room @loudspeaker messages now include source room: `BotName (SourceRoom): text` instead of `BotName: text`. Branch ready at `fix/cross-room-message-format`. PR: https://github.com/wawiesel/InfiniClaw/pull/new/fix/cross-room-message-format
 - Parker: PM2 online (pid 1378939), 0 restarts. Relay: PM2 online (pid 1377294), 4 restarts. Tali: PM2 online (pid 1380009), 0 restarts (as of 2026-03-14 20:28).
 - **Git sync**: Intermittent `spawnSync /bin/sh ETIMEDOUT` on push but self-recovering (pushed at 20:00, 20:13, 20:27 UTC). Monitor; may need investigation if push failure windows widen.
 - **Operator room M_FORBIDDEN**: `@loudspeaker` not in `!7tIuIx9AiD5jUO1hTX`. Captain's `!wake tali` + `!allow tali ~/2026-System_Review 60` ran at 20:28 UTC — commands processed silently. See item #4.
