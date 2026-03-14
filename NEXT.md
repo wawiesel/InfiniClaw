@@ -97,9 +97,9 @@ Full architecture docs now exist in `workspace/persona/docs/` (architecture-over
 - Disk count, individual disk models, RAID configuration (needs DSM Storage Manager SSH or UI)
 - Backup/Hyper Backup config (API returned 103/403) — flagged CRITICAL in backups.md
 - Synology Drive sync config (which clients sync to which dirs)
-- [x] ~~How matrix.a-gis.org routes to conduwuit~~ — **RESOLVED** (Branch Brain, 2026-03-14): Caddy on Poseidon serves ports 80/443. Eero forwards 80/443 to Poseidon:80/443 (not NAS). Caddy routes `matrix.a-gis.org → localhost:6167` (conduwuit). `networking.md` corrected. NAS DSM proxy is not in the public web path.
-- `s3.a-gis.org` routing: MinIO runs on Poseidon:9000 but Caddyfile has no s3 block — verify how s3 is currently served
-**Who:** Operator/Tali as needed — low urgency, docs are functional.
+- [x] ~~How matrix.a-gis.org routes to conduwuit~~ — **CORRECTED** (Branch Brain, 2026-03-14): Prior note was wrong. Eero forwards port 443 → NAS (not Poseidon). NAS runs nginx (port 443) as the real public TLS terminator. NAS nginx proxies `matrix.a-gis.org → Poseidon:6167` (conduwuit) and `s3.a-gis.org → Poseidon:9000` (MinIO) via LAN. Caddy on Poseidon handles only local/Tailscale clients for `a-gis.org` and `matrix.a-gis.org`. **`networking.md` still needs correction — the public traffic path goes through NAS nginx, not Caddy.**
+- [x] ~~`s3.a-gis.org` routing~~ — **RESOLVED** same investigation: NAS nginx proxies `s3.a-gis.org → Poseidon:9000` (MinIO). Confirmed via `x-amz-id-2` hash match between NAS:443 direct and public access.
+**Who:** Operator/Tali — update networking.md to reflect NAS nginx as public entry point. Low urgency.
 
 ---
 
@@ -119,6 +119,11 @@ Replace one-shot `claude --print` with a full nanoclaw group container session. 
 Pooled capability modules per role. Not yet implemented. Big feature.
 **Design:** `17-skills.md`.
 **Who:** Architect (Albert when HERACLES active) + engineers.
+
+### 14. Cross-machine health — implement doc 21
+Design complete (`docs/design/21-cross-machine-health.md`, committed 2026-03-14). Adds 5-min beacon flush, sync status fields (`secrets_sync`, `git_sync`), staleness classification (LIVE/STALE/OFFLINE), fleet aggregation pull model, `check_health scope=fleet`, and Matrix alerts on machine transitions.
+**Design:** `21-cross-machine-health.md`.
+**Who:** Parker or Cid.
 
 ### 13. NAS housekeeping (Mount-Olympus)
 Research complete (Branch Brain, 2026-03-14). Plans documented in `nas-synology.md`. Remaining items all require operator action:
