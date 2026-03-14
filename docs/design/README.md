@@ -15,7 +15,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `05-bot.md` — Identity, bot attributes (triggerType, status, rank, activeBrainModel), mention/callout flow, response rules, unified display format (`<ship><location>·<health><activity>·Name·<role><rank>` with short/medium/long verbosity), boot progress (thread steps omit ship tag), `!wake` restart behavior, resume behavior (IPC inject if active; else spawn), bot metrics (response latency, branch brain success, crashes)
 - `06-brain.md` — Three brain types (main/branch/lobe), persistent main brain, triage-and-delegate model, branch model selection, lobe MCP (not yet implemented), credential mapping (BRAIN_MODEL not forwarded to branch brains — #24; nested branching prompt-only — #25)
 - `07-ipc.md` — Container ↔ host IPC (messages/tasks/input directories at `_runtime/instances/{bot}/data/ipc/`), atomic file processing, per-room namespaces, main room elevation, wake/sleep cooldowns
-- `08-threading.md` — Branch and Merge model, branch brains (host-side `claude --print`), streaming output, concurrency limit, lobes (MCP, any provider, quarters threads), correct branch protocol; verification items annotated with not-yet-implemented status
+- `08-threading.md` — Branch and Merge model, branch brains (host-side `claude --print`), streaming output, concurrency limit, main-timeline summary (🧵 title — ✅ done after 30s debounce), thread reactivation (follow-up in completed BB thread spawns new BB, 24h TTL registry), lobes (MCP, any provider, quarters threads), correct branch protocol
 
 ## Organization
 

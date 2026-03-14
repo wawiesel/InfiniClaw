@@ -115,21 +115,21 @@ Lobes always post to quarters regardless of which room the bot is currently in. 
 ## The Merge
 
 When a branch brain completes:
-1. **Thread summary** — completion message in the thread
-2. **Termination** — branch brain exits, thread remains in Matrix history
-
-> **Status:** Main timeline summary (one-line result posted outside the thread) is not yet implemented. Currently, completion messages only appear inside the thread.
+1. **Thread summary** — completion message posted inside the thread
+2. **Main timeline summary** — `🧵 <title> — ✅ done` (or `⛔ failed`) posted on main timeline after a 30-second debounce, so the Captain sees the result without watching the thread
+3. **Bot wake** — after the debounce, the main bot restarts to pick up findings
+4. **Termination** — branch brain exits, thread remains in Matrix history permanently
 
 ## Thread Reactivation
 
-> **Status:** Thread reactivation is not yet implemented. Currently, completed threads cannot spawn new branch brains from follow-up messages.
-
 Matrix threads are permanent. Branch brains are ephemeral. But the thread context is immortal.
 
-If the Captain asks a follow-up in a completed thread:
-1. The host detects the thread and the bot's previous participation
-2. A new branch brain spawns, hydrated with the thread's history
-3. The branch brain answers in the thread and exits
+When the Captain sends a follow-up in a completed BB thread:
+1. The relay detects the message is in a thread the bot previously completed
+2. A new branch brain spawns with the original objective + follow-up message as context
+3. The branch brain answers in the thread and exits normally
+
+Completed threads are tracked in `_runtime/data/completed-bb-threads.json` with a 24-hour TTL. The registry is pruned on every write.
 
 ## Correct branch_to_thread Protocol
 
@@ -152,10 +152,10 @@ Bots must follow this sequence:
    *Check:* Main brain responds immediately.
 
 4. **Merge posts summary** — Branch brain completes.
-   *Check:* Completion message in thread. *(Main timeline summary: not yet implemented.)*
+   *Check:* Completion message in thread; `🧵 <title> — ✅ done` appears on main timeline after 30s.
 
-5. **Thread reactivation** — Reply in a completed thread later. *(Not yet implemented.)*
-   *Check:* New branch brain spawns with old context, answers the question.
+5. **Thread reactivation** — Reply in a completed thread later.
+   *Check:* New branch brain spawns with original objective + follow-up as context, answers in thread.
 
 6. **Concurrency limit** — Trigger more than `MAX_BRANCH_BRAINS_PER_BOT` branches.
    *Check:* Excess rejected with warning.
