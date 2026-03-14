@@ -28,13 +28,13 @@ Branch brains run on the **host machine** — not inside containers. They are on
 3. Relay picks up the file, calls `spawnBranchBrain()`
 4. Relay posts announcement on main timeline: `🧵 Branch Brain: {objective first line}`
 5. Announcement event ID becomes the thread root
-6. Relay spawns: `claude --print --verbose --output-format stream-json`
+6. Relay spawns: `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --add-dir {resolveRoot()}`
 7. Branch brain streams output — each message posted into the Matrix thread
 8. Captain can follow along or ignore
 
 ### Model Selection
 
-The bot chooses which model to use from its configured branch models. For example, a bot with main=haiku and branch=[haiku, sonnet] might pick sonnet for a complex engineering task and haiku for a quick investigation. This is configured in the bot's persona and memory.
+> **Status:** Per-task model selection is **not yet implemented**. Branch brains use whichever Claude model is configured as the default in the host CLI environment. The design intent is for the bot's persona/memory to specify per-task model selection (e.g., sonnet for complex engineering, haiku for quick lookups), but no model selection logic currently exists in `spawnBranchBrain`.
 
 ### Streaming Output
 
@@ -50,20 +50,33 @@ The relay parses `stream-json` format from the Claude CLI:
 ### After Completion
 
 When a branch brain exits:
-1. 30-second debounce timer starts (reset if another branch exits)
-2. After debounce: main bot wakes to pick up findings
-3. Thread remains in Matrix history permanently
+1. 30-second debounce timer starts (reset if another branch exits within the window)
+2. After debounce: relay posts main-timeline summary: `🧵 {title} — ✅ done` or `🧵 {title} — ⛔ failed`
+3. Relay restarts the main bot so it picks up branch brain findings
+4. Thread remains in Matrix history permanently
+
+### Notes File
+
+Each branch brain receives a system prompt that includes a notes file path:
+```
+_runtime/data/thread-notes/{announcementEventId}.md
+```
+If the branch brain discovers persistent findings worth saving (architectural decisions, inventory results, etc.), it writes them as Markdown to this file. The relay may inject this content as context on the next bot restart. Branch brains that have nothing persistent to record skip the file.
 
 ### Credentials
 
-Branch brains receive credentials from the bot's env file:
+Branch brains receive credentials from the bot's env file. The relay checks keys in this priority order:
 
-| Bot env key | Branch brain env |
-|-------------|-----------------|
-| `BRAIN_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` |
-| `BRAIN_API_KEY` | `ANTHROPIC_API_KEY` |
+| Check order | Source key | Branch brain env |
+|-------------|------------|-----------------|
+| 1st | `CLAUDE_CODE_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| 2nd (fallback) | `BRAIN_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| 1st | `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` |
+| 2nd (fallback) | `BRAIN_API_KEY` | `ANTHROPIC_API_KEY` |
 
-Also inherits: `ANTHROPIC_BASE_URL`, `NODE_EXTRA_CA_CERTS`, `GH_TOKEN` (from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account).
+Also inherits: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `NODE_EXTRA_CA_CERTS`, `GH_TOKEN` (from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account).
+
+`CLAUDECODE` env var is deleted before spawning to prevent nested Claude Code rejection.
 
 ### Branch Brain Upgrade: Full Interactive Session
 
@@ -115,10 +128,10 @@ Lobes always post to quarters regardless of which room the bot is currently in. 
 ## The Merge
 
 When a branch brain completes:
-1. **Thread summary** — completion message in the thread
-2. **Termination** — branch brain exits, thread remains in Matrix history
-
-> **Status:** Main timeline summary (one-line result posted outside the thread) is not yet implemented. Currently, completion messages only appear inside the thread.
+1. **Thread summary** — completion message in the thread (or "completed with no output" if nothing was posted)
+2. **Main-timeline summary** — after 30s debounce: `🧵 {title} — ✅ done` / `⛔ failed` posted on main timeline
+3. **Bot restart** — main bot restarts to pick up findings
+4. **Termination** — branch brain exits, thread remains in Matrix history
 
 ## Thread Reactivation
 
@@ -152,7 +165,7 @@ Bots must follow this sequence:
    *Check:* Main brain responds immediately.
 
 4. **Merge posts summary** — Branch brain completes.
-   *Check:* Completion message in thread. *(Main timeline summary: not yet implemented.)*
+   *Check:* Completion message in thread. After 30s debounce: `🧵 <title> — ✅ done` on main timeline.
 
 5. **Thread reactivation** — Reply in a completed thread later. *(Not yet implemented.)*
    *Check:* New branch brain spawns with old context, answers the question.
