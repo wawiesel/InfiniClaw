@@ -24,7 +24,7 @@ A one-shot `claude` process that works in a visible Matrix thread in the bot's c
 
 - **Runs on the host** — not inside the container. Spawned by the relay.
 - **Model selection** — the bot chooses from its configured branch models (e.g. main=haiku, branch=[haiku, sonnet]).
-- **No nested branching** — a branch brain cannot branch again.
+- **No nested branching** — a branch brain should not branch again (enforced by prompt instruction; see issue #25 for programmatic enforcement).
 - **Streaming output** — progress is posted into the thread as it arrives.
 
 See [08-threading](08-threading.md) for the branching protocol and implementation.
@@ -44,7 +44,7 @@ The bot can use Matrix navigation tools (see [02-matrix](02-matrix.md)) to fetch
 
 ## Configuration
 
-> **Status:** Per-task model selection from persona/memory is not yet implemented. Branch brains currently use the bot's `BRAIN_MODEL` env.
+> **Status:** Per-task model selection from persona/memory is not yet implemented. Branch brains currently inherit the relay process's `ANTHROPIC_MODEL` (bot's `BRAIN_MODEL` is not forwarded — see issue #24).
 
 Brain preferences live in the bot's **persona and memory** — not in fleet.json or env files. The bot chooses its branch model at branch time based on the task. Over time, the bot develops guidance on which models work best for which tasks.
 
@@ -54,7 +54,7 @@ Each bot's LLM is configured via env keys in `secrets/bots/{name}/env`:
 
 | Env key | Maps to (inside container) | Purpose |
 |---------|---------------------------|---------|
-| `BRAIN_MODEL` | `ANTHROPIC_MODEL` | Model ID |
+| `BRAIN_MODEL` | `ANTHROPIC_MODEL` | Model ID (main brain container only; not forwarded to branch brains — see issue #24) |
 | `BRAIN_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth authentication |
 | `BRAIN_API_KEY` | `ANTHROPIC_API_KEY` | API key authentication |
 
