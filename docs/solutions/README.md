@@ -11,3 +11,4 @@ Format: each file covers one domain. Each entry has **Problem**, **Cause**, **Fi
 - `git.md` — Git sync and secrets repo issues
 - `matrix.md` — Matrix API, account management, Element Desktop setup
 - `relay.md` — InfiniClaw relay process
+- `wks.md` — WKSM knowledge system (search strategies, indexing, hybrid mode)
