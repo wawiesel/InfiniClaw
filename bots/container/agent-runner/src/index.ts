@@ -137,6 +137,9 @@ function drainIpcInput(): string[] {
         fs.unlinkSync(filePath);
         if (data.text) {
           messages.push(data.text);
+        } else if (data.type === 'lobe_result' && typeof data.output === 'string') {
+          const status = data.exitCode === 0 ? 'completed' : `failed (exit code: ${data.exitCode ?? 'unknown'})`;
+          messages.push(`[System: Lobe ${data.lobe_id} ${status}]\n\n${data.output}`);
         } else if (data.type === 'message' && typeof data.text === 'undefined') {
           // Legacy format with just {type: "message", text: "..."}
           continue;

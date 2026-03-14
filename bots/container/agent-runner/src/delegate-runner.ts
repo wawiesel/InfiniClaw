@@ -702,7 +702,6 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
           pushMessage('completed with no textual output.', true);
         }
         writeLobeResultOnce(prefixedMessages.join('\n\n'), code);
-        // TODO: The relay/agent-runner injects a [System] message into the next turn when it sees a lobe_result IPC file.
       });
 
       proc?.unref();
