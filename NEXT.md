@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14 ~16:35 (Branch Brain monitor — item #10 partial fix PR open: lobe_result IPC injection)
+Last curated: 2026-03-14 ~16:42 (Branch Brain monitor — items #10 and #5 PRs open: lobe injection + cross-room format fix)
 
 ---
 
@@ -96,10 +96,11 @@ Root cause found: `relay.ts:3158` mirrors command output to BehindTheCurtain usi
 - `!7tIuIx9AiD5jUO1hTX:a-gis.org` (Operator room)
 **Who:** Operator. 🔑
 
-### 5. @room cross-room routing from bots
-Bots cannot currently send messages to another room (e.g., engineer → astrometrics). `@room:` is unimplemented. This would enable proper cross-room delegation.
-**Design:** `02-matrix.md`, `13-intercom.md`.
-**Who:** Parker.
+### 5. @room cross-room routing from bots — ✅ IMPLEMENTED (format fix PR open)
+Cross-room routing is implemented via `send_message(text, recipient: "BotName")` using `bot_directory.json` (maps bot → duty room JID). Relay routes via `sendViaIntercom` — logs into target room's intercom account and posts. Format fix in `fix/cross-room-message-format`: messages now appear as `BotName (SourceRoom): message` (was missing source room).
+**PR:** https://github.com/wawiesel/InfiniClaw/pull/new/fix/cross-room-message-format
+**Design:** `02-matrix.md`, `13-intercom.md` — `@room:` prefix is the design notation; actual tool is `recipient` param on `send_message`.
+**Who:** Operator merge. 🔑
 
 ---
 
