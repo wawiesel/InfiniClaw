@@ -14,7 +14,7 @@ Architecture and behavior are specified in `docs/design/` — this README docume
 | [06-brain](../docs/design/06-brain.md) | `brain-management.ts`, `container-spawn.ts` |
 | [07-ipc](../docs/design/07-ipc.md) | `ipc-watcher.ts`, `ipc-commands.ts` |
 | [08-threading](../docs/design/08-threading.md) | `relay.ts` (branch brains); lobes not yet implemented |
-| [12-co](../docs/design/12-co.md) | `wbs.ts` (WBS utilities); relay integration pending |
+| [12-co](../docs/design/12-co.md) | `wbs.ts` (WBS data model + mutations); `relay.ts` (startup inject, off-duty reabsorb, heartbeat auto-assign, wbs_complete task handler) |
 
 ## Architecture
 
@@ -99,7 +99,8 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`resolveBots`**: Finds bots on this ship — first by room membership, then (for explicit targets) by fleet assignment. Sleeping bots have no room but can still be targeted by name for `!wake`.
 - **Speaker**: `await electSpeaker()` returns true for only one machine per Engineering room. That relay handles all aggregate commands (`!fleet`, `!metrics`, `!health`, `!todo`, help text). `!metrics` with 'all' scope fetches metrics from ALL ships via S3 (`fetchAllMetricsSnapshots`) and formats a combined view. BTC uses speaker election (not local scope). `formatCombinedMetrics()` produces unified numbered-section report merging metrics + health per bot into single lines. Stale bots filtered; `trends_24h` fallback when `rolling` data unavailable.
 - **`!todo`**: Reads most-recently-modified `.claude/todos/*.json` from `_runtime/instances/{bot}/data/sessions/main/` to show actual todo items (since `ca16ce9`).
-- **Heartbeat nudge**: `heartbeatLoop()` nudges idle onduty bots to check GitHub issues for autonomous work every 15 minutes (default). Message includes `<m>Name</m>` markers so it matches the callout trigger pattern. See [04-ship](../docs/design/04-ship.md).
+- **Heartbeat nudge**: `heartbeatLoop()` nudges idle onduty bots to check GitHub issues for autonomous work every 15 minutes (default). Message includes `<m>Name</m>` markers so it matches the callout trigger pattern. When a WBS task is available, `autoAssign()` assigns the highest-priority ready item to the bot and the nudge names the specific task. See [04-ship](../docs/design/04-ship.md).
+- **WBS (Work Breakdown Structure)**: `wbs.ts` owns data model and mutations (readWbs/writeWbs, assignItem, reabsorbItems, completeItem, autoAssign). Relay hooks: `wbsInjectStartup()` writes `_runtime/instances/{bot}/data/wbs-startup.json` after `bootstrapBot` so the bot's startup checklist can populate todos from assigned items. `wbsReabsorb()` called in sleep and dismiss handlers to return bot's tasks to the ready pool. Heartbeat calls `autoAssign()` before nudging. Bots signal task completion via `wbs_complete` relay-task (`{type, room, item_id}`) — relay calls `completeItem()` and logs newly unblocked IDs. Chief bot (Cid) manages content: triage, assign, rebalance — see `bots/engineer/cid/`. Design: [12-co](../docs/design/12-co.md).
 - **`operator-commands.ts` removed**: X-commands (`!allow`, `!deny`, `!todo`, `!roster`, etc.) were folded into `relay.ts`. `command-registry.ts` is now the single source of truth for all x-command names.
 - **`command-registry.ts` security hardening**: `dispatch()` rejects cmd strings longer than 512 chars (DoS guard); `registerHandler()` sanitizes the `name` parameter in error messages (log injection); `dispatch()` emits a console.warn when a matched command has no registered handler (silent no-op guard).
 - **`machine-config.ts` removed**: Split into `infini-config.ts` (env-based config) and `ship-config.ts` (fleet.json loader).
