@@ -83,6 +83,7 @@ import {
 } from './service.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
+import { readWbs, writeWbs, autoAssign, reabsorbItems, completeItem, itemsForBot } from './wbs.js';
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -779,6 +780,8 @@ function restartRunningBots(root: string): { started: string[]; failed: string[]
       killStaleContainers(bot);
       bootstrapBot(root, bot);
       writeCrewStatus(root, bot);
+      // WBS startup injection: write assigned tasks to bot data dir for pickup on resume.
+      wbsInjectStartup(root, bot);
       started.push(bot);
     } catch (err) {
       log(`restartRunningBots: ${bot} failed — ${errStr(err)}`);
@@ -1784,6 +1787,19 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                   log(`relayTasks: git_push failed: ${errStr(err)}`);
                 }
               }
+            } else if (data['type'] === 'wbs_complete') {
+              // Bot reports a WBS task done; unblock dependencies.
+              const room = typeof data['room'] === 'string' ? data['room'] : '';
+              const itemId = typeof data['item_id'] === 'string' ? data['item_id'] : '';
+              if (room && itemId) {
+                const dataDir = path.join(resolveRoot(), '_runtime', 'data');
+                const wbs = readWbs(dataDir, room);
+                const unblocked = completeItem(wbs, itemId);
+                writeWbs(dataDir, room, wbs);
+                log(`relayTasks: wbs_complete ${itemId} in ${room}; unblocked: [${unblocked.join(', ')}]`);
+              } else {
+                log(`relayTasks: wbs_complete missing room or item_id`);
+              }
             } else if (data['type'] === 'branch_brain') {
               const thread_id = typeof data['thread_id'] === 'string' ? data['thread_id'] : '';
               const objective = typeof data['objective'] === 'string' ? data['objective'] : '';
@@ -2110,6 +2126,49 @@ async function healthLoop(): Promise<void> {
   }
 }
 
+// ── WBS relay helpers ────────────────────────────────────────────────
+
+/**
+ * Write assigned WBS tasks to the bot's instance data dir so the bot can
+ * read them on startup and populate its todo list accordingly.
+ */
+function wbsInjectStartup(root: string, bot: string): void {
+  try {
+    const room = botDutyRoom(bot);
+    if (!room) return;
+    const dataDir = path.join(root, '_runtime', 'data');
+    const wbs = readWbs(dataDir, room);
+    const items = itemsForBot(wbs, bot);
+    if (items.length === 0) return;
+    const outPath = path.join(root, '_runtime', 'instances', bot, 'data', 'wbs-startup.json');
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, JSON.stringify({ bot, room, items, generatedAt: new Date().toISOString() }, null, 2));
+    log(`wbs: injected ${items.length} task(s) for ${bot}`);
+  } catch (err) {
+    log(`wbs: startup inject failed for ${bot} — ${errStr(err)}`);
+  }
+}
+
+/**
+ * Return all in-progress WBS tasks for a bot to the ready pool.
+ * Called when the bot goes sleep or is dismissed.
+ */
+function wbsReabsorb(root: string, bot: string): void {
+  try {
+    const room = botDutyRoom(bot);
+    if (!room) return;
+    const dataDir = path.join(root, '_runtime', 'data');
+    const wbs = readWbs(dataDir, room);
+    const count = reabsorbItems(wbs, bot);
+    if (count > 0) {
+      writeWbs(dataDir, room, wbs);
+      log(`wbs: reabsorbed ${count} task(s) from ${bot}`);
+    }
+  } catch (err) {
+    log(`wbs: reabsorb failed for ${bot} — ${errStr(err)}`);
+  }
+}
+
 // ── Metrics loop — periodic S3 publish ──────────────────────────────
 
 const METRICS_INTERVAL = envInt('METRICS_INTERVAL_MS', 5 * 60_000); // 5 min default
@@ -2167,9 +2226,16 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         // Get the bot's display name for the trigger
         const env = loadProfileEnv(root, bot);
         const name = env?.ASSISTANT_NAME || capitalizeName(bot);
-        await relaySend(conn.homeserver, conn.accessToken, conn.roomId,
-          `<m>${name}</m>, check GitHub issues and work on the highest priority item you can act on.`);
-        log(`heartbeat: nudged ${name} in ${roomName}`);
+        // WBS auto-assign: give the bot a specific task if one is available.
+        const dataDir = path.join(root, '_runtime', 'data');
+        const wbs = readWbs(dataDir, roomName);
+        const assigned = autoAssign(wbs, bot);
+        if (assigned) writeWbs(dataDir, roomName, wbs);
+        const nudge = assigned
+          ? `<m>${name}</m>, your next task: **${assigned.title}**${assigned.source ? ` (${assigned.source})` : ''}. Work on it now.`
+          : `<m>${name}</m>, check GitHub issues and work on the highest priority item you can act on.`;
+        await relaySend(conn.homeserver, conn.accessToken, conn.roomId, nudge);
+        log(`heartbeat: nudged ${name} in ${roomName}${assigned ? ` — assigned WBS task ${assigned.id}` : ''}`);
       }
     } catch (err) {
       log(`heartbeat error: ${errStr(err)}`);
@@ -2275,6 +2341,8 @@ async function handleLifecycleCommand(
         fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
         writeFleet(liveFleet);
         clearShipConfigCache();
+        // WBS reabsorption: return any assigned tasks to ready pool.
+        wbsReabsorb(root, bot);
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
         restartBotForRoom(root, bot);
         writeCrewStatus(root, bot);
@@ -2298,6 +2366,8 @@ async function handleLifecycleCommand(
             if (rid && rid !== qid) await botLeaveRoom(botToken, homeserver, rid);
           }
         } catch { /* non-fatal */ }
+        // WBS reabsorption: return any assigned tasks to ready pool.
+        wbsReabsorb(root, bot);
         fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         writeFleet(liveFleet);
         await tr(`✅ ${name} asleep`);
