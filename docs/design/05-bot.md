@@ -48,7 +48,7 @@ Controls when the bot responds to messages:
 | Value | Behavior |
 |-------|----------|
 | `always` | Every message triggers a response (no callout needed) |
-| `callout` | Requires explicit `<m>name</m>` mention, participating thread, or CO main timeline |
+| `callout` | Requires explicit `<m>name</m>` mention, participating thread, or Chief fallback on main timeline |
 | `never` | Bot is stopped — no responses |
 
 The relay sets `triggerType` on status transitions:
@@ -127,7 +127,7 @@ When `triggerType` is `callout`, three conditions can trigger a response:
 |-----------|-------------|
 | **Callout** | Message contains `<m>name</m>` (the trigger pattern) |
 | **Participating thread** | Message is in a thread where the bot previously responded |
-| **CO main timeline** | Bot is CO and message doesn't mention any known bot (checked via `\b<name>\b` word-boundary against roster) |
+| **Chief fallback** | Bot is Chief (lowest-rank-number active in room) and message doesn't mention any known bot (checked via `\b<name>\b` word-boundary against roster) |
 
 When `triggerType` is `always`, every message triggers a response — no conditions needed.
 
@@ -170,9 +170,9 @@ The pip reflects **operational status**, not which room the bot is in. See [09-r
 | 🚀 | Starting — transient boot stage |
 | 🟡 | Waiting — transient boot stage |
 | 🟢 | Online — running, responding |
-| ⭐ | CO — commanding officer |
+| ⭐ | Chief — room lead (lowest-rank-number active bot in duty room) |
 
-> **Status:** Dynamic pip transitions (🔄 → 🚀 → 🟡 → 🟢) during boot are not yet implemented. `setStatusPip()` is currently a no-op in `channels/matrix.ts`. The relay sets pips at lifecycle boundaries (💤 on sleep, 🟢 on wake completion, ⭐ on CO) but not during boot stages. See [#27](https://github.com/wawiesel/InfiniClaw/issues/27).
+> **Status:** Dynamic pip transitions (🔄 → 🚀 → 🟡 → 🟢) during boot are not yet implemented. `setStatusPip()` is currently a no-op in `channels/matrix.ts`. The relay sets pips at lifecycle boundaries (💤 on sleep, 🟢 on wake completion, ⭐ on Chief) but not during boot stages. See [#27](https://github.com/wawiesel/InfiniClaw/issues/27).
 
 ### Boot Progress Messages
 

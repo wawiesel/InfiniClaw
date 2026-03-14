@@ -51,7 +51,7 @@ This is the core gate. A fully self-contained InfiniClaw instance runs inside a 
 The real bot who developed the changes acts as Captain and Operator of the simulated ship. They run the crew through scenarios that exercise the changed code paths. At minimum:
 
 - Bot startup and Matrix connection
-- Message routing (direct mention, thread participation, CO duty)
+- Message routing (direct mention, thread participation, Chief fallback)
 - IPC commands (restart, health check, fleet status)
 - Any feature-specific scenarios relevant to the branch
 
