@@ -245,17 +245,17 @@ Off-duty bots (lounge, quarters, sleep) cannot use the loudspeaker. The relay si
 
 ### @room intercom
 
-> **Status:** Not yet implemented. The relay does not currently parse `@room` cross-room routing from bots.
+> **Status:** Implemented via MCP tool. The text-prefix `@room:` syntax is not implemented; bots use `send_message(recipient="BotName")` instead.
 
-On-duty bots can send messages across rooms by mentioning the target room name:
+Bots send cross-room via the `send_message` MCP tool with a `recipient` argument:
 
-| Pattern | Example | Behavior |
-|---------|---------|----------|
-| `@engineering: <message>` | From Bridge | Relay sends `<message>` to Engineering via engineering-intercom |
-| `@bridge: <message>` | From Engineering | Relay sends `<message>` to Bridge via bridge-intercom |
-| `@astrometrics: <message>` | From Bridge | Relay sends `<message>` to Astrometrics via astrometrics-intercom |
+```
+send_message(text="hello", recipient="Cid")   # routes to Engineering via intercom
+send_message(text="hello", recipient="Albert") # routes to Astrometrics via intercom
+list_recipients()                              # shows available bots
+```
 
-Each on-duty room has access to the other two room intercoms. Messages appear as `<BotName> (<SourceRoom>): <message>` in the target room. See [13-intercom](13-intercom.md) for intercom account details.
+The relay writes `bot_directory.json` (name → room JID) into each container's IPC dir on spawn. The MCP tool resolves the name, writes an IPC message with `crossRoom: true`, and `ipc-watcher.ts` routes it via `sendViaIntercom()`. Messages appear as `BotName (SourceRoom): message` in the target room. See [13-intercom](13-intercom.md) for intercom account details.
 
 ## Bot Matrix Navigation
 

@@ -28,7 +28,7 @@ Any on-duty bot can broadcast to all duty rooms via `@loudspeaker: <message>`. T
 
 `@loudspeaker` alone (no colon or message) requests fleet status in the current room — equivalent to `!fleet` but callable by bots.
 
-> **Status:** `@room:` targeting (sending to a specific room) is not yet implemented — `@loudspeaker:` broadcasts to all duty rooms only. See [02-matrix](02-matrix.md).
+> **Status:** `@room:` text-prefix targeting is not implemented. Bot-to-room messaging uses `send_message(recipient="BotName")` MCP tool instead — see [02-matrix](02-matrix.md). `@loudspeaker:` broadcasts to all duty rooms only.
 
 ### Relays → Rooms
 

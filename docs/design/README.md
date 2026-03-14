@@ -6,7 +6,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 - `00-overview.md` — Definitions (fleet, ship, relay, bot, operator, space, room, duty room), core principles, code structure
 - `01-operator.md` — Operator as escape hatch (host-side tmux, max intelligence, idle in mature fleet), bootstrap foundations (Matrix + S3 + secrets → BehindTheCurtain → first ship → first bot), accounts, Captain communication (all ships with operatorRelay=true receive BTC; !operator on/off per ship), inter-operator inbox, x-commands, operating modes (📡 Watch/👑 Captain/🔧 Fix with mode icon in message prefix), autonomy metrics (interventions/day, 1d/7d rolling)
-- `02-matrix.md` — Matrix server, accounts, room naming convention (double-emoji on all rooms and spaces), ship spaces (example not prescriptive), room setup (m.space.child + m.space.parent both required), message format, `<m>` mention pills, reactions (📡/👀/🔔 status pipeline, 👍️/👎️/💯/❌️ scoring), special mentions (@operator, @loudspeaker broadcast/fleet-status, @room intercom), bot Matrix navigation tools, verification
+- `02-matrix.md` — Matrix server, accounts, room naming convention (double-emoji on all rooms and spaces), ship spaces (example not prescriptive), room setup (m.space.child + m.space.parent both required), message format, `<m>` mention pills, reactions (📡/👀/🔔 status pipeline, 👍️/👎️/💯/❌️ scoring), special mentions (@operator, @loudspeaker broadcast/fleet-status, @room cross-room via `send_message(recipient=...)` MCP tool), bot Matrix navigation tools, verification
 - `03-container.md` — Persistent Podman containers (one per bot, not per turn), internal concurrency (agent runner + persistent main brain + lobes), branch brains on host, image builds, mount table (corrected runtime paths), secrets flow (credential allowlist, not proxy — #37)
 
 ## Bot Runtime
@@ -23,7 +23,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `10-fleet.md` — fleet.json, transport protocol, S3 coordination, fleet metrics (availability, autonomy score)
 - `11-commands.md` — X-commands (`!`-prefixed fleet control), room-scoped targeting (presence-based for most commands, assignment-based for !report, universal from BTC), `!pull [ship]` (no arg = all ships) / `!push [ship]` commands, `!operator` toggle, `!metrics` (context-aware, 1d/7d rolling), status formats, alert threads. `!rejoin` and `!refresh` removed — `!wake` handles both restart and wake.
 - `12-co.md` — Chain of command (CO/XO/Chief), Chief election and delegation, Work Breakdown Structure (WBS) — per-room task list with dependencies, auto-assignment on bot startup, reabsorption on off-duty
-- `13-intercom.md` — Intercom accounts (bridge/engineering/astrometrics) used by relay to listen/reply; operators send as `@operator` account; loudspeaker replies (`[emoji pip Ship]` prefix), `@loudspeaker:` bot broadcast (implemented), `@loudspeaker` alone = fleet status, `@room:` targeted routing (not yet implemented), `@ <text>` callout is Captain-only
+- `13-intercom.md` — Intercom accounts (bridge/engineering/astrometrics) used by relay to listen/reply; operators send as `@operator` account; loudspeaker replies (`[emoji pip Ship]` prefix), `@loudspeaker:` bot broadcast (implemented), `@loudspeaker` alone = fleet status, cross-room routing via `send_message(recipient=...)` MCP tool (implemented; text-prefix `@room:` not implemented), `@ <text>` callout is Captain-only
 
 ## Resilience
 
