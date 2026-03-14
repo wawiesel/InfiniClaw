@@ -21,6 +21,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { collectHealthData, sessionCleanup } from './health-check.js';
+import type { SyncStatus } from './health-check.js';
 import { upsertEnvLine } from './env-utils.js';
 import {
   matrixLogin,
@@ -99,6 +100,7 @@ const GITHUB_REPO_URL = 'https://github.com/wawiesel/InfiniClaw';
 const GIT_SYNC_INTERVAL = envInt('GIT_SYNC_INTERVAL', 3 * 60_000);     // default 3 min
 const SECRETS_SYNC_INTERVAL = envInt('SECRETS_SYNC_INTERVAL', 30_000);  // default 30s
 const HEALTH_INTERVAL = envInt('HEALTH_INTERVAL', 30 * 60_000);         // default 30 min
+const BEACON_INTERVAL = envInt('BEACON_INTERVAL', 5 * 60_000);          // default 5 min
 
 // ── Failure alerting (thread + exponential backoff) ─────────────────
 
@@ -112,6 +114,29 @@ interface FailureState {
 const FAILURE_INITIAL_INTERVAL = 60_000;       // 1 minute
 const FAILURE_MAX_INTERVAL = 8 * 60 * 60_000;  // 8 hours
 const failureStates: Record<string, FailureState> = {};
+
+// ── Sync status tracking (for beacon enrichment) ─────────────────────
+
+const relayStartMs = Date.now();
+
+const syncStatus = {
+  git:     { status: 'unknown', last_ok_ts: null, last_err_ts: null, last_err_msg: null } as SyncStatus,
+  secrets: { status: 'unknown', last_ok_ts: null, last_err_ts: null, last_err_msg: null } as SyncStatus,
+};
+
+function recordSyncOk(which: 'git' | 'secrets'): void {
+  syncStatus[which].status = 'ok';
+  syncStatus[which].last_ok_ts = new Date().toISOString();
+}
+
+function recordSyncErr(which: 'git' | 'secrets', msg: string): void {
+  syncStatus[which].status = 'err';
+  syncStatus[which].last_err_ts = new Date().toISOString();
+  syncStatus[which].last_err_msg = msg.slice(0, 200);
+}
+
+// Last health report payload — refreshed by healthLoop, consumed by beaconFlushLoop
+let lastHealthPayload: string | null = null;
 
 function findEngConn(conns: RoomConn[]): RoomConn | undefined {
   return conns.find(c => c.name === 'engineering') || conns[0];
@@ -1432,8 +1457,12 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
       const result = gitSync();
       if (!result.ok) {
         log(`git sync FAILED: ${result.output}`);
+        recordSyncErr('git', result.output);
         await reportFailure('code sync', result.output, conns);
-      } else if (result.newCommits > 0) {
+      } else {
+        recordSyncOk('git');
+      }
+      if (result.ok && result.newCommits > 0) {
         await reportRecovery('code sync', conns);
         log(`git sync: pulled ${result.newCommits} new commit(s)`);
         if (!hasSourceChanges(resolveRoot(), result.newCommits)) {
@@ -1949,8 +1978,12 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
       const result = secretsGitSync();
       if (!result.ok) {
         log(`secrets sync FAILED: ${result.output}`);
+        recordSyncErr('secrets', result.output);
         await reportFailure('secrets sync', result.output, conns);
-      } else if (result.newCommits > 0) {
+      } else {
+        recordSyncOk('secrets');
+      }
+      if (result.ok && result.newCommits > 0) {
         await reportRecovery('secrets sync', conns);
         log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
         // Reload fleet.json from disk (may have transport assignments from other ships)
@@ -2094,6 +2127,21 @@ function runSessionCleanup(): void {
   }
 }
 
+/** Enrich a health payload with real-time beacon fields (uptime, sync status). */
+function enrichBeaconFields(payload: string): string {
+  try {
+    const parsed = JSON.parse(payload) as Record<string, unknown>;
+    return JSON.stringify({
+      ...parsed,
+      relay_uptime_s: Math.floor((Date.now() - relayStartMs) / 1000),
+      secrets_sync: syncStatus.secrets,
+      git_sync: syncStatus.git,
+    });
+  } catch {
+    return payload;
+  }
+}
+
 /** Periodic health loop — runs health check and uploads to S3. */
 async function healthLoop(): Promise<void> {
   // Wait before first run to let everything stabilize
@@ -2103,7 +2151,7 @@ async function healthLoop(): Promise<void> {
       const report = runHealthCheck();
       if (report) {
         appendHealthHistory(report);
-        // Enrich upload with 24h trend deltas
+        // Enrich upload with 24h trend deltas and beacon fields
         let uploadPayload = report;
         try {
           const parsed = JSON.parse(report) as { bots?: Record<string, Record<string, unknown>> };
@@ -2113,6 +2161,8 @@ async function healthLoop(): Promise<void> {
             uploadPayload = JSON.stringify({ ...parsed, trends_24h: deltas });
           }
         } catch { /* upload unmodified if parse fails */ }
+        uploadPayload = enrichBeaconFields(uploadPayload);
+        lastHealthPayload = uploadPayload;
         const uploaded = await uploadHealthToS3(uploadPayload);
         log(`health check: ${uploaded ? 'uploaded to S3' : 'S3 unavailable, local only'}`);
       }
@@ -2123,6 +2173,22 @@ async function healthLoop(): Promise<void> {
     try { removeStaleProcesses(); } catch { /* non-critical */ }
     try { await publishFleetReport(); } catch { /* non-critical */ }
     await sleep(HEALTH_INTERVAL);
+  }
+}
+
+/** Beacon flush loop — re-uploads last health payload every 5 min with fresh uptime/sync fields. */
+async function beaconFlushLoop(): Promise<void> {
+  await sleep(BEACON_INTERVAL);
+  while (true) {
+    try {
+      if (lastHealthPayload) {
+        const beacon = enrichBeaconFields(lastHealthPayload);
+        await uploadHealthToS3(beacon);
+      }
+    } catch (err) {
+      log(`beacon flush error: ${errStr(err)}`);
+    }
+    await sleep(BEACON_INTERVAL);
   }
 }
 
@@ -3781,6 +3847,7 @@ async function main(): Promise<void> {
 
   // Start background loops (non-blocking alongside room sync loops)
   healthLoop().catch((err) => log(`health loop fatal: ${errStr(err)}`));
+  beaconFlushLoop().catch((err) => log(`beacon flush loop fatal: ${errStr(err)}`));
   gitSyncLoop(conns).catch((err) => log(`git sync loop fatal: ${errStr(err)}`));
   relayTasksLoop(conns).catch((err) => log(`relay tasks loop fatal: ${errStr(err)}`));
   secretsSyncLoop(conns).catch((err) => log(`secrets sync loop fatal: ${errStr(err)}`));
