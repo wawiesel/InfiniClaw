@@ -102,6 +102,11 @@ while read f; do wksc index add semantic "$f"; done
 wksc index embed semantic
 ```
 
+For the main (BM25) index, use `wksc index backfill main` to index all monitored files
+meeting the min_priority threshold. This is slow (many files) but works for initial setup.
+Do NOT run `wksc index backfill semantic` — the semantic index should be populated
+from specific high-value directories only, not from all 49k monitored files.
+
 ## Excluding generated artifacts
 
 SCALE and similar tools generate `*.htmd/` directories with hundreds of HTML files that pollute the index. The monitor filter excludes these via `exclude_globs`:
