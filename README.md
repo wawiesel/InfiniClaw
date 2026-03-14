@@ -18,6 +18,8 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 | `parker` | Engineer | Engineering | Health metrics, monitoring, diagnostics |
 | `albert` | Architect | Astrometrics | Architecture, refactoring, AEGIS |
 
+See [NEXT.md](NEXT.md) for the prioritized task queue.
+
 ## Quick start
 
 1. Configure secrets (env files) at `~/.config/infiniclaw/secrets/bots/{bot}/env`
