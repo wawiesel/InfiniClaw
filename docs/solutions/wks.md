@@ -20,7 +20,12 @@ wksc search "<query>" [--index <name>] [-k <n>]
 ```
 MCP: `wksm__wksm__wksm_search`
 
-**Current state**: `main` index is lexical (BM25). Semantic search exists but needs a text embedding index configured (see below).
+**Indexes available:**
+- `main` — lexical BM25, 6163 docs, 55215 chunks. Best for exact names, file paths, specific terms.
+- `semantic` — sentence-transformers embeddings, 200 high-priority docs. Best for concept queries.
+- `images_semantic` — CLIP embeddings, 283 images.
+
+Use `--index semantic` for meaning-based queries. Use default (`main`) for exact-term lookups.
 
 ### Index status
 ```
@@ -28,7 +33,7 @@ wksc index status
 ```
 MCP: `wksm__wksm__wksm_index_status`
 
-Current: 2 indexes, ~6200 documents, ~54500 chunks.
+Current: 3 indexes, 6645 documents, 56111 chunks.
 
 ### Cat (read a file through WKS transform pipeline)
 ```
@@ -64,11 +69,14 @@ MCP: `wksm__wksm__wksm_diff`
 
 Shows recent changes to a file.
 
-## Adding a semantic text index
+## Semantic index (active on Herm)
 
-`sentence-transformers` is installed in the venv. To add a semantic index:
+Already configured in `~/.wks/config.json`. If embeddings need to be rebuilt:
+```bash
+~/2025-WKS/main/venv/bin/wksc index embed semantic
+```
 
-1. Edit `~/.wks/config.json`, add under `index.indexes`:
+To add the semantic index on a new machine, add under `index.indexes` in `~/.wks/config.json`:
 ```json
 "semantic": {
   "max_tokens": 256,
@@ -81,26 +89,16 @@ Shows recent changes to a file.
 }
 ```
 
-2. Build embeddings (slow first run, cached after):
-```bash
-wksc index embed semantic
-```
+## Known issues (from ~/2025-WKS/ISSUES.md)
 
-3. Search semantically:
-```bash
-wksc search "meaning-based query" --index semantic
-```
-
-## Known issues (from ISSUES.md)
-
-- **Lexical-first ranking** — BM25 matches keyword overlap, not meaning. Fix: semantic index above.
-- **Noisy main index** — images, PDFs, generated artifacts compete with source files. Fix: prune with `min_priority` or `exclude_globs`.
+- **Noisy main index** — PDFs, generated artifacts, HTML compete with source files. Fix: lower `min_priority` cutoff or add `exclude_globs`.
 - **Repo identity underweighted** — query for a known repo name doesn't reliably surface that repo. Fix: path-boost in `wks/api/search/cmd.py`.
+- **Semantic index is small** — only indexes `min_priority >= 10.0` docs (~200). Many SKILL.md/RULE.md files may be excluded. Fix: lower threshold or rebuild with `min_priority: 5.0`.
 
 ## Useful search patterns for bots
 
 ```bash
-# Find by concept (use semantic index once configured)
+# Find by concept
 wksc search "dependency injection patterns" --index semantic
 
 # Find by exact name (lexical works fine)
