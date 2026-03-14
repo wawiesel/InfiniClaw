@@ -36,7 +36,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 - `17-skills.md` — Pooled capability modules per role; skills symlinked to session `.claude/skills/` at spawn; per-bot custom skills dir not yet implemented
 - `18-deployment.md` — Code pipeline, holodeck simulation gates
-- `19-infrastructure.md` — Ships as VMs, Gitea/MinIO redundancy
+- `19-infrastructure.md` — Ships as VMs, Gitea/MinIO redundancy — all aspirational; Phase 1 (launchd → PM2) done; fleet.json uses single `endpoint` not array; Gitea stopped
 - `20-metrics.md` — Full metrics taxonomy: Productivity (messages/day, token throughput, score, task completion), Reliability (uptime %, response latency, crashes, OOM, RSS), Autonomy (interventions, autonomy score, MTBI), Infrastructure (relay restarts, sync failures, fleet RSS). Marks ✅ tracked vs 🔲 planned. Uptime as rolling % (not duration). All rolling 1d/7d — no cumulative totals.
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.

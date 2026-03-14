@@ -1,5 +1,7 @@
 # 19 — Infrastructure Redundancy
 
+> **Status:** This entire document is aspirational — none of the redundancy or multi-machine architecture described below is implemented. Current fleet runs on a single physical machine (Poseidon). Gitea is stopped. MinIO runs on a single instance. `fleet.json` uses a single `s3.endpoint` string, not an `endpoints` array.
+
 S3 (MinIO) and Gitea are single points of failure. This spec defines how to replicate both across multiple ships so the fleet survives a machine going down.
 
 ## Ships as Virtual Machines
@@ -146,7 +148,7 @@ The planned multi-computer system lets bots access resources on multiple machine
 
 | Phase | Subsystem | Approach |
 |-------|-----------|----------|
-| 1 | Service manager | launchd → PM2 (cross-platform, already used for bots) |
+| 1 | Service manager | launchd → PM2 (cross-platform, already used for bots) — **✅ done** |
 | 2 | IPC | Filesystem polling → Matrix messages (commands become `!ipc` prefixed Matrix messages; bots already communicate via Matrix) |
 | 3 | Container runtime | Local `podman` → `ssh host podman run -i --rm ...` via `host?` field on `RunContainerOpts` |
 | 4 | Volume mounts | Local → NFS (ro home) + local (rw workspace) + Syncthing (persona files) |
