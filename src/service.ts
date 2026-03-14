@@ -417,7 +417,7 @@ function pm2Stop(name: string): void {
 }
 
 /** Stamp git version info into instance so running code knows its deploy commit. */
-function stampGitVersion(root: string, instance: string): void {
+export function stampGitVersion(root: string, instance: string): void {
   try {
     const opts = { cwd: root, encoding: 'utf-8' as const, stdio: 'pipe' as const };
     const hash = execSync('git rev-parse --short HEAD', opts).toString().trim();
@@ -433,6 +433,18 @@ function stampGitVersion(root: string, instance: string): void {
  * Sync project files to an instance directory.
  * Copies external/nanoclaw/, src/, and root config files.
  */
+/** Lightweight dist-only sync: copies compiled JS so sleeping bots have current code when woken. */
+export function syncDistToInstance(root: string, bot: string): void {
+  const instance = instanceDir(root, bot);
+  if (!fs.existsSync(instance)) return; // never deployed — skip
+  const distSrc = path.join(root, 'dist');
+  const distDst = path.join(instance, 'dist');
+  if (!fs.existsSync(distSrc)) return;
+  fs.mkdirSync(distDst, { recursive: true });
+  execFileSync('rsync', ['-a', '--delete', `${distSrc}/`, `${distDst}/`], { stdio: 'pipe' });
+  stampGitVersion(root, instance);
+}
+
 function rsyncInstance(root: string, dst: string, stdio: 'inherit' | 'pipe' = 'inherit'): void {
   const excludeArgs = RSYNC_EXCLUDES.flatMap((e) => ['--exclude', e]);
 

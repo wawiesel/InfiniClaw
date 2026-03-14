@@ -79,6 +79,7 @@ import {
   loadProfileEnv,
   removeStaleProcesses,
   rebuildImageIfChanged,
+  syncDistToInstance,
 } from './service.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
@@ -1420,6 +1421,13 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             await reportFailure('code build', buildResult, conns);
           } else {
             await reportRecovery('code build', conns);
+            // Sync dist/ to ALL local bot instances (including sleeping) so they have current code when woken
+            const root = resolveRoot();
+            for (const bot of Object.keys(liveFleet)) {
+              if (liveFleet[bot]?.ship !== HOSTNAME) continue;
+              try { syncDistToInstance(root, bot); } catch { /* skip bots with no instance dir */ }
+            }
+            log('git sync: dist synced to all local instances');
             // Restart running bots so they pick up new code (skip dismissed)
             const engConn = findEngConn(conns);
             const threadRoot = engConn
