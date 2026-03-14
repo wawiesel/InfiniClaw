@@ -1,6 +1,6 @@
 # 21 — Cross-Machine Health Protocol
 
-> **Status:** Designed (2026-03-14). Not yet implemented.
+> **Status:** Implemented (2026-03-14, `feat/wbs-relay` branch). All 6 steps complete: 5-min beacon flush, `HealthReport` extended fields (`relay_uptime_s`, `secrets_sync`, `git_sync`), `classifyBeaconAge()` (LIVE/STALE/OFFLINE), `fetchAllHealthReports()` fleet aggregation, `beaconFlushLoop()` with `fleet-health.json` cache, and `check_health(scope=fleet)` in agent-runner.
 > **Motivation:** A secrets sync failure on one machine (NAS, 2026-03-14) went undetected because `check_health` only shows local containers and the health loop uploads to S3 every 30 minutes — too slow for failure detection.
 
 ---
