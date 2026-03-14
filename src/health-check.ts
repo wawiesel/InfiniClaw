@@ -39,6 +39,13 @@ export interface TokenUsage {
   total_7d: number;
 }
 
+export interface SyncStatus {
+  status: 'ok' | 'err' | 'unknown';
+  last_ok_ts: string | null;   // ISO timestamp of last success
+  last_err_ts: string | null;  // ISO timestamp of last failure
+  last_err_msg: string | null; // error message (truncated to 200 chars)
+}
+
 export interface HealthReport {
   ts: string;
   machine: string;
@@ -47,6 +54,10 @@ export interface HealthReport {
   sessions: Record<string, number>;
   session_total_mb: number;
   rolling: Record<string, unknown>;
+  // Optional beacon fields — populated by relay before S3 upload
+  relay_uptime_s?: number;
+  secrets_sync?: SyncStatus;
+  git_sync?: SyncStatus;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
