@@ -2,15 +2,15 @@
 
 ## Registering a new account on the private homeserver
 
-**Prerequisites:** Access to Poseidon (runs conduwuit). See `docs/solutions/conduwuit.md` for snapshot issues that block registration.
+**Prerequisites:** `conduwuit-ctl` must run on the Conduwuit host (Poseidon). Operators on other ships run steps 2–4 via SSH. See `docs/solutions/conduwuit.md` for snapshot issues that block registration.
 
 **Steps:**
 ```bash
-# 1. Generate token and password
+# 1. Generate token and password (run on any ship)
 TOKEN=$(openssl rand -hex 16)
 PASS=$(openssl rand -base64 24 | tr '+/' '-_' | head -c 32)
 
-# 2. Enable registration
+# 2. Enable registration (run on Poseidon, or ssh wawiesel@Poseidon)
 conduwuit-ctl enable-registration "$TOKEN"
 
 # 3. Register
@@ -20,7 +20,7 @@ curl -s -X POST "https://matrix.a-gis.org/_matrix/client/v3/register" \
        \"auth\":{\"type\":\"m.login.registration_token\",\"token\":\"$TOKEN\"}}"
 # Response: {"access_token":"...","user_id":"@<name>:a-gis.org","device_id":"..."}
 
-# 4. Disable registration
+# 4. Disable registration (run on Poseidon)
 conduwuit-ctl restart
 
 # 5. Save credentials to secrets/operator/<name>-matrix.json and push

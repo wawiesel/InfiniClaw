@@ -44,6 +44,12 @@ The Captain communicates with operators via BehindTheCurtain. The relay watches 
 
 Operators reply via `bash operator/matrix reply "<response>"` — always back to Matrix, never in Claude Code output.
 
+## Ship Independence
+
+**Every operator must be able to create a fully deployed bot without depending on another ship.** This includes registering the Matrix account, creating the quarters room, updating fleet.json, and waking the bot. No step in the new-bot workflow should require SSH access to a specific machine.
+
+The current gap: `conduwuit-ctl enable-registration` runs only on Poseidon (where Conduwuit is hosted), blocking account registration from Herc or Herm. See `docs/solutions/matrix.md` for the remote registration workaround until a proper admin API or relay command exists.
+
 ## Inter-Operator Communication
 
 Multiple ships mean multiple operators. The only coordination channel is `operator/inbox.md` in the secrets repo. Operators do not use intercom rooms (engineering, bridge, astrometrics) to talk to each other.
