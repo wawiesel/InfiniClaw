@@ -1385,6 +1385,19 @@ function hasRelayChanges(root: string, commitCount: number): boolean {
   }
 }
 
+/** Compute a fast hash of a directory's file contents for change detection. */
+function hashDir(dir: string): string {
+  try {
+    // Use find + md5 to hash all files — fast enough for dist/ (~200 files)
+    return execSync(
+      `find "${dir}" -type f -print0 | sort -z | xargs -0 md5 -q 2>/dev/null | md5 -q`,
+      { encoding: 'utf-8', timeout: 15_000, stdio: 'pipe' },
+    ).trim();
+  } catch {
+    return ''; // empty = assume changed
+  }
+}
+
 function gitSync(): { ok: boolean; output: string; newCommits: number } {
   const root = resolveRoot();
   const opts = gitOpts(root, 30_000);
@@ -1439,23 +1452,42 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             await reportFailure('code build', buildResult, conns);
           } else {
             await reportRecovery('code build', conns);
-            // Sync dist/ to ALL local bot instances (including sleeping) so they have current code when woken
             const root = resolveRoot();
+
+            // Snapshot per-bot dist hashes BEFORE syncing new code
+            const preHashes: Record<string, string> = {};
+            for (const bot of getActiveBots()) {
+              if (liveFleet[bot]?.ship !== HOSTNAME) continue;
+              const instDist = path.join(root, '_runtime', 'instances', bot, 'dist');
+              preHashes[bot] = hashDir(instDist);
+            }
+
+            // Sync dist/ to ALL local bot instances (including sleeping)
             for (const bot of Object.keys(liveFleet)) {
               if (liveFleet[bot]?.ship !== HOSTNAME) continue;
               try { syncDistToInstance(root, bot); } catch { /* skip bots with no instance dir */ }
             }
             log('git sync: dist synced to all local instances');
-            // Restart running bots so they pick up new code (skip dismissed)
+
+            // Only restart bots whose dist/ actually changed
             const engConn = findEngConn(conns);
-            const threadRoot = engConn
-              ? await reply(engConn, `📡 git sync: ${result.newCommits} new commit(s) — restarting fleet`)
-              : undefined;
+            let restarted = 0;
+            let threadRoot: string | undefined;
             for (const bot of getActiveBots()) {
               if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status)) continue;
+              const instDist = path.join(root, '_runtime', 'instances', bot, 'dist');
+              const postHash = hashDir(instDist);
+              if (preHashes[bot] && preHashes[bot] === postHash) {
+                log(`git sync: ${bot} dist unchanged, skipping restart`);
+                continue;
+              }
+              if (!threadRoot && engConn) {
+                threadRoot = await reply(engConn, `📡 git sync: ${result.newCommits} new commit(s) — restarting changed bots`);
+              }
               try {
                 bootstrapBot(resolveRoot(), bot);
                 writeCrewStatus(resolveRoot(), bot);
+                restarted++;
                 log(`git sync: restarted ${bot}`);
                 if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${bot} restarted${botVersion(resolveRoot(), bot)}`);
               } catch (err) {
@@ -1474,8 +1506,12 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
                 log(`git sync: failed to deploy ${bot}: ${errStr(err)}`);
               }
             }
-            // Post completion summary
-            if (engConn) await reply(engConn, `📡 git sync: fleet restarted`);
+            // Post completion summary (only if something changed)
+            if (restarted > 0) {
+              if (engConn) await reply(engConn, `📡 git sync: ${restarted} bot(s) restarted`);
+            } else {
+              log('git sync: no bots needed restart (dist unchanged)');
+            }
             // Only restart relay if relay-specific files changed (not bot-only code)
             if (hasRelayChanges(resolveRoot(), result.newCommits)) {
               try {
