@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14 19:45 (Branch Brain monitor — doc #12 PR open; WBS status corrected; 5 doc PRs pending merge)
+Last curated: 2026-03-14 19:50 (Branch Brain monitor — doc #13 PR open; 6 doc PRs pending merge)
 
 ---
 
@@ -31,7 +31,7 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 **Alternative:** bring up HERACLES machine (where Cid lives) and run `!wake cid` from there.
 **Who:** Operator. 🔑
 
-### 1. Design doc review cycle — five PRs open, all need merge
+### 1. Design doc review cycle — six PRs open, all need merge
 - **docs #7+#8:** Branch `docs/fix-07-ipc-08-threading-accuracy`. All 181 tests pass.
 - **doc #9:** Branch `docs/fix-09-roles-and-rooms-accuracy`. All 181 tests pass.
 - **doc #10:** Branch `docs/fix-10-fleet-accuracy`. All 181 tests pass.
@@ -39,15 +39,18 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
   - `gitVersionStr()` → `fmtVersion()` (function didn't exist), version format shows `📦 [sha](url)`, `!health` alias noted, `engineering`/`ship` scope clarified, bot-quarters default scope corrected
 - **doc #12:** Branch `docs/fix-12-co-accuracy` (pushed 2026-03-14 ~19:45). 199 tests pass.
   - WBS status block updated: relay integration is implemented (startup inject, reabsorb, heartbeat auto-assign, wbs_complete); Chief content management still pending
-- **Next doc:** #13 (13-intercom.md) — Parker to continue.
+- **doc #13:** Branch `docs/fix-13-intercom-accuracy` (pushed 2026-03-14 ~19:50). 199 tests pass.
+  - `@` callout corrected to Captain-only (not Captain/operator); `@loudspeaker` alone → fleet status documented
+- **Next doc:** #14 (14-configuration.md) — Parker to continue.
 
-**Who:** Operator to merge PRs. Parker to continue with doc #13 (13-intercom.md).
+**Who:** Operator to merge PRs. Parker to continue with doc #14 (14-configuration.md).
 **PRs:**
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-07-ipc-08-threading-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-09-roles-and-rooms-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-10-fleet-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-11-commands-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-12-co-accuracy
+- https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-13-intercom-accuracy
 
 ---
 
