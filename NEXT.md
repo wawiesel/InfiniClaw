@@ -124,18 +124,16 @@ Pooled capability modules per role. Not yet implemented. Big feature.
 **Design:** `17-skills.md`.
 **Who:** Architect (Albert when HERACLES active) + engineers.
 
-### 14. Cross-machine health — steps 4+6 remain (partially ✅)
-Branch Brain (2026-03-14 ~19:30) implemented steps 1–5:
+### 14. Cross-machine health — ✅ COMPLETE (all 6 steps done)
+Branch Brain (2026-03-14) implemented all steps:
 - `SyncStatus` interface + `HealthReport` beacon fields (`relay_uptime_s`, `secrets_sync`, `git_sync`)
 - `recordSyncOk`/`recordSyncErr` wired into gitSyncLoop and secretsSyncLoop
 - `enrichBeaconFields()` enriches every S3 health upload
-- `beaconFlushLoop()` re-uploads every 5 min (BEACON_INTERVAL envvar)
-
-**Remaining (Parker or Cid):**
-- Step 4: staleness classification in `fetchAllHealthReports()` (LIVE/STALE/OFFLINE thresholds)
-- Step 6: `check_health` MCP tool gains optional `scope=fleet` param in agent-runner
-**Design:** `21-cross-machine-health.md`.
-**Who:** Parker or Cid.
+- `beaconFlushLoop()` re-uploads every 5 min; writes `_runtime/data/fleet-health.json`
+- `classifyBeaconAge()` + `fetchAllHealthReports()` LIVE/STALE/OFFLINE classification
+- `check_health(scope=fleet)` in agent-runner reads fleet-health.json
+**PR:** https://github.com/wawiesel/InfiniClaw/pull/new/feat/wbs-relay
+**Who:** Operator merge. 🔑
 
 ### 13. NAS housekeeping (Mount-Olympus)
 Research complete (Branch Brain, 2026-03-14). Plans documented in `nas-synology.md`. Remaining items all require operator action:

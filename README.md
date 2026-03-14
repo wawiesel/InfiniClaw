@@ -97,4 +97,4 @@ Test timeout is configured in `vitest.config.ts` (10s default to accommodate pm2
 - Container images are per-persona: `nanoclaw-cid`, `nanoclaw-johnny5`, `nanoclaw-nora`, `nanoclaw-parker`, `nanoclaw-albert`.
 - Cross-bot communication: `<m>BotName</m> message` in any room auto-forwards to the target bot's room.
 - NanoClaw dependency: `external/nanoclaw/` tracks upstream. InfiniClaw extensions in `src/nanoclaw-ext.d.ts` and friends.
-- Health beacons: relay uploads S3 `health/{ship}.json` every 5 min (beacon) and 30 min (full). Includes sync status and uptime fields for cross-machine visibility. See `docs/design/21-cross-machine-health.md`.
+- Health beacons: relay uploads S3 `health/{ship}.json` every 5 min (beacon) and 30 min (full). Includes sync status and uptime fields. `beaconFlushLoop` also caches `_runtime/data/fleet-health.json` so containers can call `check_health(scope=fleet)` without S3 access. See `docs/design/21-cross-machine-health.md`.
