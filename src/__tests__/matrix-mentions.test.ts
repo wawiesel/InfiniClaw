@@ -173,10 +173,11 @@ describe('pillifyMentions', () => {
 // --- convertRawMentions (inbound: @Name → <m>Name</m>) ---
 
 describe('convertRawMentions', () => {
+  // Display names match actual format: <pip> <name> <shipEmoji>
   const cache = makeCache([
-    ['@cid:a-gis.org', 'Cid 🟢 (HERACLES)'],
-    ['@nora:a-gis.org', 'Nora 💤 (POSEIDON)'],
-    ['@norm-bot:a-gis.org', 'Norm'],
+    ['@cid:a-gis.org', '🟢 Cid 🦁'],
+    ['@nora:a-gis.org', '💤 Nora 🪽'],
+    ['@norm-bot:a-gis.org', '🟢 Norm 🦁'],
   ]);
 
   it('converts @Name to <m>Name</m>', () => {

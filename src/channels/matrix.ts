@@ -172,10 +172,13 @@ export function convertRawMentions(
 ): string {
   if (!text.includes('@')) return text;
 
-  // Build a map of lowercase base-name → display name for matching
+  // Build a map of lowercase base-name → display name for matching.
+  // Display names have pip prefixes (e.g. "🟢 Parker 🔱"), so skip emoji-only
+  // tokens and use the first alphabetic word as the base name.
   const baseNames: { pattern: RegExp; displayName: string }[] = [];
   for (const [, displayName] of nameCache) {
-    const baseName = displayName.split(/\s/)[0];
+    const words = displayName.split(/\s/).filter(w => /[a-z]/i.test(w));
+    const baseName = words[0];
     if (!baseName) continue;
     const escaped = escapeRegex(baseName);
     // Match @Name with word boundary, but not if already inside <m> markers
