@@ -22,7 +22,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `09-roles-and-rooms.md` — Roles, room topology, command hierarchy (Captain → Operator/Co → XO → Chiefs → Crew; Chief = highest-rank bot per room; Chief Navigator = XO), bot statuses (pip progression), lifecycle commands (!wake/!sleep/!report/!dismiss/!go), quarters trigger rules, quarters as retrospective memory space
 - `10-fleet.md` — fleet.json, transport protocol, S3 coordination, fleet metrics (availability, autonomy score)
 - `11-commands.md` — X-commands (`!`-prefixed fleet control), room-scoped targeting (presence-based for most commands, assignment-based for !report, universal from BTC), `!pull [ship]` (no arg = all ships) / `!push [ship]` commands, `!operator` toggle, `!metrics` (context-aware, 1d/7d rolling), status formats, alert threads. `!rejoin` and `!refresh` removed — `!wake` handles both restart and wake.
-- `12-co.md` — Chain of command (CO/XO/Chief), Chief election and delegation
+- `12-co.md` — Chain of command (CO/XO/Chief), Chief election and delegation, Work Breakdown Structure (WBS) — per-room task list with dependencies, auto-assignment on bot startup, reabsorption on off-duty
 - `13-intercom.md` — Intercom accounts (bridge/engineering/astrometrics), loudspeaker replies (`[emoji Ship]` prefix), `@loudspeaker:` bot broadcast (implemented), `@room:` targeted routing (not yet implemented)
 
 ## Resilience
