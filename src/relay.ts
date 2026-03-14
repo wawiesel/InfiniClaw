@@ -1589,9 +1589,46 @@ function removeBranchTask(threadId: string): void {
     const p = branchTasksPath();
     if (!fs.existsSync(p)) return;
     const tasks = readBranchTasks();
+    const entry = tasks[threadId];
     delete tasks[threadId];
     fs.writeFileSync(p, JSON.stringify(tasks, null, 2));
+    // Persist to completed registry so follow-up messages can reactivate the thread
+    if (entry) writeCompletedBranchThread(threadId, entry);
   } catch (err) { log(`branchTasks: remove failed: ${errStr(err)}`); }
+}
+
+// ── Completed branch-thread registry (thread reactivation) ──────────────────
+
+function completedBranchThreadsPath(): string {
+  return path.join(resolveRoot(), '_runtime', 'data', 'completed-bb-threads.json');
+}
+
+/** Persist a completed BB thread so follow-up messages reactivate it. */
+function writeCompletedBranchThread(threadId: string, entry: BranchTaskEntry): void {
+  try {
+    const p = completedBranchThreadsPath();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    let threads: Record<string, BranchTaskEntry> = {};
+    try { if (fs.existsSync(p)) threads = JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { /* start fresh */ }
+    // Prune stale entries (24h TTL — longer than active tasks)
+    const ttl = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    for (const k of Object.keys(threads)) {
+      if (!threads[k].createdAt || now - threads[k].createdAt > ttl) delete threads[k];
+    }
+    threads[threadId] = entry;
+    fs.writeFileSync(p, JSON.stringify(threads, null, 2));
+  } catch (err) { log(`completedBBThreads: write failed: ${errStr(err)}`); }
+}
+
+/** Look up a completed BB thread entry by thread ID, or return null. */
+function getCompletedBranchThread(threadId: string): BranchTaskEntry | null {
+  try {
+    const p = completedBranchThreadsPath();
+    if (!fs.existsSync(p)) return null;
+    const threads = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, BranchTaskEntry>;
+    return threads[threadId] ?? null;
+  } catch { return null; }
 }
 
 /**
@@ -3561,6 +3598,25 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 await handleCommand('!fleet', fleetConn, conns);
               }
               continue;
+            }
+
+            // Thread reactivation: follow-up message in a completed BB thread → spawn new BB
+            if (!body.startsWith('!') && isAuthorized(event.sender, captainUserId, operatorUserId)) {
+              const relatesTo = (event.content as Record<string, unknown>)?.['m.relates_to'] as Record<string, unknown> | undefined;
+              const incomingThreadId = relatesTo?.rel_type === 'm.thread' ? (relatesTo.event_id as string) : undefined;
+              if (incomingThreadId && event.event_id && markProcessed(event.event_id)) {
+                const completed = getCompletedBranchThread(incomingThreadId);
+                if (completed) {
+                  log(`${conn.name}: thread reactivation: follow-up in completed BB thread ${incomingThreadId.slice(0, 20)}`);
+                  void spawnBranchBrain({
+                    thread_id: incomingThreadId,
+                    objective: `Follow-up to previous Branch Brain task.\n\nOriginal objective:\n${completed.objective}\n\nFollow-up message:\n${body}`,
+                    chat_jid: completed.chat_jid,
+                    bot: completed.bot,
+                  }, conns);
+                  continue;
+                }
+              }
             }
 
             if (!body.startsWith('!')) continue;
