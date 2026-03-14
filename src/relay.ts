@@ -3167,6 +3167,16 @@ async function curtainLoop(captainUserId: string): Promise<void> {
     return;
   }
 
+  // Build roomId → room name lookup from intercom config so commands from
+  // non-BTC rooms (e.g. engineering) resolve correctly in resolveBots.
+  const roomIdToName: Record<string, string> = {};
+  const intercom = loadIntercomConfig();
+  if (intercom) {
+    for (const [name, room] of Object.entries(intercom.rooms)) {
+      roomIdToName[room.roomId] = name;
+    }
+  }
+
   const { homeserver, accessToken, userId } = opConfig;
   if (!accessToken || !userId) {
     log('curtain: missing accessToken or userId in operator-matrix.json — skipping');
@@ -3262,7 +3272,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           // ! commands — process from any room the operator can see (quarters, BehindTheCurtain, etc.)
           if (body.startsWith('!') && isAuthorized(event.sender, captainUserId, userId) && markProcessed(event.event_id)) {
             const cmdConn: RoomConn = {
-              name: rid === roomId ? 'BehindTheCurtain' : `operator:${rid}`,
+              name: rid === roomId ? 'BehindTheCurtain' : (roomIdToName[rid] ?? `operator:${rid}`),
               roomId: rid, homeserver,
               username: '', password: '', accessToken, syncToken, filterId, userId,
             };
