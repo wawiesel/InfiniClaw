@@ -16,24 +16,28 @@ All MCP tools are prefixed `wksm__wksm__*`. The engineer role MCP config (`bots/
 
 ### Search
 ```
-wksc search "<query>" [--index <name>] [-k <n>]
+wksc search "<query>" [--index <name>] [--strategy <name>] [-k <n>]
 ```
 MCP: `wksm__wksm__wksm_search`
 
-**Indexes available:**
-- `main` — lexical BM25, 6163 docs, 55215 chunks. Best for exact names, file paths, specific terms.
-- `semantic` — sentence-transformers embeddings, ~344 chunks / 97 docs. Best for concept queries. Includes InfiniClaw bots, skills, design docs, solutions. Path-segment boost: query terms matching directory/filename segments get higher scores.
-- `images_semantic` — CLIP embeddings, 283 images.
+**Just call `wksm_search(query="...")` — no flags needed.** The default strategy (`hybrid`) combines BM25 lexical + semantic results automatically using Reciprocal Rank Fusion (RRF).
 
-Use `--index semantic` for meaning-based queries. Use default (`main`) for exact-term lookups.
+**Indexes:**
+- `main` — lexical BM25, ~6k docs. Best for exact names, file paths, specific terms.
+- `semantic` — sentence-transformers embeddings, ~344 chunks / ~100 docs. Best for concept queries. Includes InfiniClaw bots, skills, design docs, solutions. Path-segment boost: query terms matching directory/filename segments get higher scores.
+- `images_semantic` — CLIP embeddings, ~283 images.
+
+**Strategies (combine multiple indexes):**
+- `hybrid` (default) — queries `main` + `semantic`, merges with RRF. Best for general queries.
+- `full` — queries `main` + `semantic` + `images_semantic`, merges with RRF.
+
+Override with `--index <name>` to query a single index, or `--strategy <name>` for a specific strategy. Cannot use both.
 
 ### Index status
 ```
 wksc index status
 ```
 MCP: `wksm__wksm__wksm_index_status`
-
-Current: 3 indexes, 6645 documents, 56111 chunks.
 
 ### Cat (read a file through WKS transform pipeline)
 ```
@@ -71,7 +75,7 @@ Shows recent changes to a file.
 
 ## Semantic index (active on Herm)
 
-Already configured in `~/.wks/config.json`. The daemon auto-rebuilds embeddings every 10 minutes (`embed_interval_secs: 600.0` in `daemon` config). No manual intervention needed.
+Already configured in `~/.wks/config.json`. The daemon auto-indexes new files as they change. Embeddings are built inline during indexing.
 
 If embeddings need to be rebuilt immediately:
 ```bash
@@ -88,6 +92,15 @@ To add the semantic index on a new machine, add under `index.indexes` in `~/.wks
   "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
   "embedding_mode": "text",
   "image_text_weight": null
+}
+```
+
+Also add strategies under the `index` block:
+```json
+"default_strategy": "hybrid",
+"strategies": {
+    "hybrid": {"indexes": ["main", "semantic"], "merge": "rrf"},
+    "full": {"indexes": ["main", "semantic", "images_semantic"], "merge": "rrf"}
 }
 ```
 
@@ -136,16 +149,22 @@ wksc index embed semantic
 
 - **Noisy main index** — PDFs, generated artifacts, HTML compete with source files. Fix: `min_priority` cutoff + `exclude_globs` for generated output.
 - **Repo identity underweighted** — fixed via path-segment score boost in `wks/api/search/cmd.py` (WKS commit `61444eb`). Query terms matching directory/filename path segments get a 0.2× score boost per match.
-- **Semantic index size** — 135 chunks at min_priority ≥ 10.0. Grows as new high-priority files are synced. Monitor sync now sorts files newest-first (WKS commit `ff31fe1`) so recent content indexes first.
+- **Semantic index size** — ~344 chunks at min_priority ≥ 10.0. Grows as new high-priority files are synced. Monitor sync now sorts files newest-first (WKS commit `ff31fe1`) so recent content indexes first.
 
 ## Useful search patterns for bots
 
 ```bash
-# Find by concept
-wksc search "dependency injection patterns" --index semantic
+# Default: hybrid search (BM25 + semantic combined via RRF)
+wksc search "dependency injection patterns"
 
-# Find by exact name (lexical works fine)
-wksc search "RULE.md NoHedging"
+# Force lexical only
+wksc search "RULE.md NoHedging" --index main
+
+# Force semantic only
+wksc search "how do bots stay busy" --index semantic
+
+# Full strategy (includes image index)
+wksc search "architecture diagram" --strategy full
 
 # Find recently changed files in a directory
 wksc monitor check ~/2025-WKS/main
