@@ -78,7 +78,7 @@ See `bots/README.md` for full structure.
 
 ## Values
 
-See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity, consistency, functionality.
+See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity, consistency, functionality. See [`NEXT.md`](NEXT.md) for the prioritized task queue.
 
 ## Design
 
