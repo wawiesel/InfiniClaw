@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14 15:57 (Branch Brain monitor — doc #14 PR open; 7 doc PRs pending merge)
+Last curated: 2026-03-14 16:09 (Branch Brain monitor — doc #16 PR open; 9 doc PRs pending merge)
 
 ---
 
@@ -31,7 +31,7 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 **Alternative:** bring up HERACLES machine (where Cid lives) and run `!wake cid` from there.
 **Who:** Operator. 🔑
 
-### 1. Design doc review cycle — eight PRs open, all need merge
+### 1. Design doc review cycle — nine PRs open, all need merge
 - **docs #7+#8:** Branch `docs/fix-07-ipc-08-threading-accuracy`. All 181 tests pass.
 - **doc #9:** Branch `docs/fix-09-roles-and-rooms-accuracy`. All 181 tests pass.
 - **doc #10:** Branch `docs/fix-10-fleet-accuracy`. All 181 tests pass.
@@ -45,9 +45,11 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
   - Startup checklist marked aspirational — actual boot is `injectResumeMessage()` (active todos + last 5 messages), not Skills/MCP/Ship Health tables
 - **doc #15:** Branch `docs/fix-15-safety-accuracy` (pushed 2026-03-14 ~16:00). 199 tests pass.
   - OOM env var names corrected: `KILL_137_MAX_CONSECUTIVE`/`KILL_137_COOLDOWN_MS`; MCP preflight marked aspirational
-- **Next doc:** #16 (16-autonomy.md) — Parker to continue.
+- **doc #16:** Branch `docs/fix-16-autonomy-accuracy` (pushed 2026-03-14 ~16:09). 199 tests pass.
+  - Transporter not yet implemented; peer verify check/list not yet; holodeck via IPC tasks (no CLI commands, no terminal-only enforcement, deployment gate aspirational)
+- **Next doc:** #17 (17-skills.md) — Parker to continue.
 
-**Who:** Operator to merge PRs. Parker to continue with doc #16 (16-autonomy.md).
+**Who:** Operator to merge PRs. Parker to continue with doc #17 (17-skills.md).
 **PRs:**
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-07-ipc-08-threading-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-09-roles-and-rooms-accuracy
@@ -57,6 +59,7 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-13-intercom-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-14-configuration-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-15-safety-accuracy
+- https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-16-autonomy-accuracy
 
 ---
 
