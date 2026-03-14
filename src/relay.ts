@@ -3029,11 +3029,34 @@ function registerRelayCommands(): void {
     },
 
     allow: async (cmd, conn) => {
-      const match = cmd.match(/^!allow\s+(\S+)\s+(\S+)(?:\s+(\d+))?$/);
-      if (!match) { await helpReply(conn, 'Usage: !allow <bot> <path> [minutes]'); return; }
-      const [, botName, hostPath, mins] = match;
+      // Try 3-arg form: !allow <bot> <path> [minutes]
+      let match = cmd.match(/^!allow\s+(\S+)\s+(\S+)(?:\s+(\d+))?$/);
+      let botName: string, hostPath: string, mins: string | undefined;
+      if (match) {
+        [, botName, hostPath, mins] = match;
+        // If botName looks like a path, re-parse as 2-arg (infer bot from quarters)
+        if (botName.startsWith('/') || botName.startsWith('~') || botName.startsWith('.')) {
+          const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
+          if (!qBot) { await helpReply(conn, 'Usage: !allow <bot> <path> [minutes]'); return; }
+          // Re-parse: botName is actually path, hostPath is actually minutes
+          mins = hostPath.match(/^\d+$/) ? hostPath : undefined;
+          hostPath = botName;
+          botName = qBot[0];
+        }
+      } else {
+        // Try 2-arg form from quarters: !allow <path> [minutes]
+        const m2 = cmd.match(/^!allow\s+(\S+)(?:\s+(\d+))?$/);
+        if (!m2) { await helpReply(conn, 'Usage: !allow <bot> <path> [minutes]'); return; }
+        const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
+        if (!qBot) { await helpReply(conn, 'Usage: !allow <bot> <path> [minutes]'); return; }
+        [, hostPath, mins] = m2;
+        botName = qBot[0];
+      }
       const local = getActiveBots();
-      if (!local.includes(botName.toLowerCase())) return; // not on this ship
+      if (!local.includes(botName.toLowerCase())) {
+        await helpReply(conn, `${capitalizeName(botName)} is not on this ship`);
+        return;
+      }
       const defaultDuration = 30;
       const parsedDuration = parseInt(mins ?? String(defaultDuration), 10);
       let duration = parsedDuration <= 0 ? defaultDuration : parsedDuration;
@@ -3041,18 +3064,38 @@ function registerRelayCommands(): void {
       try {
         grantMount(botName.toLowerCase(), hostPath, duration);
         const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
-        await reply(conn, `📡 mount granted to ${botName}: ${hostPath} (rw, expires ~${expiry}) — restart required`);
+        await reply(conn, `📡 mount granted to ${capitalizeName(botName)}: ${hostPath} (rw, expires ~${expiry}) — restart required`);
       } catch (err) {
         await reply(conn, `⛔ allow failed — ${errStr(err)}`);
       }
     },
 
     deny: async (cmd, conn) => {
-      const match = cmd.match(/^!deny\s+(\S+)\s+(\S+)$/);
-      if (!match) { await helpReply(conn, 'Usage: !deny <bot> <path>'); return; }
-      const [, botName, hostPath] = match;
+      // Try 2-arg form: !deny <bot> <path>
+      let match = cmd.match(/^!deny\s+(\S+)\s+(\S+)$/);
+      let botName: string, hostPath: string;
+      if (match) {
+        [, botName, hostPath] = match;
+        if (botName.startsWith('/') || botName.startsWith('~') || botName.startsWith('.')) {
+          const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
+          if (!qBot) { await helpReply(conn, 'Usage: !deny <bot> <path>'); return; }
+          hostPath = botName;
+          botName = qBot[0];
+        }
+      } else {
+        // Try 1-arg form from quarters: !deny <path>
+        const m1 = cmd.match(/^!deny\s+(\S+)$/);
+        if (!m1) { await helpReply(conn, 'Usage: !deny <bot> <path>'); return; }
+        const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
+        if (!qBot) { await helpReply(conn, 'Usage: !deny <bot> <path>'); return; }
+        [, hostPath] = m1;
+        botName = qBot[0];
+      }
       const local = getActiveBots();
-      if (!local.includes(botName.toLowerCase())) return; // not on this ship
+      if (!local.includes(botName.toLowerCase())) {
+        await helpReply(conn, `${capitalizeName(botName)} is not on this ship`);
+        return;
+      }
       try {
         const removed = revokeMount(botName.toLowerCase(), hostPath);
         await reply(conn, `📡 ${capitalizeName(botName)} ${removed ? `mount revoked: ${hostPath}` : `no mount found: ${hostPath}`}`);
