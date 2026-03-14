@@ -2128,7 +2128,7 @@ async function metricsLoop(): Promise<void> {
 
 // ── Heartbeat — nudge idle bots to do autonomous work ──────────────
 
-const HEARTBEAT_INTERVAL = envInt('HEARTBEAT_INTERVAL_MS', 30 * 60_000); // 30 min default
+const HEARTBEAT_INTERVAL = envInt('HEARTBEAT_INTERVAL_MS', 15 * 60_000); // 15 min default
 
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {
