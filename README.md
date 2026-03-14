@@ -78,7 +78,7 @@ See `bots/README.md` for full structure.
 
 ## Values
 
-See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity, consistency, functionality. See [`NEXT.md`](NEXT.md) for the prioritized task queue. Infrastructure documentation (networking, NAS, services) is maintained by the fleet in [`workspace/persona/docs/`](workspace/persona/docs/).
+See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity, consistency, functionality. See [`NEXT.md`](NEXT.md) for the prioritized task queue (design docs #7–#11 reviewed, #12 next). Infrastructure documentation (networking, NAS, services) is maintained by the fleet in [`workspace/persona/docs/`](workspace/persona/docs/).
 
 ## Design
 
@@ -97,3 +97,4 @@ Test timeout is configured in `vitest.config.ts` (10s default to accommodate pm2
 - Container images are per-persona: `nanoclaw-cid`, `nanoclaw-johnny5`, `nanoclaw-nora`, `nanoclaw-parker`, `nanoclaw-albert`.
 - Cross-bot communication: `<m>BotName</m> message` in any room auto-forwards to the target bot's room.
 - NanoClaw dependency: `external/nanoclaw/` tracks upstream. InfiniClaw extensions in `src/nanoclaw-ext.d.ts` and friends.
+- Health beacons: relay uploads S3 `health/{ship}.json` every 5 min (beacon) and 30 min (full). Includes sync status and uptime fields for cross-machine visibility. See `docs/design/21-cross-machine-health.md`.

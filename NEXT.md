@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14 19:18 (Branch Brain monitor — pushed feat/wbs-relay; Gitea status confirmed; fleet check)
+Last curated: 2026-03-14 19:28 (Branch Brain monitor — doc #11 PR open; relay git sync fixed; fleet stable)
 
 ---
 
@@ -31,19 +31,20 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 **Alternative:** bring up HERACLES machine (where Cid lives) and run `!wake cid` from there.
 **Who:** Operator. 🔑
 
-### 1. Design doc review cycle — three PRs open, all need merge
+### 1. Design doc review cycle — four PRs open, all need merge
 - **docs #7+#8:** Branch `docs/fix-07-ipc-08-threading-accuracy`. All 181 tests pass.
 - **doc #9:** Branch `docs/fix-09-roles-and-rooms-accuracy`. All 181 tests pass.
-- **doc #10:** Branch `docs/fix-10-fleet-accuracy` pushed 2026-03-14 ~18:30. All 181 tests pass.
-  - `10-fleet.md`: stale report handling corrected (not ignored — used as secondary fallback; merge: fresh > stale > liveFleet), availability definition fixed (excludes transit bots, not just sleeping)
-  - `README.md`: updated 10-fleet.md entry to reflect three-tier assembly and precise availability definition
-- **Next doc:** #11 (11-commands.md) — Parker to continue.
+- **doc #10:** Branch `docs/fix-10-fleet-accuracy`. All 181 tests pass.
+- **doc #11:** Branch `docs/fix-11-commands-accuracy` (pushed 2026-03-14 ~19:25). 199 tests pass.
+  - `gitVersionStr()` → `fmtVersion()` (function didn't exist), version format shows `📦 [sha](url)`, `!health` alias noted, `engineering`/`ship` scope clarified, bot-quarters default scope corrected
+- **Next doc:** #12 (12-co.md) — Parker to continue.
 
-**Who:** Operator to merge PRs. Parker to continue with doc #11 (11-commands.md).
+**Who:** Operator to merge PRs. Parker to continue with doc #12 (12-co.md).
 **PRs:**
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-07-ipc-08-threading-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-09-roles-and-rooms-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-10-fleet-accuracy
+- https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-11-commands-accuracy
 
 ---
 
