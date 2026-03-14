@@ -67,26 +67,22 @@ Use skills proactively. Write new skills to `/workspace/persona/skills/{name}/SK
 
 ## Writing files others can see
 
-Files written inside the container are **ephemeral** — they vanish when the container stops. To persist work:
+Files written inside the container are **ephemeral** — they vanish when the container stops. To share output:
 
-| What | Where to write | How it becomes visible |
-|---|---|---|
-| Code changes | `$INFINICLAW_ROOT/src/` | `git add`, `git commit`, then IPC `git_push` |
-| Design docs | `$INFINICLAW_ROOT/docs/` | Same — commit + IPC `git_push` |
-| Your persona | `/workspace/persona/CLAUDE.md` | Auto-synced via git (InfiniClaw repo) |
-| Memory/notes | `/workspace/persona/memory/` | Auto-synced via git (secrets repo) |
-| Shared artifacts | Upload to S3 via `aws s3 cp` | Visible at `https://s3.a-gis.org/infiniclaw/...` |
+| What | How to share |
+|---|---|
+| Code/doc changes in InfiniClaw | `git add`, `git commit`, IPC `git_push` |
+| Analysis, reports, review output | Upload to S3: `aws s3 cp <file> s3://infiniclaw/<path>` |
+| Quick findings | Post to Matrix (your room message IS your output) |
+| Persistent notes | `/workspace/persona/memory/` (auto-synced) |
 
-**CRITICAL: If you write a file and don't push it, nobody can see it.** After any code/doc change:
+**NEVER push non-InfiniClaw content to git.** Files from `!allow`-mounted directories (e.g. external repos, review materials) are NOT part of InfiniClaw. Share those via S3 or Matrix messages.
+
+**S3 for shared artifacts:**
 ```bash
-cd $INFINICLAW_ROOT && git add <files> && git commit -m "description"
+aws s3 cp report.md s3://infiniclaw/reports/tali/report.md
+# URL: https://s3.a-gis.org/infiniclaw/reports/tali/report.md
 ```
-Then write an IPC task to push:
-```bash
-echo '{"action":"git_push"}' > /workspace/ipc/tasks/push-$(date +%s).json
-```
-
-**Never write important output to random paths** — it will be lost. Use the repo or S3.
 
 ## Rules
 
