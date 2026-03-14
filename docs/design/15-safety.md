@@ -26,7 +26,7 @@ Three limits must be coordinated:
 
 **Root cause: session resume.** Claude Code sessions are JSONL files. On resume, the SDK deserializes the entire file — 2-5x the file size in memory due to JavaScript object overhead. A 1.1MB session was enough to OOM a 4GB V8 heap.
 
-**Key settings:** `CONTAINER_MEMORY_MB` (bot env), `NODE_OPTIONS=--max-old-space-size=N` (Dockerfile), `SESSION_MAX_BYTES` (agent-runner), `OOM_MAX_CONSECUTIVE` and `OOM_COOLDOWN_MS` (src/main.ts).
+**Key settings:** `CONTAINER_MEMORY_MB` (bot env), `NODE_OPTIONS=--max-old-space-size=N` (Dockerfile), `SESSION_MAX_BYTES` (agent-runner), `KILL_137_MAX_CONSECUTIVE` and `KILL_137_COOLDOWN_MS` (host).
 
 ## Rate Limit Handling
 
@@ -42,13 +42,15 @@ Podman containers with memory caps, optional CPU limits. No network egress to ar
 
 ## MCP Preflight
 
+> **Status:** Not yet implemented. There is no active health check on MCP servers at startup. Claude SDK connects to servers and errors surface at first tool call. The description below is aspirational.
+
 Agent-runner runs a 5-second check on every remote MCP server at startup. Unreachable servers are dropped. Failure reports go to Engineering automatically.
 
 ## Media Download OOM Risk
 
 > **Status:** Known issue (see [#16](https://github.com/wawiesel/InfiniClaw/issues/16)).
 
-`downloadContent()` in `src/channels/matrix.ts` buffers the full file into memory before the 50 MB cap is applied. An adversarial homeserver can send large media repeatedly and spike RSS by hundreds of MB.
+The media download function buffers the full file into memory before the 50 MB cap is applied. An adversarial homeserver can send large media repeatedly and spike RSS by hundreds of MB.
 
 **Fix (pending):** Stream `Content-Length` pre-flight check, or streaming download with byte-count abort before buffering completes. Requires matrix-bot-sdk streaming API investigation.
 

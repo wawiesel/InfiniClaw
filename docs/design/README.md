@@ -27,8 +27,8 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 
 ## Resilience
 
-- `14-configuration.md` — CLAUDE.md layers (base/persona/room), MCP per-role config, startup checklist (aspirational — actual boot is a system resume message with active todos + last 5 messages)
-- `15-safety.md` — OOM handling, memory limits, rate limiting
+- `14-configuration.md` — CLAUDE.md layers (3 separate files, not concatenated: base at allow-list path, persona at `/workspace/persona/CLAUDE.md` rw, room at `/workspace/CLAUDE.md` ro), MCP per-role config, startup checklist (aspirational — actual boot is a system resume message with active todos + last 5 messages)
+- `15-safety.md` — OOM handling (`KILL_137_MAX_CONSECUTIVE`/`KILL_137_COOLDOWN_MS`, `SESSION_MAX_BYTES`), memory limits, rate limiting; MCP preflight aspirational
 - `16-autonomy.md` — Bot capabilities (rebuild, git push, peer verification), self-healing loop, holodeck
 - `21-cross-machine-health.md` — Cross-machine health protocol: 5-min beacon flush (vs 30-min full), `HealthReport` extensions (`relay_uptime_s`, `secrets_sync`, `git_sync`), staleness classification (LIVE/STALE/OFFLINE), fleet aggregation via S3 pull model, `check_health` scope param (`local`/`fleet`), Matrix alerting on machine status transitions. Status: **Implemented** (all 6 steps, `feat/wbs-relay` branch).
 
