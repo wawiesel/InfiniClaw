@@ -22,7 +22,7 @@ MCP: `wksm__wksm__wksm_search`
 
 **Indexes available:**
 - `main` — lexical BM25, 6163 docs, 55215 chunks. Best for exact names, file paths, specific terms.
-- `semantic` — sentence-transformers embeddings, ~135 high-priority docs (min_priority ≥ 10.0, .htmd excluded). Best for concept queries. Includes path-segment boost: if a query term matches a directory/filename segment, that doc scores higher.
+- `semantic` — sentence-transformers embeddings, ~344 chunks / 97 docs. Best for concept queries. Includes InfiniClaw bots, skills, design docs, solutions. Path-segment boost: query terms matching directory/filename segments get higher scores.
 - `images_semantic` — CLIP embeddings, 283 images.
 
 Use `--index semantic` for meaning-based queries. Use default (`main`) for exact-term lookups.
@@ -89,6 +89,17 @@ To add the semantic index on a new machine, add under `index.indexes` in `~/.wks
   "embedding_mode": "text",
   "image_text_weight": null
 }
+```
+
+Then backfill the key InfiniClaw content (the daemon auto-indexes new files but doesn't backfill existing ones):
+```bash
+# Populate semantic index with bot personas, skills, and design docs
+find ~/2026-Nanoclaw/InfiniClaw/bots ~/2026-Nanoclaw/InfiniClaw/docs \
+     ~/2026-Nanoclaw/CLAUDE.md ~/.claude/CLAUDE.md -name "*.md" | \
+while read f; do wksc index add semantic "$f"; done
+
+# Build embeddings
+wksc index embed semantic
 ```
 
 ## Excluding generated artifacts
