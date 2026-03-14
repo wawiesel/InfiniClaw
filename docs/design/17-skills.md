@@ -11,12 +11,13 @@ bots/skills/
   web-recon/SKILL.md
   ...
 bots/{role}/skills.json          # lists which skills this role loads
-bots/{role}/{bot}/skills/        # per-bot custom skills (writable)
 ```
+
+> **Status:** Per-bot custom skills directory (`bots/{role}/{bot}/skills/`) is not yet implemented. Bots can write skill files directly to the session's `.claude/skills/` directory at runtime, but these are not tracked in the repo.
 
 ## Loading
 
-Skills are listed in each role's `skills.json`. At container spawn, the listed `SKILL.md` files are injected into the bot's context. Bots can also have persona-level skills in their writable directory.
+Skills are listed in each role's `skills.json`. At container spawn, the listed skill directories are symlinked into the bot's session `.claude/skills/` directory, which Claude Code reads automatically. Pool-level skills use symlinks so edits to the pool propagate immediately.
 
 ## Skill File Format
 
@@ -64,10 +65,10 @@ Bots with write access to their persona directory can create new skills by writi
 ## Verification
 
 1. **Skills loaded** — Bot starts with skills from its role's `skills.json`.
-   *Check:* Startup checklist shows skills table with all expected skills.
+   *Check:* Session `.claude/skills/` contains symlinks for all skills in the role's list.
 
 2. **Skill affects behavior** — Bot has `github-development` skill and receives a PR task.
    *Check:* Bot follows the branch naming, commit, and PR workflow from the skill.
 
-3. **Custom skill** — Bot writes a new skill to its persona skills directory.
-   *Check:* On next restart, the new skill appears in the startup checklist.
+3. **Runtime skill creation** — Bot writes a new `SKILL.md` into the session `.claude/skills/` directory.
+   *Check:* Claude Code picks up the new skill without a container restart.
