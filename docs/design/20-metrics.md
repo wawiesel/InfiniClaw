@@ -29,7 +29,7 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 | Metric | Formula | Good | Alarm | Status |
 |--------|---------|------|-------|--------|
 | **Messages/day** | Bot replies sent per day | > 5/day | 0/day (silent bot) | ✅ Tracked |
-| **Token throughput** | (input + output tokens) / day | Increasing | Sudden drop | 🔲 Planned |
+| **Token throughput** | (input + output tokens) / day | Increasing | Sudden drop | ✅ Tracked |
 | **Score** | Net reaction points/day: 👍=+1, 💯=+3, 👎=−1, ❌=−3 | > 0 | < −2/day | ✅ Tracked |
 | **Task completion** | Todos resolved / todos created per day | > 80% | < 50% | 🔲 Planned |
 | **Branch brain success** | % of branch brain sessions with output (not error/timeout) | > 80% | < 50% | ✅ Tracked |
@@ -47,7 +47,7 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 | Metric | Formula | Good | Alarm | Status |
 |--------|---------|------|-------|--------|
 | **Relay uptime %** | % of last 24h relay was running (approx: current uptime / 86400s) | 100% (1d) | < 90% | ✅ Tracked (approx) |
-| **Response latency** | p50/p95 time from Captain mention to first bot reply | < 30s p50 | > 2min p95 | 🔲 Planned |
+| **Response latency** | p50/p95 time from Captain mention to first bot reply | < 30s p50 | > 2min p95 | ✅ Tracked |
 | **Crashes/day** | PM2 restart count per day | 0 | > 2/day | ✅ Tracked |
 | **OOM kills/day** | Container killed by memory limit per day | 0 | Any | ✅ Tracked |
 | **SIGKILL/day** | Forced process termination per day | 0 | > 0 | ✅ Tracked |
@@ -67,7 +67,7 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 |--------|---------|------|-------|--------|
 | **Interventions/day** | `@operator` messages outside BehindTheCurtain | 0 | > 3/day | ✅ Tracked |
 | **Autonomy score** | 100 − (interventions × 10) − (crashes × 5), clamped 0–100 | 100 | < 50 | ✅ Tracked |
-| **MTBI** | Mean time between interventions | Increasing | < 1h | 🔲 Planned |
+| **MTBI** | Mean time between interventions | Increasing | < 1h | ✅ Tracked |
 | **Self-recovery rate** | Crashes resolved without operator action / total crashes | 100% | < 80% | 🔲 Planned |
 
 **Interventions/day** is the single most important metric. Each one means the fleet couldn't handle something on its own. Target is zero. An intervention-free day means the fleet ran itself.
@@ -122,37 +122,22 @@ Operator · interventions 0/day (1d) · x-cmds 2/day (1d)
 
 ## Planned Metrics (Not Yet Implemented)
 
-> **Status:** The metrics below are designed and specified but not yet implemented. They require additional data collection in the relay or bot runtime.
-
-### Token Throughput
-
-Track `(input_tokens + output_tokens)` per bot per day from session JSONL files. Collected by the health check script reading Claude Code session files. Published alongside RSS in the S3 health report.
-
-- **> 50K tokens/day** = active bot
-- **< 5K tokens/day** = idle or broken
-- **Sudden drop** = bot may be stuck or sleeping unexpectedly
-
-### Response Latency
-
-The relay records a timestamp when a Captain message enters a bot's context (👀 reaction), and another when the bot's reply is sent (🔔 reaction). Delta = response latency.
-
-- **p50 < 30s** = normal for a working bot
-- **p95 > 2min** = bot is struggling (large context, slow model, stuck)
-- Display as `lat 12s p50 · 45s p95 (1d)` per bot in `!metrics`
+> **Status:** Only the metrics below marked 🔲 are still unimplemented. Token throughput, response latency, and MTBI were previously planned but are now tracked (✅ above).
 
 ### Task Completion Rate
+
+> **Status:** Not yet implemented.
 
 Read Claude Code todos JSON from `_runtime/instances/{bot}/data/sessions/main/.claude/todos/`. Track resolved vs created counts per day.
 
 - **> 80%** = bot is finishing what it starts
 - **< 50%** = bot is accumulating work debt or not prioritizing
 
-### Mean Time Between Interventions (MTBI)
+### Self-Recovery Rate
 
-Timestamp each intervention event. Compute average gap between consecutive interventions in the 7d window.
+> **Status:** Not yet implemented.
 
-- **> 24h** = fleet is largely autonomous
-- **< 1h** = operator is fire-fighting
+Fraction of crashes resolved without operator action. Requires correlating crash events with post-crash recovery sequences (no subsequent `@operator` mention in the same 30-minute window).
 
 ---
 
