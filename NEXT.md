@@ -121,8 +121,16 @@ Pooled capability modules per role. Not yet implemented. Big feature.
 **Design:** `17-skills.md`.
 **Who:** Architect (Albert when HERACLES active) + engineers.
 
-### 14. Cross-machine health — implement doc 21
-Design complete (`docs/design/21-cross-machine-health.md`, committed 2026-03-14). Adds 5-min beacon flush, sync status fields (`secrets_sync`, `git_sync`), staleness classification (LIVE/STALE/OFFLINE), fleet aggregation pull model, `check_health scope=fleet`, and Matrix alerts on machine transitions.
+### 14. Cross-machine health — steps 4+6 remain (partially ✅)
+Branch Brain (2026-03-14 ~19:30) implemented steps 1–5:
+- `SyncStatus` interface + `HealthReport` beacon fields (`relay_uptime_s`, `secrets_sync`, `git_sync`)
+- `recordSyncOk`/`recordSyncErr` wired into gitSyncLoop and secretsSyncLoop
+- `enrichBeaconFields()` enriches every S3 health upload
+- `beaconFlushLoop()` re-uploads every 5 min (BEACON_INTERVAL envvar)
+
+**Remaining (Parker or Cid):**
+- Step 4: staleness classification in `fetchAllHealthReports()` (LIVE/STALE/OFFLINE thresholds)
+- Step 6: `check_health` MCP tool gains optional `scope=fleet` param in agent-runner
 **Design:** `21-cross-machine-health.md`.
 **Who:** Parker or Cid.
 
