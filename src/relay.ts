@@ -1636,6 +1636,8 @@ async function spawnBranchBrain(
   if (botEnv?.ANTHROPIC_BASE_URL) childEnv['ANTHROPIC_BASE_URL'] = botEnv.ANTHROPIC_BASE_URL;
   if (botEnv?.ANTHROPIC_AUTH_TOKEN) childEnv['ANTHROPIC_AUTH_TOKEN'] = botEnv.ANTHROPIC_AUTH_TOKEN;
   if (botEnv?.NODE_EXTRA_CA_CERTS) childEnv['NODE_EXTRA_CA_CERTS'] = botEnv.NODE_EXTRA_CA_CERTS;
+  const brainModel = botEnv?.ANTHROPIC_MODEL || botEnv?.BRAIN_MODEL;
+  if (brainModel) childEnv['ANTHROPIC_MODEL'] = brainModel;
   // Prevent nested Claude Code rejection
   delete childEnv['CLAUDECODE'];
   // Use fleet GitHub bot for PR reviews so comments appear as the bot, not the Captain
