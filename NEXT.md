@@ -2,7 +2,7 @@
 
 Prioritized by Captain value. Top items are most urgent / highest signal. Bots: check this list, pick the top unblocked item, and work on it. Operator: review and reprioritize as the fleet evolves.
 
-Last curated: 2026-03-14 19:50 (Branch Brain monitor — doc #13 PR open; 6 doc PRs pending merge)
+Last curated: 2026-03-14 15:57 (Branch Brain monitor — doc #14 PR open; 7 doc PRs pending merge)
 
 ---
 
@@ -31,7 +31,7 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 **Alternative:** bring up HERACLES machine (where Cid lives) and run `!wake cid` from there.
 **Who:** Operator. 🔑
 
-### 1. Design doc review cycle — six PRs open, all need merge
+### 1. Design doc review cycle — seven PRs open, all need merge
 - **docs #7+#8:** Branch `docs/fix-07-ipc-08-threading-accuracy`. All 181 tests pass.
 - **doc #9:** Branch `docs/fix-09-roles-and-rooms-accuracy`. All 181 tests pass.
 - **doc #10:** Branch `docs/fix-10-fleet-accuracy`. All 181 tests pass.
@@ -40,10 +40,12 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 - **doc #12:** Branch `docs/fix-12-co-accuracy` (pushed 2026-03-14 ~19:45). 199 tests pass.
   - WBS status block updated: relay integration is implemented (startup inject, reabsorb, heartbeat auto-assign, wbs_complete); Chief content management still pending
 - **doc #13:** Branch `docs/fix-13-intercom-accuracy` (pushed 2026-03-14 ~19:50). 199 tests pass.
-  - `@` callout corrected to Captain-only (not Captain/operator); `@loudspeaker` alone → fleet status documented
-- **Next doc:** #14 (14-configuration.md) — Parker to continue.
+  - `@` callout corrected to Captain-only; `@loudspeaker` alone → fleet status; operator uses `@operator` not intercom; reply format `[emoji pip Ship]`
+- **doc #14:** Branch `docs/fix-14-configuration-accuracy` (pushed 2026-03-14 ~15:57). 199 tests pass.
+  - Startup checklist marked aspirational — actual boot is `injectResumeMessage()` (active todos + last 5 messages), not Skills/MCP/Ship Health tables
+- **Next doc:** #15 (15-safety.md) — Parker to continue.
 
-**Who:** Operator to merge PRs. Parker to continue with doc #14 (14-configuration.md).
+**Who:** Operator to merge PRs. Parker to continue with doc #15 (15-safety.md).
 **PRs:**
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-07-ipc-08-threading-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-09-roles-and-rooms-accuracy
@@ -51,6 +53,7 @@ Operator ran `!wake cid` in Engineering at 17:04 and 18:03 UTC today — both si
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-11-commands-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-12-co-accuracy
 - https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-13-intercom-accuracy
+- https://github.com/wawiesel/InfiniClaw/pull/new/docs/fix-14-configuration-accuracy
 
 ---
 
