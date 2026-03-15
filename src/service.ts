@@ -283,12 +283,15 @@ export function deployBot(root: string, bot: string): void {
   if (!fs.existsSync(path.join(instance, 'node_modules')) || !filesEqual(lockSrc, lockDst)) {
     console.log(`${bot}: installing dependencies...`);
     execSync('npm ci', { cwd: instance, stdio: 'inherit', timeout: 300_000 });
-    try { fs.copyFileSync(path.join(instance, 'package-lock.json'), lockDst); } catch { /* ok */ }
   }
 
   // Build TypeScript
   console.log(`${bot}: building...`);
   execSync('npm run build', { cwd: instance, stdio: 'inherit', timeout: 120_000 });
+  // Write sentinel AFTER build — npm install --ignore-scripts in the build script overwrites
+  // node_modules/.package-lock.json, so writing it before the build causes npm ci to re-run
+  // on every restart (#83).
+  try { fs.copyFileSync(path.join(instance, 'package-lock.json'), lockDst); } catch { /* ok */ }
 
   // Pre-register room: quarters room when status is 'quarters', duty room otherwise
   const profileEnv = loadProfileEnv(root, bot);
