@@ -1910,16 +1910,8 @@ async function spawnBranchBrain(
           result?: string;
           message?: { content?: Array<{ type: string; text?: string }> };
         };
-        if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
-          const text = event.message.content
-            .filter(b => b.type === 'text')
-            .map(b => b.text ?? '')
-            .join('');
-          if (text.trim()) {
-            postedCount++;
-            threadReply(conn, replyThreadId, text.trim()).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
-          }
-        } else if (event.type === 'result' && typeof event.result === 'string' && event.result.trim() && postedCount === 0) {
+        // Only post the final result — suppress intermediate assistant steps (#95)
+        if (event.type === 'result' && typeof event.result === 'string' && event.result.trim()) {
           postedCount++;
           threadReply(conn, replyThreadId, event.result.trim()).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
         }
