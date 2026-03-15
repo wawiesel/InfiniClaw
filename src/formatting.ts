@@ -153,11 +153,12 @@ export interface UnifiedBotDisplayParams {
   name: string;          // e.g. "cid"
   shipEmoji: string;     // e.g. "🦁"
   shipName: string;      // e.g. "Herc"
-  locationEmoji: string; // e.g. "⚙️"
-  locationShort: string; // e.g. "Eng"
-  locationFull: string;  // e.g. "Engineering"
+  locationEmoji: string; // e.g. "⚙️" or "🏠" for quarters
+  locationShort: string; // e.g. "Eng" or "Qtr"
+  locationFull: string;  // e.g. "Engineering" or "Quarters"
   health: string;        // "A" | "B" | "C" | "F" | ""
   activity: string;      // "active" | "" — empty means idle
+  status: string;        // "onduty" | "quarters" | "sleep" | "transit" | etc.
   role: string;          // e.g. "engineer"
   rank: number;          // 1, 2, 3+
   isChief: boolean;      // true if CO (lowest-rank awake in role)
@@ -169,10 +170,21 @@ export interface UnifiedBotDisplayParams {
  *  - medium: emoji+abbreviated text — for !fleet / !metrics
  *  - long:   emoji+full text+[label] — for debug/verbose output
  */
+/** Status-aware health emoji: sleep→💤, building→🔄, starting→🚀, else grade emoji. */
+function statusHealthEmoji(status: string, health: string): string {
+  if (status === 'sleep' || status === 'dream') return '💤';
+  if (status === 'building') return '🔄';
+  if (status === 'starting') return '🚀';
+  if (status === 'waiting') return '🟡';
+  return GRADE_EMOJI[health] ?? '';
+}
+
 export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosity): string {
   const medal = rankMedal(p.rank, p.isChief);
   const roleIcon = ROLE_ICONS[p.role] ?? '';
-  const healthEmoji = GRADE_EMOJI[p.health] ?? '';
+  const healthEmoji = statusHealthEmoji(p.status, p.health);
+  // Sleeping/inactive bots have no activity regardless of input
+  const isActive = p.activity && p.status !== 'sleep' && p.status !== 'dream' && p.status !== 'transit';
 
   let ship: string, loc: string, health: string, act: string, role: string, rank: string;
 
@@ -181,23 +193,23 @@ export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosi
       ship = p.shipEmoji;
       loc = p.locationEmoji;
       health = healthEmoji;
-      act = p.activity ? '🔥' : '';
+      act = isActive ? '🔥' : '';
       role = roleIcon;
       rank = medal;
       break;
     case 'medium':
       ship = `${p.shipEmoji}${p.shipName}`;
       loc = `${p.locationEmoji}${p.locationShort}`;
-      health = `${healthEmoji}${p.health}`;
-      act = p.activity ? `🔥${p.activity}` : '';
+      health = p.status === 'sleep' || p.status === 'dream' ? '💤' : `${healthEmoji}${p.health}`;
+      act = isActive ? `🔥${p.activity}` : '';
       role = `${roleIcon}${p.role.slice(0, 3)}`;
       rank = `${medal}${p.rank}`;
       break;
     case 'long':
       ship = `${p.shipEmoji}${p.shipName}[ship]`;
       loc = `${p.locationEmoji}${p.locationFull}[loc]`;
-      health = `${healthEmoji}${p.health}[health]`;
-      act = p.activity ? `🔥${p.activity}[activity]` : '';
+      health = p.status === 'sleep' || p.status === 'dream' ? '💤[health]' : `${healthEmoji}${p.health}[health]`;
+      act = isActive ? `🔥${p.activity}[activity]` : '';
       role = `${roleIcon}${p.role}[role]`;
       rank = `${medal}rank${p.rank}`;
       break;

@@ -94,6 +94,7 @@ const BASE: UnifiedBotDisplayParams = {
   locationFull: 'Engineering',
   health: 'A',
   activity: 'active',
+  status: 'onduty',
   role: 'engineer',
   rank: 1,
   isChief: false,
