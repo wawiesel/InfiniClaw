@@ -226,11 +226,9 @@ Certain `@` mentions trigger system-level behaviors handled by the relay, not by
 
 ### @operator
 
-Mentioning `@operator` requests operator assistance. The relay detects the mention and delivers the context to the operator's tmux session.
+Mentioning `@operator` requests operator assistance. Currently, only the Captain or operator can trigger tmux routing — by prefixing any message with `@` (e.g. `@some note`). Bots cannot use `<m>operator</m>` to trigger this; no relay scanning for that pattern exists yet.
 
-**Current behavior:** The relay scans outgoing bot messages for `@operator` mentions via the `<m>operator</m>` marker pattern. When detected, it sends the full message context (bot name, room, content) to the local operator tmux session. All ships with `operatorRelay: true` receive the notification simultaneously.
-
-> **Planned:** Ship-scoped routing — bots on HERACLES only wake the HERACLES operator; other ships log awareness silently to their BehindTheCurtain.
+> **Planned:** Bot-triggered operator routing — the relay will scan outgoing bot messages for `<m>operator</m>` and deliver the full message context (bot name, room, content) to the operator's tmux session, with ship-scoped routing so bots on HERACLES only wake the HERACLES operator.
 
 ### @loudspeaker
 
