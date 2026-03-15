@@ -1585,6 +1585,9 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             const engConn = findEngConn(conns);
             let restarted = 0;
             let threadRoot: string | undefined;
+            // Reload fleet from disk so status checks reflect transitions that happened
+            // while git sync was running (e.g. a bot going to sleep mid-cycle, #85).
+            try { liveFleet = loadFleet(); } catch { /* best effort — fall back to cached */ }
             for (const bot of getActiveBots()) {
               if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status)) continue;
               // Do NOT restart bots on duty — code changes apply during Dream phase after retrospective.
