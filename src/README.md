@@ -45,7 +45,7 @@ Host machine (macOS / Linux)
 ├── channels/
 │   └── matrix.ts       → Matrix SDK: connect, send, edit, react, sync, mention pills
 ├── infini-config.ts    → InfiniClaw-specific env config (removed from upstream)
-├── ship-config.ts      → Fleet/ship config, shared constants. `ROLE_ROOMS` is the single source of truth for role→duty room→icon (navigator/engineer/architect/normie). `ShipEntry` includes type/typeEmoji for ship classification. `shipTag()` returns emoji+pip+name (🦁🟢 Herc) with auto-derived or caller-supplied status pip. `findShipByHostname()` resolves hostname→ship entry.
+├── ship-config.ts      → Fleet/ship config, shared constants. `ROLE_ROOMS` is the single source of truth for role→duty room→icon (navigator/engineer/architect/normie). `ShipEntry` includes type/typeEmoji for ship classification. `shipTag()` returns emoji+pip+name (🦁🟢 Herc) with auto-derived or caller-supplied status pip. `findShipByHostname()` resolves hostname→ship entry. `isQuartersOnlyRole(role)` returns true when the role's `rw` list in fleet.json is absent or empty — used by `!report` to prevent normie-style bots from joining duty rooms (engineering/bridge/astrometrics).
 ├── allow-list.ts       → Validate mounts against host-side allowlist (~/.config/infiniclaw/allow-list.json)
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
 ├── ipc-commands.ts     → Handle refresh_bot, stop_bot, send_reaction, rebuild_image, git_push, etc.
