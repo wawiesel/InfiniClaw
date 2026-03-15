@@ -9,7 +9,7 @@ The operator runs directly on the host machine (not in a container) inside a tmu
 Starting from nothing. Three foundational services must exist before any bot can run:
 
 1. **Matrix server** — Conduwuit homeserver is running (see `docs/solutions/matrix.md`). This is the communication backbone.
-2. **S3 (MinIO)** — Object storage for metrics, fleet reports, health checks, speaker election, and error logs. Endpoint and credentials go in `fleet.json` under `s3`.
+2. **S3 (MinIO)** — Object storage for metrics, fleet reports, health checks, and error logs. Endpoint and credentials go in `fleet.json` under `s3`.
 3. **Secrets repo** — Operator initializes the secrets repo with `operator/`, `bots/fleet.json` (including S3 config), and credentials.
 
 With these three in place, the operator bootstraps the fleet:
@@ -37,7 +37,7 @@ Operator is admin (power 100) in every room. All room creation, invites, and pow
 The Captain communicates with operators via BehindTheCurtain. The relay watches this room and forwards messages to the operator's tmux session. BehindTheCurtain is the one room where operator conversation is expected and normal — the Captain checks in, asks about bot performance, and gives direction.
 
 **Routing:**
-- **Default**: All ships with `operatorRelay: true` in `ships.json` receive Captain messages in BehindTheCurtain. Each operator's relay forwards the message to the local tmux session. There is no speaker gate — all enabled operators see every message simultaneously.
+- **Default**: All ships with `operatorRelay: true` in `ships.json` receive Captain messages in BehindTheCurtain. Each operator's relay forwards the message to the local tmux session. There is no speaker gate on message forwarding — all enabled operators see every message simultaneously. However, untargeted x-commands from BehindTheCurtain are only executed by the speaker ship (lowest-rank commissioned) to prevent duplicate responses.
 - **Direct**: Captain can also send x-commands from any room the operator account has joined — BehindTheCurtain, duty rooms, quarters rooms.
 - **@ prefix**: Captain can send `@ <text>` from any room the relay watches. The relay strips the `@` and pipes the message to the operator tmux session on all ships with operatorRelay enabled.
 - **Silence**: `!operator off [ship]` disables forwarding on a ship. `!operator on [ship]` re-enables it.
@@ -78,6 +78,8 @@ The operator switches between three modes depending on the situation. Each mode 
 
 Watch Mode is the receiver state — the operator's default posture. Captain and Fix are active modes entered when needed. In practice, operators start in Watch, escalate to Fix when problems arise, and enter Captain Mode when the Captain directs a coordinated effort.
 
+> **Status:** Mode icons are not yet implemented. The operator message prefix currently uses a fixed format (`[emoji ShipName]`) without a mode icon. Mode tracking and icon switching are not built into the relay or the `operator/matrix` helper script.
+
 ## Intervention
 
 Every operator message outside BehindTheCurtain is an intervention — a sign that the system couldn't handle something on its own. The frequency of these interventions is a direct measure of fleet autonomy. A mature fleet means a quiet operator.
@@ -101,6 +103,8 @@ Every operator message outside BehindTheCurtain is an intervention — a sign th
 See [20-metrics.md](20-metrics.md) for complete definitions, targets, and alarm thresholds for all metrics.
 
 **Interventions** is the primary operator metric — `@operator` messages sent outside BehindTheCurtain per day. Target is 0. A day with zero interventions means the fleet ran autonomously. X-commands (`!fleet`, `!metrics`, `!wake`) are management queries, not interventions, and are tracked separately.
+
+**Autonomy score** — composite metric: `100 − (interventions × 10) − (crashes × 5)`, computed over 1d and 7d rolling windows. **MTBI** (mean time between interventions) is also tracked over the 7d window.
 
 **Storage:** Metrics are computed by each ship's relay and published to S3 (`metrics/<ship>.json`). The speaker aggregates all ships for fleet-wide totals.
 
