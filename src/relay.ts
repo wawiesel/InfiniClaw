@@ -8,6 +8,7 @@
  * Run: node dist/relay.js
  */
 import { execFileSync, execSync, spawn, spawnSync } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -1380,14 +1381,17 @@ function hasRelayChanges(root: string, commitCount: number): boolean {
   }
 }
 
-/** Compute a fast hash of a directory's file contents for change detection. */
+/** Compute a fast hash of a directory's file contents for change detection. Cross-platform. */
 function hashDir(dir: string): string {
   try {
-    // Use find + md5 to hash all files — fast enough for dist/ (~200 files)
-    return execSync(
-      `find "${dir}" -type f -print0 | sort -z | xargs -0 md5 -q 2>/dev/null | md5 -q`,
-      { encoding: 'utf-8', timeout: 15_000, stdio: 'pipe' },
-    ).trim();
+    const files = execSync('find . -type f', { cwd: dir, encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' })
+      .trim().split('\n').filter(Boolean).sort();
+    const hash = crypto.createHash('sha256');
+    for (const file of files) {
+      hash.update(file);
+      hash.update(fs.readFileSync(path.join(dir, file)));
+    }
+    return hash.digest('hex');
   } catch {
     return ''; // empty = assume changed
   }
