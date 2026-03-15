@@ -1,8 +1,10 @@
 # 15 — Safety and Security
 
-## OOM Handling
+## Exit-137 (SIGKILL) Backoff
 
-When a container exits with OOM (code 137), the system tracks consecutive OOMs per room. After 3 consecutive OOMs, a 60-second cooldown is enforced before the next container spawn. This prevents runaway token burn from restart loops.
+When a container exits with code 137 (SIGKILL — which includes OOM kills, external kills, and timeout kills), the system tracks consecutive exit-137 events per room. After `KILL_137_MAX_CONSECUTIVE` (default 3) consecutive exits, a `KILL_137_COOLDOWN_MS` (default 60s) cooldown is enforced before the next container spawn. This prevents runaway token burn from restart loops.
+
+The system cannot distinguish OOM from other SIGKILL causes (host kill, timeout kill), so all exit-137 events are treated equally.
 
 ### Memory Architecture
 
@@ -18,53 +20,57 @@ Three limits must be coordinated:
 
 ### Prevention Layers
 
-1. **Session file size cap** — `SESSION_MAX_BYTES` (2MB) in agent-runner. Sessions exceeding this rotate to a fresh session with a summary carried forward.
+1. **Session file size cap** — `SESSION_MAX_BYTES` (2MB) in agent-runner. Sessions exceeding this rotate to a fresh session with a system note prepended (no summary extraction — the bot is told the previous session was rotated and should check MEMORY.md for context).
 2. **V8 heap limit** — set in each bot's Dockerfile via `NODE_OPTIONS`. Must be large enough to deserialize a worst-case session but smaller than the container limit.
-3. **Host-side OOM handling** — on exit 137, the host clears the session from memory and database (no toxic session loop), tracks consecutive OOMs, enforces cooldown.
+3. **Host-side exit-137 handling** — on exit 137, the host tracks consecutive kills per room via `kill137Consecutive` and enforces cooldown via `kill137CooldownUntil`. The session is cleared from memory (no toxic session loop).
 4. **Session recovery skill** — bots extract memories from old session files using a Python script (avoids loading large JSONL into the main brain).
-5. **Context compaction** — during a running session, a `PreCompact` hook archives the full transcript to `conversations/` before Claude Code compresses context.
+5. **Host memory watchdog** — the host process monitors its own RSS via `setInterval` and logs warnings when memory usage is high.
 
 **Root cause: session resume.** Claude Code sessions are JSONL files. On resume, the SDK deserializes the entire file — 2-5x the file size in memory due to JavaScript object overhead. A 1.1MB session was enough to OOM a 4GB V8 heap.
 
-**Key settings:** `CONTAINER_MEMORY_MB` (bot env), `NODE_OPTIONS=--max-old-space-size=N` (Dockerfile), `SESSION_MAX_BYTES` (agent-runner), `OOM_MAX_CONSECUTIVE` and `OOM_COOLDOWN_MS` (src/main.ts).
+**Key settings:** `CONTAINER_MEMORY_MB` (bot env), `NODE_OPTIONS=--max-old-space-size=N` (Dockerfile), `SESSION_MAX_BYTES` (agent-runner), `KILL_137_MAX_CONSECUTIVE` and `KILL_137_COOLDOWN_MS` (host main process).
 
-## Rate Limit Handling
+## Message Size Handling
 
-Matrix 429 errors trigger adaptive backoff in the send queue. Messages that exceed Matrix size limits (`M_TOO_LARGE`) are automatically truncated rather than failing.
+Messages that exceed Matrix size limits (`M_TOO_LARGE`) are automatically truncated to 16KB and retried. The private homeserver (Conduwuit) does not enforce rate limits, so no 429 backoff is needed.
 
 ## Container Isolation
 
-Podman containers with memory caps, optional CPU limits. No network egress to arbitrary hosts.
+Podman containers with memory caps, optional CPU limits. Network access is provided via `slirp4netns` (user-mode networking) — containers can reach external APIs (Anthropic, GitHub) but cannot access the host network directly.
 
 ## One Container Per Bot
 
-`group-queue.ts` enforces this. Stale containers from crashes are cleaned up before spawning. Concurrency is handled internally via branch brains.
+The container spawn logic enforces this. Before each spawn, stale containers for the same bot/group are killed. On relay startup, orphaned containers from previous runs are cleaned up. Concurrency is handled internally via branch brains.
 
-## MCP Preflight
+## MCP Connection
 
-Agent-runner runs a 5-second check on every remote MCP server at startup. Unreachable servers are dropped. Failure reports go to Engineering automatically.
+Agent-runner writes MCP server config to both `~/.claude/settings.json` (global) and `.mcp.json` (project-level) before launching Claude Code. Claude Code connects to MCP servers natively at startup. If a server is unreachable, Claude Code drops it and continues.
 
-## Media Download OOM Risk
+## Media Download Safety
 
-> **Status:** Known issue (see [#16](https://github.com/wawiesel/InfiniClaw/issues/16)).
+The media download handler implements two layers of protection against oversized media:
 
-`downloadContent()` in `src/channels/matrix.ts` buffers the full file into memory before the 50 MB cap is applied. An adversarial homeserver can send large media repeatedly and spike RSS by hundreds of MB.
+1. **Content-Length pre-check** — if the server provides a `Content-Length` header exceeding `MEDIA_MAX_BYTES`, the response body is cancelled before any data is read.
+2. **Streaming byte-count abort** — the response body is streamed directly to disk via `getReader()`. A running `bytesWritten` counter aborts the stream and deletes the partial file if the limit is exceeded mid-download.
 
-**Fix (pending):** Stream `Content-Length` pre-flight check, or streaming download with byte-count abort before buffering completes. Requires matrix-bot-sdk streaming API investigation.
+This prevents unbounded memory buffering from adversarial or large media.
 
 ## Verification
 
-1. **OOM recovery** — Simulate an OOM (kill container with code 137).
-   *Check:* Host clears toxic session, tracks OOM count, bot restarts cleanly.
+1. **Exit-137 recovery** — Simulate a SIGKILL (kill container with code 137).
+   *Check:* Host tracks kill count, bot restarts cleanly.
 
-2. **Cooldown enforced** — Trigger 3 consecutive OOMs.
+2. **Cooldown enforced** — Trigger 3 consecutive exit-137 events.
    *Check:* 60-second cooldown applied before next spawn attempt.
 
 3. **Session rotation** — Session file exceeds 2MB.
-   *Check:* New session created with summary, old session archived.
+   *Check:* New session created with system note, old session left on disk.
 
-4. **Rate limit backoff** — Matrix returns 429.
-   *Check:* Send queue backs off, retries after delay.
+4. **Message truncation** — Send a message exceeding Matrix size limit.
+   *Check:* Message truncated to 16KB, retry succeeds.
 
-5. **MCP preflight** — Start bot with an unreachable MCP server.
-   *Check:* Server dropped within 5 seconds, failure reported to Engineering.
+5. **MCP connection** — Start bot with an unreachable MCP server in mcp.json.
+   *Check:* Claude Code drops the server at startup, bot continues without it.
+
+6. **Media download limit** — Upload a file exceeding MEDIA_MAX_BYTES.
+   *Check:* Download aborted, partial file cleaned up, bot not affected.
