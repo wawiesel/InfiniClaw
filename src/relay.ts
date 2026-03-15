@@ -41,7 +41,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, rankMedal, shipHeaderLine, botTreeLine, unifiedBotDisplay } from './formatting.js';
+import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, rankMedal, shipHeaderLine, unifiedShipDisplay, botTreeLine, unifiedBotDisplay } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -1030,7 +1030,7 @@ type FleetReport = {
   ship: string;
   ts: number;
   relayVersion: string;
-  bots: Record<string, { name: string; badge: string; role: string; rank: number; status: string; gitVersion: string; grade?: string; activity?: string }>;
+  bots: Record<string, { name: string; badge: string; role: string; rank: number; status: string; gitVersion: string; grade?: string; activity?: string; tokPerDay?: number }>;
 };
 
 /** Build and publish this ship's fleet report to S3. Returns the report. */
@@ -1077,6 +1077,7 @@ async function publishFleetReport(): Promise<FleetReport> {
       gitVersion: botVersion(root, botId),
       grade,
       activity: activityIcon(tokPerDay),
+      tokPerDay: tokPerDay > 0 ? tokPerDay : 0,
     };
     if ((RUNNING_STATUSES as readonly string[]).includes(entry.status) && !running) {
       botReports[botId].status = 'warn';
@@ -3236,7 +3237,7 @@ function registerRelayCommands(): void {
         const allReports: Record<string, FleetReport> = { ...staleReports, ...freshReports };
 
         // Assemble output
-        const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; localStatus: string; grade?: string; activity?: string }> = {};
+        const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; localStatus: string; grade?: string; activity?: string; tokPerDay?: number }> = {};
         for (const [botId, entry] of Object.entries(liveFleet)) {
           allBots[botId] = { ...entry, name: capitalizeName(botId), gitVersion: '', localStatus: entry.status };
         }
@@ -3248,6 +3249,7 @@ function registerRelayCommands(): void {
               allBots[botId].localStatus = botData.status;
               allBots[botId].grade = botData.grade;
               allBots[botId].activity = botData.activity;
+              allBots[botId].tokPerDay = botData.tokPerDay;
             }
           }
         }
@@ -3280,17 +3282,37 @@ function registerRelayCommands(): void {
           const sConfig = ships[shipName];
           const shipReport = allReports[shipName];
 
+          const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
+
           if (shipName === 'drydock') {
             lines.push('🔧 drydock');
           } else {
-            const rank = sConfig?.rank ?? '?';
+            const rank = sConfig?.rank ?? 99;
             const commissioned = sConfig?.commissioned !== false;
             const isThisShipSpeaker = commissioned && isSpeakerCached && sConfig?.rank != null &&
               Object.values(ships).filter(s => s.commissioned).every(s => (s.rank ?? 99) >= (sConfig?.rank ?? 99));
-            lines.push(shipHeaderLine(sConfig?.emoji ?? '', shipName, rank, commissioned, isThisShipSpeaker));
+            // Aggregate ship health (worst grade) and throughput (sum)
+            const gradeOrder = ['A', 'B', 'C', 'F'];
+            let worstGrade = 'A';
+            let shipTok = 0;
+            for (const [, entry] of bots) {
+              if (entry.grade && gradeOrder.indexOf(entry.grade) > gradeOrder.indexOf(worstGrade)) {
+                worstGrade = entry.grade;
+              }
+              shipTok += entry.tokPerDay ?? 0;
+            }
+            lines.push(unifiedShipDisplay({
+              name: shipName,
+              emoji: sConfig?.emoji ?? '',
+              typeEmoji: sConfig?.typeEmoji ?? '',
+              type: sConfig?.type ?? '',
+              rank,
+              isSpeaker: isThisShipSpeaker,
+              commissioned,
+              health: worstGrade,
+              tokPerDay: shipTok,
+            }, 'long'));
           }
-
-          const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
 
           // Build flat list for CO detection
           const allBotList = Object.values(allBots).map(e => ({ role: e.role, rank: e.rank, status: e.localStatus }));
@@ -3302,25 +3324,17 @@ function registerRelayCommands(): void {
             // Location: onduty → duty room, everything else → quarters
             const isOnDuty = entry.localStatus === 'onduty';
             const locEmoji = isOnDuty ? (roleRoom?.icon ?? '') : '🏠';
-            const locShort = isOnDuty ? capitalizeName((roleRoom?.room ?? '').slice(0, 3)) : 'Qtr';
-            const locFull = isOnDuty ? (roleRoom?.room ?? '') : 'Quarters';
-            // Activity: map emoji icons to word for unifiedBotDisplay
-            // activityIcon returns: · (idle), 🔹 (moderate), ⚡ (active), 🔥 (high)
-            const actWord = entry.activity && entry.activity !== '·' ? 'active' : '';
             lines.push(unifiedBotDisplay({
               name: entry.name,
               shipEmoji: sConfig?.emoji ?? '',
-              shipName: capitalizeName(shipName),
               locationEmoji: locEmoji,
-              locationShort: locShort,
-              locationFull: locFull,
               health: entry.grade ?? '',
-              activity: actWord,
+              tokPerDay: entry.tokPerDay ?? 0,
               status: entry.localStatus,
               role,
               rank: entry.rank,
               isChief: co,
-            }, 'medium'));
+            }, 'long'));
           }
         }
 

@@ -4,7 +4,9 @@ import {
   botBadge,
   botTreeLine,
   unifiedBotDisplay,
+  unifiedShipDisplay,
   type UnifiedBotDisplayParams,
+  type UnifiedShipDisplayParams,
 } from '../formatting.js';
 
 // ── rankMedal ──────────────────────────────────────────────────────
@@ -88,12 +90,9 @@ describe('botTreeLine', () => {
 const BASE: UnifiedBotDisplayParams = {
   name: 'cid',
   shipEmoji: '🦁',
-  shipName: 'Herc',
   locationEmoji: '⚙️',
-  locationShort: 'Eng',
-  locationFull: 'Engineering',
   health: 'A',
-  activity: 'active',
+  tokPerDay: 500_000,
   status: 'onduty',
   role: 'engineer',
   rank: 1,
@@ -101,29 +100,13 @@ const BASE: UnifiedBotDisplayParams = {
 };
 
 describe('unifiedBotDisplay — short', () => {
-  it('contains ship emoji only (no name)', () => {
+  it('format: prefix Name roleIcon+medal+health+activity', () => {
     const out = unifiedBotDisplay(BASE, 'short');
-    expect(out).toContain('🦁');
-    expect(out).not.toContain('Herc');
+    expect(out).toBe('🦁⚙️ Cid ⚙️🥇🟢🔥');
   });
 
-  it('contains role icon and rank medal', () => {
-    const out = unifiedBotDisplay(BASE, 'short');
-    expect(out).toContain('🥇');
-  });
-
-  it('contains health emoji', () => {
-    const out = unifiedBotDisplay(BASE, 'short');
-    expect(out).toContain('🟢');
-  });
-
-  it('contains activity fire when active', () => {
-    const out = unifiedBotDisplay(BASE, 'short');
-    expect(out).toContain('🔥');
-  });
-
-  it('no fire when idle', () => {
-    const out = unifiedBotDisplay({ ...BASE, activity: '' }, 'short');
+  it('no activity emoji when idle', () => {
+    const out = unifiedBotDisplay({ ...BASE, tokPerDay: 0 }, 'short');
     expect(out).not.toContain('🔥');
   });
 
@@ -133,77 +116,135 @@ describe('unifiedBotDisplay — short', () => {
     expect(out).not.toContain('🥇');
   });
 
-  it('name is capitalized', () => {
-    const out = unifiedBotDisplay(BASE, 'short');
-    expect(out).toContain('Cid');
-  });
-});
-
-describe('unifiedBotDisplay — medium', () => {
-  it('contains ship emoji+name', () => {
-    const out = unifiedBotDisplay(BASE, 'medium');
-    expect(out).toContain('🦁Herc');
+  it('sleep bot shows 💤 health, no activity', () => {
+    const out = unifiedBotDisplay({ ...BASE, status: 'sleep', tokPerDay: 100_000 }, 'short');
+    expect(out).toContain('💤');
+    expect(out).not.toContain('🔥');
+    expect(out).not.toContain('⚡');
   });
 
-  it('contains location emoji+short name', () => {
-    const out = unifiedBotDisplay(BASE, 'medium');
-    expect(out).toContain('⚙️Eng');
+  it('moderate activity shows ⚡', () => {
+    const out = unifiedBotDisplay({ ...BASE, tokPerDay: 100_000 }, 'short');
+    expect(out).toContain('⚡');
   });
 
-  it('contains health emoji+grade letter', () => {
-    const out = unifiedBotDisplay(BASE, 'medium');
-    expect(out).toContain('🟢A');
-  });
-
-  it('contains activity with text', () => {
-    const out = unifiedBotDisplay(BASE, 'medium');
-    expect(out).toContain('🔥active');
-  });
-
-  it('contains rank number', () => {
-    const out = unifiedBotDisplay(BASE, 'medium');
-    expect(out).toContain('🥇1');
-  });
-
-  it('uses abbreviated role (first 3 chars)', () => {
-    const out = unifiedBotDisplay(BASE, 'medium');
-    expect(out).toContain('eng');
+  it('low activity shows 🔹', () => {
+    const out = unifiedBotDisplay({ ...BASE, tokPerDay: 10_000 }, 'short');
+    expect(out).toContain('🔹');
   });
 });
 
 describe('unifiedBotDisplay — long', () => {
-  it('includes [ship] label', () => {
+  it('format: prefix Name role·medal[rank]rank·health[grade]health·activity[tok/d]', () => {
     const out = unifiedBotDisplay(BASE, 'long');
-    expect(out).toContain('[ship]');
-  });
-
-  it('includes full location name and [loc] label', () => {
-    const out = unifiedBotDisplay(BASE, 'long');
-    expect(out).toContain('Engineering[loc]');
+    expect(out).toBe('🦁⚙️ Cid ⚙️engineer·🥇[1]rank·🟢[A]health·🔥[500K tok/d]');
   });
 
   it('includes [health] label', () => {
     const out = unifiedBotDisplay(BASE, 'long');
-    expect(out).toContain('[health]');
+    expect(out).toContain('[A]health');
   });
 
-  it('includes [activity] label when active', () => {
+  it('includes [rank] label', () => {
     const out = unifiedBotDisplay(BASE, 'long');
-    expect(out).toContain('[activity]');
+    expect(out).toContain('[1]rank');
   });
 
-  it('no [activity] label when idle', () => {
-    const out = unifiedBotDisplay({ ...BASE, activity: '' }, 'long');
-    expect(out).not.toContain('[activity]');
-  });
-
-  it('includes full role name and [role] label', () => {
+  it('includes tok/d in activity', () => {
     const out = unifiedBotDisplay(BASE, 'long');
-    expect(out).toContain('engineer[role]');
+    expect(out).toContain('[500K tok/d]');
   });
 
-  it('includes rank1 label', () => {
-    const out = unifiedBotDisplay(BASE, 'long');
-    expect(out).toContain('rank1');
+  it('no activity section when idle', () => {
+    const out = unifiedBotDisplay({ ...BASE, tokPerDay: 0 }, 'long');
+    expect(out).not.toContain('tok/d');
+  });
+
+  it('sleep bot shows status in health label', () => {
+    const out = unifiedBotDisplay({ ...BASE, status: 'sleep' }, 'long');
+    expect(out).toContain('💤[sleep]health');
+    expect(out).not.toContain('tok/d');
+  });
+
+  it('chief shows ⭐ medal', () => {
+    const out = unifiedBotDisplay({ ...BASE, isChief: true }, 'long');
+    expect(out).toContain('⭐[1]rank');
+  });
+
+  it('formats small tok as number', () => {
+    const out = unifiedBotDisplay({ ...BASE, tokPerDay: 800 }, 'long');
+    // 800 is below 5K threshold, no activity section
+    expect(out).not.toContain('tok/d');
+  });
+
+  it('formats 5K+ tok with K suffix', () => {
+    const out = unifiedBotDisplay({ ...BASE, tokPerDay: 16_000 }, 'long');
+    expect(out).toContain('🔹[16K tok/d]');
+  });
+
+  it('formats 1M+ tok with M suffix', () => {
+    const out = unifiedBotDisplay({ ...BASE, tokPerDay: 1_200_000 }, 'long');
+    expect(out).toContain('🔥[1.2M tok/d]');
+  });
+
+  it('formats 10M+ tok as rounded M', () => {
+    const out = unifiedBotDisplay({ ...BASE, tokPerDay: 39_333_000 }, 'long');
+    expect(out).toContain('🔥[39M tok/d]');
+  });
+});
+
+// ── unifiedShipDisplay ──────────────────────────────────────────
+
+const SHIP_BASE: UnifiedShipDisplayParams = {
+  name: 'Herc',
+  emoji: '🦁',
+  typeEmoji: '🛳️',
+  type: 'cruiser',
+  rank: 1,
+  isSpeaker: true,
+  commissioned: true,
+  health: 'A',
+  tokPerDay: 500_000,
+};
+
+describe('unifiedShipDisplay — short', () => {
+  it('format: emoji Name typeEmoji+medal+health+activity', () => {
+    const out = unifiedShipDisplay(SHIP_BASE, 'short');
+    expect(out).toBe('🦁 Herc 🛳️⭐🟢🔥');
+  });
+
+  it('non-speaker shows rank medal', () => {
+    const out = unifiedShipDisplay({ ...SHIP_BASE, isSpeaker: false, rank: 2 }, 'short');
+    expect(out).toContain('🥈');
+    expect(out).not.toContain('⭐');
+  });
+
+  it('decommissioned shows 💤', () => {
+    const out = unifiedShipDisplay({ ...SHIP_BASE, commissioned: false }, 'short');
+    expect(out).toContain('💤');
+    expect(out).not.toContain('🔥');
+  });
+});
+
+describe('unifiedShipDisplay — long', () => {
+  it('format: emoji Name type·medal[rank]rank·health[grade]health·activity[tok/d]', () => {
+    const out = unifiedShipDisplay(SHIP_BASE, 'long');
+    expect(out).toBe('🦁 Herc 🛳️cruiser·⭐[1]rank·🟢[A]health·🔥[500K tok/d]');
+  });
+
+  it('non-speaker shows rank medal', () => {
+    const out = unifiedShipDisplay({ ...SHIP_BASE, isSpeaker: false, rank: 2 }, 'long');
+    expect(out).toContain('🥈[2]rank');
+  });
+
+  it('decommissioned shows decom health', () => {
+    const out = unifiedShipDisplay({ ...SHIP_BASE, commissioned: false }, 'long');
+    expect(out).toContain('💤[decom]health');
+    expect(out).not.toContain('tok/d');
+  });
+
+  it('no activity when idle', () => {
+    const out = unifiedShipDisplay({ ...SHIP_BASE, tokPerDay: 0 }, 'long');
+    expect(out).not.toContain('tok/d');
   });
 });

@@ -96,13 +96,7 @@ export function isBotCO(
   );
 }
 
-/** Ship header line: "🦁⭐ **Herc** · 🏅1"
- *  @param emoji        - ship emoji
- *  @param name         - ship display name
- *  @param rank         - ship rank
- *  @param commissioned - is the ship commissioned?
- *  @param isSpeaker    - is this ship the speaker?
- */
+/** Ship header line: "🦁⭐ **Herc** · 🏅1" (legacy — prefer unifiedShipDisplay) */
 export function shipHeaderLine(
   emoji: string,
   name: string,
@@ -112,6 +106,43 @@ export function shipHeaderLine(
 ): string {
   const statusChar = !commissioned ? '💤' : isSpeaker ? '⭐' : '◉';
   return `${emoji}${statusChar} **${name}** · 🏅${rank}`;
+}
+
+/** Parameters for unified ship display. */
+export interface UnifiedShipDisplayParams {
+  name: string;          // e.g. "Herc"
+  emoji: string;         // e.g. "🦁"
+  typeEmoji: string;     // e.g. "🛳️"
+  type: string;          // e.g. "cruiser"
+  rank: number;          // ship rank
+  isSpeaker: boolean;    // speaker → ⭐
+  commissioned: boolean; // decommissioned → 💤
+  health: string;        // aggregate health grade (worst bot)
+  tokPerDay: number;     // aggregate token throughput (sum of bots)
+}
+
+/** Build a unified ship display string.
+ *  Long:  🦁 Herc 🛳️cruiser·⭐[1]rank·🟢[A]health·🔥[500K tok/d]
+ *  Short: 🦁 Herc 🛳️⭐🟢🔥
+ */
+export function unifiedShipDisplay(p: UnifiedShipDisplayParams, verbosity: Verbosity): string {
+  const medal = !p.commissioned ? '💤' : p.isSpeaker ? '⭐' : rankMedal(p.rank, false);
+  const healthEmoji = !p.commissioned ? '💤' : (GRADE_EMOJI[p.health] ?? '');
+  const actEmoji = !p.commissioned ? '' : activityEmoji(p.tokPerDay);
+
+  if (verbosity === 'short') {
+    return `${p.emoji} ${p.name} ${p.typeEmoji}${medal}${healthEmoji}${actEmoji}`;
+  }
+
+  // Long: 🦁 Herc 🛳️cruiser·⭐[1]rank·🟢[A]health·🔥[500K tok/d]
+  const typePart = `${p.typeEmoji}${p.type}`;
+  const rankPart = `${medal}[${p.rank}]rank`;
+  const healthPart = !p.commissioned
+    ? '💤[decom]health'
+    : `${healthEmoji}[${p.health || '?'}]health`;
+  const actPart = actEmoji ? `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]` : '';
+
+  return `${p.emoji} ${p.name} ${typePart}·${rankPart}·${healthPart}${actPart}`;
 }
 
 /** Format a bot tree line with role and rank columns.
@@ -146,30 +177,21 @@ export const GRADE_EMOJI: Record<string, string> = { A: '🟢', B: '🟡', C: '�
 
 // ── Unified display format ────────────────────────────────────────
 
-export type Verbosity = 'short' | 'medium' | 'long';
+export type Verbosity = 'short' | 'long';
 
 /** Parameters for unified bot display. */
 export interface UnifiedBotDisplayParams {
   name: string;          // e.g. "cid"
   shipEmoji: string;     // e.g. "🦁"
-  shipName: string;      // e.g. "Herc"
   locationEmoji: string; // e.g. "⚙️" or "🏠" for quarters
-  locationShort: string; // e.g. "Eng" or "Qtr"
-  locationFull: string;  // e.g. "Engineering" or "Quarters"
   health: string;        // "A" | "B" | "C" | "F" | ""
-  activity: string;      // "active" | "" — empty means idle
+  tokPerDay: number;     // token throughput per day (for activity emoji + long display)
   status: string;        // "onduty" | "quarters" | "sleep" | "transit" | etc.
   role: string;          // e.g. "engineer"
   rank: number;          // 1, 2, 3+
   isChief: boolean;      // true if CO (lowest-rank awake in role)
 }
 
-/** Build a unified bot display string.
- *  Format: <ship><location>·<health><activity>·Name·<role><rank>
- *  - short:  emoji-only fields — for Matrix display names
- *  - medium: emoji+abbreviated text — for !fleet / !metrics
- *  - long:   emoji+full text+[label] — for debug/verbose output
- */
 /** Status-aware health emoji: sleep→💤, building→🔄, starting→🚀, else grade emoji. */
 function statusHealthEmoji(status: string, health: string): string {
   if (status === 'sleep' || status === 'dream') return '💤';
@@ -179,41 +201,48 @@ function statusHealthEmoji(status: string, health: string): string {
   return GRADE_EMOJI[health] ?? '';
 }
 
+/** Activity emoji from token throughput. Mirrors metrics.ts activityIcon thresholds. */
+function activityEmoji(tokPerDay: number): string {
+  if (tokPerDay >= 500_000) return '🔥';
+  if (tokPerDay >= 50_000) return '⚡';
+  if (tokPerDay >= 5_000) return '🔹';
+  return '';
+}
+
+/** Format tok/day for display: 0→"0", 5000→"5K", 1200000→"1.2M" */
+function fmtTok(tok: number): string {
+  if (tok >= 1_000_000) {
+    const m = tok / 1_000_000;
+    return m >= 10 ? `${Math.round(m)}M` : `${+m.toFixed(1)}M`;
+  }
+  if (tok >= 1000) return `${Math.round(tok / 1000)}K`;
+  return String(Math.round(tok));
+}
+
+/** Build a unified bot display string.
+ *  Long:  🦁🏠 Tali ⚙️engineer·🥈[2]rank·🟢[A]health·🔥[16K tok/d]
+ *  Short: 🦁🏠 Tali ⚙️🥈🟢🔥
+ */
 export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosity): string {
   const medal = rankMedal(p.rank, p.isChief);
   const roleIcon = ROLE_ICONS[p.role] ?? '';
   const healthEmoji = statusHealthEmoji(p.status, p.health);
-  // Sleeping/inactive bots have no activity regardless of input
-  const isActive = p.activity && p.status !== 'sleep' && p.status !== 'dream' && p.status !== 'transit';
+  const inactive = p.status === 'sleep' || p.status === 'dream' || p.status === 'transit';
+  const actEmoji = inactive ? '' : activityEmoji(p.tokPerDay);
+  const prefix = `${p.shipEmoji}${p.locationEmoji}`;
+  const name = capitalizeName(p.name);
 
-  let ship: string, loc: string, health: string, act: string, role: string, rank: string;
-
-  switch (verbosity) {
-    case 'short':
-      ship = p.shipEmoji;
-      loc = p.locationEmoji;
-      health = healthEmoji;
-      act = isActive ? '🔥' : '';
-      role = roleIcon;
-      rank = medal;
-      break;
-    case 'medium':
-      ship = `${p.shipEmoji}${p.shipName}`;
-      loc = `${p.locationEmoji}${p.locationShort}`;
-      health = p.status === 'sleep' || p.status === 'dream' ? '💤' : `${healthEmoji}${p.health}`;
-      act = isActive ? `🔥${p.activity}` : '';
-      role = `${roleIcon}${p.role.slice(0, 3)}`;
-      rank = `${medal}${p.rank}`;
-      break;
-    case 'long':
-      ship = `${p.shipEmoji}${p.shipName}[ship]`;
-      loc = `${p.locationEmoji}${p.locationFull}[loc]`;
-      health = p.status === 'sleep' || p.status === 'dream' ? '💤[health]' : `${healthEmoji}${p.health}[health]`;
-      act = isActive ? `🔥${p.activity}[activity]` : '';
-      role = `${roleIcon}${p.role}[role]`;
-      rank = `${medal}rank${p.rank}`;
-      break;
+  if (verbosity === 'short') {
+    return `${prefix} ${name} ${roleIcon}${medal}${healthEmoji}${actEmoji}`;
   }
 
-  return `${ship}${loc}·${health}${act}·${capitalizeName(p.name)}·${role}${rank}`;
+  // Long format: 🦁🏠 Tali ⚙️engineer·🥈[2]rank·🟢[A]health·🔥[16K tok/d]
+  const rolePart = `${roleIcon}${p.role}`;
+  const rankPart = `${medal}[${p.rank}]rank`;
+  const healthPart = inactive
+    ? `${healthEmoji}[${p.status}]health`
+    : `${healthEmoji}[${p.health || '?'}]health`;
+  const actPart = actEmoji ? `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]` : '';
+
+  return `${prefix} ${name} ${rolePart}·${rankPart}·${healthPart}${actPart}`;
 }

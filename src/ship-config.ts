@@ -171,6 +171,8 @@ export function writeFleet(fleet: Record<string, BotEntry>): void {
 export interface ShipEntry {
   hostname: string;
   emoji?: string;
+  type?: string;          // e.g. "cruiser"
+  typeEmoji?: string;     // e.g. "🛳️"
   ip: string | null;
   os: string;
   user: string | null;
