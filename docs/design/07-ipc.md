@@ -33,7 +33,7 @@ Commands written by the container to `tasks/*.json`:
 |----------|--------|
 | `refresh_bot` | Wake self or another bot |
 | `stop_bot` | Sleep another bot |
-| `rebuild_image` | Rebuild container image |
+| `rebuild_image` | Rebuild container image (5m cooldown) |
 | `health_check` | Run health check and return results |
 | `fleet_status` | Return fleet.json status |
 | `git_pull` | Pull InfiniClaw, rebuild, deploy to instances |
@@ -43,7 +43,23 @@ Commands written by the container to `tasks/*.json`:
 | `send_reaction` | React to a message with an emoji |
 | `set_thread` | Set active reply thread for subsequent messages |
 | `set_brain_mode` | Switch LLM model at runtime |
-| `branch_to_thread` | Request branch brain spawn (written to relay-tasks) |
+| `restart_wksm` | Restart the WKS proxy service |
+| `restart_relay` | Restart the relay process |
+| `request_verification` | Request a verification challenge |
+| `submit_verification` | Submit verification response |
+| `holodeck_create` | Create a holodeck sandbox environment |
+| `holodeck_teardown` | Tear down a holodeck environment |
+| `holodeck_promote` | Promote holodeck changes to main workspace |
+| `holodeck_send` | Send a message to a holodeck session |
+| `holodeck_read` | Read holodeck session output |
+| `holodeck_status` | Get holodeck session status |
+
+Relay-task types written to `_runtime/relay-tasks/*.json` (processed by relay, not ipc-watcher):
+
+| Task Type | Effect |
+|-----------|--------|
+| `git_push` | Push branches to remote (requires host git credentials) |
+| `branch_brain` | Spawn a branch brain in a new thread |
 
 ## Per-Room Namespaces
 
@@ -55,7 +71,7 @@ Only the main room's containers can run privileged IPC commands (`refresh_bot`, 
 
 ## Processing
 
-The host's `ipc-watcher.ts` polls IPC directories every ~100ms. Files are processed atomically:
+The host's `ipc-watcher.ts` polls IPC directories every 500ms. Relay-tasks are polled every 2s. Files are processed atomically:
 
 1. Rename `*.json` → `*.processing`
 2. Parse and execute the command
@@ -65,7 +81,14 @@ This prevents double-processing on rapid polls.
 
 ## Cooldowns
 
-IPC commands have per-command cooldowns to prevent bots from spamming expensive operations. 60-second cooldown between wakes of the same bot prevents bots from burning context in rapid wake cycles.
+IPC commands have per-command cooldowns to prevent bots from spamming expensive operations:
+
+| Command | Cooldown |
+|---------|----------|
+| `refresh_bot` | 60s |
+| `rebuild_image` | 5m |
+| `git_push` | 60s |
+| `git_pull` | 60s |
 
 ## Verification
 
