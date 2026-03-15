@@ -43,18 +43,26 @@ export const ROLE_ICONS: Record<string, string> = Object.fromEntries(
   Object.entries(ROLE_ROOMS).map(([role, { icon }]) => [role, icon]),
 );
 
+// ── Rank medals ──────────────────────────────────────────────────
+
+/** Rank medal for bot rank display. ⭐ for chief, 🥇/🥈/🥉 for ranked bots. */
+export function rankMedal(rank: number, isChief: boolean): string {
+  if (isChief) return '⭐';
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  return '🥉';
+}
+
 // ── Shared badge / line helpers ──────────────────────────────────
 
-/** Bot badge for fleet-style displays (!fleet, !metrics).
+/** Bot health/activity badge for fleet-style displays (!fleet, !metrics).
  *  @param status   - bot status (onduty/quarters/sleep/transit/warn)
- *  @param isCO     - commanding officer of its role?
  *  @param processRunning - is the process actually running? (null = unknown)
  *  @param grade    - health grade (A/B/C/F) if available
  *  @param activity - activity icon (🔥/⚡/🔹/·) if available
  */
 export function botBadge(
   status: string,
-  isCO: boolean,
   processRunning: boolean | null,
   grade?: string,
   activity?: string,
@@ -65,15 +73,15 @@ export function botBadge(
   // Running statuses with health grade
   if (grade) {
     const ge = GRADE_EMOJI[grade] ?? '❓';
-    const act = activity || '·';
-    return isCO ? `${ge}${grade}⭐${act}` : `${ge}${grade}${act}`;
+    const act = activity || '';
+    return `${ge}${grade}${act}`;
   }
   // Running statuses without grade
   if (processRunning === false) return '🔴';
-  return isCO ? '⭐' : '◉';
+  return '◉';
 }
 
-/** Whether bot is CO: lowest-rank awake bot in its role. */
+/** Whether bot is Chief: lowest-rank awake bot in its role. */
 export function isBotCO(
   botRole: string,
   botRank: number,
@@ -106,14 +114,15 @@ export function shipHeaderLine(
 }
 
 /** Format a bot tree line with role and rank columns.
- *  @param isLast - last bot in the ship group?
- *  @param badge  - pip/badge string
- *  @param name   - capitalized bot name (padded by caller)
- *  @param role   - capitalized role name
+ *  @param isLast   - last bot in the ship group?
+ *  @param badge    - health/activity badge string
+ *  @param name     - capitalized bot name (padded by caller)
+ *  @param role     - capitalized role name
  *  @param roleIcon - role emoji
- *  @param rank   - bot rank
- *  @param rolePad - NBSP padding for role column alignment
- *  @param suffix - additional data (metrics, version, etc.)
+ *  @param rank     - bot rank number
+ *  @param isChief  - is this bot the Chief (lowest-rank active in room)?
+ *  @param rolePad  - NBSP padding for role column alignment
+ *  @param suffix   - additional data (metrics, version, etc.)
  */
 export function botTreeLine(
   isLast: boolean,
@@ -122,12 +131,76 @@ export function botTreeLine(
   role: string,
   roleIcon: string,
   rank: number,
+  isChief: boolean,
   rolePad: string,
   suffix: string,
 ): string {
   const prefix = isLast ? '  └' : '  ├';
   const roleDisplay = roleIcon ? `${roleIcon} ${role}` : role;
-  return `${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · 🏅${rank}${suffix}`;
+  const medal = rankMedal(rank, isChief);
+  return `${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · ${medal}${suffix}`;
 }
 
-const GRADE_EMOJI: Record<string, string> = { A: '🟢', B: '🟡', C: '🟠', F: '🔴' };
+export const GRADE_EMOJI: Record<string, string> = { A: '🟢', B: '🟡', C: '🟠', F: '🔴' };
+
+// ── Unified display format ────────────────────────────────────────
+
+export type Verbosity = 'short' | 'medium' | 'long';
+
+/** Parameters for unified bot display. */
+export interface UnifiedBotDisplayParams {
+  name: string;          // e.g. "cid"
+  shipEmoji: string;     // e.g. "🦁"
+  shipName: string;      // e.g. "Herc"
+  locationEmoji: string; // e.g. "⚙️"
+  locationShort: string; // e.g. "Eng"
+  locationFull: string;  // e.g. "Engineering"
+  health: string;        // "A" | "B" | "C" | "F" | ""
+  activity: string;      // "active" | "" — empty means idle
+  role: string;          // e.g. "engineer"
+  rank: number;          // 1, 2, 3+
+  isChief: boolean;      // true if CO (lowest-rank awake in role)
+}
+
+/** Build a unified bot display string.
+ *  Format: <ship><location>·<health><activity>·Name·<role><rank>
+ *  - short:  emoji-only fields — for Matrix display names
+ *  - medium: emoji+abbreviated text — for !fleet / !metrics
+ *  - long:   emoji+full text+[label] — for debug/verbose output
+ */
+export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosity): string {
+  const medal = rankMedal(p.rank, p.isChief);
+  const roleIcon = ROLE_ICONS[p.role] ?? '';
+  const healthEmoji = GRADE_EMOJI[p.health] ?? '';
+
+  let ship: string, loc: string, health: string, act: string, role: string, rank: string;
+
+  switch (verbosity) {
+    case 'short':
+      ship = p.shipEmoji;
+      loc = p.locationEmoji;
+      health = healthEmoji;
+      act = p.activity ? '🔥' : '';
+      role = roleIcon;
+      rank = medal;
+      break;
+    case 'medium':
+      ship = `${p.shipEmoji}${p.shipName}`;
+      loc = `${p.locationEmoji}${p.locationShort}`;
+      health = `${healthEmoji}${p.health}`;
+      act = p.activity ? `🔥${p.activity}` : '';
+      role = `${roleIcon}${p.role.slice(0, 3)}`;
+      rank = `${medal}${p.rank}`;
+      break;
+    case 'long':
+      ship = `${p.shipEmoji}${p.shipName}[ship]`;
+      loc = `${p.locationEmoji}${p.locationFull}[loc]`;
+      health = `${healthEmoji}${p.health}[health]`;
+      act = p.activity ? `🔥${p.activity}[activity]` : '';
+      role = `${roleIcon}${p.role}[role]`;
+      rank = `${medal}rank${p.rank}`;
+      break;
+  }
+
+  return `${ship}${loc}·${health}${act}·${capitalizeName(p.name)}·${role}${rank}`;
+}
