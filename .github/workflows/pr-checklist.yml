@@ -1,0 +1,35 @@
+name: PR Checklist Gate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  checklist:
+    name: Verify PR checklist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for unchecked items
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || '';
+            const unchecked = (body.match(/- \[ \]/g) || []).length;
+            const checked   = (body.match(/- \[x\]/gi) || []).length;
+            const isBugFix  = (context.payload.pull_request.labels || [])
+                                .some(l => l.name === 'bug') ||
+                              context.payload.pull_request.title.toLowerCase().startsWith('fix');
+
+            let summary = `**Checklist:** ${checked} ✅  ${unchecked} ☐`;
+            if (isBugFix) summary = `🐛 Bug fix PR (priority) — ${summary}`;
+
+            if (unchecked > 0) {
+              core.setFailed(
+                `${unchecked} unchecked checklist item(s) remaining.\n${summary}\n\n` +
+                'Check off items in the PR description before merging.'
+              );
+            } else if (checked === 0) {
+              core.warning('No checklist items found — consider adding a test plan.');
+            } else {
+              core.notice(`All checklist items verified. ${summary}`);
+            }
