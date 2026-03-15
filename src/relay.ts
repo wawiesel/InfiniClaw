@@ -2600,10 +2600,18 @@ async function handleLifecycleCommand(
   // from executing and replying to the same untargeted lifecycle command (fixes #50).
   if (isBTC && !target && !await electSpeaker()) return;
   const scope = isBTC ? 'ship' : action === 'report' ? 'assigned' : 'present';
-  const bots = resolveBots(target, conn, scope);
+  let bots = resolveBots(target, conn, scope);
+
+  // For !wake: a targeted sleeping/dreaming bot on this ship is always wakeable — it is not
+  // "in" any duty room but can be bootstrapped from anywhere (fixes #77).
+  if (bots.length === 0 && action === 'wake' && target && liveFleet[target]?.ship === HOSTNAME) {
+    bots = [target];
+  }
 
   // No local bots matched.
   if (bots.length === 0) {
+    // Target is on a different ship — stay silent; that ship handles it (fixes #77).
+    if (target && liveFleet[target] && liveFleet[target].ship !== HOSTNAME) return;
     // Explicit target exists on this ship but isn't in the room — warn.
     if (target && scope === 'present' && liveFleet[target]?.ship === HOSTNAME) {
       const tEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
