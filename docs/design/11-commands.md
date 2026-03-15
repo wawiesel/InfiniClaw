@@ -23,8 +23,8 @@ Commands work from any room the operator account has joined — duty rooms (via 
 | `!transport <bot> <ship>` | Beam bot to another ship (dematerialize/materialize). |
 | `!promote <target>` | Raise rank (bot within role, or ship). |
 | `!demote <target>` | Lower rank (bot within role, or ship). |
-| `!allow <bot> <path> [min]` | Grant temporary rw mount. Captain/intercom only. |
-| `!deny <bot> <path>` | Revoke a mount grant. Captain/intercom only. |
+| `!allow <bot> <path> [min]` | Grant temporary rw mount. Captain/intercom only. From quarters: bot inferred, `!allow <path> [min]`. |
+| `!deny <bot> <path>` | Revoke a mount grant. Captain/intercom only. From quarters: bot inferred, `!deny <path>`. |
 
 ### Ship Commands
 
@@ -32,7 +32,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 |---------|--------|
 | `!commission [ship]` | Commission ship(s), start assigned bots. No arg = all. |
 | `!decommission [ship]` | Stop all bots on ship(s), keep relay running. No arg = all. |
-| `!pull [ship]` | Sync secrets + code, rebuild, restart active bots in place. No arg = all ships. |
+| `!pull [--force] [ship]` | Sync secrets + code, rebuild, restart active bots preserving status. `--force` bypasses semver version gate. No arg = all ships. |
 | `!push [ship]` | Push InfiniClaw to origin. No arg = all ships. |
 
 ### Fleet Commands
@@ -41,7 +41,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 |---------|--------|
 | `!fleet` | Fleet status — each ship reports its local bots. |
 | `!fleet room` | Bots in this room only. _(not yet implemented — same as `!fleet`)_ |
-| `!health` | Fleet health summary from S3 (speaker replies). |
+| `!health` | Alias for `!metrics fleet` — fleet health summary from S3 (speaker replies). |
 | `!metrics [scope]` | Metrics (1d/7d rolling). Context-aware — see below. |
 | `!operator [on|off] [ship]` | Show or toggle operator relay on/off for ship(s). |
 
@@ -111,12 +111,12 @@ Version info follows a standard form:
 Examples:
 
 ```
-· 2a9cc64 (5m) ↑0      ← committed 5m ago, matches HEAD
-· f25432f (2h) ↓3       ← commit is 2h old, 3 commits behind HEAD
-· f814482 (10m) ↑1      ← commit is 10m old, 1 unpushed commit
+· 📦 2a9cc64 (5m) ↑0      ← committed 5m ago, matches HEAD
+· 📦 f25432f (2h) ↓3       ← commit is 2h old, 3 commits behind HEAD
+· 📦 f814482 (10m) ↑1      ← commit is 10m old, 1 unpushed commit
 ```
 
-Implemented by `gitVersionStr()`, `repoVersion()`, `relayVersion()`, `botVersion()` in the relay module.
+The sha is wrapped in a GitHub markdown link in Matrix output. Implemented by `fmtVersion()`, `repoVersion()`, `relayVersion()`, `botVersion()` in the relay module.
 
 ## Status Threads
 
@@ -127,7 +127,7 @@ Multi-step operations and failure alerts use Matrix threads to keep the main tim
 `!pull` creates one thread. The thread root appears on the main timeline (with ship tag via loudspeaker). Each step posts as a numbered thread reply (`[N/total elapsed]`). The final status posts to both the thread and main timeline.
 
 ```
-Main:   [🔱 Posi] relay pull starting ...
+Main:   [🔱 Posi] 📡 pull starting ...
 Thread: [1/7 0s]  ✅ secrets up to date · a1b2c3d (3h) ↑0
         [2/7 2s]  ✅ code pulled 3 commit(s) · 82bfd78 (20m) ↑0
         [3/7 12s] ✅ relay + dist rebuilt · 82bfd78 (20m) ↑0
@@ -142,11 +142,11 @@ Two different times are shown:
 - **Stage prefix** `[N/total elapsed]` — time since pull started
 - **Version suffix** `· sha ↑0|↓N (age)` — age of the deployed code (commit freshness)
 
-Every step uses ✅ on success, ⛔ on failure, ⚠️ on warning. All bots on the ship are restarted to quarters. The final status line posts to both the thread and the main timeline.
+Every step uses ✅ on success, ⛔ on failure, ⚠️ on warning. Bots are restarted preserving their current status (onduty stays onduty, quarters stays quarters). Bot restarts are skipped if the deployed semver tag already matches the latest tag (use `--force` to override). The final status line posts to both the thread and the main timeline.
 
 ### Failure alert threads
 
-Sync failures (secrets, code, build) create a thread in engineering on first occurrence. Updates post in the thread on an exponential backoff schedule: 1m → 2m → 4m → ... → 8h max. Recovery posts to both the thread and the main timeline.
+Sync failures (secrets, code, build) create a thread in engineering on first occurrence. Updates post in the thread on an exponential backoff schedule: 1m → 2m → 4m → ... → 8h max. Recovery posts to the main timeline.
 
 ```
 Main:   ⚠️ secrets sync (Herc) down (14:30)
