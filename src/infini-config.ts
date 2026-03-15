@@ -17,6 +17,10 @@ export const MAIN_BRAIN_TOOL_LIMIT = envInt('MAIN_BRAIN_TOOL_LIMIT', 3);
 export const HEAP_LIMIT_MB = envInt('HEAP_LIMIT_MB', 0);
 export const RESUME_DELAY_SECONDS = envInt('RESUME_DELAY_SECONDS', 0);
 export const MEMORY_CHECK_INTERVAL = envInt('MEMORY_CHECK_INTERVAL', 120_000);
+// Duty cycle: how long a bot stays on duty before retrospective is triggered.
+export const DUTY_CYCLE_MS = envInt('DUTY_CYCLE_MS', 4 * 60 * 60_000); // 4 hours
+// How long to wait for a bot to complete its retrospective before forcing sleep.
+export const RETROSPECTIVE_TIMEOUT_MS = envInt('RETROSPECTIVE_TIMEOUT_MS', 30 * 60_000); // 30 min
 
 // Matrix channel config
 export const MATRIX_HOMESERVER = process.env.MATRIX_HOMESERVER || '';

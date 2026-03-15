@@ -28,6 +28,8 @@ export interface BotEntry {
   title?: string;
   quartersRoom?: string;
   activeBrainModel?: string;
+  /** Unix ms when the bot last went onduty — used for duty cycle timer. */
+  ondutyAt?: number;
 }
 
 export interface ShipConfig {
