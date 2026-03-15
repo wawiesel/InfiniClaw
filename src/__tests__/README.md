@@ -26,7 +26,7 @@ Integration and unit tests for InfiniClaw source modules that don't live next to
 | `routing.test.ts` | Message routing logic |
 | `metrics.test.ts` | Fleet metrics: rollingRate, SCORE_REACTIONS, operator/bot/ship/fleet metrics, autonomy score (x-commands excluded), infra failure tracking, branch brain success, tokenThroughput rolling metric, response latency tracking, MTBI in operator metrics, scope routing, formatting, health grades (A/B/C/F from crashes/OOM/mem/latency), fleet aggregate grade, activity icons (tok/day tiers), gradeEmoji mapping, score attribution per bot (empty name vs named), latency/throughput in BotMetrics types. |
 | `wbs.test.ts` | WBS lifecycle: assign, reabsorb, completeItem (dependency unblocking), autoAssign, nextReadyItem priority ordering, wbsToTodos conversion (16 tests). |
-| `formatting.test.ts` | rankMedal (chief/rank1/rank2/rank3+), botBadge (sleep/transit/health/grade/activity), botTreeLine (medals, prefix), unifiedBotDisplay (short/long × all fields, status-aware health/activity, M/K tok formatting), unifiedShipDisplay (short/long, speaker/non-speaker/decommissioned). |
+| `formatting.test.ts` | rankMedal (chief/rank1/rank2/rank3+), botBadge (sleep/transit/health/grade/activity), botTreeLine (medals, prefix), unifiedBotDisplay (short/long × all fields, health grade shown for all statuses including sleep, activity shown for all statuses, M/K tok formatting), unifiedShipDisplay (short/long, speaker/non-speaker/decommissioned). |
 
 Run with: `npx vitest run --root .`
 | `branch-brain-creds.test.ts` | mapBrainEnv: BRAIN_OAUTH_TOKEN→CLAUDE_CODE_OAUTH_TOKEN, BRAIN_API_KEY→ANTHROPIC_API_KEY, BRAIN_MODEL→ANTHROPIC_MODEL, passthrough fields, CLAUDECODE deletion, null botEnv. |

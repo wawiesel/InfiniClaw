@@ -116,11 +116,10 @@ describe('unifiedBotDisplay — short', () => {
     expect(out).not.toContain('🥇');
   });
 
-  it('sleep bot shows 💤 health, no activity', () => {
+  it('sleep bot shows 💤 health and retains activity', () => {
     const out = unifiedBotDisplay({ ...BASE, status: 'sleep', tokPerDay: 100_000 }, 'short');
     expect(out).toContain('💤');
-    expect(out).not.toContain('🔥');
-    expect(out).not.toContain('⚡');
+    expect(out).toContain('⚡');
   });
 
   it('moderate activity shows ⚡', () => {
@@ -160,10 +159,10 @@ describe('unifiedBotDisplay — long', () => {
     expect(out).not.toContain('tok/d');
   });
 
-  it('sleep bot shows status in health label', () => {
-    const out = unifiedBotDisplay({ ...BASE, status: 'sleep' }, 'long');
-    expect(out).toContain('💤[sleep]health');
-    expect(out).not.toContain('tok/d');
+  it('sleep bot shows 💤 emoji with actual health grade and retains activity', () => {
+    const out = unifiedBotDisplay({ ...BASE, status: 'sleep', health: 'A', tokPerDay: 16_000 }, 'long');
+    expect(out).toContain('💤[A]health');
+    expect(out).toContain('🔹[16K tok/d]');
   });
 
   it('chief shows ⭐ medal', () => {

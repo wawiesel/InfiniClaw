@@ -227,8 +227,7 @@ export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosi
   const medal = rankMedal(p.rank, p.isChief);
   const roleIcon = ROLE_ICONS[p.role] ?? '';
   const healthEmoji = statusHealthEmoji(p.status, p.health);
-  const inactive = p.status === 'sleep' || p.status === 'dream' || p.status === 'transit';
-  const actEmoji = inactive ? '' : activityEmoji(p.tokPerDay);
+  const actEmoji = activityEmoji(p.tokPerDay);
   const prefix = `${p.shipEmoji}${p.locationEmoji}`;
   const name = capitalizeName(p.name);
 
@@ -239,9 +238,7 @@ export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosi
   // Long format: 🦁🏠 Tali ⚙️engineer·🥈[2]rank·🟢[A]health·🔥[16K tok/d]
   const rolePart = `${roleIcon}${p.role}`;
   const rankPart = `${medal}[${p.rank}]rank`;
-  const healthPart = inactive
-    ? `${healthEmoji}[${p.status}]health`
-    : `${healthEmoji}[${p.health || '?'}]health`;
+  const healthPart = `${healthEmoji}[${p.health || '?'}]health`;
   const actPart = actEmoji ? `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]` : '';
 
   return `${prefix} ${name} ${rolePart}·${rankPart}·${healthPart}${actPart}`;
