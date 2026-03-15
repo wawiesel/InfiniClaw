@@ -2625,8 +2625,17 @@ async function sendLifecycleMsg(
     const root = resolveRoot();
     const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
     const botName = env?.ASSISTANT_NAME || capitalizeName(botId);
-    const roomName = botDutyRoom(botId);
-    const conn = activeConns.find(c => c.name.toLowerCase() === roomName);
+    const fleetEntry = liveFleet[botId];
+    // When bot is not onduty (e.g. quarters, retrospective, ready), route to their quarters
+    // room so lifecycle messages appear where the bot actually is rather than engineering.
+    let conn: RoomConn | undefined;
+    if (fleetEntry && fleetEntry.status !== 'onduty' && fleetEntry.quartersRoom) {
+      conn = activeConns.find(c => c.roomId === fleetEntry.quartersRoom);
+    }
+    if (!conn) {
+      const roomName = botDutyRoom(botId);
+      conn = activeConns.find(c => c.name.toLowerCase() === roomName);
+    }
     if (!conn?.accessToken) return;
     const rankPart = rank !== undefined ? ` (rank ${rank})` : '';
     const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
