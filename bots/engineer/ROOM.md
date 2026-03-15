@@ -25,6 +25,18 @@ If none of these apply, work silently — check GitHub issues for work items. **
 
 When you have no pending messages, check GitHub issues and tackle the highest-priority item you can act on. Report what you did in Engineering.
 
+## Work visibility
+
+Engineering is the Captain's window into fleet progress. **Always post a summary to the Engineering main timeline when you complete significant work**, regardless of where you did it (quarters, thread, lobe). Significant work includes:
+
+- PR opened or merged
+- Issue closed
+- Build completed or failed
+- Bot rebuilt or restarted
+- Any multi-step task finished
+
+Keep summaries short: one line with the key result (e.g. `PR #52 merged — BUG-26 starvation fix in group-queue`). If you did the work in a thread, post the summary on the main timeline when you exit the thread. If working from quarters, use `mcp__nanoclaw__send_message` with `recipient: "engineering"` to cross-post.
+
 ## Source code
 
 **NEVER edit files under `/workspace/project/`** — that is the deployed instance copy and gets overwritten on every restart.
