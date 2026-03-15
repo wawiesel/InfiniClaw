@@ -272,6 +272,11 @@ export function deployBot(root: string, bot: string): void {
   rsyncInstance(root, instance);
   stampGitVersion(root, instance);
 
+  // Remove legacy pm2-ecosystem.json — no longer written by current code; stale
+  // copies cause ASSISTANT_ROLE/path confusion (BUG-30).
+  const legacyEcosystem = path.join(instance, 'pm2-ecosystem.json');
+  try { fs.rmSync(legacyEcosystem); } catch { /* already gone */ }
+
   // Install deps if lockfile differs
   const lockSrc = path.join(root, 'package-lock.json');
   const lockDst = path.join(instance, 'node_modules', '.package-lock.json');
