@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
     gh \
     git \
     ripgrep \
+    tmux \
     python3 \
     python3-pip \
     python3-venv \
@@ -37,8 +38,9 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install A_GIS dependencies so the runtime mount is immediately usable.
+# Also install claude-code-tools to provide tmux-cli in engineer containers.
 # PYTHONPATH is injected at runtime via CONTAINER_ENV_PYTHONPATH in the bot's profile env.
-RUN pip3 install --break-system-packages click matplotlib scipy numpy pydantic
+RUN pip3 install --break-system-packages click matplotlib scipy numpy pydantic claude-code-tools
 
 # Cap Node.js heap so processes GC instead of growing until VM OOM.
 # Applies to main brain, MCP server, and lobe spawns.
