@@ -46,12 +46,15 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 
 | Metric | Formula | Good | Alarm | Status |
 |--------|---------|------|-------|--------|
+| **Fleet availability** | % of non-sleeping bots with running processes (snapshot) | 100% | < 80% | ✅ Tracked |
 | **Relay uptime %** | % of last 24h relay was running (approx: current uptime / 86400s) | 100% (1d) | < 90% | ✅ Tracked (approx) |
 | **Response latency** | p50/p95 time from Captain mention to first bot reply | < 30s p50 | > 2min p95 | ✅ Tracked |
 | **Crashes/day** | PM2 restart count per day | 0 | > 2/day | ✅ Tracked |
 | **OOM kills/day** | Container killed by memory limit per day | 0 | Any | ✅ Tracked |
 | **SIGKILL/day** | Forced process termination per day | 0 | > 0 | ✅ Tracked |
 | **RSS / limit** | Current RSS vs container memory cap (snapshot) | < 80% | > 90% | ✅ Tracked |
+
+**Fleet availability** = `running / (total − sleeping − transit) × 100`. A bot in `quarters`, `onduty`, `retrospective`, or `ready` is "assigned" and counts in the denominator. Displayed as `avail XX%` in `!metrics` footer. 100% = all assigned bots have running processes.
 
 **Relay uptime %** is approximated as `min(uptimeSeconds, 86400) / 86400 × 100`. If the relay has been continuously running for 22h, that's 92%. If it just restarted, it's near 0%. Displayed as `up 91% (1d)` in `!metrics`. This understates reliability if the relay restarts quickly, but a low % always means something went wrong recently. The precise implementation (recording stop/start timestamps) is planned — see below.
 
