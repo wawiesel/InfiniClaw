@@ -2374,6 +2374,7 @@ async function metricsLoop(): Promise<void> {
 // ── Heartbeat — nudge idle bots to do autonomous work ──────────────
 
 const HEARTBEAT_INTERVAL = envInt('HEARTBEAT_INTERVAL_MS', 15 * 60_000); // 15 min default
+const AUTO_SLEEP_IDLE_MS = envInt('AUTO_SLEEP_IDLE_MS', 30 * 60_000); // 30 min default; 0 = disabled
 
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {
@@ -2417,6 +2418,26 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         const nudge = assignedTitle
           ? `<m>${name}</m>, work on your next task: "${assignedTitle}".`
           : `<m>${name}</m>, check GitHub issues and work on the highest priority item you can act on.`;
+        // Auto-sleep: if bot has been idle longer than AUTO_SLEEP_IDLE_MS, sleep it instead of nudging
+        if (AUTO_SLEEP_IDLE_MS > 0) {
+          try {
+            const hbPath = path.join(root, '_runtime', 'instances', bot, 'data', 'heartbeat');
+            const hbAge = Date.now() - fs.statSync(hbPath).mtimeMs;
+            if (hbAge >= AUTO_SLEEP_IDLE_MS) {
+              log(`auto-sleep: ${name} idle ${Math.round(hbAge / 60_000)}m — sleeping`);
+              stopBot(bot);
+              killStaleContainers(bot);
+              await setBotPip(root, bot, '💤');
+              reabsorbWbsItems(root, bot);
+              fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
+              writeFleet(liveFleet);
+              sendLifecycleMsg(bot, 'stopped').catch(() => {});
+              publishFleetReport().catch(() => {});
+              continue;
+            }
+          } catch { /* no heartbeat file — skip auto-sleep check */ }
+        }
+
         await relaySend(conn.homeserver, conn.accessToken, conn.roomId, nudge);
         log(`heartbeat: nudged ${name} in ${roomName}${assignedTitle ? ` (WBS: "${assignedTitle}")` : ''}`);
       }
