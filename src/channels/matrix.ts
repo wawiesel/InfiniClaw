@@ -1434,16 +1434,37 @@ export class MatrixChannel implements Channel {
       return null;
     }
     try {
-      const { data, contentType } = await withTimeout(
-        this.client.downloadContent(mxcUrl),
-        30_000,
-        'downloadContent',
-      );
+      const httpUrl = this.client.mxcToHttp(mxcUrl);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
-      if (data.length > MEDIA_MAX_BYTES) {
-        logger.warn({ filename, size: data.length, limit: MEDIA_MAX_BYTES }, 'Media file too large, skipping download');
+      let response: Response;
+      try {
+        response = await fetch(httpUrl, {
+          headers: { Authorization: `Bearer ${this.client.accessToken}` },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (!response.ok) {
+        logger.warn({ mxcUrl, status: response.status }, 'Media download HTTP error');
         return null;
       }
+
+      // Reject early if Content-Length exceeds limit (avoids starting the stream)
+      const contentLengthStr = response.headers.get('content-length');
+      if (contentLengthStr) {
+        const contentLength = parseInt(contentLengthStr, 10);
+        if (contentLength > MEDIA_MAX_BYTES) {
+          logger.warn({ filename, contentLength, limit: MEDIA_MAX_BYTES }, 'Media file too large (Content-Length), skipping download');
+          await response.body?.cancel();
+          return null;
+        }
+      }
+
+      const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
 
       // Sanitize filename: strip path separators, limit length
       const sanitized = filename.replace(/[/\\]/g, '_').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
@@ -1460,10 +1481,36 @@ export class MatrixChannel implements Channel {
       fs.mkdirSync(mediaDir, { recursive: true });
 
       const hostPath = path.join(mediaDir, timestamped);
-      fs.writeFileSync(hostPath, data);
+
+      // Stream response body directly to disk, enforcing byte limit
+      let bytesWritten = 0;
+      const writeStream = fs.createWriteStream(hostPath);
+      const reader = response.body!.getReader();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          writeStream.on('error', reject);
+          const pump = (): void => {
+            reader.read().then(({ done, value }) => {
+              if (done) { writeStream.end(); resolve(); return; }
+              bytesWritten += value.length;
+              if (bytesWritten > MEDIA_MAX_BYTES) {
+                reader.cancel().catch(() => { /* ignore */ });
+                writeStream.destroy();
+                reject(new Error(`Media too large: ${bytesWritten} > ${MEDIA_MAX_BYTES}`));
+                return;
+              }
+              writeStream.write(value, (err) => { if (err) reject(err); else pump(); });
+            }).catch(reject);
+          };
+          pump();
+        });
+      } catch (err) {
+        try { fs.unlinkSync(hostPath); } catch { /* ignore */ }
+        throw err;
+      }
 
       const containerPath = `/workspace/ipc/${safeGroupFolder}/media/${timestamped}`;
-      logger.info({ filename, contentType, size: data.length, containerPath }, 'Media downloaded to IPC');
+      logger.info({ filename, contentType, size: bytesWritten, containerPath }, 'Media downloaded to IPC');
       return containerPath;
     } catch (err) {
       logger.warn({ mxcUrl, filename, err }, 'Failed to download media from Matrix');
