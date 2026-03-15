@@ -85,6 +85,7 @@ import {
 } from './service.js';
 import { getLatestSemverTag, getStampedSemverTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
+import { DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
 
@@ -214,7 +215,7 @@ function loadGitHubBotToken(): string {
 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
-type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; triggerType?: 'always' | 'callout' | 'never'; title?: string; quartersRoom?: string; activeBrainModel?: string };
+type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; triggerType?: 'always' | 'callout' | 'never'; title?: string; quartersRoom?: string; activeBrainModel?: string; ondutyAt?: number };
 let liveFleet: Record<string, FleetEntry> = {};
 /** Cached BehindTheCurtain room ID — set once on startup from operator-matrix.json. */
 let curtainRoomId: string | null = null;
@@ -265,7 +266,7 @@ function writeCrewStatus(root: string, bot: string): void {
 
   const raw: (Omit<CrewEntry, 'isCommandingOfficer'>)[] = [];
   for (const [name, entry] of Object.entries(liveFleet)) {
-    const present = entry.status !== 'sleep';
+    const present = entry.status !== 'sleep' && entry.status !== 'dream';
     let room = 'Quarters';
     if (entry.status === 'onduty') {
       const dutyRoom = ROLE_ROOMS[entry.role?.toLowerCase() ?? '']?.room;
@@ -1586,6 +1587,11 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             let threadRoot: string | undefined;
             for (const bot of getActiveBots()) {
               if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status)) continue;
+              // Do NOT restart bots on duty — code changes apply during Dream phase after retrospective.
+              if (liveFleet[bot]?.status === 'onduty') {
+                log(`git sync: ${bot} is onduty — deferring restart to Dream phase`);
+                continue;
+              }
               const instDist = path.join(root, '_runtime', 'instances', bot, 'dist');
               const postHash = hashDir(instDist);
               if (preHashes[bot] && preHashes[bot] === postHash) {
@@ -1608,9 +1614,9 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
                 if (engConn && threadRoot) await threadReply(engConn, threadRoot, `⛔ ${botName} restart failed: ${errStr(err).slice(0, 100)}`);
               }
             }
-            // Deploy dist to sleeping bots so they have current code when they wake
+            // Deploy dist to sleeping and dreaming bots so they have current code when they wake
             for (const bot of getActiveBots()) {
-              if (liveFleet[bot]?.status !== 'sleep') continue;
+              if (liveFleet[bot]?.status !== 'sleep' && liveFleet[bot]?.status !== 'dream') continue;
               try {
                 deployBot(resolveRoot(), bot);
                 log(`git sync: deployed ${bot} (sleeping)`);
@@ -2334,6 +2340,150 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
   }
 }
 
+/**
+ * Retrospective sequence: dismiss → send questions → wait → sleep → wake.
+ * Called automatically when a bot's duty cycle expires.
+ */
+async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise<void> {
+  const root = resolveRoot();
+  const entry = liveFleet[bot];
+  if (!entry) return;
+  const env = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+  const name = env?.ASSISTANT_NAME || capitalizeName(bot);
+  const engConn = findEngConn(conns);
+  const quartersRoomId = entry.quartersRoom;
+  const quartersConn = quartersRoomId ? conns.find(c => c.roomId === quartersRoomId) : undefined;
+
+  const tr = (text: string) => engConn ? reply(engConn, text).catch(() => {}) : Promise.resolve();
+  log(`duty cycle: ${bot} duty expired — starting retrospective`);
+  await tr(`🔄 ${name} duty cycle complete — starting retrospective`);
+
+  // Step 1: Dismiss (leave duty room, back to quarters)
+  try {
+    const loungeId = findShipByHostname()?.[1]?.loungeId as string | undefined;
+    const dutyRoomId = conns.find(c => c.name === botDutyRoom(bot))?.roomId;
+    try {
+      const { token: botToken, homeserver } = await botMatrixLogin(root, bot);
+      if (dutyRoomId) await botLeaveRoom(botToken, homeserver, dutyRoomId);
+      if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
+    } catch { /* non-fatal */ }
+    // status=retrospective: container keeps running, bot reflects in quarters
+    fleetUpdate(bot, { status: 'retrospective', triggerType: 'always', ondutyAt: undefined });
+    writeFleet(liveFleet);
+    clearShipConfigCache();
+    reabsorbWbsItems(root, bot);
+    restartBotForRoom(root, bot);
+    writeCrewStatus(root, bot);
+    sendLifecycleMsg(bot, 'stopped').catch(() => {});
+    publishFleetReport().catch(() => {});
+    log(`duty cycle: ${bot} dismissed → retrospective`);
+  } catch (err) {
+    log(`duty cycle: ${bot} dismiss failed — ${errStr(err)}`);
+    return;
+  }
+
+  // Step 2: Send retrospective questions to quarters room
+  if (quartersConn?.accessToken) {
+    const questions = [
+      `<m>${name}</m>, your duty cycle is complete. Please reflect:`,
+      '1. What went well since your last duty cycle?',
+      '2. What didn\'t go well? Any blockers or mistakes?',
+      '3. How could you do better next time?',
+      '4. Which parts of your CLAUDE.md helped you achieve your goals? Which parts didn\'t?',
+      '5. Update your CLAUDE.md and MEMORY.md now. Post "Update complete." when done.',
+    ].join('\n');
+    try {
+      await relaySend(quartersConn.homeserver, quartersConn.accessToken, quartersConn.roomId, questions);
+      log(`duty cycle: ${bot} retrospective questions sent`);
+    } catch (err) {
+      log(`duty cycle: ${bot} could not send retrospective questions — ${errStr(err)}`);
+    }
+  }
+
+  // Step 3: Wait for retrospective (timeout)
+  await sleep(RETROSPECTIVE_TIMEOUT_MS);
+
+  // Step 4: Sleep (stop container — Dream phase begins)
+  if (liveFleet[bot]?.status !== 'retrospective') {
+    log(`duty cycle: ${bot} retrospective interrupted — aborting cycle`);
+    return;
+  }
+  log(`duty cycle: ${bot} retrospective complete — sleeping`);
+  await tr(`💤 ${name} retrospective complete — sleeping`);
+  try {
+    stopBot(bot);
+    killStaleContainers(bot);
+    await setBotPip(root, bot, '💤');
+    reabsorbWbsItems(root, bot);
+    // status=dream: container stopped, deferred git changes can now apply
+    fleetUpdate(bot, { status: 'dream', triggerType: 'never' });
+    writeFleet(liveFleet);
+    sendLifecycleMsg(bot, 'stopped').catch(() => {});
+    publishFleetReport().catch(() => {});
+    log(`duty cycle: ${bot} asleep — Dream phase`);
+  } catch (err) {
+    log(`duty cycle: ${bot} sleep failed — ${errStr(err)}`);
+    return;
+  }
+
+  // Step 5: Dream — wait for any pending git sync to apply changes
+  await sleep(60_000);
+
+  // Step 6: Wake (Ready phase — fresh start with latest code)
+  log(`duty cycle: ${bot} waking for new cycle`);
+  await tr(`🟢 ${name} starting fresh cycle`);
+  try {
+    stopBot(bot);
+    killStaleContainers(bot);
+    // status=ready: like quarters but signals the bot just completed a duty cycle
+    fleetUpdate(bot, { status: 'ready', triggerType: 'always' });
+    writeFleet(liveFleet);
+    clearShipConfigCache();
+    bootstrapBot(root, bot);
+    writeCrewStatus(root, bot);
+    injectWbsTasks(root, bot);
+    await setBotPip(root, bot, '✅');
+    sendLifecycleMsg(bot, 'started', entry.rank).catch(() => {});
+    publishFleetReport().catch(() => {});
+    log(`duty cycle: ${bot} ready — new cycle`);
+    await tr(`✅ ${name} ready — new duty cycle`);
+  } catch (err) {
+    log(`duty cycle: ${bot} wake failed — ${errStr(err)}`);
+    await tr(`⛔ ${name} wake failed after retrospective — ${errStr(err)}`);
+  }
+}
+
+const DUTY_CYCLE_CHECK_INTERVAL = 60_000; // check every minute
+
+/**
+ * Periodic duty cycle loop — checks if any onduty bot has exceeded DUTY_CYCLE_MS.
+ * When expired: runs dismiss → retrospective → sleep → dream → wake.
+ */
+async function dutyCycleLoop(conns: RoomConn[]): Promise<void> {
+  if (!DUTY_CYCLE_MS) return; // disabled if 0
+  // Track bots currently in retrospective to avoid double-triggering
+  const inRetrospective = new Set<string>();
+  while (true) {
+    await sleep(DUTY_CYCLE_CHECK_INTERVAL);
+    try {
+      const now = Date.now();
+      for (const [bot, entry] of Object.entries(liveFleet)) {
+        if (entry.status !== 'onduty') continue;
+        if (entry.ship !== HOSTNAME) continue;
+        if (!entry.ondutyAt) continue;
+        if (inRetrospective.has(bot)) continue;
+        if (now - entry.ondutyAt < DUTY_CYCLE_MS) continue;
+        inRetrospective.add(bot);
+        runRetrospectiveSequence(bot, conns)
+          .catch(err => log(`duty cycle: ${bot} retrospective sequence error — ${errStr(err)}`))
+          .finally(() => inRetrospective.delete(bot));
+      }
+    } catch (err) {
+      log(`duty cycle loop error: ${errStr(err)}`);
+    }
+  }
+}
+
 // ── Command handling ───────────────────────────────────────────────
 
 /**
@@ -2431,7 +2581,7 @@ async function handleLifecycleCommand(
         } catch (roomErr) {
           log(`${name}: room leave failed (non-fatal): ${errStr(roomErr)}`);
         }
-        fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
+        fleetUpdate(bot, { status: 'quarters', triggerType: 'always', ondutyAt: undefined });
         writeFleet(liveFleet);
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
@@ -2468,8 +2618,9 @@ async function handleLifecycleCommand(
         await tr(`⛔ ${name} sleep failed — ${errStr(err)}`);
       }
     } else if (action === 'wake') {
-      // Wake sleeping bot or restart already-awake bot (preserves current status)
-      const isRestart = liveFleet[bot]?.status !== 'sleep';
+      // Wake sleeping/dreaming bot or restart already-awake bot (preserves current status)
+      const currentStatus = liveFleet[bot]?.status;
+      const isRestart = currentStatus !== 'sleep' && currentStatus !== 'dream';
       const verb = isRestart ? 'restarting' : 'waking';
       const doneVerb = isRestart ? 'restarted' : 'awake';
       const startedAt = Date.now();
@@ -2516,9 +2667,9 @@ async function handleLifecycleCommand(
         recordInfraFailure('wake-build');
       }
     } else {
-      // Report: move awake bot to duty room. Skip sleeping bots.
-      if (liveFleet[bot]?.status === 'sleep') {
-        log(`!report ${name}: skipping (sleeping)`);
+      // Report: move awake bot to duty room. Skip sleeping/dreaming bots.
+      if (liveFleet[bot]?.status === 'sleep' || liveFleet[bot]?.status === 'dream') {
+        log(`!report ${name}: skipping (${liveFleet[bot]?.status})`);
         continue;
       }
       if (liveFleet[bot]?.status === 'onduty') {
@@ -2536,7 +2687,7 @@ async function handleLifecycleCommand(
           await tr(`⛔ ${name} report failed — ${errStr(roomErr)}`);
           continue;
         }
-        fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME });
+        fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME, ondutyAt: Date.now() });
         writeFleet(liveFleet);
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild)
@@ -3922,6 +4073,7 @@ async function main(): Promise<void> {
   relayTasksLoop(conns).catch((err) => log(`relay tasks loop fatal: ${errStr(err)}`));
   secretsSyncLoop(conns).catch((err) => log(`secrets sync loop fatal: ${errStr(err)}`));
   heartbeatLoop(conns).catch((err) => log(`heartbeat loop fatal: ${errStr(err)}`));
+  dutyCycleLoop(conns).catch((err) => log(`duty cycle loop fatal: ${errStr(err)}`));
   curtainLoop(captainUserId).catch((err) => log(`curtain loop fatal: ${errStr(err)}`));
   metricsLoop().catch((err) => log(`metrics loop fatal: ${errStr(err)}`));
 

@@ -16,7 +16,7 @@ export interface S3Config {
   secretKey: string;
 }
 
-export type BotStatus = 'onduty' | 'quarters' | 'sleep' | 'transit';
+export type BotStatus = 'onduty' | 'quarters' | 'sleep' | 'transit' | 'retrospective' | 'dream' | 'ready';
 export type TriggerType = 'always' | 'callout' | 'never';
 
 export interface BotEntry {
@@ -28,6 +28,8 @@ export interface BotEntry {
   title?: string;
   quartersRoom?: string;
   activeBrainModel?: string;
+  /** Unix ms when the bot last went onduty — used for duty cycle timer. */
+  ondutyAt?: number;
 }
 
 export interface ShipConfig {
@@ -43,12 +45,14 @@ const SHIPS_PATH = path.join(SECRETS_PATH, 'operator', 'ships.json');
 export const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** Statuses that mean the bot should be running on its assigned ship. */
-export const RUNNING_STATUSES: readonly BotStatus[] = ['onduty', 'quarters'] as const;
+export const RUNNING_STATUSES: readonly BotStatus[] = ['onduty', 'quarters', 'retrospective', 'ready'] as const;
 
 /** Default triggerType for a given status (used when triggerType is not explicitly set). */
 export function defaultTriggerType(status: BotStatus): TriggerType {
   if (status === 'onduty') return 'callout';
   if (status === 'quarters') return 'always';
+  if (status === 'retrospective') return 'always';
+  if (status === 'ready') return 'always';
   return 'never';
 }
 
