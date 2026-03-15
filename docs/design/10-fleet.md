@@ -15,7 +15,16 @@ Fleet-wide bot availability is tracked in `fleet.json` and synced via git. The r
     "architect": { "rw": ["infiniclaw", "aegis"] }
   },
   "bots": {
-    "cid": { "role": "engineer", "rank": 2, "ship": "HERACLES", "status": "onduty" }
+    "cid": {
+      "role": "engineer",
+      "rank": 2,
+      "ship": "HERACLES",
+      "status": "onduty",
+      "triggerType": "callout",
+      "quartersRoom": "!roomId:homeserver",
+      "activeBrainModel": "claude-sonnet-4-6",
+      "ondutyAt": 1710000000000
+    }
   }
 }
 ```
@@ -25,7 +34,7 @@ Fleet-wide bot availability is tracked in `fleet.json` and synced via git. The r
 `!transport <bot> <ship>` moves a bot between ships via a two-phase git protocol:
 
 1. **Dematerialize** — source ship stops the bot, writes `ship: targetShip, status: "transit"` to fleet.json, and pushes.
-2. **Materialize** — target ship's 30s secrets sync sees the inactive bot assigned to it, activates it, starts it, and pushes the updated state.
+2. **Materialize** — target ship's 30s secrets sync sees the transit bot assigned to it, sets `status: "quarters"`, starts it, and pushes the updated state.
 
 Transport uses git (not Matrix) because it must survive relay restarts and network blips. If the target ship's relay missed a Matrix message, the bot would be lost. The git protocol guarantees delivery.
 
@@ -55,7 +64,7 @@ All metrics use rolling 1d/7d windows. No cumulative totals.
    *Check:* Pre-commit hook validates rank integrity and required fields.
 
 2. **Transport works** — `!transport cid poseidon` moves Cid to Poseidon.
-   *Check:* Cid dematerializes on source ship (status → transit), materializes on target ship (status → onduty). fleet.json updated and pushed.
+   *Check:* Cid dematerializes on source ship (status → transit), materializes on target ship (status → quarters). fleet.json updated and pushed.
 
 3. **Fleet command aggregates** — `!fleet` in any room.
    *Check:* Single response from speaker, includes data from all active ships.
