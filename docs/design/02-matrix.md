@@ -10,7 +10,7 @@ Matrix is the communication backbone. Every message, command, and status update 
 | Operator (`@operator`) | Operator's direct Matrix presence. Admin in all rooms. Used for direct messages, BehindTheCurtain, quarters room commands, and room management. Mentionable by bots to request operator assistance (see Special Mentions). |
 | Loudspeaker (`@loudspeaker`) | Relay's reply voice. Member of all rooms. Delivers x-command responses prefixed `[SHIPNAME]`. Mentionable by on-duty bots for fleet status or broadcast (see Special Mentions). |
 | Help (`@help`) | Help text and unknown command feedback. Member of all rooms. Captain-only visibility — bots ignore this account. |
-| Bot accounts | One per bot. Joins rooms based on lifecycle status. |
+| Bot accounts | One per bot. Joins rooms based on lifecycle status. Display names use `unifiedBotDisplay('short')` format: `shipEmoji locationEmoji Name roleIcon medal healthEmoji` (e.g. `🦁🏠 Cid ⚙️🥈💤`). Synced on relay startup via `syncBotDisplayNames()`. |
 | Intercom accounts | Write-only broadcast channels, one per duty room. The relay polls these for incoming x-commands. Not present in ship rooms. |
 
 Bots see loudspeaker and intercom messages in their context window (for situational awareness) but only ignore the help account via `IGNORE_SENDERS`. The trigger system controls whether bots respond — not whether they hear.
@@ -262,11 +262,27 @@ Bots have MCP tools for navigating Matrix room history. These let a bot "look ba
 | Tool | Purpose |
 |------|---------|
 | `get_message` | Fetch a specific message by event ID |
-| `get_thread` | Fetch all messages in a thread |
-| `get_last_event_id` | Get the event ID of the most recent message |
-| `get_metrics` | Fleet metrics (operator, bot, ship, fleet) with 1d/7d rolling windows |
+| `get_last_event_id` | Get the event ID of the most recent message in this room |
 
-Navigation tools access the bot's current room (quarters or duty room). They do not require the bot to have been active when the messages were sent — Matrix history is permanent. `get_metrics` returns the same data as the `!metrics` x-command.
+Navigation tools access the bot's current room (quarters or duty room). They do not require the bot to have been active when the messages were sent — Matrix history is permanent.
+
+### Other Bot MCP Tools
+
+Beyond navigation, bots have tools for communication and fleet awareness. Full list in `bots/container/agent-runner/src/tools.ts`:
+
+| Tool | Purpose |
+|------|---------|
+| `send_reaction` | React to a message with an emoji (call `get_last_event_id` first) |
+| `send_image` / `send_file` | Send media to the current room |
+| `set_thread` | Set/clear the active Matrix thread for subsequent messages |
+| `check_health` | Query fleet health data from the relay |
+| `crew_roster` | List bots in the fleet with roles and status |
+| `list_recipients` | List accounts in the current room |
+| `set_brain_mode` / `get_brain_mode` | Switch or query the bot's LLM model |
+| `restart_self` | Request bot restart via the relay |
+| `branch_to_thread` | Dispatch work to a Branch Brain in a new thread |
+| `delegate_to_lobe` | Spawn a sub-process (codex/gemini/claude/ollama) |
+| `git_push` | Push commits via relay task |
 
 ## Verification
 
@@ -283,8 +299,8 @@ Navigation tools access the bot's current room (quarters or duty room). They do 
    *Check:* Trigger pattern matches via `<m>Name</m>` markers.
 9. **Outbound pill conversion** — Bot sends a message containing `<m>Name</m>` for a known room member. Matrix client shows it as a clickable mention pill.
    *Check:* `formatted_body` contains `<a href="https://matrix.to/#/@...">Name</a>`.
-10. **@operator wakes operator** — Bot or Captain mentions `@operator` in a room. Operator tmux session receives the request with context.
-    *Check:* Operator session shows the message; only the bot's ship's operator responds.
+10. **@operator wakes operator** — Captain prefixes a message with `@` in any room. Operator tmux session receives the request with context.
+    *Check:* Operator session shows the message; only the bot's ship's operator responds. Note: bot-triggered `<m>operator</m>` routing is not yet implemented (see Special Mentions).
 11. **@loudspeaker fleet status** — On-duty bot mentions `@loudspeaker` in a room.
     *Check:* Relay responds with fleet status in the same room.
 12. **@loudspeaker broadcast** — On-duty bot sends `@loudspeaker: test message` in Engineering.
