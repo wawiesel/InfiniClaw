@@ -373,8 +373,8 @@ function computeBuildContextHash(root: string, bot: string): string {
   // Bot-specific Dockerfile
   const dockerfile = findDockerfile(root, bot);
   if (dockerfile) hash.update(fs.readFileSync(dockerfile));
-  // Shared build context: external/nanoclaw/container/agent-runner/
-  const agentRunner = path.join(root, 'external', 'nanoclaw', 'container', 'agent-runner');
+  // Shared build context: bots/container/ (used by bots/build.sh as CONTAINER_CONTEXT)
+  const agentRunner = path.join(root, 'bots', 'container');
   if (fs.existsSync(agentRunner)) {
     const walk = (dir: string) => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
