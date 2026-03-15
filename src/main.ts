@@ -146,6 +146,11 @@ const triggerAckByMessageKey: Record<string, number> = {};
 const turnToolCallCount: Record<string, number> = {};
 const turnDispatchCalled: Record<string, boolean> = {};
 const turnKilledByTimeout: Record<string, boolean> = {};
+// Hang watchdog (#93): tracks main-brain turn boundaries to detect silent hangs after timeout kills.
+// A turn that starts but never ends (event loop blocked by a dangling Promise) increments stalledMs
+// past the threshold and triggers a self-restart via process.exit(1).
+let lastMainTurnStartedAt = 0;
+let lastMainTurnEndedAt = 0;
 let resumeGateResolve: (() => void) | null = null;
 const resumeGate = new Promise<void>((resolve) => { resumeGateResolve = resolve; });
 let isResuming = false;
@@ -946,6 +951,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const agentResponses: string[] = [];
   let lastResponseBody: string | undefined;
   markRunStarted(chatJid);
+  if (isMainGroup) lastMainTurnStartedAt = Date.now();
   // Reset per-turn dispatch counters
   turnToolCallCount[chatJid] = 0;
   turnDispatchCalled[chatJid] = false;
@@ -1031,6 +1037,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
       delete activeReplyThreadIds[chatJid];
       markRunEnded(chatJid);
+      if (isMainGroup) lastMainTurnEndedAt = Date.now();
       return true;
     }
     lastAgentTimestamp[chatJid] = previousCursor;
@@ -1038,6 +1045,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
     delete activeReplyThreadIds[chatJid];
     markRunEnded(chatJid);
+    if (isMainGroup) lastMainTurnEndedAt = Date.now();
     return false;
   }
 
@@ -1046,6 +1054,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
   delete activeReplyThreadIds[chatJid];
   markRunEnded(chatJid);
+  if (isMainGroup) lastMainTurnEndedAt = Date.now();
 
   appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
   return true;
@@ -1681,6 +1690,28 @@ async function main(): Promise<void> {
     }
   }, MEMORY_CHECK_INTERVAL));
   try { fs.writeFileSync(heartbeatPath, String(Date.now())); } catch { }
+
+  // Hang watchdog (#93): detect silent hangs after a brain-turn timeout kill.
+  // When the container is SIGKILLed, the main process can get stuck waiting on a Promise
+  // that will never resolve, leaving the bot "online" but completely unresponsive.
+  // We give the turn 2× the kill timeout to complete; if it still hasn't ended, force
+  // a self-restart so pm2 can respawn a clean process.
+  if (MAIN_BRAIN_TURN_TIMEOUT_MS > 0) {
+    const HANG_WATCHDOG_THRESHOLD_MS = 2 * MAIN_BRAIN_TURN_TIMEOUT_MS;
+    const HANG_WATCHDOG_INTERVAL_MS = Math.max(30_000, Math.round(MAIN_BRAIN_TURN_TIMEOUT_MS / 4));
+    persistentTimers.push(setInterval(() => {
+      if (lastMainTurnStartedAt === 0) return; // no turn has started yet
+      if (lastMainTurnEndedAt >= lastMainTurnStartedAt) return; // turn ended normally
+      const stalledMs = Date.now() - lastMainTurnStartedAt;
+      if (stalledMs > HANG_WATCHDOG_THRESHOLD_MS) {
+        logger.error(
+          { stalledMs, thresholdMs: HANG_WATCHDOG_THRESHOLD_MS },
+          'Hang watchdog: main brain turn has not completed — forcing restart to recover from silent hang (#93)',
+        );
+        process.exit(1);
+      }
+    }, HANG_WATCHDOG_INTERVAL_MS));
+  }
 
   // Prune expired allow-list entries every 5 minutes
   persistentTimers.push(setInterval(() => {
