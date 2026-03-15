@@ -66,7 +66,7 @@ Host machine (macOS / Linux)
 ├── status.ts           → Bot status reporting
 ├── status-cli.ts       → Status display for CLI and MCP server
 ├── todo.ts             → Read Claude Code task state from session files
-├── formatting.ts       → Message formatting helpers: capitalizeName, escapeHtml, statusMessage, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, rankMedal, botBadge, isBotCO, shipHeaderLine, botTreeLine
+├── formatting.ts       → Message formatting helpers: capitalizeName, escapeHtml, statusMessage, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, rankMedal, botBadge, isBotCO, shipHeaderLine, botTreeLine, unifiedBotDisplay (short/medium/long verbosity)
 ├── git-utils.ts        → Shared git helpers: gitOpts(), execErrOutput(), gitSyncRepo() (stash→rebase→pop, conflict hard-reset)
 ├── utils.ts            → Shared utilities: isRecord, sleep, shellQuote, errStr, envInt, escapeRegex, readJson, writeJson
 └── version.ts          → Git version resolution (prefers stamped GIT_VERSION file)

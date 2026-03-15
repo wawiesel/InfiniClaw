@@ -141,4 +141,66 @@ export function botTreeLine(
   return `${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · ${medal}${suffix}`;
 }
 
-const GRADE_EMOJI: Record<string, string> = { A: '🟢', B: '🟡', C: '🟠', F: '🔴' };
+export const GRADE_EMOJI: Record<string, string> = { A: '🟢', B: '🟡', C: '🟠', F: '🔴' };
+
+// ── Unified display format ────────────────────────────────────────
+
+export type Verbosity = 'short' | 'medium' | 'long';
+
+/** Parameters for unified bot display. */
+export interface UnifiedBotDisplayParams {
+  name: string;          // e.g. "cid"
+  shipEmoji: string;     // e.g. "🦁"
+  shipName: string;      // e.g. "Herc"
+  locationEmoji: string; // e.g. "⚙️"
+  locationShort: string; // e.g. "Eng"
+  locationFull: string;  // e.g. "Engineering"
+  health: string;        // "A" | "B" | "C" | "F" | ""
+  activity: string;      // "active" | "" — empty means idle
+  role: string;          // e.g. "engineer"
+  rank: number;          // 1, 2, 3+
+  isChief: boolean;      // true if CO (lowest-rank awake in role)
+}
+
+/** Build a unified bot display string.
+ *  Format: <ship><location>·<health><activity>·Name·<role><rank>
+ *  - short:  emoji-only fields — for Matrix display names
+ *  - medium: emoji+abbreviated text — for !fleet / !metrics
+ *  - long:   emoji+full text+[label] — for debug/verbose output
+ */
+export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosity): string {
+  const medal = rankMedal(p.rank, p.isChief);
+  const roleIcon = ROLE_ICONS[p.role] ?? '';
+  const healthEmoji = GRADE_EMOJI[p.health] ?? '';
+
+  let ship: string, loc: string, health: string, act: string, role: string, rank: string;
+
+  switch (verbosity) {
+    case 'short':
+      ship = p.shipEmoji;
+      loc = p.locationEmoji;
+      health = healthEmoji;
+      act = p.activity ? '🔥' : '';
+      role = roleIcon;
+      rank = medal;
+      break;
+    case 'medium':
+      ship = `${p.shipEmoji}${p.shipName}`;
+      loc = `${p.locationEmoji}${p.locationShort}`;
+      health = `${healthEmoji}${p.health}`;
+      act = p.activity ? `🔥${p.activity}` : '';
+      role = `${roleIcon}${p.role.slice(0, 3)}`;
+      rank = `${medal}${p.rank}`;
+      break;
+    case 'long':
+      ship = `${p.shipEmoji}${p.shipName}[ship]`;
+      loc = `${p.locationEmoji}${p.locationFull}[loc]`;
+      health = `${healthEmoji}${p.health}[health]`;
+      act = p.activity ? `🔥${p.activity}[activity]` : '';
+      role = `${roleIcon}${p.role}[role]`;
+      rank = `${medal}rank${p.rank}`;
+      break;
+  }
+
+  return `${ship}${loc}·${health}${act}·${capitalizeName(p.name)}·${role}${rank}`;
+}
