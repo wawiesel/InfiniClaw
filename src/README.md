@@ -14,7 +14,7 @@ Architecture and behavior are specified in `docs/design/` — this README docume
 | [06-brain](../docs/design/06-brain.md) | `brain-management.ts`, `container-spawn.ts` |
 | [07-ipc](../docs/design/07-ipc.md) | `ipc-watcher.ts`, `ipc-commands.ts` |
 | [08-threading](../docs/design/08-threading.md) | `relay.ts` (branch brains); lobes not yet implemented |
-| [12-co](../docs/design/12-co.md) | `wbs.ts` (WBS utilities); relay integration pending |
+| [12-co](../docs/design/12-co.md) | `wbs.ts` (WBS utilities); `relay.ts` (startup injection, reabsorption, heartbeat auto-assign, completion unblocking) |
 
 ## Architecture
 
@@ -148,3 +148,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`!go` threading**: Creates thread root on first reply, adds bot result steps to thread — consistent with other lifecycle commands.
 - **`activeBrainModel`**: Written to `fleet.json` by `applyBrainMode()` in `ipc-commands.ts` whenever `set_brain_mode` IPC command fires. Also typed in `BotEntry` interface in `ship-config.ts`.
 - **`crew-status.json`**: Written by `writeCrewStatus(root, bot)` in `relay.ts` after every `bootstrapBot`/`restartBotForRoom` call. Lands at `_runtime/instances/{bot}/data/crew-status.json`. Read by the `crew_roster` MCP tool in the container. Includes all fleet bots with role/rank/room/present/isCommandingOfficer; CO = lowest rank per room among present bots.
+- **`wbs-initial.json`**: Written by `injectWbsTasks(root, bot)` in `relay.ts` after every `bootstrapBot` call. Lands at `_runtime/instances/{bot}/data/wbs-initial.json`. Contains the bot's currently-assigned WBS items so it can load its task list at startup. Relay manages the shared WBS at `_runtime/data/wbs-{room}.json`: reabsorbs items on dismiss/sleep, auto-assigns on heartbeat, unblocks dependents on `wbs_complete` relay-task.
