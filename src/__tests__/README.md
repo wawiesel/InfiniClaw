@@ -29,3 +29,4 @@ Integration and unit tests for InfiniClaw source modules that don't live next to
 | `formatting.test.ts` | rankMedal (chief/rank1/rank2/rank3+), botBadge (sleep/transit/health/grade/activity), botTreeLine (medals, prefix), unifiedBotDisplay (short/medium/long × all fields). |
 
 Run with: `npx vitest run --root .`
+| `branch-brain-creds.test.ts` | mapBrainEnv: BRAIN_OAUTH_TOKEN→CLAUDE_CODE_OAUTH_TOKEN, BRAIN_API_KEY→ANTHROPIC_API_KEY, BRAIN_MODEL→ANTHROPIC_MODEL, passthrough fields, CLAUDECODE deletion, null botEnv. |

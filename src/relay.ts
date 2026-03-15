@@ -1599,6 +1599,31 @@ function removeBranchTask(threadId: string): void {
 }
 
 /**
+ * Map bot profile env vars to the child process env for a Branch Brain.
+ * Pure function — extracted for testability.
+ * @param botEnv  - parsed bot env file (null if bot not specified or env unreadable)
+ * @param baseEnv - starting env (defaults to process.env); mutated and returned
+ */
+export function mapBrainEnv(
+  botEnv: Record<string, string> | null,
+  baseEnv: Record<string, string> = { ...process.env as Record<string, string> },
+): Record<string, string> {
+  if (botEnv) {
+    const oauthToken = botEnv['CLAUDE_CODE_OAUTH_TOKEN'] || botEnv['BRAIN_OAUTH_TOKEN'];
+    const apiKey = botEnv['ANTHROPIC_API_KEY'] || botEnv['BRAIN_API_KEY'];
+    const model = botEnv['ANTHROPIC_MODEL'] || botEnv['BRAIN_MODEL'];
+    if (oauthToken) baseEnv['CLAUDE_CODE_OAUTH_TOKEN'] = oauthToken;
+    if (apiKey) baseEnv['ANTHROPIC_API_KEY'] = apiKey;
+    if (model) baseEnv['ANTHROPIC_MODEL'] = model;
+    if (botEnv['ANTHROPIC_BASE_URL']) baseEnv['ANTHROPIC_BASE_URL'] = botEnv['ANTHROPIC_BASE_URL'];
+    if (botEnv['ANTHROPIC_AUTH_TOKEN']) baseEnv['ANTHROPIC_AUTH_TOKEN'] = botEnv['ANTHROPIC_AUTH_TOKEN'];
+    if (botEnv['NODE_EXTRA_CA_CERTS']) baseEnv['NODE_EXTRA_CA_CERTS'] = botEnv['NODE_EXTRA_CA_CERTS'];
+  }
+  delete baseEnv['CLAUDECODE'];
+  return baseEnv;
+}
+
+/**
  * Spawn a Branch Brain as a host-side claude process (BUG-14 fix).
  * Branch Brain runs independently of the bot container, capturing stdout
  * and posting results to the specified Matrix thread.
@@ -1637,16 +1662,7 @@ async function spawnBranchBrain(
   // Load bot credentials so claude can authenticate on the host.
   // Raw env file uses BRAIN_* names; map to CLAUDE_CODE_* / ANTHROPIC_* as needed.
   const botEnv = bot ? (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })() : null;
-  const childEnv: Record<string, string> = { ...process.env as Record<string, string> };
-  const oauthToken = botEnv?.CLAUDE_CODE_OAUTH_TOKEN || botEnv?.BRAIN_OAUTH_TOKEN;
-  const apiKey = botEnv?.ANTHROPIC_API_KEY || botEnv?.BRAIN_API_KEY;
-  if (oauthToken) childEnv['CLAUDE_CODE_OAUTH_TOKEN'] = oauthToken;
-  if (apiKey) childEnv['ANTHROPIC_API_KEY'] = apiKey;
-  if (botEnv?.ANTHROPIC_BASE_URL) childEnv['ANTHROPIC_BASE_URL'] = botEnv.ANTHROPIC_BASE_URL;
-  if (botEnv?.ANTHROPIC_AUTH_TOKEN) childEnv['ANTHROPIC_AUTH_TOKEN'] = botEnv.ANTHROPIC_AUTH_TOKEN;
-  if (botEnv?.NODE_EXTRA_CA_CERTS) childEnv['NODE_EXTRA_CA_CERTS'] = botEnv.NODE_EXTRA_CA_CERTS;
-  // Prevent nested Claude Code rejection
-  delete childEnv['CLAUDECODE'];
+  const childEnv = mapBrainEnv(botEnv);
   // Use fleet GitHub bot for PR reviews so comments appear as the bot, not the Captain
   const ghBotToken = loadGitHubBotToken();
   if (ghBotToken) childEnv['GH_TOKEN'] = ghBotToken;
