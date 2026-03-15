@@ -422,12 +422,25 @@ function computeBotMetrics(): BotMetrics[] {
   });
 }
 
+// ── Token throughput cache (60s TTL) — avoids re-scanning JSONL on every !fleet ──
+const TOKEN_THROUGHPUT_TTL_MS = 60_000;
+const tokenThroughputCache = new Map<string, { value: number; updatedAt: number }>();
+
 /** Read token throughput (total tokens/day) for a bot from session JSONL files. -1 if no data. */
 function readTokenThroughput(bot: string, windowDays: number): number {
+  const cacheKey = `${bot}:${windowDays}`;
+  const cached = tokenThroughputCache.get(cacheKey);
+  if (cached && Date.now() - cached.updatedAt < TOKEN_THROUGHPUT_TTL_MS) {
+    return cached.value;
+  }
+
   const cutoff = Date.now() - windowDays * 86_400_000;
   const instancesDir = path.join(resolveRoot(), '_runtime', 'instances');
   const projectsBase = path.join(instancesDir, bot, 'data', 'sessions', 'main', '.claude', 'projects');
-  if (!fs.existsSync(projectsBase)) return -1;
+  if (!fs.existsSync(projectsBase)) {
+    tokenThroughputCache.set(cacheKey, { value: -1, updatedAt: Date.now() });
+    return -1;
+  }
 
   let totalTokens = 0;
   let hasData = false;
@@ -463,10 +476,14 @@ function readTokenThroughput(bot: string, windowDays: number): number {
         } catch { /* skip bad files */ }
       }
     }
-  } catch { return -1; }
+  } catch {
+    tokenThroughputCache.set(cacheKey, { value: -1, updatedAt: Date.now() });
+    return -1;
+  }
 
-  if (!hasData) return -1;
-  return Math.round(totalTokens / windowDays);
+  const result = hasData ? Math.round(totalTokens / windowDays) : -1;
+  tokenThroughputCache.set(cacheKey, { value: result, updatedAt: Date.now() });
+  return result;
 }
 
 /** Branch brain success rate (0–100%) for a bot in the given window. -1 if no data. */
