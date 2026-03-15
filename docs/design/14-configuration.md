@@ -32,7 +32,7 @@ The host tracks per-room state: current objective, last progress, last completio
 
 ## Startup Checklist
 
-Sent automatically to each bot's main room on every boot, wrapped in a collapsible `<details>` block so it doesn't dominate the timeline.
+Sent automatically to each bot's main room on every boot as a markdown section (## heading).
 
 ### Sections by role
 
@@ -41,29 +41,26 @@ Sent automatically to each bot's main room on every boot, wrapped in a collapsib
 | Skills | ✅ | ✅ | ✅ |
 | MCP Servers | ✅ | ✅ | ✅ |
 | Active Todos | ✅ | ✅ | ✅ |
-| Ship Health | — | ✅ (named ship) | — |
+| Machine Health | — | ✅ (named hostname) | — |
 | Weekly Goals | — | — | ✅ |
 | Knowledge Search (latest entry) | — | — | ✅ |
 
 ### Rules
 
 - **All bots** show: Skills table, MCP Servers table, Active Todos table.
-- **Engineers** additionally show a Ship Health table. The table header must name the ship explicitly (e.g. `🏥 Ship Health — Herc`). Engineers are always in Engineering rooms.
+- **Engineers** additionally show a Machine Health table. The table header must name the hostname explicitly (e.g. `🏥 Machine Health — HERACLES`). Engineers are always in Engineering rooms.
 - **Navigators** additionally show:
   1. The Captain's global weekly goal list.
   2. The latest entry from a knowledge search (most recently updated knowledge base item).
-- The entire checklist is wrapped in a `<details><summary>` block so it collapses by default.
+- The entire checklist is a `## 🚀 {name} startup checklist` markdown section.
 
-### Collapsible format
+### Format
 
-```html
-<details>
-<summary>🚀 Cid startup checklist</summary>
+```markdown
+## 🚀 Cid startup checklist
 
 ### 🔧 Skills
 ...tables...
-
-</details>
 ```
 
 ## Verification
