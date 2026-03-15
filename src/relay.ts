@@ -1916,9 +1916,13 @@ async function spawnBranchBrain(
       const brainSucceeded = postedCount > 0;
       const timer = setTimeout(() => {
         branchBrainRestartTimers.delete(bot);
-        // Post main-timeline summary so Captain sees completion without watching thread
+        // Post main-timeline summary so Captain sees completion without watching thread.
+        // Use the bot's own room connection (conn.accessToken), not the loudspeaker, so
+        // the summary appears as the bot in their quarters room (#80).
         const status = brainSucceeded ? '✅ done' : '⛔ failed';
-        reply(conn, `🧵 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
+        if (conn.accessToken) {
+          relaySend(conn.homeserver, conn.accessToken, conn.roomId, `[${replyTag()}] 🧵 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
+        }
         log(`branchBrain: restarting ${bot} to pick up findings`);
         try {
           bootstrapBot(resolveRoot(), bot);
