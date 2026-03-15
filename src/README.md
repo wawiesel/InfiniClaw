@@ -69,7 +69,7 @@ Host machine (macOS / Linux)
 ├── formatting.ts       → Message formatting helpers: capitalizeName, escapeHtml, statusMessage, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, rankMedal, botBadge, isBotCO, shipHeaderLine, botTreeLine, unifiedBotDisplay (short/medium/long verbosity)
 ├── git-utils.ts        → Shared git helpers: gitOpts(), execErrOutput(), gitSyncRepo() (stash→rebase→pop, conflict hard-reset)
 ├── utils.ts            → Shared utilities: isRecord, sleep, shellQuote, errStr, envInt, escapeRegex, readJson, writeJson
-└── version.ts          → Git version resolution (prefers stamped GIT_VERSION file)
+└── version.ts          → Git version resolution (prefers stamped GIT_VERSION file); `getLatestSemverTag()`/`getStampedSemverTag()` for semver deploy gating
 ```
 
 ## NanoClaw as a library
