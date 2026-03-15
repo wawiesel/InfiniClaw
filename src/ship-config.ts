@@ -244,6 +244,21 @@ export function shipTag(hostname?: string, pip?: string): string {
   return entry.emoji ? `${entry.emoji}${statusPip} ${name}` : `${statusPip} ${name}`;
 }
 
+/**
+ * Returns true if the given role has no duty-room access — i.e. its `rw` list
+ * in the fleet.json `roles` section is absent or empty.  Bots with such roles
+ * (e.g. normie) must never join duty rooms; they are quarters-only.
+ */
+export function isQuartersOnlyRole(role: string): boolean {
+  try {
+    const raw = readJson<Record<string, unknown>>(FLEET_PATH);
+    const roleConfig = (raw.roles as Record<string, { rw?: string[] }> | undefined)?.[role];
+    return !roleConfig?.rw || roleConfig.rw.length === 0;
+  } catch {
+    return false; // on error, don't block
+  }
+}
+
 /** Clear cached config (for testing or reload). */
 export function clearShipConfigCache(): void {
   cached = null;

@@ -39,7 +39,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, rankMedal, shipHeaderLine, unifiedShipDisplay, botTreeLine, unifiedBotDisplay } from './formatting.js';
 import {
@@ -2808,6 +2808,13 @@ async function handleLifecycleCommand(
       }
       if (liveFleet[bot]?.status === 'onduty') {
         await tr(`⚠️ ${name} already on duty`);
+        continue;
+      }
+      // Normie enforcement (#118): bots whose role has rw:[] in fleet.json roles
+      // have no duty-room access and must stay in quarters.
+      const botRole = liveFleet[bot]?.role?.toLowerCase() ?? '';
+      if (isQuartersOnlyRole(botRole)) {
+        await tr(`⚠️ ${name} has no duty room (quarters only)`);
         continue;
       }
       try {
