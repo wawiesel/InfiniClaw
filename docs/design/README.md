@@ -23,7 +23,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `10-fleet.md` — fleet.json schema (role/rank/ship/status/triggerType/quartersRoom/activeBrainModel/ondutyAt), transport protocol (transit→quarters on materialize), S3 coordination, fleet metrics (availability, autonomy score)
 - `11-commands.md` — X-commands (`!`-prefixed fleet control), room-scoped targeting (presence-based for most commands, assignment-based for !report, universal from BTC), `!pull [ship]` (no arg = all ships) / `!push [ship]` commands, `!operator` toggle, `!metrics` (context-aware, 1d/7d rolling), status formats, alert threads. `!rejoin` and `!refresh` removed — `!wake` handles both restart and wake.
 - `12-co.md` — Chain of command (CO/XO/Chief), Chief election and delegation, Work Breakdown Structure (WBS) — per-room task list with dependencies, auto-assignment on bot startup, reabsorption on off-duty
-- `13-intercom.md` — Intercom accounts (bridge/engineering/astrometrics), loudspeaker replies (`[emoji Ship]` prefix), `@loudspeaker:` bot broadcast (implemented), `@room:` targeted routing (not yet implemented)
+- `13-intercom.md` — Intercom accounts (bridge/engineering/astrometrics), loudspeaker replies (`[emoji Ship]` prefix), `@loudspeaker:` bot broadcast / `@loudspeaker` alone = fleet status (both implemented), `@room:` targeted routing (not yet implemented)
 
 ## Resilience
 

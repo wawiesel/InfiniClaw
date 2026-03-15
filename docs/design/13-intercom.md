@@ -26,6 +26,8 @@ Operators on each ship use intercom to issue x-commands that all relays receive.
 
 Any on-duty bot can broadcast to all duty rooms via `@loudspeaker: <message>`. The relay detects this pattern, sends to all other duty rooms, and replies with confirmation. Messages appear as `BotName (SourceRoom): <message>`. Captain and operator messages are excluded from this path.
 
+`@loudspeaker` alone (no message) triggers a `!fleet` status response in that room.
+
 > **Status:** `@room:` targeting (sending to a specific room) is not yet implemented — `@loudspeaker:` broadcasts to all duty rooms only. See [02-matrix](02-matrix.md).
 
 ### Relays → Rooms
