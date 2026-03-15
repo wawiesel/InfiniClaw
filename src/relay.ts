@@ -874,10 +874,31 @@ async function setBotPip(root: string, bot: string, pip: string): Promise<void> 
 /** Sync display names for ALL bots on this ship (including sleeping ones). */
 async function syncBotDisplayNames(): Promise<void> {
   const root = resolveRoot();
+  const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
+  const allBotList = Object.values(liveFleet).map(e => ({ role: e.role, rank: e.rank, status: e.status }));
   for (const [bot, entry] of Object.entries(liveFleet)) {
     if (entry.ship !== HOSTNAME) continue;
-    const pip = PIP_FOR_STATUS[entry.status] || '💤';
-    await setBotPip(root, bot, pip);
+    const role = entry.role?.toLowerCase() ?? '';
+    const isOnDuty = entry.status === 'onduty';
+    const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
+    const co = isBotCO(entry.role, entry.rank, entry.status, allBotList);
+    const displayName = unifiedBotDisplay({
+      name: bot,
+      shipEmoji,
+      locationEmoji,
+      health: '',
+      tokPerDay: 0,
+      status: entry.status,
+      role,
+      rank: entry.rank,
+      isChief: co,
+    }, 'short');
+    try {
+      const { token, homeserver, userId } = await botMatrixLogin(root, bot);
+      await matrixSetDisplayName(homeserver, token, userId, displayName);
+    } catch (err) {
+      log(`syncBotDisplayNames ${bot}: ${errStr(err)}`);
+    }
   }
 }
 
