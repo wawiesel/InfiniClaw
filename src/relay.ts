@@ -1503,6 +1503,7 @@ function hasSourceChanges(root: string, commitCount: number): boolean {
 const RELAY_FILES = [
   'src/relay.ts', 'src/matrix-api.ts', 'src/metrics.ts', 'src/ipc-watcher.ts',
   'src/ship-config.ts', 'src/intercom-relay.ts', 'src/infini-config.ts',
+  'src/formatting.ts', 'src/version.ts', 'src/git-utils.ts', 'src/utils.ts',
   'package.json', 'package-lock.json',
 ];
 
