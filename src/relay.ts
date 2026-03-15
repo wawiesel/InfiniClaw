@@ -97,6 +97,12 @@ const RETRY_DELAY_BASE = 10_000;
 const RETRY_DELAY_MAX = 5 * 60_000;
 const STARTUP_SYNC_DELAY = 3_000;
 
+/** 502/503/504 mean the server is temporarily unavailable — don't grow backoff. */
+function isTransientServerError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /Sync failed: 50[234]/.test(msg);
+}
+
 // Configurable intervals (env vars in milliseconds, or use defaults)
 const GITHUB_REPO_URL = 'https://github.com/wawiesel/InfiniClaw';
 const GIT_SYNC_INTERVAL = envInt('GIT_SYNC_INTERVAL', 3 * 60_000);     // default 3 min
@@ -3610,7 +3616,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
     } catch (err) {
       log(`curtain: sync error (retry in ${Math.round(retryDelay / 1000)}s): ${errStr(err)}`);
       await sleep(retryDelay);
-      retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
+      if (!isTransientServerError(err)) retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
     }
   }
 }
@@ -3644,7 +3650,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
       log(`${conn.name}: initial sync failed (retry in ${Math.round(retryDelay / 1000)}s): ${errStr(err)}`);
       conn.accessToken = null;
       await sleep(retryDelay);
-      retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
+      if (!isTransientServerError(err)) retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
     }
   }
 
@@ -3769,7 +3775,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
       log(`${conn.name}: sync error (retry in ${Math.round(retryDelay / 1000)}s): ${errStr(err)}`);
       conn.accessToken = null;
       await sleep(retryDelay);
-      retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
+      if (!isTransientServerError(err)) retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX);
     }
   }
 }
