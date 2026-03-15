@@ -1648,7 +1648,8 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
                 log(`git sync: ${bot} dist unchanged, skipping restart`);
                 continue;
               }
-              const botName = capitalizeName(bot);
+              const botSyncEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+              const botName = botSyncEnv?.ASSISTANT_NAME || capitalizeName(bot);
               if (!threadRoot && engConn) {
                 threadRoot = await reply(engConn, `📡 git sync: ${result.newCommits} new commit(s) — restarting changed bots`);
               }
@@ -1670,7 +1671,8 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               try {
                 deployBot(resolveRoot(), bot);
                 log(`git sync: deployed ${bot} (sleeping)`);
-                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${capitalizeName(bot)} deployed (sleeping)`);
+                const botDeployEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${botDeployEnv?.ASSISTANT_NAME || capitalizeName(bot)} deployed (sleeping)`);
               } catch (err) {
                 log(`git sync: failed to deploy ${bot}: ${errStr(err)}`);
               }
@@ -2226,9 +2228,10 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
                 bootstrapBot(root, bot);
                 writeCrewStatus(root, bot);
                 injectWbsTasks(root, bot);
+                const matEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
                 for (const c of conns) {
                   if (c.accessToken) {
-                    await reply(c, `📡 ${capitalizeName(bot)} materialized`).catch(() => {});
+                    await reply(c, `📡 ${matEnv?.ASSISTANT_NAME || capitalizeName(bot)} materialized`).catch(() => {});
                   }
                 }
               } catch (err) {
@@ -2871,16 +2874,16 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
   const isBTC = conn.roomId === curtainRoomId;
   const scope = isBTC ? 'assigned' : 'present' as const;
   const bots = resolveBots(targetBot, conn, scope);
+  const labelEnv = targetBot ? (() => { try { return loadProfileEnv(root, targetBot); } catch { return null; } })() : null;
   if (bots.length === 0) {
     if (targetBot && scope === 'present' && liveFleet[targetBot]?.ship === HOSTNAME) {
-      await reply(conn, `📡 ${capitalizeName(targetBot)} not in this room`);
+      await reply(conn, `📡 ${labelEnv?.ASSISTANT_NAME || capitalizeName(targetBot)} not in this room`);
     } else if (targetBot) {
       await helpReply(conn, `No local bot: ${targetBot}`);
     }
     return;
   }
 
-  const labelEnv = targetBot ? (() => { try { return loadProfileEnv(root, targetBot); } catch { return null; } })() : null;
   const label = labelEnv?.ASSISTANT_NAME || (targetBot ? capitalizeName(targetBot) : `${bots.length} bot${bots.length !== 1 ? 's' : ''}`);
   const goThreadRoot = await reply(conn, `📡 go ${roomName} ${label}`);
   const tr = (text: string) => goThreadRoot ? threadReply(conn, goThreadRoot, text) : reply(conn, text);
@@ -3549,8 +3552,9 @@ function registerRelayCommands(): void {
         botName = qBot[0];
       }
       const local = getActiveBots();
+      const allowEnv = (() => { try { return loadProfileEnv(resolveRoot(), botName.toLowerCase()); } catch { return null; } })();
       if (!local.includes(botName.toLowerCase())) {
-        await helpReply(conn, `${capitalizeName(botName)} is not on this ship`);
+        await helpReply(conn, `${allowEnv?.ASSISTANT_NAME || capitalizeName(botName)} is not on this ship`);
         return;
       }
       const defaultDuration = 30;
@@ -3560,7 +3564,7 @@ function registerRelayCommands(): void {
       try {
         grantMount(botName.toLowerCase(), hostPath, duration);
         const expiry = new Date(Date.now() + duration * 60 * 1000).toLocaleTimeString();
-        await reply(conn, `📡 mount granted to ${capitalizeName(botName)}: ${hostPath} (rw, expires ~${expiry}) — restart required`);
+        await reply(conn, `📡 mount granted to ${allowEnv?.ASSISTANT_NAME || capitalizeName(botName)}: ${hostPath} (rw, expires ~${expiry}) — restart required`);
       } catch (err) {
         await reply(conn, `⛔ allow failed — ${errStr(err)}`);
       }
@@ -3588,13 +3592,14 @@ function registerRelayCommands(): void {
         botName = qBot[0];
       }
       const local = getActiveBots();
+      const denyEnv = (() => { try { return loadProfileEnv(resolveRoot(), botName.toLowerCase()); } catch { return null; } })();
       if (!local.includes(botName.toLowerCase())) {
-        await helpReply(conn, `${capitalizeName(botName)} is not on this ship`);
+        await helpReply(conn, `${denyEnv?.ASSISTANT_NAME || capitalizeName(botName)} is not on this ship`);
         return;
       }
       try {
         const removed = revokeMount(botName.toLowerCase(), hostPath);
-        await reply(conn, `📡 ${capitalizeName(botName)} ${removed ? `mount revoked: ${hostPath}` : `no mount found: ${hostPath}`}`);
+        await reply(conn, `📡 ${denyEnv?.ASSISTANT_NAME || capitalizeName(botName)} ${removed ? `mount revoked: ${hostPath}` : `no mount found: ${hostPath}`}`);
       } catch (err) {
         await reply(conn, `⛔ deny failed — ${errStr(err)}`);
       }
@@ -3623,7 +3628,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
     }
     writeShips(ships);
     secretsGitCommit(['operator/ships.json'], `rerank ships: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
-    await send(`✅ ${result.target} → 🏅${result.targetRank}, ${result.swap} → 🏅${result.swapRank}`);
+    await send(`✅ ${result.target} → ${rankMedal(result.targetRank, false)}, ${result.swap} → ${rankMedal(result.swapRank, false)}`);
     return;
   }
 
@@ -3631,13 +3636,16 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const local = getActiveBots();
   if (!local.includes(target)) return;
   if (!liveFleet[target]) { await helpReply(conn, `Unknown bot: ${rawTarget}`); return; }
-  const tr = await reply(conn, `📡 ${verb} ${capitalizeName(target)} ...`);
+  const root = resolveRoot();
+  const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
+  const botDisplayName = botEnv?.ASSISTANT_NAME || capitalizeName(target);
+  const tr = await reply(conn, `📡 ${verb} ${botDisplayName} ...`);
   const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
   const role = liveFleet[target].role;
   const sameRole = Object.entries(liveFleet).filter(([_, b]) => b.role === role);
   const result = rankSwap(sameRole, target, direction);
   if (!result) {
-    await send(`📡 ${capitalizeName(target)} already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
+    await send(`📡 ${botDisplayName} already ${isPromote ? 'highest' : 'lowest'} rank in ${role}`);
     return;
   }
   fleetUpdate(result.target, { rank: result.targetRank });
@@ -3645,13 +3653,10 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   writeFleet(liveFleet);
   secretsGitCommit(['bots/fleet.json'], `rerank ${role}: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
   fleetDirty = false;
-  await send(`✅ ${capitalizeName(result.target)} → ${rankMedal(result.targetRank, false)}, ${capitalizeName(result.swap)} → ${rankMedal(result.swapRank, false)} (${role})`);
-
-  const root = resolveRoot();
-  const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
   const swapEnv = (() => { try { return loadProfileEnv(root, result.swap); } catch { return null; } })();
-  const botDisplayName = botEnv?.ASSISTANT_NAME || capitalizeName(target);
   const swapDisplayName = swapEnv?.ASSISTANT_NAME || capitalizeName(result.swap);
+  await send(`✅ ${botDisplayName} → ${rankMedal(result.targetRank, false)}, ${swapDisplayName} → ${rankMedal(result.swapRank, false)} (${role})`);
+
   const botRoom = botDutyRoom(target);
 
   const targetConn = allConns.find(c => c.name === botRoom) || conn;
