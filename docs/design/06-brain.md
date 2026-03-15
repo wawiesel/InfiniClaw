@@ -22,7 +22,7 @@ The turn timeout enforces this model — if the brain takes too long, the contai
 
 A one-shot `claude` process that works in a visible Matrix thread in the bot's current room. The main brain initiates a branch when a request is too complex for inline triage.
 
-- **Runs on the host** — not inside the container. Spawned by the relay.
+- **Runs in a container** — isolated podman container (`--network none`, memory/pid limits). Falls back to host `claude --print` if `BRANCH_BRAIN_IMAGE` unset. Spawned by the relay.
 - **Model selection** — the bot chooses from its configured branch models (e.g. main=haiku, branch=[haiku, sonnet]).
 - **No nested branching** — a branch brain should not branch again (enforced by prompt instruction; see issue #25 for programmatic enforcement).
 - **Streaming output** — progress is posted into the thread as it arrives.
@@ -44,7 +44,7 @@ The bot can use Matrix navigation tools (see [02-matrix](02-matrix.md)) to fetch
 
 ## Configuration
 
-> **Status:** Per-task model selection from persona/memory is not yet implemented. Branch brains currently inherit the relay process's `ANTHROPIC_MODEL` (bot's `BRAIN_MODEL` is not forwarded — see issue #24).
+> **Status:** Per-task model selection from persona/memory is not yet implemented. Branch brains receive the bot's `BRAIN_MODEL` forwarded as `ANTHROPIC_MODEL` via `mapBrainEnv()` (issue #24 fixed). Dynamic model selection per task is still planned.
 
 Brain preferences live in the bot's **persona and memory** — not in fleet.json or env files. The bot chooses its branch model at branch time based on the task. Over time, the bot develops guidance on which models work best for which tasks.
 
@@ -54,7 +54,7 @@ Each bot's LLM is configured via env keys in `secrets/bots/{name}/env`:
 
 | Env key | Maps to (inside container) | Purpose |
 |---------|---------------------------|---------|
-| `BRAIN_MODEL` | `ANTHROPIC_MODEL` | Model ID (main brain container only; not forwarded to branch brains — see issue #24) |
+| `BRAIN_MODEL` | `ANTHROPIC_MODEL` | Model ID — forwarded to both main brain container and branch brains via `mapBrainEnv()` (issue #24 fixed) |
 | `BRAIN_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth authentication |
 | `BRAIN_API_KEY` | `ANTHROPIC_API_KEY` | API key authentication |
 
