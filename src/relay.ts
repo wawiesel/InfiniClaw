@@ -2610,7 +2610,7 @@ async function dutyCycleLoop(conns: RoomConn[]): Promise<void> {
 /**
  * Broadcast a lifecycle event for a bot via its duty room intercom connection.
  * Bots' handleLifecycleMessage() listens for these to update roomRoster / CO election.
- * Format: `HOSTNAME: BotName stopped|started (rank N)|reranked (rank N)`
+ * Format: `<shipEmoji>HOSTNAME: BotName stopped|started (rank N)|reranked (rank N)`
  */
 async function sendLifecycleMsg(
   botId: string,
@@ -2625,7 +2625,8 @@ async function sendLifecycleMsg(
     const conn = activeConns.find(c => c.name.toLowerCase() === roomName);
     if (!conn?.accessToken) return;
     const rankPart = rank !== undefined ? ` (rank ${rank})` : '';
-    await relaySend(conn.homeserver, conn.accessToken, conn.roomId, `${HOSTNAME}: ${botName} ${event}${rankPart}`);
+    const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
+    await relaySend(conn.homeserver, conn.accessToken, conn.roomId, `${shipEmoji}${HOSTNAME}: ${botName} ${event}${rankPart}`);
   } catch { /* non-fatal — lifecycle broadcast is best-effort */ }
 }
 
