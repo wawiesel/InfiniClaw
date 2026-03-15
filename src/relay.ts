@@ -85,7 +85,7 @@ import {
 } from './service.js';
 import { getLatestSemverTag, getStampedSemverTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
-import { DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
+import { BRANCH_BRAIN_IMAGE, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
 
@@ -1788,6 +1788,10 @@ async function spawnBranchBrain(
 
   // Notes file: Branch Brain can persist key findings here; relay injects as context on bot restart.
   const notesFile = path.join(resolveRoot(), '_runtime', 'data', 'thread-notes', `${replyThreadId.slice(0, 12)}.md`);
+  // In container mode the notes dir is bind-mounted at /relay-notes; adjust the path accordingly.
+  const notesFilePromptPath = BRANCH_BRAIN_IMAGE
+    ? `/relay-notes/${path.basename(notesFile)}`
+    : notesFile;
 
   const fullPrompt = [
     'You are a focused research and implementation agent. Work through the objective below, use available tools, and output your findings or results as plain text when done.',
@@ -1798,23 +1802,51 @@ async function spawnBranchBrain(
     '- Skip any preamble — go straight to the work.',
     '',
     'Before finishing: if you have persistent findings, decisions, or architecture notes worth saving,',
-    `write them in Markdown to: ${notesFile}`,
+    `write them in Markdown to: ${notesFilePromptPath}`,
     '(Create parent directories as needed. Omit this step if nothing persistent to record.)',
     '',
     'Objective:',
     objective,
   ].join('\n');
 
-  const child = spawn('claude', [
-    '--print',
-    '--verbose',
-    '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--add-dir', resolveRoot(),
-  ], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: childEnv,
-  });
+  // Spawn branch brain: prefer isolated podman container; fall back to host claude if image unset.
+  const useContainer = !!BRANCH_BRAIN_IMAGE;
+  let child: ReturnType<typeof spawn>;
+  if (useContainer) {
+    const notesDir = path.dirname(notesFile);
+    const envArgs: string[] = [];
+    for (const [k, v] of Object.entries(childEnv)) {
+      envArgs.push('--env', `${k}=${v}`);
+    }
+    child = spawn('podman', [
+      'run', '--rm', '-i',
+      '--network', 'none',
+      '--memory', '2g',
+      '--pids-limit', '256',
+      '--volume', `${notesDir}:/relay-notes:rw`,
+      ...envArgs,
+      BRANCH_BRAIN_IMAGE,
+      '--print',
+      '--verbose',
+      '--dangerously-skip-permissions',
+      '--output-format', 'stream-json',
+    ], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    log(`branchBrain: spawning in container image=${BRANCH_BRAIN_IMAGE}`);
+  } else {
+    log(`branchBrain: BRANCH_BRAIN_IMAGE unset — falling back to host spawn`);
+    child = spawn('claude', [
+      '--print',
+      '--verbose',
+      '--dangerously-skip-permissions',
+      '--output-format', 'stream-json',
+      '--add-dir', resolveRoot(),
+    ], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: childEnv,
+    });
+  }
 
   child.stdin?.write(fullPrompt);
   child.stdin?.end();
