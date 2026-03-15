@@ -36,6 +36,7 @@ export function statusMessage(emoji: string, text: string): string {
 /** Display-name pip for each bot status. Used by syncBotDisplayNames. */
 export const PIP_FOR_STATUS: Record<string, string> = {
   onduty: '🟢', quarters: '🟢', sleep: '💤', transit: '🚀',
+  retrospective: '📝', dream: '💤', ready: '✅',
 };
 
 /** Role icon lookup derived from ROLE_ROOMS — single source of truth. */
