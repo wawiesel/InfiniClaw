@@ -1845,7 +1845,7 @@ async function spawnBranchBrain(
     }
     child = spawn('podman', [
       'run', '--rm', '-i',
-      '--network', 'none',
+      '--network', 'slirp4netns',
       '--memory', '2g',
       '--pids-limit', '256',
       '--volume', `${notesDir}:/relay-notes:rw`,
