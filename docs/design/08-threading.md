@@ -8,7 +8,7 @@ InfiniClaw uses a "Branch and Merge" model. The main brain stays responsive on t
 Main Brain (persistent, in container)
   ├── Simple request → reply on main timeline
   ├── Complex request → branch_to_thread(objective)
-  │     → Relay spawns Branch Brain on HOST (claude --print)
+  │     → Relay spawns Branch Brain in container (or host fallback)
   │     → Branch Brain streams into visible Matrix thread
   │     → On exit: bot wakes to pick up findings
   └── Heavy/async work → invoke lobe MCP tool
@@ -19,7 +19,7 @@ Main Brain (persistent, in container)
 
 ## Branch Brains
 
-Branch brains run on the **host machine** — not inside containers. They are one-shot `claude --print` processes that stream output into a Matrix thread in the bot's current room.
+Branch brains run as isolated **podman containers** when `BRANCH_BRAIN_IMAGE` is set (default: `localhost/infiniclaw-branch-brain:latest`). They are one-shot `claude --print` processes that stream output into a Matrix thread in the bot's current room. Set `BRANCH_BRAIN_IMAGE=` (empty) to fall back to host-side spawn.
 
 ### How Branching Works
 
@@ -28,7 +28,7 @@ Branch brains run on the **host machine** — not inside containers. They are on
 3. Relay picks up the file, calls `spawnBranchBrain()`
 4. Relay posts announcement on main timeline: `🧵 Branch Brain: {objective first line}`
 5. Announcement event ID becomes the thread root
-6. Relay spawns: `claude --print --verbose --output-format stream-json`
+6. Relay spawns container: `podman run --rm --network none --memory 2g` with credentials as `--env` args; falls back to host `claude --print` if `BRANCH_BRAIN_IMAGE` unset
 7. Branch brain streams output — each message posted into the Matrix thread
 8. Captain can follow along or ignore
 
@@ -129,7 +129,7 @@ When the Captain sends a follow-up in a completed BB thread:
 2. A new branch brain spawns with the original objective + follow-up message as context
 3. The branch brain answers in the thread and exits normally
 
-Completed threads are tracked in `_runtime/data/completed-bb-threads.json` with a 24-hour TTL. The registry is pruned on every write.
+Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour TTL. The registry is pruned on every read.
 
 ## Correct branch_to_thread Protocol
 
