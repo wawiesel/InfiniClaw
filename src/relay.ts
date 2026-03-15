@@ -83,7 +83,7 @@ import {
   syncDistToInstance,
   collectBotMatrixUserMap,
 } from './service.js';
-import { getLatestSemverTag, getStampedSemverTag } from './version.js';
+import { getLatestSemverTag, getStampedSemverTag, getLatestSemverTagOnRef, commitsAheadOfTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_IMAGE, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
@@ -1533,13 +1533,13 @@ function hashDir(dir: string): string {
   }
 }
 
-function gitSync(): { ok: boolean; output: string; newCommits: number } {
+function gitSync(force = false): { ok: boolean; output: string; newCommits: number } {
   const root = resolveRoot();
   const opts = gitOpts(root, 30_000);
   try {
     // Fetch + push local commits ahead of origin before pulling.
     // Ensure we're on main first — container may have left a feature branch checked out (#101).
-    execSync('git fetch origin', opts);
+    execSync('git fetch origin --tags', opts);
     try {
       const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { ...opts, timeout: 5_000 }).trim();
       if (currentBranch !== 'main') {
@@ -1560,8 +1560,21 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
         log(`git sync: push failed: ${errStr(pushErr)}`);
       }
     }
-    // Pull new commits (gitSyncRepo re-fetches internally — harmless)
-    const { pulled, changed, output } = gitSyncRepo(root);
+    // Determine target: latest semver tag on origin/main (default) or origin/main HEAD (force).
+    // Only tagged commits deploy automatically — untagged commits on main are ignored (#112).
+    let targetRef = 'origin/main';
+    if (!force) {
+      const latestTag = getLatestSemverTagOnRef(root, 'origin/main');
+      if (latestTag) {
+        targetRef = latestTag;
+        const ahead = commitsAheadOfTag(root, 'origin/main');
+        if (ahead > 0) {
+          log(`git sync: ${ahead} untagged commit(s) on main ahead of ${latestTag} — waiting for tag`);
+        }
+      }
+    }
+    // Pull to target ref (gitSyncRepo re-fetches internally — harmless)
+    const { pulled, changed, output } = gitSyncRepo(root, targetRef);
     if (changed) {
       try {
         log('git sync: package-lock.json changed, running npm install');
@@ -3122,7 +3135,7 @@ function registerRelayCommands(): void {
           await s(stageOk('secrets up to date', secretsVer));
         }
 
-        const icResult = gitSync();
+        const icResult = gitSync(force);
         const codeVer = repoVersion(root);
         if (!icResult.ok) {
           warnings++;

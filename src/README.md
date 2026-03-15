@@ -67,9 +67,9 @@ Host machine (macOS / Linux)
 ├── status-cli.ts       → Status display for CLI and MCP server
 ├── todo.ts             → Read Claude Code task state from session files
 ├── formatting.ts       → Message formatting helpers: capitalizeName, escapeHtml, statusMessage, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, rankMedal, botBadge, isBotCO, shipHeaderLine (legacy), unifiedShipDisplay (short/long), botTreeLine, GRADE_EMOJI, unifiedBotDisplay (short/long verbosity, status-aware health via statusHealthEmoji, tok/day activity levels with M/K formatting)
-├── git-utils.ts        → Shared git helpers: gitOpts(), execErrOutput(), gitSyncRepo() (stash→rebase→pop, conflict hard-reset)
+├── git-utils.ts        → Shared git helpers: gitOpts(), execErrOutput(), gitSyncRepo(cwd, targetRef?) (stash→rebase→pop, conflict hard-reset; targetRef defaults to 'origin/main', accepts tags/commits for semver-gated deployment)
 ├── utils.ts            → Shared utilities: isRecord, sleep, shellQuote, errStr, envInt, escapeRegex, readJson, writeJson
-└── version.ts          → Git version resolution (prefers stamped GIT_VERSION file); `getLatestSemverTag()`/`getStampedSemverTag()` for semver deploy gating
+└── version.ts          → Git version resolution (prefers stamped GIT_VERSION file); `getLatestSemverTag()`/`getStampedSemverTag()` for semver deploy gating; `getLatestSemverTagOnRef(cwd, ref)` for remote tag discovery; `commitsAheadOfTag()` for untagged commit counting
 ```
 
 ## NanoClaw as a library
@@ -142,6 +142,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Code version in metrics**: `ShipMetrics.codeVersion` (optional) populated by relay with `relayVersion()`. Shown on ship header lines in `formatCombinedMetrics` — git sha, age, and ↑/↓ relation to origin/main.
 - **Dist sync for sleeping bots**: `gitSyncLoop` calls `syncDistToInstance()` for ALL local bots after a successful build — not just running ones. Sleeping bots get current compiled JS so they have up-to-date code when woken via `!wake`.
 - **Branch checkout guard**: `gitSyncLoop` checks current git branch before pushing; if not on `main` (e.g. left on a feature branch after a PR), it runs `git checkout main` first (#101).
+- **Semver deploy gate**: `gitSync(force?)` advances to the latest semver tag on `origin/main` by default, not HEAD. Untagged commits are fetched but not deployed — the Captain controls deployment by creating tags. `!pull --force` overrides to deploy HEAD of main. `git fetch --tags` ensures tags are always current (#112).
 - **Fleet reload before restart**: `gitSyncLoop` calls `loadFleet()` immediately before the restart-decision loop to get authoritative bot statuses from disk. This prevents stale in-memory `liveFleet` state from causing restarts of bots that transitioned to `sleep`/`dream`/`transit` while the git sync was running (issue #85).
 - **Fleet autonomy score**: Composite metric in `FleetMetrics`: `100 − (interventions × 10) − (crashes × 5)`, clamped to [0, 100]. Uses 1d and 7d rolling windows. Computed from existing operator intervention and pm2 restart data.
 - **Branch brain success tracking**: `recordBranchBrainResult(bot, success)` called from relay on branch brain exit. Success = posted at least one message. Rate shown as percentage (0–100%) per bot, -1 when no data. `formatBotMetrics` only shows the line when data exists.

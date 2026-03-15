@@ -48,3 +48,34 @@ export function getStampedSemverTag(instanceDir: string): string | null {
     return null;
   }
 }
+
+/**
+ * Get the latest semver tag reachable from a remote ref (e.g. origin/main).
+ * Returns null if no semver tag exists on the ref.
+ */
+export function getLatestSemverTagOnRef(cwd: string, ref = 'origin/main'): string | null {
+  try {
+    const tag = execSync(`git describe --tags --match "v*.*.*" --abbrev=0 ${ref}`, {
+      cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return tag || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Count commits on a ref that are ahead of the latest semver tag.
+ * Returns 0 if HEAD is at or behind the latest tag.
+ */
+export function commitsAheadOfTag(cwd: string, ref = 'origin/main'): number {
+  const tag = getLatestSemverTagOnRef(cwd, ref);
+  if (!tag) return 0;
+  try {
+    return parseInt(execSync(`git rev-list ${tag}..${ref} --count`, {
+      cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim(), 10) || 0;
+  } catch {
+    return 0;
+  }
+}

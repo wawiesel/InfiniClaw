@@ -19,26 +19,27 @@ export function execErrOutput(err: unknown): string {
 }
 
 /**
- * Fetch origin, then stash → rebase onto origin/main → pop stash.
- * On rebase conflict: aborts and hard-resets to origin/main (origin is authoritative).
+ * Fetch origin, then stash → rebase onto targetRef → pop stash.
+ * On rebase conflict: aborts and hard-resets to targetRef (origin is authoritative).
+ * @param targetRef - git ref to advance to (default: 'origin/main'). Can be a tag or commit.
  * Returns { pulled, changed, output }; pulled=0 means already up to date.
  */
-export function gitSyncRepo(cwd: string): { pulled: number; changed: boolean; output: string } {
+export function gitSyncRepo(cwd: string, targetRef = 'origin/main'): { pulled: number; changed: boolean; output: string } {
   const opts = gitOpts(cwd, 30_000);
   // Abort any stuck rebase from a previous failed sync
   if (fs.existsSync(path.join(cwd, '.git', 'REBASE_HEAD'))) {
     try { execSync('git rebase --abort', opts); } catch { /* ignore */ }
   }
-  execSync('git fetch origin', opts);
+  execSync('git fetch origin --tags', opts);
   const pulled = parseInt(
-    execSync('git rev-list HEAD..origin/main --count', { ...opts, timeout: 5_000 }).trim(),
+    execSync(`git rev-list HEAD..${targetRef} --count`, { ...opts, timeout: 5_000 }).trim(),
     10,
   ) || 0;
   if (pulled === 0) return { pulled: 0, changed: false, output: 'up to date' };
   // Check if package-lock.json will change (caller may need to run npm install)
   let changed = false;
   try {
-    const diff = execSync('git diff HEAD..origin/main --name-only', { ...opts, timeout: 5_000 }).trim();
+    const diff = execSync(`git diff HEAD..${targetRef} --name-only`, { ...opts, timeout: 5_000 }).trim();
     changed = diff.split('\n').includes('package-lock.json');
   } catch { /* best effort */ }
   // If there's an in-progress merge (e.g. from a previous conflict), abort it so git stash works
@@ -58,13 +59,13 @@ export function gitSyncRepo(cwd: string): { pulled: number; changed: boolean; ou
   }
   let output = '';
   try {
-    output = execSync('git rebase origin/main', opts).trim();
+    output = execSync(`git rebase ${targetRef}`, opts).trim();
   } catch {
     // Origin is authoritative — abort rebase and hard reset
     try { execSync('git rebase --abort', opts); } catch { /* ignore */ }
-    execSync('git reset --hard origin/main', opts);
+    execSync(`git reset --hard ${targetRef}`, opts);
     changed = true;
-    output = 'reset to origin/main (rebase conflict auto-resolved)';
+    output = `reset to ${targetRef} (rebase conflict auto-resolved)`;
   } finally {
     if (didStash) {
       try { execSync('git stash pop', opts); } catch { /* conflict — leave in stash */ }
