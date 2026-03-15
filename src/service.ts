@@ -803,7 +803,7 @@ export function holodeckCreate(bot: string, branch: string): void {
   const instance = instanceDir(root, hdBot);
 
   if (fs.existsSync(worktree)) {
-    throw new Error(`Holodeck already exists for ${bot}. Run 'holodeck teardown ${bot}' first.`);
+    throw new Error(`Holodeck already exists for ${bot}. Use holodeck_teardown first.`);
   }
 
   ensurePodmanReady();
@@ -875,9 +875,11 @@ export function holodeckCreate(bot: string, branch: string): void {
   console.log(`\nHolodeck started: ${hdBot}`);
   console.log(`  Branch: ${normalizedBranch}`);
   console.log(`  Instance: ${instance}`);
-  console.log(`  Chat: npm run cli holodeck chat ${bot}`);
+  console.log(`  Send: IPC holodeck_send (bot: "${bot}", message: "...")`);
+  console.log(`  Read: IPC holodeck_read (bot: "${bot}")`);
   console.log(`  Logs: tail -f ${logs}/${hdBot}.log`);
-  console.log(`  Teardown: npm run cli holodeck teardown ${bot}`);
+  console.log(`  Teardown: IPC holodeck_teardown (bot: "${bot}")`);
+  console.log(`  Status: IPC holodeck_status (bot: "${bot}")`);
 }
 
 export function holodeckTeardown(bot: string): void {
