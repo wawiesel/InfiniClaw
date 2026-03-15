@@ -20,3 +20,31 @@ export const GIT_VERSION = (() => {
     return 'unknown';
   }
 })();
+
+/**
+ * Get the latest semver git tag (`v*.*.*`) reachable from HEAD in the given repo.
+ * Returns null if no semver tag exists.
+ */
+export function getLatestSemverTag(cwd: string): string | null {
+  try {
+    const tag = execSync('git describe --tags --match "v*.*.*" --abbrev=0', {
+      cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    return tag || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the semver tag stamped at deploy time from a SEMVER_VERSION file.
+ * Written by stampSemverVersion() in service.ts. Returns null if not stamped.
+ */
+export function getStampedSemverTag(instanceDir: string): string | null {
+  try {
+    const tag = fs.readFileSync(path.join(instanceDir, 'SEMVER_VERSION'), 'utf-8').trim();
+    return tag || null;
+  } catch {
+    return null;
+  }
+}

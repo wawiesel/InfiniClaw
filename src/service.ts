@@ -437,6 +437,23 @@ export function stampGitVersion(root: string, instance: string): void {
   } catch {
     // Not a git repo or git unavailable — skip
   }
+  stampSemverVersion(root, instance);
+}
+
+/**
+ * Stamp the latest semver tag into SEMVER_VERSION so !pull can compare
+ * deployed tag vs latest without a live git query inside the container.
+ */
+export function stampSemverVersion(root: string, instance: string): void {
+  try {
+    const tag = execSync('git describe --tags --match "v*.*.*" --abbrev=0', {
+      cwd: root, encoding: 'utf-8' as const, stdio: 'pipe' as const,
+    }).trim();
+    fs.writeFileSync(path.join(instance, 'SEMVER_VERSION'), `${tag}\n`);
+  } catch {
+    // No semver tag yet — write empty marker so callers get null cleanly
+    try { fs.writeFileSync(path.join(instance, 'SEMVER_VERSION'), ''); } catch { /* ok */ }
+  }
 }
 
 /**

@@ -83,6 +83,7 @@ import {
   syncDistToInstance,
   collectBotMatrixUserMap,
 } from './service.js';
+import { getLatestSemverTag, getStampedSemverTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
@@ -2812,7 +2813,9 @@ function registerRelayCommands(): void {
     },
 
     pull: async (cmd, conn) => {
-      const targetShip = cmd.slice('!pull'.length).trim() || null;
+      const args = cmd.slice('!pull'.length).trim();
+      const force = args === '--force' || args.startsWith('--force ');
+      const targetShip = (force ? args.slice('--force'.length) : args).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
       const startedAt = Date.now();
 
@@ -2876,6 +2879,25 @@ function registerRelayCommands(): void {
           }
         }
 
+        // Semver version gate: skip restarts if the deployed tag matches the latest tag,
+        // unless --force was passed. With no semver tags yet, always restart.
+        const relayDir = path.join(root, '_runtime', 'relay');
+        const latestTag = getLatestSemverTag(root);
+        const deployedTag = getStampedSemverTag(relayDir);
+        const tagAdvanced = !latestTag || !deployedTag || latestTag !== deployedTag;
+        if (!force && !tagAdvanced) {
+          await s(stageOk(`version gate: ${latestTag} already deployed — skipping restarts (use !pull --force to override)`));
+          persistFleet();
+          await publishFleetReport().catch(() => {});
+          const msg = pullResult('complete (no new version)', warnings, errors, elapsed());
+          await s(msg);
+          await reply(conn, msg);
+          return;
+        }
+        if (latestTag) {
+          await s(stageOk(`version gate: advancing to ${latestTag}${force ? ' (forced)' : ''}`));
+        }
+
         if (isShipCommissioned()) {
           ensurePodmanReady();
           removeStaleProcesses();
@@ -2901,6 +2923,14 @@ function registerRelayCommands(): void {
           }
         } else {
           await s(stageOk('ship decommissioned — skipping bot startup'));
+        }
+
+        // Stamp deployed semver tag so next !pull can compare
+        if (latestTag) {
+          try {
+            fs.mkdirSync(relayDir, { recursive: true });
+            fs.writeFileSync(path.join(relayDir, 'SEMVER_VERSION'), `${latestTag}\n`);
+          } catch { /* best effort */ }
         }
 
         persistFleet();
