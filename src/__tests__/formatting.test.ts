@@ -134,19 +134,19 @@ describe('unifiedBotDisplay — short', () => {
 });
 
 describe('unifiedBotDisplay — long', () => {
-  it('format: prefix Name role·medal[rank]rank·health[grade]health·activity[tok/d]', () => {
+  it('format: prefix Name role·medal[rank]·health[grade]·activity[tok/d]', () => {
     const out = unifiedBotDisplay(BASE, 'long');
-    expect(out).toBe('🦁⚙️ Cid ⚙️engineer·🥇[1]rank·🟢[A]health·🔥[500K tok/d]');
+    expect(out).toBe('🦁⚙️ Cid ⚙️engineer·🥇[1]·🟢[A]·🔥[500K tok/d]');
   });
 
-  it('includes [health] label', () => {
+  it('includes [health] bracket', () => {
     const out = unifiedBotDisplay(BASE, 'long');
-    expect(out).toContain('[A]health');
+    expect(out).toContain('[A]');
   });
 
-  it('includes [rank] label', () => {
+  it('includes [rank] bracket', () => {
     const out = unifiedBotDisplay(BASE, 'long');
-    expect(out).toContain('[1]rank');
+    expect(out).toContain('[1]');
   });
 
   it('includes tok/d in activity', () => {
@@ -161,13 +161,13 @@ describe('unifiedBotDisplay — long', () => {
 
   it('sleep bot shows 💤 emoji with actual health grade and retains activity', () => {
     const out = unifiedBotDisplay({ ...BASE, status: 'sleep', health: 'A', tokPerDay: 16_000 }, 'long');
-    expect(out).toContain('💤[A]health');
+    expect(out).toContain('💤[A]');
     expect(out).toContain('🔹[16K tok/d]');
   });
 
   it('chief shows ⭐ medal', () => {
     const out = unifiedBotDisplay({ ...BASE, isChief: true }, 'long');
-    expect(out).toContain('⭐[1]rank');
+    expect(out).toContain('⭐[1]');
   });
 
   it('formats small tok as number', () => {
@@ -226,19 +226,19 @@ describe('unifiedShipDisplay — short', () => {
 });
 
 describe('unifiedShipDisplay — long', () => {
-  it('format: emoji Name type·medal[rank]rank·health[grade]health·activity[tok/d]', () => {
+  it('format: emoji Name type·medal[rank]·health[grade]·activity[tok/d]', () => {
     const out = unifiedShipDisplay(SHIP_BASE, 'long');
-    expect(out).toBe('🦁 Herc 🛳️cruiser·⭐[1]rank·🟢[A]health·🔥[500K tok/d]');
+    expect(out).toBe('🦁 Herc 🛳️cruiser·⭐[1]·🟢[A]·🔥[500K tok/d]');
   });
 
   it('non-speaker shows rank medal', () => {
     const out = unifiedShipDisplay({ ...SHIP_BASE, isSpeaker: false, rank: 2 }, 'long');
-    expect(out).toContain('🥈[2]rank');
+    expect(out).toContain('🥈[2]');
   });
 
-  it('decommissioned shows decom health', () => {
+  it('decommissioned shows decom', () => {
     const out = unifiedShipDisplay({ ...SHIP_BASE, commissioned: false }, 'long');
-    expect(out).toContain('💤[decom]health');
+    expect(out).toContain('💤[decom]');
     expect(out).not.toContain('tok/d');
   });
 

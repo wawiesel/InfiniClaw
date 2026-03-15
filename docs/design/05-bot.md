@@ -176,14 +176,14 @@ Two verbosity levels — **short** and **long** — applied uniformly to ships a
 ### Ship Display
 
 ```
-Long:  🦁 Herc 🛳️cruiser·⭐[1]rank·🟢[A]health·🔥[32 tok/d]
+Long:  🦁 Herc 🛳️cruiser·⭐[1]·🟢[A]·🔥[32 tok/d]
 Short: 🦁 Herc 🛳️⭐🟢🔥
 ```
 
 ### Bot Display
 
 ```
-Long:  🦁🏠 Tali ⚙️engineer·🥈[2]rank·🟢[A]health·🔥[16 tok/d]
+Long:  🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16 tok/d]
 Short: 🦁🏠 Tali ⚙️🥈🟢🔥
 ```
 
@@ -200,11 +200,11 @@ Both ships and bots follow the same structure:
 | **prefix** | `<shipEmoji> ` | `<shipEmoji><locEmoji> ` |
 | **Name** | Ship name | Bot name (capitalized) |
 | **type/role** | Ship type emoji+name (`🛳️cruiser`) | Role emoji+name (`⚙️engineer`) |
-| **rank** | Medal `⭐[1]rank` | Medal `🥈[2]rank` |
-| **health** | Grade emoji `🟢[A]health` | Grade emoji `🟢[A]health` |
+| **rank** | Medal `⭐[1]` | Medal `🥈[2]` |
+| **health** | Grade emoji `🟢[A]` | Grade emoji `🟢[A]` |
 | **activity** | Throughput `🔥[32 tok/d]` | Throughput `🔥[16 tok/d]` |
 
-In **long** format, each field shows `<emoji>[<value>]<label>` separated by `·` (interpunct).
+In **long** format, each field shows `<emoji>[<value>]` separated by `·` (interpunct).
 In **short** format, only emojis — no values or labels.
 
 ### Where Each Level Is Used
@@ -233,7 +233,7 @@ Computed from bot metrics (crashes, OOM kills, memory, response latency):
 | transit | 🚀 | `?` | Bot moving between ships |
 | waiting | 🟡 | `?` | Waiting for first output after start |
 
-Example: a sleeping bot with no recent metrics shows `💤[A]health` — the 💤 signals sleep status, `A` is the default grade (sleeping = healthy by definition). Health is vitals, not status.
+Example: a sleeping bot with no recent metrics shows `💤[A]` — the 💤 signals sleep status, `A` is the default grade (sleeping = healthy by definition). Health is vitals, not status.
 
 Fleet-level health grade = worst grade among all non-sleeping bots.
 
