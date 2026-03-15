@@ -1839,16 +1839,33 @@ async function spawnBranchBrain(
   let child: ReturnType<typeof spawn>;
   if (useContainer) {
     const notesDir = path.dirname(notesFile);
+    // Only pass specific env vars to container — host env vars like HOME break claude CLI.
+    const containerEnv: Record<string, string> = {};
+    const envKeys = [
+      'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL',
+      'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'GH_TOKEN',
+    ];
+    for (const k of envKeys) {
+      if (childEnv[k]) containerEnv[k] = childEnv[k];
+    }
     const envArgs: string[] = [];
-    for (const [k, v] of Object.entries(childEnv)) {
+    for (const [k, v] of Object.entries(containerEnv)) {
       envArgs.push('--env', `${k}=${v}`);
+    }
+    // Mount corporate CA cert if present on host so SSL works through proxy.
+    const volumeArgs: string[] = [`${notesDir}:/relay-notes:rw`];
+    const hostCaCert = process.env['NODE_EXTRA_CA_CERTS'];
+    if (hostCaCert && fs.existsSync(hostCaCert)) {
+      const containerCaPath = '/etc/ssl/certs/corporate-ca.pem';
+      volumeArgs.push(`${hostCaCert}:${containerCaPath}:ro`);
+      envArgs.push('--env', `NODE_EXTRA_CA_CERTS=${containerCaPath}`);
     }
     child = spawn('podman', [
       'run', '--rm', '-i',
       '--network', 'slirp4netns',
       '--memory', '2g',
       '--pids-limit', '256',
-      '--volume', `${notesDir}:/relay-notes:rw`,
+      ...volumeArgs.map(v => ['--volume', v]).flat(),
       ...envArgs,
       BRANCH_BRAIN_IMAGE,
       '--print',
