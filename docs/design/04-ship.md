@@ -87,6 +87,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 | Relay tasks | — | built-in | Poll `_runtime/relay-tasks/` for host-side operations |
 | Curtain | — | built-in | Watch all operator-joined rooms via operator account; process x-commands and mention-wakes from any room; forward BehindTheCurtain Captain messages to operator tmux |
 | Metrics | `METRICS_INTERVAL_MS` | 5 min | Publish metrics snapshot to S3 |
+| Duty cycle | `DUTY_CYCLE_MS` | 4 h | Check every 60s if any onduty bot has exceeded `DUTY_CYCLE_MS`; trigger retrospective → sleep → dream → wake sequence |
 
 **InfiniClaw sync** detects source changes (TypeScript, package.json, Dockerfiles, tsconfig) and triggers a rebuild → deploy dist → restart bots → restart relay.
 
