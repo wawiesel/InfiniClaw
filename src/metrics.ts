@@ -11,7 +11,7 @@ import path from 'path';
 
 import { logger } from 'nanoclaw/logger.js';
 
-import { capitalizeName } from './formatting.js';
+import { botBadge, capitalizeName, GRADE_EMOJI } from './formatting.js';
 import { matrixGetMessages } from './matrix-api.js';
 import { uploadContent } from './s3-sync.js';
 import { resolveRoot } from './service.js';
@@ -89,8 +89,6 @@ export interface FleetMetrics {
 // ── Health grade & activity ───────────────────────────────────────────
 
 export type HealthGrade = 'A' | 'B' | 'C' | 'F';
-
-const GRADE_EMOJI: Record<HealthGrade, string> = { A: '🟢', B: '🟡', C: '🟠', F: '🔴' };
 
 export function gradeEmoji(grade: HealthGrade): string {
   return GRADE_EMOJI[grade];
@@ -601,7 +599,7 @@ export function formatOperatorMetrics(m: OperatorMetrics): string {
 }
 
 export function formatBotMetrics(b: BotMetrics): string {
-  const pip = b.processRunning ? '◉' : '🔴';
+  const pip = botBadge(b.status, b.processRunning);
   const name = capitalizeName(b.name);
   const score = `score ${b.score.day1}/${b.score.day7}`;
   const crashes = `crashes ${b.crashes.day1}/${b.crashes.day7}`;
