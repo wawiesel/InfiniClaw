@@ -223,15 +223,17 @@ Computed from bot metrics (crashes, OOM kills, memory, response latency):
 | C | 🟠 | Significant — 3+ crashes/day, or OOM > 0, or mem > 85%, or p95 > 120s |
 | F | 🔴 | Down — should be running (onduty/quarters) but process not found |
 
-**Special health states** override grade display:
+**Special health states** override the health emoji, but the grade label is always shown:
 
-| State | Emoji | When |
-|-------|-------|------|
-| sleep/dream | 💤 | Bot is asleep or dreaming |
-| building | 🔄 | Container image being built |
-| starting | 🚀 | Container starting up |
-| transit | 🚀 | Bot moving between ships |
-| waiting | 🟡 | Waiting for first output after start |
+| State | Emoji | Grade label | When |
+|-------|-------|-------------|------|
+| sleep/dream | 💤 | Actual grade (default A if no data) | Bot is asleep or dreaming |
+| building | 🔄 | `?` | Container image being built |
+| starting | 🚀 | `?` | Container starting up |
+| transit | 🚀 | `?` | Bot moving between ships |
+| waiting | 🟡 | `?` | Waiting for first output after start |
+
+Example: a sleeping bot with no recent metrics shows `💤[A]health` — the 💤 signals sleep status, `A` is the default grade (sleeping = healthy by definition). Health is vitals, not status.
 
 Fleet-level health grade = worst grade among all non-sleeping bots.
 
@@ -246,10 +248,10 @@ Based on rolling token throughput (tokens per day):
 | moderate | ⚡ | 50K–500K tok/day |
 | high | 🔥 | 500K+ tok/day |
 
-In **long** format, the actual throughput is shown: `🔥[32 tok/d]`, `⚡[120 tok/d]`, `·[0 tok/d]`.
+In **long** format, the actual throughput is shown: `🔥[32K tok/d]`, `⚡[120K tok/d]`. Idle bots (< 5K tok/day) omit the activity field entirely — no emoji, no throughput label.
 In **short** format, only the emoji tier is shown. Idle bots omit the activity field entirely.
 
-Sleep/dream/transit bots show no activity regardless of historical throughput.
+Activity is shown for all bot statuses, including sleep/dream/transit — it represents the rolling 24-hour throughput, not current state.
 
 ### Rank Medals
 
@@ -285,13 +287,15 @@ Location is derived from bot status: onduty → duty room (from `ROLE_ROOMS`), e
 
 ### Matrix Display Name
 
-The bot's Matrix display name uses the **short** format:
+The bot's Matrix display name uses `unifiedBotDisplay(params, 'short')`:
 
 ```
-<health> <Name> <ship>
+<shipEmoji><locationEmoji> <Name> <roleIcon><medal><healthEmoji><actEmoji>
 ```
 
-Examples: `🟢 Cid 🦁`, `⭐ Parker 🦁`, `💤 Nora 🔱`
+Examples: `🦁🏠 Cid ⚙️🥈🟢🔥`, `🔱⚙️ Parker ⚙️⭐🟢⚡`, `🦁🏠 Nora 🧭🥈💤`
+
+At relay startup, `syncBotDisplayNames()` sets display names for all local bots (including sleeping). Health and tokPerDay default to `''`/`0` at sync time since metrics aren't available yet.
 
 > **Status:** Dynamic pip transitions (🔄 → 🚀 → 🟡 → 🟢) during boot are not yet implemented. `setStatusPip()` is currently a no-op in `channels/matrix.ts`. The relay sets pips at lifecycle boundaries (💤 on sleep, 🟢 on wake completion, ⭐ on Chief) but not during boot stages. See [#27](https://github.com/wawiesel/InfiniClaw/issues/27).
 
@@ -324,7 +328,7 @@ User message → Matrix → host message loop → SQLite → trigger check
   → [TRIGGERED] IPC inject if container active; else container spawns → main brain processes conversation
     → [IF COMPLEX] main brain calls branch_to_thread(objective)
       → Host creates thread: "🧵 Branch: <title>"
-      → Host spawns branch brain (claude --print on host, not container)
+      → Host spawns branch brain (podman container; host `claude --print` fallback when BRANCH_BRAIN_IMAGE unset)
       → Branch brain works, posts progress into thread
       → Main brain continues listening — never blocked
     → [IF SIMPLE] main brain replies directly
@@ -386,7 +390,7 @@ Response latency is the primary bot metric — it measures whether the main brai
 6. **Self-echo prevented** — Bot does not process its own messages.
    *Check:* Bot's log shows its own messages filtered out.
 
-7. **Display name correct** — Bot's display name shows `<pip> <name> <shipEmoji>`.
+7. **Display name correct** — Bot's display name uses `unifiedBotDisplay('short')`: `<shipEmoji><locEmoji> <Name> <roleIcon><medal><healthEmoji><actEmoji>`.
    *Check:* Matrix profile API returns the expected display name format.
 
 8. **Resume works** — Wake the bot (via `!wake`), verify it injects context and responds.
