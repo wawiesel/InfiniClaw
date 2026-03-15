@@ -382,7 +382,7 @@ describe('formatting', () => {
     expect(result).toContain('score');
   });
 
-  it('formatBotMetrics shows 🔴 pip when not running', () => {
+  it('formatBotMetrics shows 💤 pip for sleeping bot even when process not running', () => {
     const result = formatBotMetrics({
       name: 'norm',
       score: { day1: 0, day7: 0 },
@@ -392,7 +392,7 @@ describe('formatting', () => {
       status: 'sleep',
       processRunning: false,
     });
-    expect(result).toContain('🔴');
+    expect(result).toContain('💤');
   });
 
   it('formatShipMetrics shows name, uptime, restarts, infra failures', () => {
