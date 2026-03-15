@@ -92,6 +92,12 @@ npx vitest run --root .
 
 Test timeout is configured in `vitest.config.ts` (10s default to accommodate pm2-dependent metrics tests).
 
+## Hooks
+
+`.claude/hooks/` contains PostToolUse hooks that enforce architectural rules:
+
+- **`check-hardcoded-literals.sh`** — Blocks edits that hardcode values from fleet.json (bot names, room IDs, S3 secrets). Config values must be read at runtime.
+
 ## Notes
 
 - Container images are per-persona: `nanoclaw-cid`, `nanoclaw-johnny5`, `nanoclaw-nora`, `nanoclaw-parker`, `nanoclaw-albert`.
