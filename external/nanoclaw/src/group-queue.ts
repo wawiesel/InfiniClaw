@@ -287,7 +287,20 @@ export class GroupQueue {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
+    const hasPending =
+      state.pendingTasks.length > 0 || state.pendingMessages;
 
+    // If other groups are waiting, yield the freed slot to them first.
+    // Re-enqueue this group at the back so it gets a fair turn.
+    if (hasPending && this.waitingGroups.length > 0) {
+      if (!this.waitingGroups.includes(groupJid)) {
+        this.waitingGroups.push(groupJid);
+      }
+      this.drainWaiting();
+      return;
+    }
+
+    // No waiting groups — serve this group immediately.
     // Tasks first (they won't be re-discovered from SQLite like messages)
     if (state.pendingTasks.length > 0) {
       const task = state.pendingTasks.shift()!;
@@ -300,7 +313,6 @@ export class GroupQueue {
       return;
     }
 
-    // Then pending messages
     if (state.pendingMessages) {
       this.runForGroup(groupJid, 'drain').catch((err) =>
         logger.error(
