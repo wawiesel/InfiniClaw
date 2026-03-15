@@ -89,6 +89,9 @@ The pip reflects **operational status**, not which room the bot is in. A bot's r
 | Pip | Status | Meaning |
 |-----|--------|---------|
 | 💤 | sleep | Container stopped |
+| 📝 | retrospective | Dismissed to quarters; reflecting on duty cycle |
+| 💤 | dream | Container stopped; deferred code changes applying |
+| ✅ | ready | Container started fresh; awaiting next `!report` |
 | 🔄 | building | Transient — container image building |
 | 🚀 | starting | Transient — container spawning |
 | 🟡 | waiting | Transient — waiting for first output |
@@ -105,7 +108,10 @@ A bot is **always** in its quarters room. It can be in at most one additional ro
 |-------------------|-------|-------|-------------|-----------|
 | `onduty` | Quarters + duty room | Full model | `callout` | Running |
 | `quarters` | Quarters only | Full model | `always` | Running |
+| `retrospective` | Quarters only | Full model | `always` | Running |
 | `sleep` | Quarters only | — | `never` | Stopped |
+| `dream` | Quarters only | — | `never` | Stopped |
+| `ready` | Quarters only | Full model | `always` | Running |
 | `transit` | — | — | `never` | Stopped |
 
 Quarters and onduty are functionally identical environments — same brain, same lobes, same branch brains. The only differences are which rooms the bot is in and `triggerType`. A bot in quarters is transferrable to another ship without reboot.
@@ -209,7 +215,7 @@ quarters → report → ON DUTY → dismiss → quarters → retrospective → s
 
 ### No Resync While On Duty
 
-**Critical rule:** The git sync loop must NOT restart a bot that is on duty. Code changes detected during a duty cycle are **queued** and applied during the Dream phase. Only an emergency override (`!wake --force`) can interrupt an active duty cycle.
+**Critical rule:** The git sync loop must NOT restart a bot that is on duty. Code changes detected during a duty cycle are **queued** and applied during the Dream phase. To interrupt a duty cycle, use `!dismiss` then `!sleep` manually.
 
 Change classification:
 - **Runtime** (`src/*.ts`, `package.json`, `Dockerfile`): queued until Dream phase
@@ -218,7 +224,7 @@ Change classification:
 
 ### Duty Timer
 
-`ondutyAt` is tracked per bot in `_runtime/data/ipc/{bot}/status.json`. On each branch brain completion or heartbeat, the relay checks if `DUTY_CYCLE_MS` has elapsed.
+`ondutyAt` is tracked per bot in `fleet.json` (set by `fleetUpdate` on `!report`, cleared on `!dismiss`). The `dutyCycleLoop` checks every 60s whether any onduty bot has exceeded `DUTY_CYCLE_MS`.
 
 ### Retrospective Sequence
 
