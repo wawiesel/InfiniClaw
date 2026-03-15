@@ -41,7 +41,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, rankMedal, shipHeaderLine, botTreeLine, unifiedBotDisplay } from './formatting.js';
+import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, rankMedal, shipHeaderLine, botTreeLine } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -3289,26 +3289,28 @@ function registerRelayCommands(): void {
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
 
+          // Compute max display widths for column alignment (nbsp padding)
+          const NBSP = '\u00A0';
+          let maxName = 0;
+          let maxRole = 0;
+          for (const [, entry] of bots) {
+            maxName = Math.max(maxName, entry.name.length);
+            maxRole = Math.max(maxRole, (entry.role ? capitalizeName(entry.role) : '').length);
+          }
+
           // Build flat list for CO detection
           const allBotList = Object.values(allBots).map(e => ({ role: e.role, rank: e.rank, status: e.localStatus }));
 
-          for (const [, [, entry]] of bots.entries()) {
+          for (const [i, [, entry]] of bots.entries()) {
+            const isLast = i === bots.length - 1;
             const co = isBotCO(entry.role, entry.rank, entry.localStatus, allBotList);
-            const role = entry.role?.toLowerCase() ?? '';
-            const roleRoom = ROLE_ROOMS[role];
-            lines.push(unifiedBotDisplay({
-              name: entry.name,
-              shipEmoji: sConfig?.emoji ?? '',
-              shipName: capitalizeName(shipName),
-              locationEmoji: roleRoom?.icon ?? '',
-              locationShort: capitalizeName((roleRoom?.room ?? '').slice(0, 3)),
-              locationFull: roleRoom?.room ?? '',
-              health: entry.grade ?? '',
-              activity: entry.activity ?? '',
-              role,
-              rank: entry.rank,
-              isChief: co,
-            }, 'medium'));
+            const badge = botBadge(entry.localStatus, null, entry.grade, entry.activity);
+            const roleIcon = ROLE_ICONS[entry.role?.toLowerCase()] ?? '';
+            const roleCap = entry.role ? capitalizeName(entry.role) : '';
+            const rolePad = NBSP.repeat(maxRole - roleCap.length);
+            const namePad = NBSP.repeat(maxName - entry.name.length);
+            const nameDisplay = `${entry.name}${namePad}`;
+            lines.push(botTreeLine(isLast, badge, nameDisplay, roleCap, roleIcon, entry.rank, co, rolePad, ''));
           }
         }
 
