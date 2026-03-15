@@ -1778,14 +1778,16 @@ async function spawnBranchBrain(
   const notesFile = path.join(resolveRoot(), '_runtime', 'data', 'thread-notes', `${replyThreadId.slice(0, 12)}.md`);
 
   const fullPrompt = [
-    'You are a Branch Brain — a focused research/analysis agent.',
-    'Output your findings as plain text. Do NOT call send_message, set_thread, branch_to_thread, or any Matrix communication tools.',
-    'Do NOT spawn nested branch brains — branch_to_thread is explicitly prohibited inside a branch brain.',
-    'Do NOT announce that you are starting. Just do the work and output findings at the end.',
+    'You are a focused research and implementation agent. Work through the objective below, use available tools, and output your findings or results as plain text when done.',
     '',
-    'Before finishing: if you discovered persistent findings, decisions, or architectural notes worth saving,',
+    'Operating constraints:',
+    '- Output channel is stdout only. Matrix/messaging tools (send_message, set_thread, branch_to_thread) are not available in this context.',
+    '- Work sequentially with no sub-agents. The branch_to_thread tool is unavailable here.',
+    '- Skip any preamble — go straight to the work.',
+    '',
+    'Before finishing: if you have persistent findings, decisions, or architecture notes worth saving,',
     `write them in Markdown to: ${notesFile}`,
-    '(Create parent directories as needed. Skip if nothing persistent to record.)',
+    '(Create parent directories as needed. Omit this step if nothing persistent to record.)',
     '',
     'Objective:',
     objective,
