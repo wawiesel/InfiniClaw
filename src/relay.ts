@@ -1807,8 +1807,9 @@ async function spawnBranchBrain(
   // Raw env file uses BRAIN_* names; map to CLAUDE_CODE_* / ANTHROPIC_* as needed.
   const botEnv = bot ? (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })() : null;
   const childEnv = mapBrainEnv(botEnv);
-  // Use fleet GitHub bot for PR reviews so comments appear as the bot, not the Captain
-  const ghBotToken = loadGitHubBotToken();
+  // Use fleet GitHub bot for PR reviews so comments appear as the bot, not the Captain.
+  // Fall back to host GH_TOKEN if no bot token configured (#100).
+  const ghBotToken = loadGitHubBotToken() || process.env['GH_TOKEN'];
   if (ghBotToken) childEnv['GH_TOKEN'] = ghBotToken;
 
   // Notes file: Branch Brain can persist key findings here; relay injects as context on bot restart.
@@ -1853,7 +1854,12 @@ async function spawnBranchBrain(
       envArgs.push('--env', `${k}=${v}`);
     }
     // Mount corporate CA cert if present on host so SSL works through proxy.
-    const volumeArgs: string[] = [`${notesDir}:/relay-notes:rw`];
+    // Mount InfiniClaw repo read-only so BB can read source and docs (#99).
+    const infraRoot = resolveRoot();
+    const volumeArgs: string[] = [
+      `${notesDir}:/relay-notes:rw`,
+      `${infraRoot}:/workspace/extra/InfiniClaw:ro`,
+    ];
     const hostCaCert = process.env['NODE_EXTRA_CA_CERTS'];
     if (hostCaCert && fs.existsSync(hostCaCert)) {
       const containerCaPath = '/etc/ssl/certs/corporate-ca.pem';
