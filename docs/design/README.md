@@ -7,7 +7,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `00-overview.md` — Definitions (fleet, ship, relay, bot, operator, space, room, duty room), core principles, code structure
 - `01-operator.md` — Operator as escape hatch (host-side tmux, max intelligence, idle in mature fleet), bootstrap foundations (Matrix + S3 + secrets → BehindTheCurtain → first ship → first bot), accounts, Captain communication (all ships with operatorRelay=true receive BTC; !operator on/off per ship), inter-operator inbox, x-commands, operating modes (📡 Watch/👑 Captain/🔧 Fix with mode icon in message prefix), autonomy metrics (interventions/day, 1d/7d rolling)
 - `02-matrix.md` — Matrix server, accounts, room naming convention (double-emoji on all rooms and spaces), ship spaces (example not prescriptive), room setup (m.space.child + m.space.parent both required), message format, `<m>` mention pills, reactions (📡/👀/🔔 status pipeline, 👍️/👎️/💯/❌️ scoring), special mentions (@operator, @loudspeaker broadcast/fleet-status, @room intercom), bot Matrix navigation tools, verification
-- `03-container.md` — Persistent Podman containers (one per bot, not per turn), internal concurrency (agent runner + persistent main brain + lobes), branch brains on host, image builds, mount table (corrected runtime paths), secrets flow (credential allowlist, not proxy — #37)
+- `03-container.md` — Persistent Podman containers (one per bot, not per turn), internal concurrency (agent runner + persistent main brain + lobes), branch brains in containers (BRANCH_BRAIN_IMAGE, bots/container/branch-brain/Dockerfile), image builds (CONTAINER_IMAGE), mount table, secrets flow (CONTAINER_ENV_* prefix stripping, credential allowlist — #37)
 
 ## Bot Runtime
 
