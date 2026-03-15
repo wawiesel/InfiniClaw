@@ -1536,8 +1536,18 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
   const root = resolveRoot();
   const opts = gitOpts(root, 30_000);
   try {
-    // Fetch + push local commits ahead of origin before pulling
+    // Fetch + push local commits ahead of origin before pulling.
+    // Ensure we're on main first — container may have left a feature branch checked out (#101).
     execSync('git fetch origin', opts);
+    try {
+      const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { ...opts, timeout: 5_000 }).trim();
+      if (currentBranch !== 'main') {
+        log(`git sync: on branch '${currentBranch}', switching to main`);
+        execSync('git checkout main', { ...opts, timeout: 10_000 });
+      }
+    } catch (branchErr) {
+      log(`git sync: branch check/switch failed: ${errStr(branchErr)}`);
+    }
     const aheadCount = parseInt(
       execSync('git rev-list origin/main..HEAD --count', { ...opts, timeout: 5_000 }).trim(), 10,
     ) || 0;
