@@ -1656,7 +1656,8 @@ async function spawnBranchBrain(
 
   const fullPrompt = [
     'You are a Branch Brain — a focused research/analysis agent.',
-    'Output your findings as plain text. Do NOT call send_message, set_thread, or any Matrix communication tools.',
+    'Output your findings as plain text. Do NOT call send_message, set_thread, branch_to_thread, or any Matrix communication tools.',
+    'Do NOT spawn nested branch brains — branch_to_thread is explicitly prohibited inside a branch brain.',
     'Do NOT announce that you are starting. Just do the work and output findings at the end.',
     '',
     'Before finishing: if you discovered persistent findings, decisions, or architectural notes worth saving,',
