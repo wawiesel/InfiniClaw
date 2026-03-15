@@ -2359,6 +2359,9 @@ async function handleLifecycleCommand(
   // !report uses assignment-based scope so it can reach bots currently in quarters.
   // All other commands in duty/quarters rooms use presence-based matching.
   const isBTC = conn.roomId === curtainRoomId;
+  // In BTC without an explicit bot target, only the speaker ship acts — prevents all ships
+  // from executing and replying to the same untargeted lifecycle command (fixes #50).
+  if (isBTC && !target && !await electSpeaker()) return;
   const scope = isBTC ? 'ship' : action === 'report' ? 'assigned' : 'present';
   const bots = resolveBots(target, conn, scope);
 
@@ -2746,6 +2749,7 @@ function registerRelayCommands(): void {
     push: async (cmd, conn) => {
       const targetShip = cmd.slice('!push'.length).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
+      if (!targetShip && conn.roomId === curtainRoomId && !await electSpeaker()) return;
       const branch = 'main';
       const root = resolveRoot();
       const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
