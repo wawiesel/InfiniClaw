@@ -3418,11 +3418,12 @@ function registerRelayCommands(): void {
             // Location: onduty → duty room, everything else → quarters
             const isOnDuty = entry.localStatus === 'onduty';
             const locEmoji = isOnDuty ? (roleRoom?.icon ?? '') : '🏠';
+            const isSleeping = entry.localStatus === 'sleep' || entry.localStatus === 'dream';
             lines.push(unifiedBotDisplay({
               name: entry.name,
               shipEmoji: sConfig?.emoji ?? '',
               locationEmoji: locEmoji,
-              health: entry.grade ?? '',
+              health: entry.grade || (isSleeping ? 'A' : ''),
               tokPerDay: entry.tokPerDay ?? 0,
               status: entry.localStatus,
               role,
