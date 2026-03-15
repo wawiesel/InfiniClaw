@@ -60,6 +60,7 @@ Relay-task types written to `_runtime/relay-tasks/*.json` (processed by relay, n
 |-----------|--------|
 | `git_push` | Push branches to remote (requires host git credentials) |
 | `branch_brain` | Spawn a branch brain in a new thread |
+| `wbs_complete` | Signal that a bot completed a WBS item (unblocks dependents) |
 
 ## Per-Room Namespaces
 
@@ -71,7 +72,7 @@ Only the main room's containers can run privileged IPC commands (`refresh_bot`, 
 
 ## Processing
 
-The host's `ipc-watcher.ts` polls IPC directories every 500ms. Relay-tasks are polled every 2s. Files are processed atomically:
+The host's `ipc-watcher.ts` polls IPC directories every 1s. Relay-tasks are polled every 2s. Files are processed atomically:
 
 1. Rename `*.json` → `*.processing`
 2. Parse and execute the command
