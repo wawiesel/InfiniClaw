@@ -433,6 +433,41 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  // --- BUG-26: starvation fix ---
+
+  it('yields freed slot to waiting groups instead of self-re-running (BUG-26)', async () => {
+    const processed: string[] = [];
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      processed.push(groupJid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots with group1 and group2
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // group3 waits for a slot
+    queue.enqueueMessageCheck('group3@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // group1 gets a new message while running — it will have pendingMessages on finish
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // group1 finishes — should yield slot to group3 (waiting), not re-run itself
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // group3 must have gotten the slot, not group1's re-run
+    const thirdRun = processed[2];
+    expect(thirdRun).toBe('group3@g.us');
+  });
+
   it('preempts when idle arrives with pending tasks', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;

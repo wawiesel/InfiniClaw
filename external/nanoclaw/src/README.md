@@ -11,7 +11,7 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 | `types.ts` | Core interfaces: `Channel`, `NewMessage`, `RegisteredGroup` |
 | `router.ts` | `formatMessages` (XML → bot prompt), `findChannel` |
 | `db.ts` | SQLite message/chat/group store |
-| `group-queue.ts` | Per-group container queue — serializes agent runs, IPC piping |
+| `group-queue.ts` | Per-group container queue — serializes agent runs, IPC piping, fair slot scheduling |
 | `container-runner.ts` | Spawns podman containers for agent runs |
 | `container-runtime.ts` | Container runtime detection |
 | `credential-proxy.ts` | Credential proxy for secure secret injection |
