@@ -2025,16 +2025,39 @@ async function spawnBranchBrain(
     });
     log(`branchBrain: spawning in container image=${BRANCH_BRAIN_IMAGE} session=${sessionId}`);
   } else {
-    log(`branchBrain: BRANCH_BRAIN_IMAGE unset — falling back to host spawn session=${sessionId}`);
-    child = spawn('claude', [
-      '--verbose',
-      '--dangerously-skip-permissions',
-      '--output-format', 'stream-json',
-      '--add-dir', resolveRoot(),
-    ], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: childEnv,
-    });
+    // Prefer --fork-session so BB inherits the bot's full conversation context (#81).
+    // Falls back to cold context if no session ID file exists yet.
+    const sessionFile = bot
+      ? path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'current-session-id')
+      : '';
+    let botSessionId = '';
+    if (sessionFile) { try { botSessionId = fs.readFileSync(sessionFile, 'utf-8').trim(); } catch { /* no file yet */ } }
+
+    if (botSessionId) {
+      log(`branchBrain: BRANCH_BRAIN_IMAGE unset — forking from bot session=${botSessionId.slice(0, 8)}... bb=${sessionId}`);
+      child = spawn('claude', [
+        '--resume', botSessionId,
+        '--fork-session',
+        '--verbose',
+        '--dangerously-skip-permissions',
+        '--output-format', 'stream-json',
+        '--add-dir', resolveRoot(),
+      ], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: childEnv,
+      });
+    } else {
+      log(`branchBrain: BRANCH_BRAIN_IMAGE unset — falling back to host spawn session=${sessionId}`);
+      child = spawn('claude', [
+        '--verbose',
+        '--dangerously-skip-permissions',
+        '--output-format', 'stream-json',
+        '--add-dir', resolveRoot(),
+      ], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: childEnv,
+      });
+    }
   }
 
   // Write initial prompt and keep stdin open for context injection.
