@@ -1,6 +1,6 @@
 # InfiniClaw Design
 
-InfiniClaw is a multi-agent orchestration system that operates a fleet of autonomous AI bots on Matrix. Each bot runs in a secure Podman container with a persistent main brain. Complex work is delegated to ephemeral branch brains and lobes via a "Branch and Merge" threading model.
+InfiniClaw is a multi-agent orchestration system that operates a fleet of autonomous AI bots on Matrix. Each bot runs in a secure Podman container with a persistent main brain. Complex work is delegated to ephemeral branch brains via a "Branch and Merge" threading model.
 
 ## Definitions
 
@@ -10,13 +10,13 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 >
 > **Relay** — The ship's control plane. A pm2-managed process that connects to Matrix, dispatches x-commands, manages bot lifecycle, syncs code, and spawns branch brains. One per ship, always running.
 >
-> **Bot** — A Matrix account backed by a Podman container. Has a persona, role, rank, and lifecycle status (`sleep`, `quarters`, `onduty`, `transit`).
+> **Bot** — A Matrix account backed by a Podman container. Has a persona, role, rank, and lifecycle status (`sleep`, `quarters`, `onduty`, `transit`, `retrospective`, `dream`, `ready`).
 >
 > **Operator** — The human-in-the-loop escape hatch. Bootstraps the system from scratch and intervenes when bots cannot fix themselves. In a mature fleet, the operator is idle — the Captain commands bots directly and relays handle updates autonomously. A Matrix account (`@operator`) and a tmux session on each ship.
 >
 > **Space** — A Matrix space that groups related rooms. Each ship has a space; quarters rooms are grouped under a quarters sub-space.
 >
-> **Room** — A Matrix room where bots and humans communicate. Named with double-emoji prefix: `<location><type> Name`.
+> **Room** — A Matrix room where bots and humans communicate. Named with double-emoji prefix: `<location><room> Name`.
 >
 > **Duty room** — A fleet-wide shared room (Engineering, Bridge, Astrometrics). Bots join via `!report` and leave via `!dismiss`. Uses `🌌` location emoji.
 
@@ -25,7 +25,7 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 Three services must exist before any bot can run:
 
 - **Matrix** — Communication backbone. All messages, commands, status updates, and bot interactions flow through Matrix.
-- **S3 (MinIO)** — Shared state between ships. Metrics, fleet reports, health checks, speaker election, error logs, and conversation history.
+- **S3 (MinIO)** — Shared state between ships. Fleet reports (including health grades), bot state backup (messages.db, sessions), tool call content, and relay commit epochs.
 - **Secrets repo** — Coordination via git. Fleet config, bot credentials, ship registry, operator config. Synced on every ship.
 
 ## Core Principles
