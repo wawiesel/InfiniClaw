@@ -99,7 +99,7 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 
 ## Displaying Metrics
 
-The `!metrics` output uses the **medium** verbosity of the [unified display format](05-bot.md#unified-display-format):
+The `!metrics` output uses the **long** verbosity of the [unified display format](05-bot.md#unified-display-format):
 
 ```
 🦁Herc · 🏅1 · up 91% (1d) · ↻2/5 · sync OK

@@ -171,47 +171,117 @@ Before routing, messages pass through filtering:
 
 ## Unified Display Format
 
-Every bot/ship display uses the same field order:
+Two verbosity levels — **short** and **long** — applied uniformly to ships and bots.
+
+### Ship Display
 
 ```
-<ship><location>·<health><activity>·Name·<role><rank>
+Long:  🦁 Herc 🛳️cruiser·⭐[1]rank·🟢[A]health·🔥[32 tok/d]
+Short: 🦁 Herc 🛳️⭐🟢🔥
 ```
 
-**Examples:**
-- `🦁⚙️·🟢🔥·Albert·⚙️🥇` — Albert, engineer on Herc, healthy+active, rank 1 (not chief)
-- `🦁⚙️·🟢🔥·Albert·⚙️⭐` — same, but chief of Engineering (on duty)
-- `🔱🏠·💤·Nora·🧭🥈` — Nora, navigator on Posi, sleeping, rank 2
+### Bot Display
 
-### Fields
+```
+Long:  🦁🏠 Tali ⚙️engineer·🥈[2]rank·🟢[A]health·🔥[16 tok/d]
+Short: 🦁🏠 Tali ⚙️🥈🟢🔥
+```
 
-| Field | Values | Notes |
-|-------|--------|-------|
-| **ship** | Ship emoji (🦁 🔱 etc.) | From `ships.json` |
-| **location** | Room emoji (⚙️=Engineering, 🧭=Bridge, 🔭=Astrometrics, 🏠=Quarters) | Current room, not role |
-| **health** | 🟢=A, 🟡=B, 🟠=C, 🔴=F, 💤=sleep, 🔄=building, 🚀=starting, 🟡=waiting | Grade or boot stage |
-| **activity** | 🔥=active (responding/working), blank=idle | Only shown when bot is actively working |
-| **Name** | Bot name (capitalized) | Always shown |
-| **role** | Role emoji (⚙️=engineer, 🧭=navigator, 🔭=architect, 💬=normie) | From `fleet.json` role |
-| **rank** | 🥇=1, 🥈=2, 🥉=3+ **or** ⭐=chief (on duty, lowest rank in room) | Chief replaces medal when on duty |
+### Field Order
 
-### Verbosity Levels
+Both ships and bots follow the same structure:
 
-Every display context chooses a verbosity — **short**, **medium**, or **long** — applied uniformly to all fields:
+```
+<prefix> <Name> <type/role><rank>·<health>·<activity>
+```
 
-| Field | Short | Medium | Long |
-|-------|-------|--------|------|
-| ship | 🦁 | 🦁Herc | 🦁Herc[ship] |
-| location | ⚙️ | ⚙️Eng | ⚙️Engineering[loc] |
-| health | 🟢 | 🟢A | 🟢A[health] |
-| activity | 🔥 | 🔥active | 🔥active[activity] |
-| Name | Cid | Cid | Cid |
-| role | ⚙️ | ⚙️eng | ⚙️engineer[role] |
-| rank | 🥇 | 🥇1 | 🥇rank1 |
+| Field | Ship | Bot |
+|-------|------|-----|
+| **prefix** | `<shipEmoji> ` | `<shipEmoji><locEmoji> ` |
+| **Name** | Ship name | Bot name (capitalized) |
+| **type/role** | Ship type emoji+name (`🛳️cruiser`) | Role emoji+name (`⚙️engineer`) |
+| **rank** | Medal `⭐[1]rank` | Medal `🥈[2]rank` |
+| **health** | Grade emoji `🟢[A]health` | Grade emoji `🟢[A]health` |
+| **activity** | Throughput `🔥[32 tok/d]` | Throughput `🔥[16 tok/d]` |
 
-**Where each level is used:**
-- **Short** — Matrix display name (space constrained), pips, compact badges
-- **Medium** — `!fleet` output, metrics displays, thread summaries
-- **Long** — Detailed diagnostics, `!fleet --verbose`, health reports
+In **long** format, each field shows `<emoji>[<value>]<label>` separated by `·` (interpunct).
+In **short** format, only emojis — no values or labels.
+
+### Where Each Level Is Used
+
+- **Short** — Matrix display names (bot names)
+- **Long** — `!fleet` output, `!metrics`, health reports, status displays
+
+### Health Grades
+
+Computed from bot metrics (crashes, OOM kills, memory, response latency):
+
+| Grade | Emoji | Criteria |
+|-------|-------|----------|
+| A | 🟢 | Healthy — 0 crashes/day, 0 OOM, mem < 70%, p95 latency < 60s |
+| B | 🟡 | Minor issues — 1–2 crashes/day, or mem 70–85%, or p95 60–120s |
+| C | 🟠 | Significant — 3+ crashes/day, or OOM > 0, or mem > 85%, or p95 > 120s |
+| F | 🔴 | Down — should be running (onduty/quarters) but process not found |
+
+**Special health states** override grade display:
+
+| State | Emoji | When |
+|-------|-------|------|
+| sleep/dream | 💤 | Bot is asleep or dreaming |
+| building | 🔄 | Container image being built |
+| starting | 🚀 | Container starting up |
+| transit | 🚀 | Bot moving between ships |
+| waiting | 🟡 | Waiting for first output after start |
+
+Fleet-level health grade = worst grade among all non-sleeping bots.
+
+### Activity Levels
+
+Based on rolling token throughput (tokens per day):
+
+| Level | Emoji | Threshold |
+|-------|-------|-----------|
+| idle | · | 0 tok/day |
+| low | 🔹 | 5K–50K tok/day |
+| moderate | ⚡ | 50K–500K tok/day |
+| high | 🔥 | 500K+ tok/day |
+
+In **long** format, the actual throughput is shown: `🔥[32 tok/d]`, `⚡[120 tok/d]`, `·[0 tok/d]`.
+In **short** format, only the emoji tier is shown. Idle bots omit the activity field entirely.
+
+Sleep/dream/transit bots show no activity regardless of historical throughput.
+
+### Rank Medals
+
+| Medal | Meaning |
+|-------|---------|
+| ⭐ | Chief — lowest-rank awake bot in its role (onduty or quarters) |
+| 🥇 | Rank 1 (not chief) |
+| 🥈 | Rank 2 |
+| 🥉 | Rank 3+ |
+
+Ships use ⭐ for speaker (lowest-rank commissioned), ◉ for non-speaker, 💤 for decommissioned.
+
+### Ship Types
+
+Ships have a `type` field in `ships.json` with associated emoji:
+
+| Type | Emoji |
+|------|-------|
+| cruiser | 🛳️ |
+
+> **Status:** Ship types are not yet implemented in `ships.json`. Currently all ships are implicitly cruisers.
+
+### Location Emojis
+
+| Location | Emoji | When |
+|----------|-------|------|
+| Engineering | ⚙️ | Bot onduty in engineering room |
+| Bridge | 🌉 | Bot onduty in bridge room |
+| Astrometrics | 🔭 | Bot onduty in astrometrics room |
+| Quarters | 🏠 | Bot in quarters, sleeping, or any non-onduty status |
+
+Location is derived from bot status: onduty → duty room (from `ROLE_ROOMS`), everything else → quarters.
 
 ### Matrix Display Name
 
