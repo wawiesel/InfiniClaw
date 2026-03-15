@@ -35,7 +35,7 @@ Every bot has runtime attributes that determine its behavior. Commands and event
 
 | Attribute | Type | Set by | Stored in |
 |-----------|------|--------|-----------|
-| `status` | `onduty` · `quarters` · `sleep` · `transit` | Relay commands | `fleet.json` |
+| `status` | `onduty` · `quarters` · `sleep` · `transit` · `retrospective` · `dream` · `ready` | Relay commands | `fleet.json` |
 | `triggerType` | `always` · `callout` · `never` | Relay on room moves | `fleet.json` |
 | `rank` | number | `!promote` / `!demote` | `fleet.json` |
 | `ship` | hostname | `!transport` | `fleet.json` |
@@ -66,14 +66,32 @@ The relay sets `triggerType` on status transitions:
 Commands only toggle attributes — they don't encode room-specific logic:
 
 ```
-!wake    → status=quarters,  triggerType=always, container=start
-!sleep   → status=sleep,     triggerType=never,  container=stop
-!report  → status=onduty,    triggerType=callout, rooms=+duty
-!dismiss → status=quarters,  triggerType=always,  rooms=-duty
-!go room → rooms=+room,      (no attribute change)
+!wake    → status=quarters,      triggerType=always,   container=start
+!sleep   → status=sleep,         triggerType=never,    container=stop
+!report  → status=onduty,        triggerType=callout,  rooms=+duty
+!dismiss → status=quarters,      triggerType=always,   rooms=-duty
+!go room → rooms=+room,          (no attribute change)
+
+# Duty cycle (automatic, driven by dutyCycleLoop):
+duty expired  → status=retrospective, triggerType=always,   rooms=-duty (dismissed to quarters)
+retrospective → status=dream,         triggerType=never,    container=stop (git sync applies)
+dream done    → status=ready,         triggerType=always,   container=start (woken to quarters)
 ```
 
 The bot reads `triggerType` from fleet.json at startup and re-reads it periodically. This replaces hardcoded room-ID checks.
+
+### Duty Cycle Status Flow
+
+The `dutyCycleLoop` runs every 60s and triggers a retrospective sequence when a bot's on-duty time exceeds `DUTY_CYCLE_MS` (default 4h). Pip progression through the cycle:
+
+| Status | Pip | triggerType | Description |
+|--------|-----|-------------|-------------|
+| `onduty` | 🟢 | callout | Bot is active in duty room |
+| `retrospective` | 📝 | always | Dismissed to quarters; relay sends reflection questions |
+| `dream` | 💤 | never | Container stopped; git sync applies new code |
+| `ready` | ✅ | always | Bot woken to quarters, ready for next `!report` |
+
+After `ready`, the Captain issues `!report` to send the bot back on duty, resetting `ondutyAt`.
 
 ## Mentions and Callouts
 
