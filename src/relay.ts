@@ -1971,6 +1971,18 @@ async function spawnBranchBrain(
       threadReply(conn, replyThreadId, `Branch Brain completed with no output (exit ${code ?? 'null'})`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }
 
+    // Persist BB notes to bot's data dir so they survive restarts/sleep (#123).
+    // injectResumeMessage reads bb-pending-*.md on bot start and includes them as context.
+    if (bot) {
+      try {
+        const botDataDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data');
+        fs.mkdirSync(botDataDir, { recursive: true });
+        let content = `# Branch Brain: ${announcedTitle}\n\nThread: ${replyThreadId}\n\n`;
+        try { content += fs.readFileSync(notesFile, 'utf-8'); } catch { content += '(no notes written)'; }
+        fs.writeFileSync(path.join(botDataDir, `bb-pending-${replyThreadId.slice(0, 12)}.md`), content);
+      } catch (err) { log(`branchBrain: failed to write pending delivery: ${errStr(err)}`); }
+    }
+
     // Schedule debounced main-brain restart so it picks up Branch Brain findings (30s delay).
     // Reset timer on each successive TB exit; fires once all TBs for this bot are done.
     if (bot && getActiveBots().includes(bot)) {
