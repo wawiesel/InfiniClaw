@@ -106,9 +106,10 @@ function isTransientServerError(err: unknown): boolean {
 
 // Configurable intervals (env vars in milliseconds, or use defaults)
 const GITHUB_REPO_URL = 'https://github.com/wawiesel/InfiniClaw';
-const GIT_SYNC_INTERVAL = envInt('GIT_SYNC_INTERVAL', 3 * 60_000);     // default 3 min
-const SECRETS_SYNC_INTERVAL = envInt('SECRETS_SYNC_INTERVAL', 30_000);  // default 30s
-const HEALTH_INTERVAL = envInt('HEALTH_INTERVAL', 30 * 60_000);         // default 30 min
+const GIT_SYNC_INTERVAL = envInt('GIT_SYNC_INTERVAL', 3 * 60_000);          // default 3 min
+const SECRETS_SYNC_INTERVAL = envInt('SECRETS_SYNC_INTERVAL', 30_000);       // default 30s
+const HEALTH_INTERVAL = envInt('HEALTH_INTERVAL', 30 * 60_000);              // default 30 min
+const GIT_SYNC_PUSH_TIMEOUT_MS = envInt('GIT_SYNC_PUSH_TIMEOUT_MS', 60_000); // default 60s (#104)
 
 // ── Failure alerting (thread + exponential backoff) ─────────────────
 
@@ -1553,7 +1554,7 @@ function gitSync(): { ok: boolean; output: string; newCommits: number } {
     ) || 0;
     if (aheadCount > 0) {
       try {
-        execSync('git push origin main', { ...opts, timeout: 30_000 });
+        execSync('git push origin main', { ...opts, timeout: GIT_SYNC_PUSH_TIMEOUT_MS });
         log(`git sync: pushed ${aheadCount} local commit(s)`);
       } catch (pushErr) {
         log(`git sync: push failed: ${errStr(pushErr)}`);
