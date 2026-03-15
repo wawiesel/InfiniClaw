@@ -2631,6 +2631,8 @@ async function sendLifecycleMsg(
     let conn: RoomConn | undefined;
     if (fleetEntry && fleetEntry.status !== 'onduty' && fleetEntry.quartersRoom) {
       conn = activeConns.find(c => c.roomId === fleetEntry.quartersRoom);
+      // Bot is not onduty — do not fall back to duty room if no quarters connection
+      if (!conn) return;
     }
     if (!conn) {
       const roomName = botDutyRoom(botId);
