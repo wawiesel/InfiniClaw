@@ -85,7 +85,7 @@ import {
 } from './service.js';
 import { getLatestSemverTag, getStampedSemverTag, getLatestSemverTagOnRef, commitsAheadOfTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
-import { BRANCH_BRAIN_IMAGE, BRANCH_BRAIN_TIMEOUT_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
+import { BRANCH_BRAIN_IMAGE, BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
 
@@ -1785,7 +1785,6 @@ const RELAY_TASKS_POLL_INTERVAL = 2_000;
 // ── Branch Brain task registry ──────────────────────────────────────────
 
 const BRANCH_BRAIN_RESTART_DELAY = 30_000; // wait 30s after last TB exit before restarting bot
-const BRANCH_BRAIN_FINALIZE_MS = 30_000;   // grace period after interrupt before hard SIGKILL
 const MAX_BRANCH_BRAINS_PER_BOT = envInt('MAX_BRANCH_BRAINS_PER_BOT', 3);
 const branchBrainRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const activeBranchBrainCount = new Map<string, number>(); // bot → active TB count
@@ -1864,6 +1863,19 @@ function completeBranchTask(threadId: string): void {
  */
 export function formatContextInjectionMessage(title: string, msg: string): string {
   return `You are branch brain ${title}. Here is a message from main timeline: ${msg}. It may not apply to you. If it does, modify your task accordingly.\n`;
+}
+
+/**
+ * Build the reactivation objective for a thread-reactivated Branch Brain.
+ * Pure function — exported for testability.
+ */
+export function buildReactivationObjective(original: string, followUp: string, title: string): string {
+  return [
+    `Original objective: ${original}`,
+    '',
+    `Follow-up from Captain in thread "${title}":`,
+    followUp,
+  ].join('\n');
 }
 
 /** Write a context injection message to all active branch brain stdin pipes. */
@@ -4226,13 +4238,8 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 const task = tasks[relates.event_id];
                 if (task?.completed) {
                   log(`dialtone: BB thread reactivation for thread=${relates.event_id.slice(0, 20)}`);
-                  const reactivationObjective = [
-                    task.objective,
-                    '',
-                    '---',
-                    '',
-                    `Follow-up from Captain: ${body}`,
-                  ].join('\n');
+                  const taskTitle = task.objective.split('\n')[0].trim().slice(0, 80);
+                  const reactivationObjective = buildReactivationObjective(task.objective, body, taskTitle);
                   const botKey = task.bot ?? '__relay__';
                   const count = activeBranchBrainCount.get(botKey) ?? 0;
                   if (count < MAX_BRANCH_BRAINS_PER_BOT) {
