@@ -1956,7 +1956,9 @@ async function spawnBranchBrain(
   task: { thread_id: string; objective: string; chat_jid: string; bot?: string },
   conns: RoomConn[],
 ): Promise<void> {
-  const { thread_id, objective, chat_jid, bot } = task;
+  const { thread_id, objective, chat_jid, bot: rawBot } = task;
+  // Normalize bot name to lowercase — ASSISTANT_NAME is capitalized but env dirs and fleet keys are lowercase.
+  const bot = rawBot?.toLowerCase();
   log(`branchBrain: spawning for thread=${thread_id.slice(0, 20)}`);
 
   // Find the connection for this room (strip matrix: prefix if present)
