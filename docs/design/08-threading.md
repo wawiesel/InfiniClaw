@@ -8,9 +8,10 @@ InfiniClaw uses a "Branch and Merge" model. The main brain stays responsive on t
 Main Brain (persistent, in container)
   ├── Simple request → reply on main timeline
   ├── Complex request → branch_to_thread(objective)
-  │     → Relay spawns Branch Brain in container (or host fallback)
-  │     → Branch Brain streams into visible Matrix thread
-  │     → On exit: bot wakes to pick up findings
+  │     → Bot posts thread title on main timeline
+  │     → Relay forks bot's session via claude --fork-session
+  │     → Fork streams into visible Matrix thread (same room as bot)
+  │     → On exit: merge message posted, bot assimilates results
   └── Heavy/async work → invoke lobe MCP tool
         → Lobe works in a quarters thread (any provider)
         → On completion: summary posted to quarters main timeline
@@ -51,10 +52,10 @@ The relay parses `stream-json` format from the Claude CLI:
 ### After Completion
 
 When a branch brain exits:
-1. 30-second debounce timer starts (reset if another branch exits)
-2. After debounce: main timeline summary posted (`🧵 <title> — ✅ done` or `⛔ failed`)
-3. BB notes persisted to `_runtime/instances/{bot}/data/bb-pending-*.md`
-4. Thread remains in Matrix history permanently
+1. Merge message posted to the thread — a normal Matrix message with any level of detail the BB chooses (summary, full results, code snippets, etc.)
+2. Main timeline summary posted: `🧵 <title> — ✅ done` (or `⛔ failed`)
+3. Thread remains in Matrix history permanently
+4. No restart needed — the main brain assimilates results on its next turn
 
 ### Credentials
 
@@ -113,11 +114,11 @@ Lobes always post to quarters regardless of which room the bot is currently in. 
 ## The Merge
 
 When a branch brain completes:
-1. **Thread summary** — completion message posted inside the thread
-2. **Main timeline summary** — `🧵 <title> — ✅ done` (or `⛔ failed`) posted on main timeline after a 30-second debounce, so the Captain sees the result without watching the thread
-3. **Notes persisted** — BB findings written to `_runtime/instances/{bot}/data/bb-pending-*.md` for the main brain to read on its next turn
-4. **No restart needed** — since the BB forked from the main brain's session, the main brain already has full context. Findings are available via the thread and persisted notes.
-5. **Termination** — branch brain exits, thread remains in Matrix history permanently
+1. **Merge message** — BB posts a normal Matrix message in the thread with its results. This can be any level of detail: a one-line summary, full analysis, code snippets, or structured output. The BB decides the format.
+2. **Main timeline summary** — `🧵 <title> — ✅ done` (or `⛔ failed`) posted on main timeline so the Captain sees the result without watching the thread
+3. **Assimilation** — the main brain MUST process BB results on its next turn. This is enforced via MCP: the relay queues a merge event that the main brain receives as a message, containing the thread ID and summary. The bot reads the thread and decides how to incorporate the findings.
+4. **No restart needed** — the main brain assimilates results naturally. A restart is never necessary.
+5. **Termination** — branch brain fork exits, thread remains in Matrix history permanently
 
 ## Thread Reactivation
 
@@ -132,12 +133,15 @@ Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour
 
 ## Correct branch_to_thread Protocol
 
-Bots must follow this sequence:
+Bots must follow this exact sequence:
 
-1. Post a conversational reply FIRST ("Got it, dispatching...")
-2. Call `get_last_event_id` to get the real Matrix event ID (`$...` format)
-3. Call `branch_to_thread` with that event ID and the objective
-4. Say "Branch dispatched." and STOP — do NOT dispatch more in the same turn
+1. Post a thread title on the main timeline FIRST (e.g. "Branching: fix the display formatting")
+2. Call `get_last_event_id` — this returns both `lastSent` and `lastReceived`
+3. Use **`lastSent`** as the thread_id (your title post). **NEVER use `lastReceived`** — that is the Captain's message, branching off it creates a broken thread
+4. Call `branch_to_thread(objective, thread_id)` with the `lastSent` event ID
+5. Say "Branch dispatched." and STOP — do NOT dispatch more in the same turn
+
+**Critical:** The thread root is YOUR title post, not the Captain's message. The bot owns the thread.
 
 ## Verification
 
