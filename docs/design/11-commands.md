@@ -41,8 +41,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 |---------|--------|
 | `!fleet` | Fleet status — each ship reports its local bots. |
 | `!fleet room` | Bots in this room only. _(not yet implemented — same as `!fleet`)_ |
-| `!health` | Alias for `!metrics fleet` — fleet health summary from S3 (speaker replies). |
-| `!metrics [scope]` | Metrics (1d/7d rolling). Context-aware — see below. |
+| `!metrics [scope]` | Metrics + health (1d/7d rolling). Context-aware — see below. |
 | `!operator [on|off] [ship]` | Show or toggle operator relay on/off for ship(s). |
 
 ## Metrics
