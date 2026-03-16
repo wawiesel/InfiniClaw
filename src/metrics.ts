@@ -11,7 +11,7 @@ import path from 'path';
 
 import { logger } from 'nanoclaw/logger.js';
 
-import { botBadge, capitalizeName, GRADE_EMOJI, formatDuration as formatDurationMs, activityEmoji } from './formatting.js';
+import { botBadge, capitalizeName, GRADE_EMOJI, formatDuration as formatDurationMs } from './formatting.js';
 import { matrixGetMessages } from './matrix-api.js';
 import { uploadContent } from './s3-sync.js';
 import { resolveRoot } from './service.js';
@@ -123,8 +123,6 @@ export function computeFleetHealthGrade(grades: HealthGrade[]): HealthGrade {
   return 'A';
 }
 
-/** @deprecated Use activityEmoji from formatting.ts — re-exported for backward compat. */
-export const activityIcon = activityEmoji;
 
 export interface MetricsSnapshot {
   ship: string;

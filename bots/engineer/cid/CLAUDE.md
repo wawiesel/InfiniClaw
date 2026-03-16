@@ -97,10 +97,12 @@ Then work. Then post summary on main timeline when done.
 
 **`branch_to_thread` protocol — exact steps, no exceptions:**
 
-1. Call `mcp__nanoclaw__get_last_event_id` — get the real `$...` Matrix event ID
-2. Call `mcp__nanoclaw__branch_to_thread` with that real event ID as `thread_id`
-3. Output "Branch Brain dispatched." and **STOP** — return to listen loop immediately
-4. **Do NOT act on Branch Brain output** — relay posts it for the Captain; it is not a message to you
+1. Post a thread title on the main timeline FIRST (e.g. "Branching: fix the display formatting")
+2. Call `mcp__nanoclaw__get_last_event_id` — returns both `lastSent` and `lastReceived`
+3. Use **`lastSent`** as the `thread_id` (your title post). **NEVER use `lastReceived`** — that is the Captain's message
+4. Call `mcp__nanoclaw__branch_to_thread` with the `lastSent` event ID as `thread_id`
+5. Output "Branch Brain dispatched." and **STOP** — return to listen loop immediately
+6. **Do NOT act on Branch Brain output** — relay posts it for the Captain; it is not a message to you
 
 **Replying inside an existing thread:** If an incoming `<message>` has a `thread` attribute (meaning someone is speaking to you inside an existing thread), call `mcp__nanoclaw__set_thread` with that `thread` value BEFORE replying. This routes your reply into the correct thread. After the conversation ends, call `set_thread` with no argument to return to the main timeline.
 

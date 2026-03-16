@@ -2,19 +2,13 @@
  * Shared formatting utilities for chat messages.
  */
 
-import { findShipByHostname, ROLE_ROOMS } from './ship-config.js';
+import { ROLE_ROOMS } from './ship-config.js';
 
 /** Capitalize first letter: "cid" → "Cid". Single source of truth for name display. */
 export function capitalizeName(name: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-/** Format bot display name: "pip Name shipEmoji". */
-export function formatBotDisplayName(bot: string, pip: string): string {
-  const name = capitalizeName(bot);
-  const shipEmoji = findShipByHostname()?.[1]?.emoji;
-  return shipEmoji ? `${pip} ${name} ${shipEmoji}` : `${pip} ${name}`;
-}
 
 export function escapeHtml(input: string): string {
   return input

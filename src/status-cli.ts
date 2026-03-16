@@ -10,7 +10,7 @@
  */
 import path from 'path';
 
-import { capitalizeName } from './formatting.js';
+import { capitalizeName, fmtTok } from './formatting.js';
 import { getSystemStatus, getRecentLogLines, getBotActivity, type SystemStatus, type BotStatus } from './status.js';
 
 const ROOT_DIR = process.env.INFINICLAW_ROOT || path.resolve(process.cwd(), '..');
@@ -32,11 +32,6 @@ function relativeTime(iso: string | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
 
 function stripHtml(text: string): string {
   return text
@@ -118,7 +113,7 @@ function formatBot(bot: BotStatus): string {
   // Token usage
   if (bot.tokenUsage && bot.tokenUsage.length > 0) {
     for (const t of bot.tokenUsage) {
-      lines.push(`  Tokens (${t.model}): ${formatTokens(t.inputTokens)} in / ${formatTokens(t.outputTokens)} out / ${formatTokens(t.cacheReadTokens)} cache`);
+      lines.push(`  Tokens (${t.model}): ${fmtTok(t.inputTokens)} in / ${fmtTok(t.outputTokens)} out / ${fmtTok(t.cacheReadTokens)} cache`);
     }
   }
 

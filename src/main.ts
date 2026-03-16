@@ -115,7 +115,7 @@ import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
-import { capitalizeName, formatBotDisplayName, unifiedBotDisplay } from './formatting.js';
+import { capitalizeName, unifiedBotDisplay } from './formatting.js';
 import { loadFleet, findShipByHostname, ROLE_ROOMS } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
 
@@ -126,7 +126,7 @@ function botDisplayName(badge: string): string {
   try {
     const fleet = loadFleet();
     const entry = fleet[ASSISTANT_NAME.toLowerCase()];
-    if (!entry) return formatBotDisplayName(ASSISTANT_NAME, badge);
+    if (!entry) return `${badge} ${capitalizeName(ASSISTANT_NAME)}`;
     const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
     const role = entry.role?.toLowerCase() ?? '';
     const isOnDuty = entry.status === 'onduty';
@@ -138,7 +138,7 @@ function botDisplayName(badge: string): string {
     const health = healthMap[badge] ?? 'A';
     return unifiedBotDisplay({ name: ASSISTANT_NAME, shipEmoji, locationEmoji, health, tokPerDay: 0, status: entry.status, role, rank: entry.rank, isChief }, 'short');
   } catch {
-    return formatBotDisplayName(ASSISTANT_NAME, badge); // fallback if fleet unavailable
+    return `${badge} ${capitalizeName(ASSISTANT_NAME)}`; // fallback if fleet unavailable
   }
 }
 
