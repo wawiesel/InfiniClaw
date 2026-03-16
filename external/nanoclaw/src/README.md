@@ -16,7 +16,7 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 | `container-runtime.ts` | Container runtime detection; defaults to `podman`, overridable via `CONTAINER_RUNTIME_BIN` env var |
 | `credential-proxy.ts` | Credential proxy for secure secret injection |
 | `ipc.ts` | IPC watcher — task/message/context dirs |
-| `task-scheduler.ts` | Cron/interval task scheduler |
+| `task-scheduler.ts` | Cron/interval task scheduler; `SchedulerDependencies.runContainerAgent` overrides the default runner |
 | `sender-allowlist.ts` | Per-room sender allow/block rules |
 | `channels/` | Channel implementations |
 | `index.ts` | Re-exports |
