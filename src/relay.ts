@@ -932,11 +932,29 @@ async function botLeaveRoom(token: string, homeserver: string, roomId: string): 
   await matrixLeave(homeserver, token, roomId);
 }
 
-/** Update a bot's Matrix display name pip during boot stages. */
+/** Maps transitional pip emoji to status strings for unifiedBotDisplay. */
+const PIP_TO_STATUS: Record<string, string> = {
+  '💤': 'sleep', '✅': 'ready', '🔄': 'building', '🚀': 'starting', '🟡': 'waiting',
+};
+
+/** Update a bot's Matrix display name pip during boot stages. Uses short unified format. */
 async function setBotPip(root: string, bot: string, pip: string): Promise<void> {
   try {
     const { token, homeserver, userId } = await botMatrixLogin(root, bot);
-    await matrixSetDisplayName(homeserver, token, userId, formatBotDisplayName(bot, pip));
+    const entry = liveFleet[bot];
+    const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
+    const role = entry?.role?.toLowerCase() ?? '';
+    const isOnDuty = entry?.status === 'onduty';
+    const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
+    const allBotList = Object.entries(liveFleet).map(([n, e]) => ({ name: n, role: e.role, rank: e.rank, status: e.status }));
+    const dutyRoom = ROLE_ROOMS[role]?.room ?? '';
+    const co = findRoomChief(dutyRoom, allBotList) === bot;
+    const status = PIP_TO_STATUS[pip] ?? entry?.status ?? 'onduty';
+    const displayName = unifiedBotDisplay({
+      name: bot, shipEmoji, locationEmoji, health: '', tokPerDay: 0,
+      status, role, rank: entry?.rank ?? 1, isChief: co,
+    }, 'short');
+    await matrixSetDisplayName(homeserver, token, userId, displayName);
   } catch (err) {
     log(`setBotPip ${bot} ${pip}: ${errStr(err)}`);
   }
