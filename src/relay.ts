@@ -2016,17 +2016,7 @@ async function spawnBranchBrain(
     '- Work sequentially with no sub-agents. The branch_to_thread tool is unavailable here.',
     '- Skip any preamble — go straight to the work.',
     '',
-    `Before finishing, write a structured merge summary to: ${notesFilePromptPath}`,
-    'This summary will be posted to the thread and read by the main brain. Format:',
-    '```',
-    '## Merge Summary',
-    '**Objective:** <what was asked>',
-    '**Result:** <success/partial/failed>',
-    '**Key findings:** <bullet list of important results>',
-    '**Files changed:** <list of files modified, if any>',
-    '**Open items:** <anything left undone>',
-    '```',
-    '(Create parent directories as needed.)',
+    `If you need to persist notes between sessions, write them to: ${notesFilePromptPath}`,
     '',
     'Objective:',
     objective,
@@ -2138,6 +2128,7 @@ async function spawnBranchBrain(
 
   let stdoutBuf = '';
   let postedCount = 0;
+  let lastPostedText = ''; // Track last posted content for merge injection
   let capturedSessionId: string = sessionId; // start with our generated UUID; update if BB emits its own
 
   child.stdout?.on('data', (chunk: Buffer) => {
@@ -2173,13 +2164,15 @@ async function spawnBranchBrain(
           for (const block of event.message.content) {
             if (block.type === 'text' && block.text?.trim()) {
               postedCount++;
-              threadReply(conn, replyThreadId, block.text.trim()).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
+              lastPostedText = block.text.trim();
+              threadReply(conn, replyThreadId, lastPostedText).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
             }
           }
         }
         // Post final result only if nothing was streamed (fallback for non-streaming output).
         if (event.type === 'result' && typeof event.result === 'string' && event.result.trim() && postedCount === 0) {
           postedCount++;
+          lastPostedText = event.result.trim();
           threadReply(conn, replyThreadId, event.result.trim()).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
         }
       } catch { /* not JSON, skip */ }
@@ -2209,22 +2202,40 @@ async function spawnBranchBrain(
       threadReply(conn, replyThreadId, `Branch Brain completed with no output (exit ${code ?? 'null'})`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }
 
-    // Read merge summary from notes file and post as final thread message.
-    let mergeContent = '';
-    try { mergeContent = fs.readFileSync(notesFile, 'utf-8').trim(); } catch { /* no notes written */ }
-
-    // Post merge message in thread — structured summary for the main brain to read.
-    if (mergeContent) {
-      threadReply(conn, replyThreadId, `🔀 **Merge**\n\n${mergeContent}`).catch((err) => log(`branchBrain: merge post failed: ${errStr(err)}`));
+    // Post merge marker in thread so the main brain can find and read it.
+    if (lastPostedText) {
+      threadReply(conn, replyThreadId, `🔀 **Merge complete**`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
     }
 
-    // Persist BB notes to bot's data dir so they survive restarts/sleep (#123).
+    // Inject merge content into the main brain via IPC so it processes the BB findings.
+    // The main brain sees this as a high-priority message on its next turn.
+    if (bot && lastPostedText) {
+      try {
+        const fleet = loadFleet();
+        const botEntry = fleet[bot];
+        const role = botEntry?.role?.toLowerCase() ?? '';
+        const roleRoom = ROLE_ROOMS[role];
+        // Determine the IPC folder for the bot's active room
+        const roomFolder = roleRoom?.room ?? 'main';
+        const ipcInputDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'ipc', roomFolder, 'input');
+        fs.mkdirSync(ipcInputDir, { recursive: true });
+        const mergeMsg = `🔀 Branch Brain "${announcedTitle}" completed. Last output:\n\n${lastPostedText.slice(0, 4000)}`;
+        const filename = `message-${Date.now()}.json`;
+        const filepath = path.join(ipcInputDir, filename);
+        const tempPath = `${filepath}.tmp`;
+        fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text: mergeMsg }));
+        fs.renameSync(tempPath, filepath);
+        log(`branchBrain: injected merge into ${bot} IPC (${roomFolder})`);
+      } catch (err) { log(`branchBrain: IPC merge injection failed: ${errStr(err)}`); }
+    }
+
+    // Also persist notes to bot data dir for context recovery across restarts.
     if (bot) {
       try {
         const botDataDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data');
         fs.mkdirSync(botDataDir, { recursive: true });
         let content = `# Branch Brain: ${announcedTitle}\n\nThread: ${replyThreadId}\n\n`;
-        content += mergeContent || '(no notes written)';
+        content += lastPostedText || '(no output)';
         fs.writeFileSync(path.join(botDataDir, `bb-pending-${replyThreadId.slice(0, 12)}.md`), content);
       } catch (err) { log(`branchBrain: failed to write pending delivery: ${errStr(err)}`); }
     }
