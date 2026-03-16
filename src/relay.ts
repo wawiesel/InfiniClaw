@@ -2013,9 +2013,10 @@ async function spawnBranchBrain(
     : notesFile;
 
   const fullPrompt = [
-    'You are a focused research and implementation agent. Work through the objective below, use available tools, and output your findings or results as plain text when done.',
+    'You are a focused research and implementation agent. Work through the objective below, use available tools, and output your findings as plain text.',
     '',
     'Operating constraints:',
+    '- Your text output is streamed live to the Captain in a Matrix thread. Output progress updates every few tool calls so the Captain can follow along — don\'t stay silent for minutes.',
     '- Output channel is stdout only. Matrix/messaging tools (send_message, set_thread, branch_to_thread) are not available in this context.',
     '- Work sequentially with no sub-agents. The branch_to_thread tool is unavailable here.',
     '- Skip any preamble — go straight to the work.',
@@ -2135,6 +2136,7 @@ async function spawnBranchBrain(
   let postedCount = 0;
   let lastPostedText = ''; // Track last posted content for merge injection
   let capturedSessionId: string = sessionId; // start with our generated UUID; update if BB emits its own
+  let lastToolPostMs = 0; // Throttle tool-use activity posts to one per 30s
 
   child.stdout?.on('data', (chunk: Buffer) => {
     stdoutBuf += chunk.toString();
@@ -2149,7 +2151,7 @@ async function spawnBranchBrain(
           type?: string;
           result?: string;
           session_id?: string;
-          message?: { content?: Array<{ type: string; text?: string }> };
+          message?: { content?: Array<{ type: string; text?: string; name?: string }> };
         };
         // Capture session ID emitted by the BB process for resumable context recovery
         if (event.session_id && event.session_id !== capturedSessionId) {
@@ -2171,6 +2173,14 @@ async function spawnBranchBrain(
               postedCount++;
               lastPostedText = block.text.trim();
               threadReply(conn, replyThreadId, lastPostedText).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
+            }
+            // Post tool-use activity so Captain can see the BB is working (throttled to one per 30s).
+            if (block.type === 'tool_use' && block.name) {
+              const now = Date.now();
+              if (now - lastToolPostMs >= 30_000) {
+                lastToolPostMs = now;
+                threadReply(conn, replyThreadId, `🔧 ${block.name}`).catch(() => {});
+              }
             }
           }
         }
@@ -2204,7 +2214,9 @@ async function spawnBranchBrain(
     completeBranchTask(replyThreadId);
     if (bot) recordBranchBrainResult(bot, postedCount > 0);
     if (postedCount === 0) {
-      threadReply(conn, replyThreadId, `Branch Brain completed with no output (exit ${code ?? 'null'})`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
+      // Surface stderr errors so the Captain can see why the BB failed (auth, container, etc.).
+      const errDetail = stderrBuf.trim() ? `\n\n\`\`\`\n${stderrBuf.trim().slice(0, 500)}\n\`\`\`` : '';
+      threadReply(conn, replyThreadId, `Branch Brain completed with no output (exit ${code ?? 'null'})${errDetail}`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }
 
     // Post merge marker in thread so the main brain can find and read it.
