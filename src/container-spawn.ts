@@ -126,9 +126,11 @@ function buildVolumeMounts(
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
 
-  // Project root (ro) + group working dir
+  // Project root — rw for engineers (they need to edit code), ro for others
   if (isMain) {
-    mounts.push({ hostPath: projectRoot, containerPath: '/workspace/project', readonly: true });
+    const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
+    const projectReadonly = role !== 'engineer';
+    mounts.push({ hostPath: projectRoot, containerPath: '/workspace/project', readonly: projectReadonly });
   }
   mounts.push({
     hostPath: path.join(GROUPS_DIR, group.folder),
