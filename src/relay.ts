@@ -3603,6 +3603,15 @@ function registerRelayCommands(): void {
             }, 'long'));
           }
 
+          // Warn when a commissioned ship has active bots but no health report — relay likely offline (#135)
+          const hasReport = shipName in allReports;
+          const hasActiveBots = bots.some(([, e]) =>
+            e.localStatus !== 'sleep' && e.localStatus !== 'dream' && e.localStatus !== 'transit',
+          );
+          if (!hasReport && hasActiveBots && commissioned && shipName !== thisShipName()) {
+            lines.push(`  ⚠️ relay offline — bots may be unreachable`);
+          }
+
           // Build flat list for CO detection
           const allBotList = Object.values(allBots).map(e => ({ role: e.role, rank: e.rank, status: e.localStatus }));
 
