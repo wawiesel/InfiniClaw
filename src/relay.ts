@@ -2932,9 +2932,11 @@ async function dutyCycleLoop(conns: RoomConn[]): Promise<void> {
 // ── Command handling ───────────────────────────────────────────────
 
 /**
- * Broadcast a lifecycle event for a bot via its duty room intercom connection.
- * Bots' handleLifecycleMessage() listens for these to update roomRoster / CO election.
- * Format: `[🦁⭐ Herc] BotName stopped|started (rank N)|reranked (rank N)`
+ * Broadcast a lifecycle event for a bot via its quarters room.
+ * Always routes to quarters — lifecycle messages are operational noise that should
+ * not clutter duty rooms (engineering/astrometrics). Falls back to duty room only
+ * if no quarters room is configured.
+ * Format: `[🦁⭐ Herc] BotName stopped|started (rank N)`
  */
 async function sendLifecycleMsg(
   botId: string,
@@ -2946,13 +2948,10 @@ async function sendLifecycleMsg(
     const env = (() => { try { return loadProfileEnv(root, botId); } catch { return null; } })();
     const botName = env?.ASSISTANT_NAME || capitalizeName(botId);
     const fleetEntry = liveFleet[botId];
-    // When bot is not onduty (e.g. quarters, retrospective, ready), route to their quarters
-    // room so lifecycle messages appear where the bot actually is rather than engineering.
+    // Always prefer quarters room — lifecycle messages are noise in duty rooms.
     let conn: RoomConn | undefined;
-    if (fleetEntry && fleetEntry.status !== 'onduty' && fleetEntry.quartersRoom) {
+    if (fleetEntry?.quartersRoom) {
       conn = activeConns.find(c => c.roomId === fleetEntry.quartersRoom);
-      // Bot is not onduty — do not fall back to duty room if no quarters connection
-      if (!conn) return;
     }
     if (!conn) {
       const roomName = botDutyRoom(botId);
