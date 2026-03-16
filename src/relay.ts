@@ -3917,9 +3917,12 @@ async function helpReply(conn: RoomConn, text: string): Promise<string | undefin
   const hc = loadHelpConfig();
   if (hc) {
     const token = await getHelpToken(hc.homeserver, hc.username, hc.password);
-    if (token) return relaySend(hc.homeserver, token, conn.roomId, tagged);
+    if (token) {
+      const eventId = await relaySend(hc.homeserver, token, conn.roomId, tagged);
+      if (eventId) return eventId;
+    }
   }
-  // Fall back to loudspeaker until help account exists
+  // Fall back to loudspeaker → operator account (e.g. help account not in BTC)
   return reply(conn, text);
 }
 
