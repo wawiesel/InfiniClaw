@@ -3033,11 +3033,16 @@ async function handleLifecycleCommand(
       const doneVerb = isRestart ? 'restarted' : 'awake';
       const startedAt = Date.now();
       const role = env?.ASSISTANT_ROLE || liveFleet[bot]?.role || '?';
-      const threadRoot = await reply(conn, `📡 ${verb} ${name} ...`);
+      // When bot is in quarters, route progress messages to their quarters room (#168)
+      const qRoom = liveFleet[bot]?.quartersRoom;
+      const progressConn = (currentStatus === 'quarters' && qRoom)
+        ? (activeConns.find(c => c.roomId === qRoom) ?? conn)
+        : conn;
+      const threadRoot = await reply(progressConn, `📡 ${verb} ${name} ...`);
       if (!threadRoot) continue;
       let stepN = 0;
       const totalSteps = 4;
-      const step = (text: string) => threadReply(conn, threadRoot, `[${++stepN}/${totalSteps} ${formatDuration(Date.now() - startedAt)}] ${text}`);
+      const step = (text: string) => threadReply(progressConn, threadRoot, `[${++stepN}/${totalSteps} ${formatDuration(Date.now() - startedAt)}] ${text}`);
       try {
         await setBotPip(root, bot, '🔄');
         await step('🔄 building');
@@ -3061,8 +3066,8 @@ async function handleLifecycleCommand(
         await setBotPip(root, bot, '🟢');
         await step(`🟢 online · ${role}[${rank}] · ${model}${ver}`);
         const done = `✅ ${name} ${doneVerb}`;
-        await threadReply(conn, threadRoot, done);
-        await reply(conn, done);
+        await threadReply(progressConn, threadRoot, done);
+        await reply(progressConn, done);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
@@ -3070,7 +3075,7 @@ async function handleLifecycleCommand(
         if (!isRestart) await setBotPip(root, bot, '💤');
         const fail = `⛔ wake ${name} failed — ${errStr(err)}`;
         await step(fail);
-        await reply(conn, fail);
+        await reply(progressConn, fail);
         // Count build/deploy failures in infra metrics
         recordInfraFailure('wake-build');
       }
