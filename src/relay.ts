@@ -2120,10 +2120,9 @@ async function spawnBranchBrain(
     });
   }
 
-  // Write initial prompt and keep stdin open for context injection.
-  // In interactive mode claude processes each newline-terminated message as a turn.
-  child.stdin?.write(fullPrompt + '\n');
-  // stdin intentionally left open — context injection messages and timeout interrupt are written later.
+  // Prompt is written after the `system` init event — see stdout handler below.
+  // Writing immediately after spawn can lose the prompt if the container hasn't started claude yet.
+  let promptWritten = false;
 
   // Register this process for context injection fan-out
   activeBranchBrainProcs.set(replyThreadId, { title: announcedTitle, stdin: child.stdin });
@@ -2166,6 +2165,12 @@ async function spawnBranchBrain(
           session_id?: string;
           message?: { content?: Array<{ type: string; text?: string; name?: string }> };
         };
+        // Write prompt after system init event — container needs time to start claude.
+        if (event.type === 'system' && !promptWritten) {
+          promptWritten = true;
+          child.stdin?.write(fullPrompt + '\n');
+          log(`branchBrain: system init received, prompt written`);
+        }
         // Capture session ID emitted by the BB process for resumable context recovery
         if (event.session_id && event.session_id !== capturedSessionId) {
           capturedSessionId = event.session_id;
