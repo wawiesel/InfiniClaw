@@ -3630,6 +3630,9 @@ function registerRelayCommands(): void {
           // Build flat list for CO detection — per duty room (design: 12-co.md)
           const allBotList = Object.entries(allBots).map(([name, e]) => ({ name, role: e.role, rank: e.rank, status: e.localStatus }));
 
+          // Compute max bot name length for column alignment
+          const maxNameLen = bots.reduce((max, [, e]) => Math.max(max, capitalizeName(e.name).length), 0);
+
           for (const [idx, [, entry]] of bots.entries()) {
             const role = entry.role?.toLowerCase() ?? '';
             const roleRoom = ROLE_ROOMS[role];
@@ -3650,7 +3653,7 @@ function registerRelayCommands(): void {
               role,
               rank: entry.rank,
               isChief: co,
-            }, 'short');
+            }, 'short', maxNameLen);
             lines.push(`${tree}${botLine}`);
           }
         }

@@ -138,7 +138,7 @@ export function unifiedShipDisplay(p: UnifiedShipDisplayParams, verbosity: Verbo
   const healthPart = !p.commissioned
     ? '💤[decom]'
     : `${healthEmoji}[${p.health || '?'}]`;
-  const actPart = actEmoji ? `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]` : '';
+  const actPart = p.commissioned ? `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]` : '';
 
   return `${p.emoji} ${p.name} ${typePart}·${rankPart}·${healthPart}${actPart}`;
 }
@@ -219,7 +219,7 @@ function activityEmoji(tokPerDay: number): string {
   if (tokPerDay >= 500_000) return '🔥';
   if (tokPerDay >= 50_000) return '⚡';
   if (tokPerDay >= 5_000) return '🔹';
-  return '';
+  return '·';
 }
 
 /** Format tok/day for display: 0→"0", 5000→"5K", 1200000→"1.2M" */
@@ -235,14 +235,15 @@ function fmtTok(tok: number): string {
 /** Build a unified bot display string.
  *  Long:  🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16K tok/d]
  *  Short: 🦁🏠 Tali ⚙️🥈🟢🔥
+ *  Pass nameWidth to pad the name for column alignment in fleet output.
  */
-export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosity): string {
+export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosity, nameWidth = 0): string {
   const medal = rankMedal(p.rank, p.isChief);
   const roleIcon = ROLE_ICONS[p.role] ?? '';
   const healthEmoji = statusHealthEmoji(p.status, p.health);
   const actEmoji = activityEmoji(p.tokPerDay);
   const prefix = `${p.shipEmoji}${p.locationEmoji}`;
-  const name = capitalizeName(p.name);
+  const name = capitalizeName(p.name).padEnd(nameWidth);
 
   if (verbosity === 'short') {
     return `${prefix} ${name} ${roleIcon}${medal}${healthEmoji}${actEmoji}`;
@@ -252,7 +253,7 @@ export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosi
   const rolePart = `${roleIcon}${p.role}`;
   const rankPart = `${medal}[${p.rank}]`;
   const healthPart = `${healthEmoji}[${p.health || '?'}]`;
-  const actPart = actEmoji ? `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]` : '';
+  const actPart = `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]`;
 
   return `${prefix} ${name} ${rolePart}·${rankPart}·${healthPart}${actPart}`;
 }

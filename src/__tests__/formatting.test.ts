@@ -105,9 +105,10 @@ describe('unifiedBotDisplay — short', () => {
     expect(out).toBe('🦁⚙️ Cid ⚙️🥇🟢🔥');
   });
 
-  it('no activity emoji when idle', () => {
+  it('idle activity shows · dot', () => {
     const out = unifiedBotDisplay({ ...BASE, tokPerDay: 0 }, 'short');
     expect(out).not.toContain('🔥');
+    expect(out).toContain('·');
   });
 
   it('chief shows ⭐ instead of rank medal', () => {
@@ -130,6 +131,12 @@ describe('unifiedBotDisplay — short', () => {
   it('low activity shows 🔹', () => {
     const out = unifiedBotDisplay({ ...BASE, tokPerDay: 10_000 }, 'short');
     expect(out).toContain('🔹');
+  });
+
+  it('nameWidth pads name for column alignment', () => {
+    const out = unifiedBotDisplay({ ...BASE, name: 'cid' }, 'short', 10);
+    // "Cid" padded to 10 chars
+    expect(out).toContain('Cid       ');
   });
 });
 
@@ -154,9 +161,9 @@ describe('unifiedBotDisplay — long', () => {
     expect(out).toContain('[500K tok/d]');
   });
 
-  it('no activity section when idle', () => {
+  it('idle activity shows · with 0 tok/d', () => {
     const out = unifiedBotDisplay({ ...BASE, tokPerDay: 0 }, 'long');
-    expect(out).not.toContain('tok/d');
+    expect(out).toContain('·[0 tok/d]');
   });
 
   it('sleep bot shows 💤 emoji with actual health grade and retains activity', () => {
@@ -172,8 +179,7 @@ describe('unifiedBotDisplay — long', () => {
 
   it('formats small tok as number', () => {
     const out = unifiedBotDisplay({ ...BASE, tokPerDay: 800 }, 'long');
-    // 800 is below 5K threshold, no activity section
-    expect(out).not.toContain('tok/d');
+    expect(out).toContain('·[800 tok/d]');
   });
 
   it('formats 5K+ tok with K suffix', () => {
@@ -218,9 +224,16 @@ describe('unifiedShipDisplay — short', () => {
     expect(out).not.toContain('⭐');
   });
 
-  it('decommissioned shows 💤', () => {
+  it('decommissioned shows 💤 no activity', () => {
     const out = unifiedShipDisplay({ ...SHIP_BASE, commissioned: false }, 'short');
     expect(out).toContain('💤');
+    expect(out).not.toContain('🔥');
+    expect(out).not.toContain('·');
+  });
+
+  it('idle commissioned ship shows · dot', () => {
+    const out = unifiedShipDisplay({ ...SHIP_BASE, tokPerDay: 0 }, 'short');
+    expect(out).toContain('·');
     expect(out).not.toContain('🔥');
   });
 });
@@ -242,8 +255,8 @@ describe('unifiedShipDisplay — long', () => {
     expect(out).not.toContain('tok/d');
   });
 
-  it('no activity when idle', () => {
+  it('idle commissioned ship shows · with 0 tok/d', () => {
     const out = unifiedShipDisplay({ ...SHIP_BASE, tokPerDay: 0 }, 'long');
-    expect(out).not.toContain('tok/d');
+    expect(out).toContain('·[0 tok/d]');
   });
 });

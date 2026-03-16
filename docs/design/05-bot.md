@@ -248,8 +248,8 @@ Based on rolling token throughput (tokens per day):
 | moderate | ⚡ | 50K–500K tok/day |
 | high | 🔥 | 500K+ tok/day |
 
-In **long** format, the actual throughput is shown: `🔥[32K tok/d]`, `⚡[120K tok/d]`. Idle bots (< 5K tok/day) omit the activity field entirely — no emoji, no throughput label.
-In **short** format, only the emoji tier is shown. Idle bots omit the activity field entirely.
+In **long** format, the actual throughput is shown: `🔥[32K tok/d]`, `⚡[120K tok/d]`, `·[0 tok/d]`.
+In **short** format, only the emoji tier is shown. Idle bots show `·` (middle dot).
 
 Activity is shown for all bot statuses, including sleep/dream/transit — it represents the rolling 24-hour throughput, not current state.
 
