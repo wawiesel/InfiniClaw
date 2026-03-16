@@ -3615,7 +3615,7 @@ function registerRelayCommands(): void {
               commissioned,
               health: worstGrade,
               tokPerDay: shipTok,
-            }, 'long'));
+            }, 'short'));
           }
 
           // Warn when a commissioned ship has active bots but no health report — relay likely offline (#135)
