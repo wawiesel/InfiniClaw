@@ -9,7 +9,6 @@ export function capitalizeName(name: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-
 export function escapeHtml(input: string): string {
   return input
     .replace(/&/g, '&amp;')
@@ -124,34 +123,6 @@ export function unifiedShipDisplay(p: UnifiedShipDisplayParams, verbosity: Verbo
   const actPart = p.commissioned ? `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]` : '';
 
   return `${p.emoji} ${p.name} ${typePart}·${rankPart}·${healthPart}${actPart}`;
-}
-
-/** Format a bot tree line with role and rank columns.
- *  @param isLast   - last bot in the ship group?
- *  @param badge    - health/activity badge string
- *  @param name     - capitalized bot name (padded by caller)
- *  @param role     - capitalized role name
- *  @param roleIcon - role emoji
- *  @param rank     - bot rank number
- *  @param isChief  - is this bot the Chief (lowest-rank active in room)?
- *  @param rolePad  - NBSP padding for role column alignment
- *  @param suffix   - additional data (metrics, version, etc.)
- */
-export function botTreeLine(
-  isLast: boolean,
-  badge: string,
-  nameDisplay: string,
-  role: string,
-  roleIcon: string,
-  rank: number,
-  isChief: boolean,
-  rolePad: string,
-  suffix: string,
-): string {
-  const prefix = isLast ? '  └' : '  ├';
-  const roleDisplay = roleIcon ? `${roleIcon} ${role}` : role;
-  const medal = rankMedal(rank, isChief);
-  return `${prefix} ${badge} ${nameDisplay} · ${roleDisplay}${rolePad} · ${medal}${suffix}`;
 }
 
 export const GRADE_EMOJI: Record<string, string> = { A: '🟢', B: '🟡', C: '🟠', F: '🔴' };

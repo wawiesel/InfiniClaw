@@ -32,7 +32,6 @@ function relativeTime(iso: string | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-
 function stripHtml(text: string): string {
   return text
     .replace(/<[^>]*>/g, '')

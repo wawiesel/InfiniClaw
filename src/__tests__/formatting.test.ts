@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   rankMedal,
   botBadge,
-  botTreeLine,
   unifiedBotDisplay,
   unifiedShipDisplay,
   type UnifiedBotDisplayParams,
@@ -56,32 +55,6 @@ describe('botBadge', () => {
 
   it('returns ◉ when running but no grade', () => {
     expect(botBadge('onduty', null)).toBe('◉');
-  });
-});
-
-// ── botTreeLine ────────────────────────────────────────────────────
-
-describe('botTreeLine', () => {
-  it('uses 🥇 medal for rank 1 non-chief', () => {
-    const line = botTreeLine(false, '🟢A', 'Cid', 'Engineer', '⚙️', 1, false, '', '');
-    expect(line).toContain('🥇');
-    expect(line).not.toContain('⭐');
-  });
-
-  it('uses ⭐ medal for chief', () => {
-    const line = botTreeLine(false, '🟢A', 'Cid', 'Engineer', '⚙️', 1, true, '', '');
-    expect(line).toContain('⭐');
-    expect(line).not.toContain('🥇');
-  });
-
-  it('uses └ prefix for last item', () => {
-    const line = botTreeLine(true, '🟢A', 'Cid', 'Engineer', '⚙️', 1, false, '', '');
-    expect(line).toContain('└');
-  });
-
-  it('uses ├ prefix for non-last item', () => {
-    const line = botTreeLine(false, '🟢A', 'Cid', 'Engineer', '⚙️', 1, false, '', '');
-    expect(line).toContain('├');
   });
 });
 

@@ -123,7 +123,6 @@ export function computeFleetHealthGrade(grades: HealthGrade[]): HealthGrade {
   return 'A';
 }
 
-
 export interface MetricsSnapshot {
   ship: string;
   ts: number;
