@@ -1999,15 +1999,39 @@ async function spawnBranchBrain(
   // Announce Branch Brain dispatch on main timeline before spawning.
   // Capture the returned event ID so Branch Brain replies thread under this
   // announcement (not under the triggering message).
+  // Send as the bot's own Matrix account so it looks like the bot is threading out work.
   const announcedTitle = objective.split('\n')[0].trim().slice(0, 80);
   let announcementEventId: string | undefined;
+  let botSendToken: string | undefined;
+  let botSendHomeserver: string | undefined;
+  if (bot) {
+    try {
+      const { token, homeserver } = await botMatrixLogin(resolveRoot(), bot);
+      botSendToken = token;
+      botSendHomeserver = homeserver;
+    } catch (err) {
+      log(`branchBrain: bot login failed, falling back to loudspeaker: ${errStr(err)}`);
+    }
+  }
   try {
-    announcementEventId = await reply(conn, `🧵 Branch Brain: ${announcedTitle}`, undefined, { skipMirror: true });
+    if (botSendToken && botSendHomeserver) {
+      announcementEventId = await relaySend(botSendHomeserver, botSendToken, conn.roomId, `🧵 ${announcedTitle}`);
+    } else {
+      announcementEventId = await reply(conn, `🧵 Branch Brain: ${announcedTitle}`, undefined, { skipMirror: true });
+    }
   } catch (err) {
     log(`branchBrain: announce failed: ${errStr(err)}`);
   }
   // Use the announcement event as the thread root; fall back to the triggering thread_id.
   const replyThreadId = announcementEventId ?? thread_id;
+
+  // Helper: send thread replies as the bot when possible, fall back to loudspeaker.
+  const bbThreadReply = (text: string): Promise<string | undefined> => {
+    if (botSendToken && botSendHomeserver) {
+      return relaySend(botSendHomeserver, botSendToken, conn.roomId, text, replyThreadId);
+    }
+    return threadReply(conn, replyThreadId, text);
+  };
 
   // Try to fork from the bot's active session so BB inherits main brain context.
   // Session ID is written by main.ts after each turn to current-session-id (#81).
@@ -2168,7 +2192,7 @@ async function spawnBranchBrain(
       child.stdin?.write(interruptMsg);
       child.stdin?.end();
     } catch { /* stdin may already be closed */ }
-    threadReply(conn, replyThreadId, '⏱️ Branch Brain time limit reached — finalizing…').catch(() => {});
+    bbThreadReply('⏱️ Branch Brain time limit reached — finalizing…').catch(() => {});
     const killTimer = setTimeout(() => {
       log(`branchBrain: finalize timeout — sending SIGKILL thread=${replyThreadId.slice(0, 20)}`);
       child.kill('SIGKILL');
@@ -2217,14 +2241,14 @@ async function spawnBranchBrain(
             if (block.type === 'text' && block.text?.trim()) {
               postedCount++;
               lastPostedText = block.text.trim();
-              threadReply(conn, replyThreadId, lastPostedText).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
+              bbThreadReply(lastPostedText).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
             }
             // Post tool-use activity so Captain can see the BB is working (throttled to one per 30s).
             if (block.type === 'tool_use' && block.name) {
               const now = Date.now();
               if (now - lastToolPostMs >= 30_000) {
                 lastToolPostMs = now;
-                threadReply(conn, replyThreadId, `🔧 ${block.name}`).catch(() => {});
+                bbThreadReply(`🔧 ${block.name}`).catch(() => {});
               }
             }
           }
@@ -2233,7 +2257,7 @@ async function spawnBranchBrain(
         if (event.type === 'result' && typeof event.result === 'string' && event.result.trim() && postedCount === 0) {
           postedCount++;
           lastPostedText = event.result.trim();
-          threadReply(conn, replyThreadId, event.result.trim()).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
+          bbThreadReply(event.result.trim()).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
         }
       } catch { /* not JSON, skip */ }
     }
@@ -2248,7 +2272,7 @@ async function spawnBranchBrain(
     log(`branchBrain: spawn error: ${errStr(err)}`);
     completeBranchTask(replyThreadId);
     if (bot) recordBranchBrainResult(bot, false);
-    threadReply(conn, replyThreadId, `⚠️ Branch Brain failed to start: ${err.message}`).catch(() => {});
+    bbThreadReply(`⚠️ Branch Brain failed to start: ${err.message}`).catch(() => {});
   });
 
   child.on('close', (code) => {
@@ -2261,12 +2285,12 @@ async function spawnBranchBrain(
     if (postedCount === 0) {
       // Surface stderr errors so the Captain can see why the BB failed (auth, container, etc.).
       const errDetail = stderrBuf.trim() ? `\n\n\`\`\`\n${stderrBuf.trim().slice(0, 500)}\n\`\`\`` : '';
-      threadReply(conn, replyThreadId, `Branch Brain completed with no output (exit ${code ?? 'null'})${errDetail}`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
+      bbThreadReply(`Branch Brain completed with no output (exit ${code ?? 'null'})${errDetail}`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }
 
     // Post merge marker in thread so the main brain can find and read it.
     if (lastPostedText) {
-      threadReply(conn, replyThreadId, `🔀 **Merge complete**`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
+      bbThreadReply(`🔀 **Merge complete**`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
     }
 
     // Inject merge content into the main brain via IPC so it processes the BB findings.

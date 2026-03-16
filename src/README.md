@@ -113,6 +113,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`killStaleContainers` on wake**: `!wake` calls `killStaleContainers(bot)` before `bootstrapBot`. Ensures no orphaned podman containers on restart.
 - **Branch brain GitHub auth**: `GH_TOKEN` injected from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account, not the host user.
 - **Branch brain limit**: `MAX_BRANCH_BRAINS_PER_BOT` (default 3) caps concurrent branch brains per bot. Rejection posts a warning into the triggering Matrix thread so the bot knows to wait.
+- **Branch brain identity**: BB announcements and thread replies are sent as the bot's own Matrix account (via `botMatrixLogin`), making it look like the bot is threading out work themselves. Falls back to loudspeaker if bot login fails. `bbThreadReply` closure captures the bot's token for all thread posts within a BB session.
 - **Error strings**: Always use `errStr(err)` from `utils.ts` instead of inline `err instanceof Error ? err.message : String(err)`. Imported in all source files (including `service.ts`, `matrix-api.ts`, `s3-sync.ts`).
 - **Regex escaping**: Use `escapeRegex(s)` from `utils.ts` instead of inline `/[.*+?^${}()|[\]\\]/g` patterns.
 - **Env var integers**: Use `envInt(name, default)` from `utils.ts` instead of `parseInt(process.env.VAR || 'X', 10)`. Configurable intervals: `GIT_SYNC_INTERVAL` (3min), `SECRETS_SYNC_INTERVAL` (30s), `HEALTH_INTERVAL` (30min), `GIT_SYNC_PUSH_TIMEOUT_MS` (60s — generous default to avoid ETIMEDOUT on slow networks, #104).
