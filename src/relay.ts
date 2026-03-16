@@ -125,7 +125,11 @@ const FAILURE_MAX_INTERVAL = 8 * 60 * 60_000;  // 8 hours
 const failureStates: Record<string, FailureState> = {};
 
 function findEngConn(conns: RoomConn[]): RoomConn | undefined {
-  return conns.find(c => c.name === 'engineering') || conns[0];
+  // Prefer engineering; fall back to bridge so failures don't route to astrometrics
+  // on ships that only watch architect/navigator rooms (fixes #134).
+  return conns.find(c => c.name === 'engineering')
+    || conns.find(c => c.name === 'bridge')
+    || conns[0];
 }
 
 function formatDuration(ms: number): string {
@@ -2197,6 +2201,11 @@ function secretsGitSync(): { ok: boolean; newCommits: number; output: string } {
   }
 }
 
+// Retry backoff for secrets sync: start at SECRETS_SYNC_INTERVAL, grow to SECRETS_SYNC_MAX_INTERVAL.
+// This prevents hammering a broken SSH remote (e.g. Herm #134) every 30s indefinitely.
+const SECRETS_SYNC_MAX_INTERVAL = 10 * 60_000; // 10 minutes
+let secretsSyncRetryMs = SECRETS_SYNC_INTERVAL;
+
 /** Periodic secrets repo sync loop. */
 async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
   await sleep(10_000);
@@ -2206,7 +2215,10 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
       if (!result.ok) {
         log(`secrets sync FAILED: ${result.output}`);
         await reportFailure('secrets sync', result.output, conns);
+        // Back off retry interval when SSH is persistently broken (fixes #134)
+        secretsSyncRetryMs = Math.min(secretsSyncRetryMs * 2, SECRETS_SYNC_MAX_INTERVAL);
       } else if (result.newCommits > 0) {
+        secretsSyncRetryMs = SECRETS_SYNC_INTERVAL; // reset on success
         await reportRecovery('secrets sync', conns);
         log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
         // Reload fleet.json from disk (may have transport assignments from other ships)
@@ -2284,12 +2296,13 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
         } catch { /* inbox check is best-effort */ }
       } else {
         // Success with 0 new commits — still clear any prior failure
+        secretsSyncRetryMs = SECRETS_SYNC_INTERVAL; // reset on success
         await reportRecovery('secrets sync', conns);
       }
     } catch (err) {
       log(`secrets sync loop error: ${errStr(err)}`);
     }
-    await sleep(SECRETS_SYNC_INTERVAL);
+    await sleep(secretsSyncRetryMs);
   }
 }
 
