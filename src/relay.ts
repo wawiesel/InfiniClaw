@@ -1613,7 +1613,7 @@ function gitSync(force = false): { ok: boolean; output: string; newCommits: numb
   try {
     // Fetch + push local commits ahead of origin before pulling.
     // Ensure we're on main first — container may have left a feature branch checked out (#101).
-    execSync('git fetch origin --tags', opts);
+    execSync('git fetch origin --tags --force', opts);
     try {
       const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { ...opts, timeout: 5_000 }).trim();
       if (currentBranch !== 'main') {
@@ -2061,6 +2061,15 @@ async function spawnBranchBrain(
         volumeArgs.push(`${hostClaudeDir}:/home/claude/.claude:ro`);
       }
     }
+    // Ensure .claude.json exists in the container — Claude Code refuses to start without it.
+    // The main bot containers create this via agent-runner, but BB containers need it provided.
+    const claudeJsonDir = path.join(infraRoot, '_runtime', 'data', 'bb-config');
+    const claudeJsonPath = path.join(claudeJsonDir, '.claude.json');
+    if (!fs.existsSync(claudeJsonPath)) {
+      fs.mkdirSync(claudeJsonDir, { recursive: true });
+      fs.writeFileSync(claudeJsonPath, JSON.stringify({ firstStartTime: new Date().toISOString() }));
+    }
+    volumeArgs.push(`${claudeJsonPath}:/home/claude/.claude.json:ro`);
     const hostCaCert = process.env['NODE_EXTRA_CA_CERTS'];
     if (hostCaCert && fs.existsSync(hostCaCert)) {
       const containerCaPath = '/etc/ssl/certs/corporate-ca.pem';
