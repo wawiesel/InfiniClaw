@@ -1994,8 +1994,9 @@ async function spawnBranchBrain(
 
   // Load bot credentials so claude can authenticate on the host.
   // Raw env file uses BRAIN_* names; map to CLAUDE_CODE_* / ANTHROPIC_* as needed.
-  const botEnv = bot ? (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })() : null;
+  const botEnv = bot ? (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch (err) { log(`branchBrain: loadProfileEnv failed for ${bot}: ${errStr(err)}`); return null; } })() : null;
   const childEnv = mapBrainEnv(botEnv);
+  log(`branchBrain: credentials for ${bot}: oauth=${!!childEnv['CLAUDE_CODE_OAUTH_TOKEN']} apiKey=${!!childEnv['ANTHROPIC_API_KEY']} model=${childEnv['ANTHROPIC_MODEL'] ?? 'none'}`);
   // Use fleet GitHub bot for PR reviews so comments appear as the bot, not the Captain.
   // Fall back to host GH_TOKEN if no bot token configured (#100).
   const ghBotToken = loadGitHubBotToken() || process.env['GH_TOKEN'];
@@ -2040,6 +2041,7 @@ async function spawnBranchBrain(
     for (const [k, v] of Object.entries(containerEnv)) {
       envArgs.push('--env', `${k}=${v}`);
     }
+    log(`branchBrain: container env keys: ${Object.keys(containerEnv).join(', ')}`);
     // Mount corporate CA cert if present on host so SSL works through proxy.
     // Mount InfiniClaw repo read-only so BB can read source and docs (#99).
     // Mount bot's session data so --continue --fork-session inherits context.
