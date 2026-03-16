@@ -105,10 +105,10 @@ describe('unifiedBotDisplay — short', () => {
     expect(out).toBe('🦁⚙️ Cid ⚙️🥇🟢🔥');
   });
 
-  it('idle activity shows · dot', () => {
+  it('idle activity shows ⏸ pause', () => {
     const out = unifiedBotDisplay({ ...BASE, tokPerDay: 0 }, 'short');
     expect(out).not.toContain('🔥');
-    expect(out).toContain('·');
+    expect(out).toContain('⏸');
   });
 
   it('chief shows ⭐ instead of rank medal', () => {
@@ -161,9 +161,9 @@ describe('unifiedBotDisplay — long', () => {
     expect(out).toContain('[500K tok/d]');
   });
 
-  it('idle activity shows · with 0 tok/d', () => {
+  it('idle activity shows ⏸ with 0 tok/d', () => {
     const out = unifiedBotDisplay({ ...BASE, tokPerDay: 0 }, 'long');
-    expect(out).toContain('·[0 tok/d]');
+    expect(out).toContain('⏸[0 tok/d]');
   });
 
   it('sleep bot shows 💤 emoji with actual health grade and retains activity', () => {
@@ -179,7 +179,7 @@ describe('unifiedBotDisplay — long', () => {
 
   it('formats small tok as number', () => {
     const out = unifiedBotDisplay({ ...BASE, tokPerDay: 800 }, 'long');
-    expect(out).toContain('·[800 tok/d]');
+    expect(out).toContain('⏸[800 tok/d]');
   });
 
   it('formats 5K+ tok with K suffix', () => {
@@ -231,9 +231,9 @@ describe('unifiedShipDisplay — short', () => {
     expect(out).not.toContain('·');
   });
 
-  it('idle commissioned ship shows · dot', () => {
+  it('idle commissioned ship shows ⏸ pause', () => {
     const out = unifiedShipDisplay({ ...SHIP_BASE, tokPerDay: 0 }, 'short');
-    expect(out).toContain('·');
+    expect(out).toContain('⏸');
     expect(out).not.toContain('🔥');
   });
 });
@@ -255,8 +255,8 @@ describe('unifiedShipDisplay — long', () => {
     expect(out).not.toContain('tok/d');
   });
 
-  it('idle commissioned ship shows · with 0 tok/d', () => {
+  it('idle commissioned ship shows ⏸ with 0 tok/d', () => {
     const out = unifiedShipDisplay({ ...SHIP_BASE, tokPerDay: 0 }, 'long');
-    expect(out).toContain('·[0 tok/d]');
+    expect(out).toContain('⏸[0 tok/d]');
   });
 });

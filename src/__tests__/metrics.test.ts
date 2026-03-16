@@ -716,10 +716,10 @@ describe('computeFleetHealthGrade', () => {
 });
 
 describe('activityIcon', () => {
-  it('returns · for no/low activity', () => {
-    expect(activityIcon(0)).toBe('·');
-    expect(activityIcon(-1)).toBe('·');
-    expect(activityIcon(4999)).toBe('·');
+  it('returns ⏸ for no/low activity', () => {
+    expect(activityIcon(0)).toBe('⏸');
+    expect(activityIcon(-1)).toBe('⏸');
+    expect(activityIcon(4999)).toBe('⏸');
   });
 
   it('returns 🔹 for moderate activity', () => {
@@ -847,8 +847,8 @@ describe('token throughput in bot metrics', () => {
   });
 
   it('activityIcon maps throughput to correct icons', () => {
-    expect(activityIcon(-1)).toBe('·');
-    expect(activityIcon(0)).toBe('·');
+    expect(activityIcon(-1)).toBe('⏸');
+    expect(activityIcon(0)).toBe('⏸');
     expect(activityIcon(10000)).toBe('🔹');
     expect(activityIcon(100000)).toBe('⚡');
     expect(activityIcon(600000)).toBe('🔥');
