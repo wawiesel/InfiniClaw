@@ -1408,6 +1408,21 @@ async function injectResumeMessage(): Promise<void> {
       contextBlock = `\n\nHere are the last ${recent.length} messages before restart:\n${lines.join('\n')}`;
     }
 
+    // Inject pending Branch Brain results (#123): relay writes bb-pending-*.md on BB completion.
+    // Read, include in context, then rename to bb-delivered-* to prevent re-injection.
+    let bbBlock = '';
+    try {
+      for (const f of fs.readdirSync(DATA_DIR)) {
+        if (!f.startsWith('bb-pending-')) continue;
+        const fp = path.join(DATA_DIR, f);
+        try {
+          bbBlock += `\n\n${fs.readFileSync(fp, 'utf-8')}`;
+          fs.renameSync(fp, fp.replace('bb-pending-', 'bb-delivered-'));
+        } catch { /* skip unreadable files */ }
+      }
+    } catch { /* DATA_DIR may not exist on first boot */ }
+    if (bbBlock) contextBlock += `\n\nPending Branch Brain results:${bbBlock}`;
+
     storeMessage({
       id: `resume-${Date.now()}-${group.folder}`,
       chat_jid: chatJid,
