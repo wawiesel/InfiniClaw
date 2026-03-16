@@ -225,12 +225,14 @@ export interface UnifiedBotDisplayParams {
   isChief: boolean;      // true if CO (lowest-rank awake in role)
 }
 
-/** Status-aware health emoji: sleep→💤, building→🔄, starting→🚀, else grade emoji. */
+/** Status-aware health emoji: sleep→💤, building→🔄, starting→🚀, online→🟢, etc. */
 function statusHealthEmoji(status: string, health: string): string {
   if (status === 'sleep' || status === 'dream') return '💤';
   if (status === 'building') return '🔄';
   if (status === 'starting') return '🚀';
   if (status === 'waiting') return '🟡';
+  if (status === 'online') return '🟢';
+  if (status === 'ready') return '✅';
   return GRADE_EMOJI[health] ?? '';
 }
 

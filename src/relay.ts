@@ -41,7 +41,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
+import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -132,12 +132,13 @@ function formatTimestamp(): string {
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 }
 
-/** Standard status line: `<emoji> <what> (<ship>) <status> (<time>)` */
+/** Standard status line: `<emoji> <what> <status> (<time>)`.
+ *  Ship identity comes from the [replyTag()] prefix added by reply(). */
 function statusLine(emoji: string, what: string, status: string, elapsedMs: number): string {
   const time = elapsedMs > 0
     ? `${formatTimestamp()} · ${formatDuration(elapsedMs)}`
     : formatTimestamp();
-  return `${emoji} ${what} (${thisShipName()}) ${status} (${time})`;
+  return `${emoji} ${what} ${status} (${time})`;
 }
 
 /** Stage result: `✅ <what><suffix>` or `⛔ <what><suffix>` or `⚠️ <what><suffix>` */
@@ -228,7 +229,7 @@ async function postToBTC(text: string): Promise<void> {
   const opConf = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
   const roomId = opConf.rooms?.['BehindTheCurtain'];
   if (!roomId || !opConf.accessToken) return;
-  const tagged = `[${shipTag()}] ${text}`;
+  const tagged = `[${replyTag()}] ${text}`;
   await matrixSend({ homeserver: opConf.homeserver, token: opConf.accessToken, roomId, text: tagged, log });
 }
 
@@ -915,13 +916,28 @@ async function botLeaveRoom(token: string, homeserver: string, roomId: string): 
   await matrixLeave(homeserver, token, roomId);
 }
 
-/** Update a bot's Matrix display name pip during boot stages. */
-async function setBotPip(root: string, bot: string, pip: string): Promise<void> {
+/** Update a bot's Matrix display name to unified format with a given display status.
+ *  Display statuses: 'sleep', 'building', 'starting', 'waiting', 'online', 'ready',
+ *  or the bot's actual fleet status (onduty/quarters) for grade-based display. */
+async function setBotDisplayStatus(root: string, bot: string, displayStatus: string): Promise<void> {
   try {
+    const entry = liveFleet[bot];
+    if (!entry) return;
+    const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
+    const role = entry.role?.toLowerCase() ?? '';
+    const isOnDuty = entry.status === 'onduty';
+    const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
+    const dutyRoom = ROLE_ROOMS[role]?.room ?? '';
+    const allBotList = Object.entries(liveFleet).map(([n, e]) => ({ name: n, role: e.role, rank: e.rank, status: e.status }));
+    const co = findRoomChief(dutyRoom, allBotList) === bot;
+    const displayName = unifiedBotDisplay({
+      name: bot, shipEmoji, locationEmoji, health: '', tokPerDay: 0,
+      status: displayStatus, role, rank: entry.rank, isChief: co,
+    }, 'short');
     const { token, homeserver, userId } = await botMatrixLogin(root, bot);
-    await matrixSetDisplayName(homeserver, token, userId, formatBotDisplayName(bot, pip));
+    await matrixSetDisplayName(homeserver, token, userId, displayName);
   } catch (err) {
-    log(`setBotPip ${bot} ${pip}: ${errStr(err)}`);
+    log(`setBotDisplayStatus ${bot} ${displayStatus}: ${errStr(err)}`);
   }
 }
 
@@ -2748,7 +2764,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
               log(`auto-sleep: ${name} idle ${Math.round(hbAge / 60_000)}m — sleeping`);
               stopBot(bot);
               killStaleContainers(bot);
-              await setBotPip(root, bot, '💤');
+              await setBotDisplayStatus(root, bot, 'sleep');
               reabsorbWbsItems(root, bot);
               fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
               writeFleet(liveFleet);
@@ -2842,7 +2858,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
   try {
     stopBot(bot);
     killStaleContainers(bot);
-    await setBotPip(root, bot, '💤');
+    await setBotDisplayStatus(root, bot, 'sleep');
     reabsorbWbsItems(root, bot);
     // status=dream: container stopped, deferred git changes can now apply
     fleetUpdate(bot, { status: 'dream', triggerType: 'never' });
@@ -2871,7 +2887,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     bootstrapBot(root, bot);
     writeCrewStatus(root, bot);
     injectWbsTasks(root, bot);
-    await setBotPip(root, bot, '✅');
+    await setBotDisplayStatus(root, bot, 'ready');
     sendLifecycleMsg(bot, 'started', entry.rank).catch(() => {});
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} ready — new cycle`);
@@ -3048,7 +3064,7 @@ async function handleLifecycleCommand(
       try {
         stopBot(bot);
         killStaleContainers(bot);
-        await setBotPip(root, bot, '💤');
+        await setBotDisplayStatus(root, bot, 'sleep');
         // Leave non-quarters rooms
         const qid = liveFleet[bot]?.quartersRoom;
         try {
@@ -3085,7 +3101,7 @@ async function handleLifecycleCommand(
       const totalSteps = 4;
       const step = (text: string) => threadReply(progressConn, threadRoot, `[${++stepN}/${totalSteps} ${formatDuration(Date.now() - startedAt)}] ${text}`);
       try {
-        await setBotPip(root, bot, '🔄');
+        await setBotDisplayStatus(root, bot, 'building');
         await step('🔄 building');
         if (!isRestart) {
           fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
@@ -3094,26 +3110,26 @@ async function handleLifecycleCommand(
         }
         stopBot(bot);
         killStaleContainers(bot);
-        await setBotPip(root, bot, '🚀');
+        await setBotDisplayStatus(root, bot, 'starting');
         await step('🚀 starting');
         killStaleContainers(bot);
         bootstrapBot(root, bot);
         writeCrewStatus(root, bot);
         injectWbsTasks(root, bot);
-        await setBotPip(root, bot, '🟡');
+        await setBotDisplayStatus(root, bot, 'waiting');
         await step('🟡 waiting for first output');
         const model = env?.BRAIN_MODEL || '?';
         const roleIcon = ROLE_ICONS[role.toLowerCase()] ?? '';
         const medal = rankMedal(rank, false);
         const ver = botVersion(root, bot);
-        await setBotPip(root, bot, '🟢');
+        await setBotDisplayStatus(root, bot, 'online');
         await step(`🟢 online · ${roleIcon}${medal} · ${model}${ver}`);
         await reply(progressConn, `✅ ${name} ${doneVerb}`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
         recordInfraFailure(`wake-${bot}`);
-        if (!isRestart) await setBotPip(root, bot, '💤');
+        if (!isRestart) await setBotDisplayStatus(root, bot, 'sleep');
         const fail = `⛔ wake ${name} failed — ${errStr(err)}`;
         await step(fail);
         await reply(progressConn, fail);
@@ -4070,7 +4086,7 @@ async function reply(conn: RoomConn, text: string, threadRootId?: string): Promi
 /** Reply via the help account (for help text, unknown command errors).
  *  Falls back to loudspeaker if help account is not configured yet. */
 async function helpReply(conn: RoomConn, text: string): Promise<string | undefined> {
-  const tagged = `[${shipTag()}] ${text}`;
+  const tagged = `[${replyTag()}] ${text}`;
   const hc = loadHelpConfig();
   if (hc) {
     const token = await getHelpToken(hc.homeserver, hc.username, hc.password);
