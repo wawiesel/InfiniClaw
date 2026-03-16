@@ -8,8 +8,8 @@ import os from 'os';
 
 import { logger } from './logger.js';
 
-/** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'docker';
+/** The container runtime binary name. Defaults to podman; override via CONTAINER_RUNTIME_BIN env var. */
+export const CONTAINER_RUNTIME_BIN = process.env.CONTAINER_RUNTIME_BIN ?? 'podman';
 
 /** Hostname containers use to reach the host machine. */
 export const CONTAINER_HOST_GATEWAY = 'host.docker.internal';
