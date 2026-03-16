@@ -85,7 +85,7 @@ import {
 } from './service.js';
 import { getLatestSemverTag, getStampedSemverTag, getLatestSemverTagOnRef, commitsAheadOfTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
-import { BRANCH_BRAIN_IMAGE, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
+import { BRANCH_BRAIN_IMAGE, BRANCH_BRAIN_TIMEOUT_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
 
@@ -1785,15 +1785,21 @@ const RELAY_TASKS_POLL_INTERVAL = 2_000;
 // ── Branch Brain task registry ──────────────────────────────────────────
 
 const BRANCH_BRAIN_RESTART_DELAY = 30_000; // wait 30s after last TB exit before restarting bot
+const BRANCH_BRAIN_FINALIZE_MS = 30_000;   // grace period after interrupt before hard SIGKILL
 const MAX_BRANCH_BRAINS_PER_BOT = envInt('MAX_BRANCH_BRAINS_PER_BOT', 3);
 const branchBrainRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const activeBranchBrainCount = new Map<string, number>(); // bot → active TB count
+
+// Active branch brain processes indexed by replyThreadId — used for context injection fan-out
+const activeBranchBrainProcs = new Map<string, { title: string; stdin: ReturnType<typeof spawn>['stdin'] }>();
 
 interface BranchTaskEntry {
   objective: string;
   chat_jid: string;
   bot?: string;
   createdAt: number;
+  sessionId?: string;   // BB session ID stored for context recovery on relay restart
+  completed?: boolean;  // true when BB has finished; kept for TTL-based thread reactivation
 }
 
 function branchTasksPath(): string {
@@ -1837,6 +1843,43 @@ function removeBranchTask(threadId: string): void {
     delete tasks[threadId];
     fs.writeFileSync(p, JSON.stringify(tasks, null, 2));
   } catch (err) { log(`branchTasks: remove failed: ${errStr(err)}`); }
+}
+
+/** Mark a branch task as completed (kept for TTL-based thread reactivation). */
+function completeBranchTask(threadId: string): void {
+  try {
+    const p = branchTasksPath();
+    if (!fs.existsSync(p)) return;
+    const tasks = readBranchTasks();
+    if (tasks[threadId]) {
+      tasks[threadId].completed = true;
+      fs.writeFileSync(p, JSON.stringify(tasks, null, 2));
+    }
+  } catch (err) { log(`branchTasks: complete failed: ${errStr(err)}`); }
+}
+
+/**
+ * Format the context injection message that is fanned out to active branch brains.
+ * Pure function — exported for testability.
+ */
+export function formatContextInjectionMessage(title: string, msg: string): string {
+  return `You are branch brain ${title}. Here is a message from main timeline: ${msg}. It may not apply to you. If it does, modify your task accordingly.\n`;
+}
+
+/** Write a context injection message to all active branch brain stdin pipes. */
+function fanOutToBranchBrains(msg: string): void {
+  if (activeBranchBrainProcs.size === 0) return;
+  for (const [threadId, proc] of activeBranchBrainProcs.entries()) {
+    try {
+      const injected = formatContextInjectionMessage(proc.title, msg);
+      if (proc.stdin && !proc.stdin.destroyed) {
+        proc.stdin.write(injected);
+        log(`branchBrain: context injected into thread=${threadId.slice(0, 20)}`);
+      }
+    } catch (err) {
+      log(`branchBrain: context injection failed for thread=${threadId.slice(0, 20)}: ${errStr(err)}`);
+    }
+  }
 }
 
 /**
@@ -1897,8 +1940,11 @@ async function spawnBranchBrain(
   // Use the announcement event as the thread root; fall back to the triggering thread_id.
   const replyThreadId = announcementEventId ?? thread_id;
 
-  // Register task in branch-tasks.json for !todo deep-link annotation
-  writeBranchTask(replyThreadId, { objective, chat_jid, bot, createdAt: Date.now() });
+  // Generate a session ID for this BB instance (stored for context recovery on relay restart).
+  const sessionId = crypto.randomUUID();
+
+  // Register task in branch-tasks.json for !todo deep-link annotation and thread reactivation
+  writeBranchTask(replyThreadId, { objective, chat_jid, bot, createdAt: Date.now(), sessionId });
 
   // Load bot credentials so claude can authenticate on the host.
   // Raw env file uses BRAIN_* names; map to CLAUDE_CODE_* / ANTHROPIC_* as needed.
@@ -1971,18 +2017,16 @@ async function spawnBranchBrain(
       ...volumeArgs.map(v => ['--volume', v]).flat(),
       ...envArgs,
       BRANCH_BRAIN_IMAGE,
-      '--print',
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
     ], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    log(`branchBrain: spawning in container image=${BRANCH_BRAIN_IMAGE}`);
+    log(`branchBrain: spawning in container image=${BRANCH_BRAIN_IMAGE} session=${sessionId}`);
   } else {
-    log(`branchBrain: BRANCH_BRAIN_IMAGE unset — falling back to host spawn`);
+    log(`branchBrain: BRANCH_BRAIN_IMAGE unset — falling back to host spawn session=${sessionId}`);
     child = spawn('claude', [
-      '--print',
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
@@ -1993,11 +2037,34 @@ async function spawnBranchBrain(
     });
   }
 
-  child.stdin?.write(fullPrompt);
-  child.stdin?.end();
+  // Write initial prompt and keep stdin open for context injection.
+  // In interactive mode claude processes each newline-terminated message as a turn.
+  child.stdin?.write(fullPrompt + '\n');
+  // stdin intentionally left open — context injection messages and timeout interrupt are written later.
+
+  // Register this process for context injection fan-out
+  activeBranchBrainProcs.set(replyThreadId, { title: announcedTitle, stdin: child.stdin });
+
+  // Time-limited: after BRANCH_BRAIN_TIMEOUT_MS, send interrupt then SIGKILL
+  const timeoutTimer = setTimeout(() => {
+    log(`branchBrain: timeout (${BRANCH_BRAIN_TIMEOUT_MS}ms) thread=${replyThreadId.slice(0, 20)}`);
+    const interruptMsg = '\nYour allotted time has expired. Please finalize your work immediately and output a summary of what you accomplished.\n';
+    try {
+      child.stdin?.write(interruptMsg);
+      child.stdin?.end();
+    } catch { /* stdin may already be closed */ }
+    threadReply(conn, replyThreadId, '⏱️ Branch Brain time limit reached — finalizing…').catch(() => {});
+    const killTimer = setTimeout(() => {
+      log(`branchBrain: finalize timeout — sending SIGKILL thread=${replyThreadId.slice(0, 20)}`);
+      child.kill('SIGKILL');
+    }, BRANCH_BRAIN_FINALIZE_MS);
+    killTimer.unref();
+  }, BRANCH_BRAIN_TIMEOUT_MS);
+  timeoutTimer.unref();
 
   let stdoutBuf = '';
   let postedCount = 0;
+  let capturedSessionId: string = sessionId; // start with our generated UUID; update if BB emits its own
 
   child.stdout?.on('data', (chunk: Buffer) => {
     stdoutBuf += chunk.toString();
@@ -2011,8 +2078,21 @@ async function spawnBranchBrain(
         const event = JSON.parse(line) as {
           type?: string;
           result?: string;
+          session_id?: string;
           message?: { content?: Array<{ type: string; text?: string }> };
         };
+        // Capture session ID emitted by the BB process for resumable context recovery
+        if (event.session_id && event.session_id !== capturedSessionId) {
+          capturedSessionId = event.session_id;
+          try {
+            const tasks = readBranchTasks();
+            if (tasks[replyThreadId]) {
+              tasks[replyThreadId].sessionId = capturedSessionId;
+              fs.writeFileSync(branchTasksPath(), JSON.stringify(tasks, null, 2));
+            }
+          } catch { /* best-effort */ }
+          log(`branchBrain: captured session_id=${capturedSessionId}`);
+        }
         // Only post the final result — suppress intermediate assistant steps (#95)
         if (event.type === 'result' && typeof event.result === 'string' && event.result.trim()) {
           postedCount++;
@@ -2026,16 +2106,20 @@ async function spawnBranchBrain(
   child.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString(); });
 
   child.on('error', (err) => {
+    clearTimeout(timeoutTimer);
+    activeBranchBrainProcs.delete(replyThreadId);
     log(`branchBrain: spawn error: ${errStr(err)}`);
-    removeBranchTask(replyThreadId);
+    completeBranchTask(replyThreadId);
     if (bot) recordBranchBrainResult(bot, false);
     threadReply(conn, replyThreadId, `⚠️ Branch Brain failed to start: ${err.message}`).catch(() => {});
   });
 
   child.on('close', (code) => {
+    clearTimeout(timeoutTimer);
+    activeBranchBrainProcs.delete(replyThreadId);
     if (stderrBuf.trim()) log(`branchBrain: stderr: ${stderrBuf.trim().slice(0, 400)}`);
     log(`branchBrain: done exit=${code} posted=${postedCount}`);
-    removeBranchTask(replyThreadId);
+    completeBranchTask(replyThreadId);
     if (bot) recordBranchBrainResult(bot, postedCount > 0);
     if (postedCount === 0) {
       threadReply(conn, replyThreadId, `Branch Brain completed with no output (exit ${code ?? 'null'})`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
@@ -3569,8 +3653,8 @@ function registerRelayCommands(): void {
         const name = env?.ASSISTANT_NAME || capitalizeName(bot);
         lines.push(`📋 **${name}**`);
 
-        // Threads dispatched by this bot
-        const botThreadEntries = Object.entries(branchTasks).filter(([, t]) => !t.bot || t.bot === bot);
+        // Active (non-completed) threads dispatched by this bot
+        const botThreadEntries = Object.entries(branchTasks).filter(([, t]) => (!t.bot || t.bot === bot) && !t.completed);
 
         // Read actual todos from most recently modified session todos file
         const todosDir = path.join(root, '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude', 'todos');
@@ -4117,6 +4201,46 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             // 📡 — relay received acknowledgement for Captain messages
             if (event.sender === captainUserId && event.event_id && conn.accessToken) {
               relayAck(conn.homeserver, conn.accessToken, conn.roomId, event.event_id);
+            }
+
+            // ── Branch Brain: context injection + thread reactivation ──────────
+            if (event.sender === captainUserId && body && !body.startsWith('!')) {
+              const relates = (event.content as Record<string, unknown>)?.['m.relates_to'] as { rel_type?: string; event_id?: string } | undefined;
+              const isThreadReply = relates?.rel_type === 'm.thread' && !!relates.event_id;
+
+              if (isThreadReply && relates?.event_id) {
+                // Check if this is a reply inside a completed BB thread — if so, reactivate
+                const tasks = readBranchTasks();
+                const task = tasks[relates.event_id];
+                if (task?.completed) {
+                  log(`dialtone: BB thread reactivation for thread=${relates.event_id.slice(0, 20)}`);
+                  const reactivationObjective = [
+                    task.objective,
+                    '',
+                    '---',
+                    '',
+                    `Follow-up from Captain: ${body}`,
+                  ].join('\n');
+                  const botKey = task.bot ?? '__relay__';
+                  const count = activeBranchBrainCount.get(botKey) ?? 0;
+                  if (count < MAX_BRANCH_BRAINS_PER_BOT) {
+                    activeBranchBrainCount.set(botKey, count + 1);
+                    void spawnBranchBrain(
+                      { thread_id: relates.event_id, objective: reactivationObjective, chat_jid: task.chat_jid, bot: task.bot },
+                      conns,
+                    ).finally(() => {
+                      const n = activeBranchBrainCount.get(botKey) ?? 1;
+                      if (n <= 1) activeBranchBrainCount.delete(botKey);
+                      else activeBranchBrainCount.set(botKey, n - 1);
+                    });
+                  } else {
+                    log(`dialtone: BB reactivation rejected — ${botKey} at limit`);
+                  }
+                }
+              } else if (!isThreadReply) {
+                // Main-timeline Captain message — fan out to all active branch brain IPC queues
+                fanOutToBranchBrains(body);
+              }
             }
 
             // Captain-only: @ <text> — pipe to operator tmux (if relay enabled)
