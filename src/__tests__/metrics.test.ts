@@ -5,6 +5,15 @@ vi.mock('child_process', () => ({
   execSync: () => '[]',
 }));
 
+// Mock ship-config so tests run without fleet.json secrets
+vi.mock('../ship-config.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../ship-config.js')>();
+  return {
+    ...original,
+    loadShipConfig: () => ({ bots: [], secretsPath: '/tmp/test-secrets' }),
+  };
+});
+
 import {
   initMetrics,
   resetMetrics,
