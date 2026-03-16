@@ -2120,9 +2120,13 @@ async function spawnBranchBrain(
     });
   }
 
-  // Prompt is written after the `system` init event — see stdout handler below.
-  // Writing immediately after spawn can lose the prompt if the container hasn't started claude yet.
-  let promptWritten = false;
+  // Wait briefly for the container to start, then write the prompt.
+  // Claude in interactive+stream-json mode emits the system init only after stdin data arrives,
+  // so we can't wait for init — just delay enough for podman to start the process.
+  setTimeout(() => {
+    child.stdin?.write(fullPrompt + '\n');
+    log(`branchBrain: prompt written to stdin`);
+  }, 3000);
 
   // Register this process for context injection fan-out
   activeBranchBrainProcs.set(replyThreadId, { title: announcedTitle, stdin: child.stdin });
@@ -2165,12 +2169,6 @@ async function spawnBranchBrain(
           session_id?: string;
           message?: { content?: Array<{ type: string; text?: string; name?: string }> };
         };
-        // Write prompt after system init event — container needs time to start claude.
-        if (event.type === 'system' && !promptWritten) {
-          promptWritten = true;
-          child.stdin?.write(fullPrompt + '\n');
-          log(`branchBrain: system init received, prompt written`);
-        }
         // Capture session ID emitted by the BB process for resumable context recovery
         if (event.session_id && event.session_id !== capturedSessionId) {
           capturedSessionId = event.session_id;
