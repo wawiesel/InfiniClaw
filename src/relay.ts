@@ -2076,15 +2076,14 @@ async function spawnBranchBrain(
       volumeArgs.push(`${hostCaCert}:${containerCaPath}:ro`);
       envArgs.push('--env', `NODE_EXTRA_CA_CERTS=${containerCaPath}`);
     }
-    // Build claude args: fork from main brain session if available, else fresh.
+    // Build claude args: fresh session in container (fork-session loads the entire
+    // conversation transcript into V8 memory before producing output — for long-running
+    // bots this exceeds the 10min BB timeout and wastes gigabytes of RAM).
     const claudeArgs: string[] = [
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
     ];
-    if (mainSessionId) {
-      claudeArgs.push('--resume', mainSessionId, '--fork-session');
-    }
     child = spawn('podman', [
       'run', '--rm', '-i',
       '--network', 'host',
