@@ -3724,6 +3724,11 @@ function registerRelayCommands(): void {
           return (ships[a]?.rank ?? 99) - (ships[b]?.rank ?? 99);
         });
 
+        // Global max name length for consistent alignment across all ships
+        const globalMaxNameLen = Object.values(allBots).reduce(
+          (max, e) => Math.max(max, capitalizeName(e.name).length), 0,
+        );
+
         const lines: string[] = [];
         for (const shipName of shipOrder) {
           const sConfig = ships[shipName];
@@ -3773,9 +3778,6 @@ function registerRelayCommands(): void {
           // Build flat list for CO detection — per duty room (design: 12-co.md)
           const allBotList = Object.entries(allBots).map(([name, e]) => ({ name, role: e.role, rank: e.rank, status: e.localStatus }));
 
-          // Compute max bot name length for column alignment
-          const maxNameLen = bots.reduce((max, [, e]) => Math.max(max, capitalizeName(e.name).length), 0);
-
           for (const [idx, [, entry]] of bots.entries()) {
             const role = entry.role?.toLowerCase() ?? '';
             const roleRoom = ROLE_ROOMS[role];
@@ -3796,7 +3798,7 @@ function registerRelayCommands(): void {
               role,
               rank: entry.rank,
               isChief: co,
-            }, 'short', maxNameLen);
+            }, 'short', globalMaxNameLen);
             lines.push(`${tree}${botLine}`);
           }
         }
@@ -3804,10 +3806,22 @@ function registerRelayCommands(): void {
         // Add blank lines between ship groups for readability
         const spaced = lines.reduce<string[]>((acc, line, i) => {
           // Insert blank line before ship headers (lines that don't start with tree chars), skip first
-          if (i > 0 && !line.startsWith('├') && !line.startsWith('└')) acc.push('');
+          if (i > 0 && !line.startsWith('├') && !line.startsWith('└') && !line.startsWith('  ⚠')) acc.push('');
           acc.push(line);
           return acc;
         }, []);
+
+        // Concise summary footer
+        const allBotEntries = Object.values(allBots);
+        const awake = allBotEntries.filter(b => b.localStatus !== 'sleep' && b.localStatus !== 'dream' && b.localStatus !== 'transit');
+        const ondutyCount = allBotEntries.filter(b => b.localStatus === 'onduty').length;
+        const sleepCount = allBotEntries.filter(b => b.localStatus === 'sleep' || b.localStatus === 'dream').length;
+        const warnCount = allBotEntries.filter(b => b.localStatus === 'warn').length;
+        const totalTok = allBotEntries.reduce((sum, b) => sum + (b.tokPerDay ?? 0), 0);
+        const parts = [`${allBotEntries.length} bots`, `${ondutyCount} onduty`, `${sleepCount} asleep`];
+        if (warnCount > 0) parts.push(`⚠️${warnCount} warn`);
+        parts.push(`${fmtTok(totalTok)} tok/d`);
+        spaced.push('', `**Fleet** · ${parts.join(' · ')}`);
 
         if (threadRoot) await threadReply(conn, threadRoot, spaced.join('\n'));
       } catch (err) {

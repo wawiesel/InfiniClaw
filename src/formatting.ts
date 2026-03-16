@@ -60,7 +60,7 @@ export function rankMedal(rank: number, isChief: boolean): string {
  *  @param status   - bot status (onduty/quarters/sleep/transit/warn)
  *  @param processRunning - is the process actually running? (null = unknown)
  *  @param grade    - health grade (A/B/C/F) if available
- *  @param activity - activity icon (🔥/⚡/🔹/·) if available
+ *  @param activity - activity icon (🔥/⚡/🔹/⏸) if available
  */
 export function botBadge(
   status: string,
@@ -201,11 +201,11 @@ export function fmtTok(tok: number): string {
 
 /** Activity emoji from token throughput. Single source — used by !fleet, !metrics, publishFleetReport. */
 export function activityEmoji(tokPerDay: number): string {
-  if (tokPerDay <= 0) return '·';
+  if (tokPerDay <= 0) return '⏸';
   if (tokPerDay >= 500_000) return '🔥';
   if (tokPerDay >= 50_000) return '⚡';
   if (tokPerDay >= 5_000) return '🔹';
-  return '·';
+  return '⏸';
 }
 
 // ── Unified display format ────────────────────────────────────────
