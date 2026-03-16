@@ -16,11 +16,11 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 | `container-runtime.ts` | Container runtime detection; defaults to `podman`, overridable via `CONTAINER_RUNTIME_BIN` env var |
 | `credential-proxy.ts` | Credential proxy for secure secret injection |
 | `ipc.ts` | IPC watcher — task/message/context dirs |
-| `task-scheduler.ts` | Cron/interval task scheduler; `SchedulerDependencies.runContainerAgent` overrides the default runner |
+| `task-scheduler.ts` | Cron/interval task scheduler |
 | `sender-allowlist.ts` | Per-room sender allow/block rules |
 | `channels/` | Channel implementations |
-| `index.ts` | Re-exports |
-| `config.ts` | `ASSISTANT_NAME`, `TRIGGER_PATTERN` (global `<m>Name</m>` match), `buildTriggerPattern(name)` (per-group trigger regex), shared constants |
+| `index.ts` | Main loop: `processGroupMessages` sends only the last agent result to prevent duplicates |
+| `config.ts` | `ASSISTANT_NAME`, `TRIGGER_PATTERN` (`<m>Name</m>` match), shared constants (trailing newline cleanup) |
 | `env-utils.ts` | Env file parsing: `parseEnvLine`, `parseEnvFile`, `upsertEnvLine`, `isOllamaBaseUrl` |
 | `logger.ts` | Pino logger setup |
 | `timezone.ts` | Timezone resolution |
