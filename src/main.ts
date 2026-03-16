@@ -131,7 +131,8 @@ function botDisplayName(badge: string): string {
     const role = entry.role?.toLowerCase() ?? '';
     const isOnDuty = entry.status === 'onduty';
     const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
-    const isChief = process.env.IS_CO === 'true' || badge === '⭐';
+    // Chief is a duty room concept — only show ⭐ when onduty (design: 09-roles-and-rooms.md).
+    const isChief = isOnDuty && (process.env.IS_CO === 'true' || badge === '⭐');
     // Map transient pips to health grades; default to 'A' (🟢)
     const healthMap: Record<string, string> = { '🔴': 'F', '🟡': 'B', '🟠': 'C' };
     const health = healthMap[badge] ?? 'A';
@@ -181,6 +182,8 @@ let matrixRef: MatrixChannel | null = null;
 let triggerType: 'always' | 'callout' | 'never' = 'callout';
 let triggerTypeLastRead = 0;
 const TRIGGER_TYPE_TTL = 5_000; // re-read fleet.json at most every 5s
+// Cached quarters room ID — bot always responds here regardless of triggerType (design: 09-roles-and-rooms.md).
+let myQuartersRoom: string | undefined;
 
 function refreshTriggerType(): 'always' | 'callout' | 'never' {
   const now = Date.now();
@@ -194,9 +197,17 @@ function refreshTriggerType(): 'always' | 'callout' | 'never' {
     if (myEntry) {
       const entry = myEntry[1];
       triggerType = entry.triggerType || (entry.status === 'quarters' ? 'always' : entry.status === 'onduty' ? 'callout' : 'never');
+      myQuartersRoom = entry.quartersRoom;
     }
   } catch { /* keep current value */ }
   return triggerType;
+}
+
+/** True if chatJid is this bot's own quarters room — always respond there. */
+function isOwnQuarters(chatJid: string): boolean {
+  if (!myQuartersRoom) refreshTriggerType(); // ensure cached
+  if (!myQuartersRoom) return false;
+  return chatJid === `matrix:${myQuartersRoom}` || chatJid === myQuartersRoom;
 }
 
 /** Parse relay lifecycle messages to update CO roster at runtime. */
@@ -332,7 +343,7 @@ function sendTriggerAck(chatJid: string, messages: NewMessage[]): void {
   }
 
   if (!ch.sendReaction) return;
-  const alwaysTriggered = refreshTriggerType() === 'always';
+  const alwaysTriggered = refreshTriggerType() === 'always' || isOwnQuarters(chatJid);
   for (const m of messages) {
     if (!m.id) continue;
     if (/^(resume|out|system|op)-/.test(m.id)) continue;
@@ -896,7 +907,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
   // triggerType=always: every message triggers. triggerType=callout: need explicit trigger.
-  const alwaysTriggered = refreshTriggerType() === 'always';
+  const alwaysTriggered = refreshTriggerType() === 'always' || isOwnQuarters(chatJid);
   if (!alwaysTriggered && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
     saveState();
@@ -1230,7 +1241,7 @@ async function handleGroupMessagesInLoop(
   );
   const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
-  const alwaysTriggered = refreshTriggerType() === 'always';
+  const alwaysTriggered = refreshTriggerType() === 'always' || isOwnQuarters(chatJid);
   if (!alwaysTriggered && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
     saveState();
@@ -1606,6 +1617,7 @@ async function main(): Promise<void> {
     if (myBotId && fleet[myBotId]) {
       const entry = fleet[myBotId];
       triggerType = entry.triggerType || (entry.status === 'quarters' ? 'always' : entry.status === 'onduty' ? 'callout' : 'never');
+      myQuartersRoom = entry.quartersRoom;
       triggerTypeLastRead = Date.now();
     }
     // Build roster from active bots in fleet.json

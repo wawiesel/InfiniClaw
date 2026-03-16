@@ -82,7 +82,8 @@ export function botBadge(
   return '◉';
 }
 
-/** Whether bot is Chief: lowest-rank onduty bot in its role (duty room position — quarters is off-duty). */
+/** Whether bot is Chief: lowest-rank onduty bot in its role.
+ *  Chief is a duty room concept — only onduty bots are eligible (design: 09-roles-and-rooms.md). */
 export function isBotCO(
   botRole: string,
   botRank: number,
