@@ -1568,7 +1568,9 @@ async function main(): Promise<void> {
   pruneOldSessions();
 
   // Start credential proxy so BB containers can reach the Anthropic API
-  const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT);
+  // Import PROXY_BIND_HOST so containers (which reach host via docker0 bridge) can connect
+  const { PROXY_BIND_HOST } = await import('nanoclaw/container-runtime.js');
+  const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);
   const proxyAddr = proxyServer.address();
   const proxyPort = typeof proxyAddr === 'object' && proxyAddr ? proxyAddr.port : CREDENTIAL_PROXY_PORT;
   logger.info({ port: proxyPort }, 'Credential proxy started');
