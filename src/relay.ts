@@ -2054,11 +2054,11 @@ async function spawnBranchBrain(
       `${notesDir}:/relay-notes:rw`,
       `${infraRoot}:/workspace/extra/InfiniClaw:ro`,
     ];
-    // Mount the bot's .claude session dir for fork-session context inheritance.
+    // Mount the bot's .claude session dir rw — fork-session needs to write the forked session file.
     if (bot && mainSessionId) {
       const hostClaudeDir = path.join(infraRoot, '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude');
       if (fs.existsSync(hostClaudeDir)) {
-        volumeArgs.push(`${hostClaudeDir}:/home/claude/.claude:ro`);
+        volumeArgs.push(`${hostClaudeDir}:/home/claude/.claude:rw`);
       }
     }
     // Ensure .claude.json exists in the container — Claude Code refuses to start without it.
