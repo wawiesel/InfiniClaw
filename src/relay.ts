@@ -2108,12 +2108,12 @@ async function spawnBranchBrain(
     }
     log(`branchBrain: container env keys: ${Object.keys(containerEnv).join(', ')}`);
     // Mount corporate CA cert if present on host so SSL works through proxy.
-    // Mount InfiniClaw repo read-only so BB can read source and docs (#99).
+    // Mount InfiniClaw repo read-write so BB can edit source and docs.
     // Mount bot's session data so --continue --fork-session inherits context.
     const infraRoot = resolveRoot();
     const volumeArgs: string[] = [
       `${notesDir}:/relay-notes:rw`,
-      `${infraRoot}:/workspace/extra/InfiniClaw:ro`,
+      `${infraRoot}:/workspace/extra/InfiniClaw:rw`,
     ];
     // Mount the bot's .claude session dir rw — fork-session needs to write the forked session file.
     if (bot && mainSessionId) {
