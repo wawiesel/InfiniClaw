@@ -27,32 +27,37 @@ Messages written by the container to `messages/*.json`:
 
 ## IPC Commands
 
-Commands written by the container to `tasks/*.json`:
+Commands written by the container to `tasks/*.json`. Statuses: ✅ implemented, 🔲 not yet implemented, 🗑 to be removed (nanoclaw-specific).
 
-| IPC Type | Effect |
-|----------|--------|
-| `refresh_bot` | Wake self or another bot |
-| `stop_bot` | Sleep another bot |
-| `rebuild_image` | Rebuild container image (5m cooldown) |
-| `health_check` | Run health check and return results |
-| `fleet_status` | Return fleet.json status |
-| `git_pull` | Pull InfiniClaw, rebuild, deploy to instances |
-| `git_push` | Push InfiniClaw repo (via relay-tasks, requires host git credentials) |
-| `bot_status` | Get pm2 + error log status |
-| `send_to_room` | Send message to another room |
-| `send_reaction` | React to a message with an emoji |
-| `set_thread` | Set active reply thread for subsequent messages |
-| `set_brain_mode` | Switch LLM model at runtime |
-| `restart_wksm` | Restart the WKS proxy service |
-| `restart_relay` | Restart the relay process |
-| `request_verification` | Request a verification challenge |
-| `submit_verification` | Submit verification response |
-| `holodeck_create` | Create a holodeck sandbox environment |
-| `holodeck_teardown` | Tear down a holodeck environment |
-| `holodeck_promote` | Promote holodeck changes to main workspace |
-| `holodeck_send` | Send a message to a holodeck session |
-| `holodeck_read` | Read holodeck session output |
-| `holodeck_status` | Get holodeck session status |
+| IPC Type | Effect | Status |
+|----------|--------|--------|
+| `refresh_bot` | Wake self or another bot | ✅ |
+| `stop_bot` | Sleep another bot | ✅ |
+| `rebuild_image` | Rebuild container image (5m cooldown) | ✅ |
+| `health_check` | Run health check and return results | ✅ |
+| `fleet_status` | Return fleet.json status | ✅ |
+| `git_pull` | Pull InfiniClaw, rebuild, deploy to instances | ✅ |
+| `git_push` | Push InfiniClaw repo (via relay-tasks, requires host git credentials) | ✅ |
+| `bot_status` | Get pm2 + error log status | ✅ |
+| `send_to_room` | Send message to another room via intercom | ✅ |
+| `send_reaction` | React to a message with an emoji | ✅ |
+| `set_thread` | Set active reply thread for subsequent messages | ✅ |
+| `set_brain_mode` | Switch LLM model at runtime | ✅ |
+| `restart_relay` | Restart the relay process | ✅ |
+| `request_verification` | Request a verification challenge | ✅ |
+| `submit_verification` | Submit verification response | ✅ |
+| `holodeck_create` | Create a holodeck sandbox environment | ✅ |
+| `holodeck_teardown` | Tear down a holodeck environment | ✅ |
+| `holodeck_promote` | Promote holodeck changes to main workspace | ✅ |
+| `holodeck_send` | Send a message to a holodeck session | ✅ |
+| `holodeck_read` | Read holodeck session output | ✅ |
+| `holodeck_status` | Get holodeck session status | ✅ |
+| `schedule_task` | Schedule a recurring/one-off agent task | 🗑 nanoclaw-specific — relay heartbeat + WBS handles scheduling in InfiniClaw |
+| `list_tasks` | List scheduled tasks | 🗑 nanoclaw-specific |
+| `pause_task` | Pause a scheduled task | 🗑 nanoclaw-specific |
+| `resume_task` | Resume a scheduled task | 🗑 nanoclaw-specific |
+| `cancel_task` | Cancel a scheduled task | 🗑 nanoclaw-specific |
+| `restart_wksm` | Restart the WKS proxy service | 🗑 nanoclaw-specific service name |
 
 Relay-task types written to `_runtime/relay-tasks/*.json` (processed by relay, not ipc-watcher):
 

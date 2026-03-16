@@ -255,34 +255,85 @@ On-duty bots can send messages across rooms by mentioning the target room name:
 
 Each on-duty room has access to the other two room intercoms. Messages appear as `<BotName> (<SourceRoom>): <message>` in the target room. See [13-intercom](13-intercom.md) for intercom account details.
 
-## Bot Matrix Navigation
+## Bot MCP Tools
 
-Bots have MCP tools for navigating Matrix room history. These let a bot "look back" at conversations — investigating lobe results, reading threads, or reviewing context it missed.
+All bot MCP tools are provided by the InfiniClaw agent-runner under the `mcp__infiniclaw__*` namespace. The server namespace is `infiniclaw` — bots reference tools as `mcp__infiniclaw__tool_name`. Implementation lives in `bots/container/agent-runner/src/`.
 
-| Tool | Purpose |
-|------|---------|
-| `get_message` | Fetch a specific message by event ID |
-| `get_last_event_id` | Get the event ID of the most recent message in this room |
+### Communication
 
-Navigation tools access the bot's current room (quarters or duty room). They do not require the bot to have been active when the messages were sent — Matrix history is permanent.
+| Tool | Purpose | Status |
+|------|---------|--------|
+| `send_reaction` | React to a message with an emoji (call `get_last_event_id` first) | ✅ |
+| `send_image` | Send an image file to the current room | ✅ |
+| `send_file` | Send a file attachment to the current room | ✅ |
+| `set_thread` | Set/clear the active Matrix thread for subsequent messages | ✅ |
 
-### Other Bot MCP Tools
+**Note:** Bots send text by outputting to stdout — the relay routes it to Matrix automatically. There is no `send_message` tool. Cross-room messaging is handled by the `@loudspeaker: <message>` mention pattern (see Special Mentions above), not an MCP tool.
 
-Beyond navigation, bots have tools for communication and fleet awareness. Full list in `bots/container/agent-runner/src/tools.ts`:
+### Navigation
 
-| Tool | Purpose |
-|------|---------|
-| `send_reaction` | React to a message with an emoji (call `get_last_event_id` first) |
-| `send_image` / `send_file` | Send media to the current room |
-| `set_thread` | Set/clear the active Matrix thread for subsequent messages |
-| `check_health` | Query fleet health data from the relay |
-| `crew_roster` | List bots in the fleet with roles and status |
-| `list_recipients` | List accounts in the current room |
-| `set_brain_mode` / `get_brain_mode` | Switch or query the bot's LLM model |
-| `restart_self` | Request bot restart via the relay |
-| `branch_to_thread` | Dispatch work to a Branch Brain in a new thread |
-| `delegate_to_lobe` | Spawn a sub-process (codex/gemini/claude/ollama) |
-| `git_push` | Push commits via relay task |
+| Tool | Purpose | Status |
+|------|---------|--------|
+| `get_message` | Fetch a specific message by event ID | ✅ |
+| `get_last_event_id` | Get the event ID of the most recent message in this room | ✅ |
+
+Navigation tools access the bot's current room (quarters or duty room). Matrix history is permanent — the bot does not need to have been active when messages were sent.
+
+### Fleet Awareness
+
+| Tool | Purpose | Status |
+|------|---------|--------|
+| `crew_roster` | List bots in the fleet with roles, status, and Chief designation | ✅ |
+| `check_health` | Query fleet health snapshot from relay (containers, queue, status) | ✅ |
+| `get_metrics` | Read this bot's own metrics: response latency, scores, crashes | 🔲 not yet implemented |
+
+### Self-Management
+
+| Tool | Purpose | Status |
+|------|---------|--------|
+| `set_brain_mode` | Switch LLM model at runtime (requires restart to take effect) | ✅ |
+| `get_brain_mode` | Query current brain mode and model | ✅ |
+| `restart_self` | Request bot restart via the relay | ✅ |
+
+### Work
+
+| Tool | Purpose | Status |
+|------|---------|--------|
+| `branch_to_thread` | Dispatch work to a Branch Brain in a new thread — main brain must not do heavy work inline | ✅ |
+| `delegate_to_lobe` | Spawn a sub-process worker (codex/gemini/claude/ollama); posts to quarters thread | ✅ infrastructure, 🔲 end-to-end not production-ready |
+| `git_push` | Push commits to remote via relay (requires host git credentials) | ✅ |
+
+### WBS (Work Breakdown Structure)
+
+Chief-only write tools and crew read tools for the room WBS. See [12-co](12-co.md) for WBS design.
+
+| Tool | Role access | Purpose | Status |
+|------|-------------|---------|--------|
+| `wbs_read` | All | Read WBS items for this room | 🔲 not yet implemented |
+| `wbs_write` | Chief only | Add/update/remove WBS items | 🔲 not yet implemented |
+| `wbs_assign` | Chief only | Assign a task to a bot | 🔲 not yet implemented |
+| `wbs_complete` | Chief only | Mark a task done (unblocks dependents) | 🔲 not yet implemented |
+| `wbs_get_assigned` | All | Get this bot's currently assigned tasks | 🔲 not yet implemented |
+
+### Holodeck
+
+| Tool | Purpose | Status |
+|------|---------|--------|
+| `holodeck_create` | Create an isolated test environment | ✅ |
+| `holodeck_teardown` | Destroy a holodeck instance | ✅ |
+| `holodeck_promote` | Merge holodeck feature branch into main | ✅ |
+| `holodeck_send` | Send a test message to a holodeck bot | ✅ |
+| `holodeck_read` | Read messages from a holodeck session | ✅ |
+| `holodeck_status` | Check holodeck instance status | ✅ |
+
+### Verification (P2P)
+
+| Tool | Purpose | Status |
+|------|---------|--------|
+| `request_verification` | Request a challenge from another bot | ✅ |
+| `submit_verification` | Submit a verification response | ✅ |
+| `check_verification` | Check verification result | ✅ |
+| `list_verifications` | List pending verifications | ✅ |
 
 ## Verification
 
