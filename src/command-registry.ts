@@ -64,7 +64,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'push',          usage: '!push [ship]',               description: 'git push InfiniClaw to origin',         match: prefix('push') },
   { name: 'allow',         usage: '!allow <bot> <path> [min]', description: 'grant rw mount (authorized)',          match: startsWith('allow') },
   { name: 'deny',          usage: '!deny <bot> <path>',        description: 'revoke rw mount (authorized)',         match: startsWith('deny') },
-  { name: 'operator',      usage: '!operator [on|off] [ship]',  description: 'operator relay status or toggle',       match: prefix('operator') },
+  { name: 'operator',      usage: '!operator [on|off|reset] [ship]', description: 'operator relay toggle or restart',  match: prefix('operator') },
   { name: 'metrics',       usage: '!metrics [scope]',            description: 'metrics (context-aware, 1d/7d)',       match: prefix('metrics') },
 ];
 

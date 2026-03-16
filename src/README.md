@@ -131,7 +131,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **"No bots here" noise**: `handleLifecycleCommand` only announces "No bots here" in fleet rooms (not quarters) and only if speaker. Prevents noise from non-owning ships in bot quarters rooms.
 - **Quarters-aware `!allow`/`!deny`**: When sent from a bot's quarters room, the bot name is auto-inferred — `!allow ~/path 60` works without specifying the bot. Path-like first args (`/`, `~`, `.` prefix) trigger inference. Non-matching bot gives feedback instead of silent return.
 - **`@loudspeaker:` broadcast**: On-duty bots (non-captain, non-operator) can send `@loudspeaker: <text>` in any duty room. Relay broadcasts to all other duty rooms prefixed `BotName (sourceRoom):`. Plain `@loudspeaker` (no colon) triggers `!fleet` in the requesting room. Both patterns detected before the `!` command check in the intercom room sync loop.
-- **Ship-targeted commands**: `!push`, `!pull`, `!decommission`, `!commission`, `!operator on/off` accept optional `[ship]` — omit to target all ships.
+- **Ship-targeted commands**: `!push`, `!pull`, `!decommission`, `!commission`, `!operator on/off/reset` accept optional `[ship]` — omit to target all ships.
 - **`!wake` dual-purpose**: Wakes sleeping bots or restarts already-awake bots (preserving current status). Uses `restarting`/`restarted` verbs when bot is already running.
 - **Sleeping bot health default**: `!fleet` display defaults sleeping/dream bots with no health data to grade 'A' (healthy by definition — not failing). Active bots show live grade from metrics.
 - **Room name idempotency**: `ensureRoomNames` checks current name before setting — avoids spam of `m.room.name` state events on relay restarts.

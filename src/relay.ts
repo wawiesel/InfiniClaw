@@ -3044,8 +3044,24 @@ function registerRelayCommands(): void {
       }
 
       const [action, targetShip] = arg.split(/\s+/, 2);
+
+      // !operator reset [ship] — restart the operator Claude Code session
+      if (action === 'reset') {
+        if (targetShip && !isThisShip(targetShip)) return;
+        const tr = await reply(conn, `📡 operator reset`);
+        const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
+        const script = path.join(secretsRepoPath(), 'operator', 'restart-operator.sh');
+        try {
+          await send('🔄 restarting operator...');
+          spawn('bash', [script], { detached: true, stdio: 'ignore' }).unref();
+        } catch (err) {
+          await send(`⛔ reset failed — ${errStr(err)}`);
+        }
+        return;
+      }
+
       if (action !== 'on' && action !== 'off') {
-        if (await electSpeaker()) await helpReply(conn, `usage: !operator | !operator on [ship] | !operator off [ship]`);
+        if (await electSpeaker()) await helpReply(conn, `usage: !operator | !operator on [ship] | !operator off [ship] | !operator reset [ship]`);
         return;
       }
       if (targetShip && !isThisShip(targetShip)) return;
