@@ -224,6 +224,76 @@ let curtainRoomId: string | null = null;
 function isOperatorRelayEnabled(): boolean {
   return findShipByHostname()?.[1]?.operatorRelay !== false;
 }
+
+const OPERATOR_SESSION = 'operator';
+const OPERATOR_PANE = `${OPERATOR_SESSION}:0.0`;
+
+/** Send keys to the operator tmux pane. */
+function tmuxSend(text: string): void {
+  execFileSync('tmux', ['send-keys', '-t', OPERATOR_PANE, '-l', text], { stdio: 'pipe' });
+  execFileSync('tmux', ['send-keys', '-t', OPERATOR_PANE, 'Enter'], { stdio: 'pipe' });
+}
+
+/** Capture the operator tmux pane contents. */
+function tmuxCapture(): string {
+  return execFileSync('tmux', ['capture-pane', '-t', OPERATOR_PANE, '-p'], { encoding: 'utf-8' });
+}
+
+/** Post a message to BehindTheCurtain as the operator Matrix account. */
+async function postToBTC(text: string): Promise<void> {
+  const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
+  const opConf = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+  const roomId = opConf.rooms?.['BehindTheCurtain'];
+  if (!roomId || !opConf.accessToken) return;
+  const tagged = `[${shipTag()}] ${text}`;
+  await matrixSend({ homeserver: opConf.homeserver, token: opConf.accessToken, roomId, text: tagged, log });
+}
+
+/**
+ * Reset the operator Claude Code session via tmux.
+ * Invariant: when done, a fresh Claude instance is running in the operator
+ * tmux session and a remote-control URL has been posted to BTC.
+ */
+async function resetOperatorSession(conn: RoomConn): Promise<void> {
+  const secretsDir = secretsRepoPath();
+
+  // 1. Exit current Claude Code session
+  try {
+    execFileSync('tmux', ['has-session', '-t', OPERATOR_SESSION], { stdio: 'pipe' });
+    tmuxSend('/exit');
+  } catch {
+    // No session — will be created below
+  }
+  await sleep(10_000);
+
+  // 2. Start fresh Claude Code in the secrets dir
+  try {
+    execFileSync('tmux', ['has-session', '-t', OPERATOR_SESSION], { stdio: 'pipe' });
+  } catch {
+    // Session gone — create it
+    execFileSync('tmux', ['new-session', '-d', '-s', OPERATOR_SESSION, '-c', secretsDir], { stdio: 'pipe' });
+    await sleep(2_000);
+  }
+  tmuxSend(`cd ${shellQuote(secretsDir)} && claude --model claude-opus-4-6 --dangerously-skip-permissions`);
+  await sleep(15_000);
+
+  // 3. Enable remote-control
+  tmuxSend('/remote-control');
+  await sleep(10_000);
+
+  // 4. Capture remote-control URL from pane output
+  const paneText = tmuxCapture();
+  const urlMatch = paneText.match(/https:\/\/claude\.ai\/code\/session_\S+/);
+
+  if (urlMatch) {
+    await postToBTC(`Operator restarted. Remote-control: ${urlMatch[0]}`);
+    log(`operator reset: URL posted to BTC`);
+  } else {
+    await postToBTC('Operator restarted but remote-control URL not found. Connect manually.');
+    log('operator reset: URL not found in pane output');
+  }
+}
+
 let fleetDirty = false;
 /** Active intercom connections — set in startRelay so lifecycle helpers can send messages. */
 let activeConns: RoomConn[] = [];
@@ -3050,13 +3120,9 @@ function registerRelayCommands(): void {
         if (targetShip && !isThisShip(targetShip)) return;
         const tr = await reply(conn, `📡 operator reset`);
         const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
-        const script = path.join(secretsRepoPath(), 'operator', 'restart-operator.sh');
-        try {
-          await send('🔄 restarting operator...');
-          spawn('bash', [script], { detached: true, stdio: 'ignore' }).unref();
-        } catch (err) {
-          await send(`⛔ reset failed — ${errStr(err)}`);
-        }
+        await send('🔄 restarting operator...');
+        // Fire-and-forget — orchestrates tmux restart asynchronously
+        resetOperatorSession(conn).catch(err => log(`operator reset failed: ${errStr(err)}`));
         return;
       }
 
