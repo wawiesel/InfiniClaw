@@ -82,18 +82,16 @@ export function botBadge(
   return '◉';
 }
 
-/** Whether bot is Chief: lowest-rank onduty bot in its role.
- *  Chief is a duty room concept — only onduty bots are eligible (design: 09-roles-and-rooms.md). */
-export function isBotCO(
-  botRole: string,
-  botRank: number,
-  botStatus: string,
-  allBots: Array<{ role: string; rank: number; status: string }>,
-): boolean {
-  if (botStatus !== 'onduty') return false;
-  return !allBots.some(
-    b => b.role === botRole && b.status === 'onduty' && b.rank < botRank,
+/** Find the Chief of a duty room — lowest-rank-number onduty bot (design: 09-roles-and-rooms.md, 12-co.md). */
+export function findRoomChief(
+  dutyRoom: string,
+  allBots: Array<{ name: string; role: string; rank: number; status: string }>,
+): string | undefined {
+  const roomBots = allBots.filter(
+    b => b.status === 'onduty' && ROLE_ROOMS[b.role]?.room === dutyRoom,
   );
+  if (roomBots.length === 0) return undefined;
+  return roomBots.reduce((a, b) => (a.rank < b.rank ? a : b)).name;
 }
 
 /** Ship header line: "🦁⭐ **Herc** · 🏅1" (legacy — prefer unifiedShipDisplay) */

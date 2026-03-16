@@ -41,7 +41,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, shipHeaderLine, unifiedShipDisplay, botTreeLine, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification } from './formatting.js';
+import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, findRoomChief, rankMedal, shipHeaderLine, unifiedShipDisplay, botTreeLine, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -946,13 +946,14 @@ async function setBotPip(root: string, bot: string, pip: string): Promise<void> 
 async function syncBotDisplayNames(): Promise<void> {
   const root = resolveRoot();
   const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
-  const allBotList = Object.values(liveFleet).map(e => ({ role: e.role, rank: e.rank, status: e.status }));
+  const allBotList = Object.entries(liveFleet).map(([name, e]) => ({ name, role: e.role, rank: e.rank, status: e.status }));
   for (const [bot, entry] of Object.entries(liveFleet)) {
     if (entry.ship !== HOSTNAME) continue;
     const role = entry.role?.toLowerCase() ?? '';
     const isOnDuty = entry.status === 'onduty';
     const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
-    const co = isBotCO(entry.role, entry.rank, entry.status, allBotList);
+    const dutyRoom = ROLE_ROOMS[role]?.room ?? '';
+    const co = findRoomChief(dutyRoom, allBotList) === bot;
     const displayName = unifiedBotDisplay({
       name: bot,
       shipEmoji,
@@ -1360,6 +1361,7 @@ function formatCombinedMetrics(
 
     // Build flat list for CO detection (all bots across all ships)
     const allBotList = sorted.flatMap(ss => ss.bots.map(b => ({
+      name: b.name,
       role: liveFleet[b.name]?.role ?? '',
       rank: liveFleet[b.name]?.rank ?? 99,
       status: b.status,
@@ -1368,7 +1370,8 @@ function formatCombinedMetrics(
     for (const [i, bot] of botsWithMeta.entries()) {
       const isLast = i === botsWithMeta.length - 1;
 
-      const co = isBotCO(bot.role, bot.rank, bot.status, allBotList);
+      const dutyRoom = ROLE_ROOMS[bot.role?.toLowerCase()]?.room ?? '';
+      const co = findRoomChief(dutyRoom, allBotList) === bot.name;
       const badge = botBadge(bot.status, bot.processRunning ?? null);
 
       const nameDisplay = capitalizeName(bot.name) + NBSP.repeat(maxName - capitalizeName(bot.name).length);
@@ -3624,13 +3627,13 @@ function registerRelayCommands(): void {
             }
           }
 
-          // Build flat list for CO detection
-          const allBotList = Object.values(allBots).map(e => ({ role: e.role, rank: e.rank, status: e.localStatus }));
+          // Build flat list for CO detection — per duty room (design: 12-co.md)
+          const allBotList = Object.entries(allBots).map(([name, e]) => ({ name, role: e.role, rank: e.rank, status: e.localStatus }));
 
           for (const [, [, entry]] of bots.entries()) {
-            const co = isBotCO(entry.role, entry.rank, entry.localStatus, allBotList);
             const role = entry.role?.toLowerCase() ?? '';
             const roleRoom = ROLE_ROOMS[role];
+            const co = findRoomChief(roleRoom?.room ?? '', allBotList) === entry.name;
             // Location: onduty → duty room, everything else → quarters
             const isOnDuty = entry.localStatus === 'onduty';
             const locEmoji = isOnDuty ? (roleRoom?.icon ?? '') : '🏠';
