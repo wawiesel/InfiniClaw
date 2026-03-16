@@ -2120,15 +2120,17 @@ async function spawnBranchBrain(
     });
   }
 
-  // Wait briefly for the container to start, then write the prompt.
-  // Claude in interactive+stream-json mode emits the system init only after stdin data arrives,
-  // so we can't wait for init — just delay enough for podman to start the process.
+  // Write the prompt to stdin then close it. Claude in stream-json mode on a pipe
+  // (non-TTY) requires EOF to start processing — without it the process hangs forever.
+  // This means context injection via stdin won't work (needs a different approach),
+  // but BB must produce output to be useful at all.
   setTimeout(() => {
     child.stdin?.write(fullPrompt + '\n');
-    log(`branchBrain: prompt written to stdin`);
+    child.stdin?.end();
+    log(`branchBrain: prompt written to stdin (closed)`);
   }, 3000);
 
-  // Register this process for context injection fan-out
+  // Register this process (stdin is closed, so context injection is a no-op for now)
   activeBranchBrainProcs.set(replyThreadId, { title: announcedTitle, stdin: child.stdin });
 
   // Time-limited: after BRANCH_BRAIN_TIMEOUT_MS, send interrupt then SIGKILL
