@@ -66,7 +66,7 @@ Host machine (macOS / Linux)
 ├── status.ts           → Bot status reporting
 ├── status-cli.ts       → Status display for CLI and MCP server
 ├── todo.ts             → Read Claude Code task state from session files
-├── formatting.ts       → Message formatting helpers: capitalizeName, escapeHtml, statusMessage, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, rankMedal, botBadge, isBotCO, shipHeaderLine (legacy), unifiedShipDisplay (short/long), botTreeLine, GRADE_EMOJI, unifiedBotDisplay (short/long verbosity, statusHealthEmoji for 💤/🔄/🚀/🟡 status icons, health grade always shown as vitals regardless of status, tok/day activity always shown with M/K formatting)
+├── formatting.ts       → Message formatting helpers: capitalizeName, escapeHtml, statusMessage, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, rankMedal, botBadge, findRoomChief, shipHeaderLine (legacy), unifiedShipDisplay (short/long), botTreeLine, GRADE_EMOJI, unifiedBotDisplay (short/long verbosity, statusHealthEmoji for 💤/🔄/🚀/🟡 status icons, health grade always shown as vitals regardless of status, tok/day activity always shown with M/K formatting)
 ├── git-utils.ts        → Shared git helpers: gitOpts(), execErrOutput(), gitSyncRepo(cwd, targetRef?) (stash→rebase→pop, conflict hard-reset; targetRef defaults to 'origin/main', accepts tags/commits for semver-gated deployment)
 ├── utils.ts            → Shared utilities: isRecord, sleep, shellQuote, errStr, envInt, escapeRegex, readJson, writeJson
 └── version.ts          → Git version resolution (prefers stamped GIT_VERSION file); `getLatestSemverTag()`/`getStampedSemverTag()` for semver deploy gating; `getLatestSemverTagOnRef(cwd, ref)` for remote tag discovery; `commitsAheadOfTag()` for untagged commit counting
