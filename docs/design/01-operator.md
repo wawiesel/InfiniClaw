@@ -136,3 +136,23 @@ See [20-metrics.md](20-metrics.md) for complete definitions, targets, and alarm 
 
 6. **Inter-operator inbox** — Post an item to `inbox.md` targeting another ship.
    *Check:* Other ship's operator picks it up on next startup or secrets sync.
+
+## Reporting Operational Status
+
+**Capability ≠ operational status.** Code existing, an image being built, or a mechanism being wired up does not mean a feature has ever fired. Before reporting that any feature "works" or "is ready," an operator must have runtime evidence.
+
+**Two states only:**
+
+| State | Evidence required | Correct phrasing |
+|-------|-------------------|-----------------|
+| Verified | Log entries showing the feature executed | "Working — N invocations in relay.log" |
+| Unverified | No runtime evidence (code may exist) | "Not yet verified — no runtime evidence" |
+
+**Required evidence per feature:**
+
+- **Branch brain** — `grep -c 'branchBrain:' _runtime/logs/relay.log` > 0
+- **WBS auto-assign** — `grep -c 'autoAssign' _runtime/logs/relay.log` > 0
+- **Bot in duty room** — `grep 'onduty' _runtime/logs/relay.log` shows the bot name
+- **Container spawn** — `podman ps` or log entry `container started`
+
+**Procedure:** If asked whether a feature works, run the evidence check first. If the count is zero or the check cannot be run, the answer is "not yet verified." Never substitute architectural reasoning ("the code is there") for runtime evidence.
