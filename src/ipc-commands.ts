@@ -18,7 +18,7 @@ import { runHealthCheck as healthCheck } from './health.js';
 import { logger } from 'nanoclaw/logger.js';
 import { errStr } from './utils.js';
 import { gitSyncRepo } from './git-utils.js';
-import { GIT_VERSION } from './version.js';
+import { GIT_VERSION, SEMVER_TAG } from './version.js';
 import {
   getActiveBots,
   bootstrapBot as serviceBootstrapBot,
@@ -118,7 +118,8 @@ function botStatusLine(bot: string, emoji: string): string {
       : rawModel.startsWith('gemini') ? 'Google'
       : isOllamaBaseUrl(env.BRAIN_BASE_URL || '') ? 'Ollama' : 'Claude';
     const model = `${provider}/${rawModel}`;
-    return `<font color="#888888"><em>${emoji} ${name} · 🔧 ${role} · 💬 ${group} · 🧠 ${model} · 🖥️ ${shipTag()} · 📦 ${GIT_VERSION}</em></font>`;
+    const versionLabel = SEMVER_TAG ? `🏷️ ${SEMVER_TAG}` : '⚠️ untagged';
+    return `<font color="#888888"><em>${emoji} ${name} · 🔧 ${role} · 💬 ${group} · 🧠 ${model} · 🖥️ ${shipTag()} · ${versionLabel} · 📦 ${GIT_VERSION}</em></font>`;
   } catch {
     return statusMessage(emoji, `${bot} restarting...`);
   }

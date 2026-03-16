@@ -189,6 +189,7 @@ export interface UnifiedBotDisplayParams {
   role: string;          // e.g. "engineer"
   rank: number;          // 1, 2, 3+
   isChief: boolean;      // true if CO (lowest-rank awake in role)
+  version?: string;      // semver tag e.g. "v1.3.12" — appended to name
 }
 
 /** Status-aware health emoji: sleep→💤, building→🔄, starting→🚀, online→🟢, etc. */
@@ -213,7 +214,8 @@ export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosi
   const healthEmoji = statusHealthEmoji(p.status, p.health);
   const actEmoji = activityEmoji(p.tokPerDay);
   const prefix = `${p.shipEmoji}${p.locationEmoji}`;
-  const name = capitalizeName(p.name).padEnd(nameWidth);
+  const baseName = capitalizeName(p.name);
+  const name = (p.version ? `${baseName} ${p.version}` : baseName).padEnd(nameWidth);
 
   if (verbosity === 'short') {
     const icons = [roleIcon, medal, healthEmoji, actEmoji].filter(Boolean).join(' ');

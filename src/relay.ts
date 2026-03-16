@@ -667,6 +667,14 @@ function relayVersion(root: string): string {
   return repoVersion(root);
 }
 
+/** Semver tag for a bot's deployed instance (e.g. "v1.3.12"), or null. */
+function botSemver(root: string, bot: string): string | null {
+  try {
+    const tag = fs.readFileSync(path.join(root, '_runtime', 'instances', bot, 'SEMVER_VERSION'), 'utf-8').trim();
+    return tag || null;
+  } catch { return null; }
+}
+
 /** Version string for a bot's deployed instance: stamped sha vs HEAD. */
 function botVersion(root: string, bot: string): string {
   try {
@@ -928,7 +936,7 @@ async function setBotDisplayStatus(root: string, bot: string, displayStatus: str
     const co = findRoomChief(dutyRoom, allBotList) === bot;
     const displayName = unifiedBotDisplay({
       name: bot, shipEmoji, locationEmoji, health: '', tokPerDay: 0,
-      status: displayStatus, role, rank: entry.rank, isChief: co,
+      status: displayStatus, role, rank: entry.rank, isChief: co, version: botSemver(root, bot) ?? undefined,
     }, 'short');
     const { token, homeserver, userId } = await botMatrixLogin(root, bot);
     await matrixSetDisplayName(homeserver, token, userId, displayName);
@@ -959,6 +967,7 @@ async function syncBotDisplayNames(): Promise<void> {
       role,
       rank: entry.rank,
       isChief: co,
+      version: botSemver(root, bot) ?? undefined,
     }, 'short');
     try {
       const { token, homeserver, userId } = await botMatrixLogin(root, bot);

@@ -3,6 +3,15 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+/** Semver tag stamped at deploy time (e.g. "v1.3.12"), or null if untagged. */
+export const SEMVER_TAG: string | null = (() => {
+  const root = process.env.INFINICLAW_ROOT || process.cwd();
+  try {
+    const tag = fs.readFileSync(path.join(root, 'SEMVER_VERSION'), 'utf-8').trim();
+    return tag || null;
+  } catch { return null; }
+})();
+
 export const GIT_VERSION = (() => {
   const root = process.env.INFINICLAW_ROOT || process.cwd();
   // Prefer stamped file written by deployBot() — always reflects deployed commit
