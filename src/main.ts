@@ -1027,6 +1027,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     // Track exit-137 (SIGKILL) kills and apply backoff after consecutive hits
     const isSigKill = /exit 137/.test(compactError) || /SIGKILL/.test(compactError);
+    // wasTimeoutKill: true only when our own turn-timeout fired the SIGKILL (not an OOM or external kill).
+    // turnKilledByTimeout[chatJid] is set in runAgent's timeout handler before issuing the kill.
+    const wasTimeoutKill = isSigKill && !!turnKilledByTimeout[chatJid];
     if (isSigKill) {
       kill137Consecutive[chatJid] = (kill137Consecutive[chatJid] || 0) + 1;
       if (kill137Consecutive[chatJid] >= KILL_137_MAX_CONSECUTIVE) {
@@ -1039,6 +1042,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
     } else {
       kill137Consecutive[chatJid] = 0; // reset on any clean run
+    }
+
+    // Auto-restart after a timeout kill (fix #167): re-enqueue a brain turn so the bot
+    // resumes without requiring a manual !wake. Skip when the circuit breaker is active
+    // (repeated kills engaged the cooldown) or when the kill was external OOM, not our timeout.
+    if (wasTimeoutKill && !(kill137CooldownUntil[chatJid] > Date.now())) {
+      logger.info(
+        { group: group.name, timeoutMs: MAIN_BRAIN_TURN_TIMEOUT_MS },
+        'Brain turn killed by timeout — auto-restarting turn (fix #167)',
+      );
+      queue.enqueueMessageCheck(chatJid);
     }
 
     if (!outputSentToUser && channel) {
