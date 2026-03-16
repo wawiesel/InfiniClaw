@@ -109,6 +109,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`resolveReplyThread`**: Scans messages in reverse for `thread_id` from non-bot senders. Returns `workThreadIds` override if set. Cleared after each response turn.
 - **`storeOutgoing`**: Must set `is_bot_message: true` — otherwise outgoing messages are re-detected as new human messages by `getNewMessages`, causing echo loops in quarters rooms.
 - **Turn timeout kill**: Must use `podman stop` (not `proc.kill('SIGTERM')`) — podman does not relay SIGTERM to the container process. Without this, containers survive the kill and run for minutes/hours.
+- **Auto-restart after timeout kill (#167)**: When our own turn-timeout fires (`turnKilledByTimeout[chatJid]` is set), the error handler calls `queue.enqueueMessageCheck` to restart the brain turn automatically. External OOM kills (`turnKilledByTimeout` not set) still go idle. Respects `KILL_137_MAX_CONSECUTIVE` / `KILL_137_COOLDOWN_MS` — no auto-restart fires while the circuit-breaker cooldown is active.
 - **`killStaleContainers` on wake**: `!wake` calls `killStaleContainers(bot)` before `bootstrapBot`. Ensures no orphaned podman containers on restart.
 - **Branch brain GitHub auth**: `GH_TOKEN` injected from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account, not the host user.
 - **Branch brain limit**: `MAX_BRANCH_BRAINS_PER_BOT` (default 3) caps concurrent branch brains per bot. Rejection posts a warning into the triggering Matrix thread so the bot knows to wait.
