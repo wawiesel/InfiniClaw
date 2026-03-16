@@ -2088,7 +2088,7 @@ async function spawnBranchBrain(
     child = spawn('podman', [
       'run', '--rm', '-i',
       '--network', 'host',
-      '--memory', '2g',
+      '--memory', '4g',
       '--pids-limit', '256',
       ...volumeArgs.map(v => ['--volume', v]).flat(),
       ...envArgs,
