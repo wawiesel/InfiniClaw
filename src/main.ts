@@ -1567,8 +1567,16 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   pruneOldSessions();
 
-  // Start credential proxy so BB containers can reach the Anthropic API
-  // Import PROXY_BIND_HOST so containers (which reach host via docker0 bridge) can connect
+  // Start credential proxy so BB containers can reach the Anthropic API.
+  // The proxy reads credentials from .env file — write one from process.env
+  // (which applyBrainEnv already populated from the bot's env file).
+  const proxyEnvLines = [
+    'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
+  ].filter(k => process.env[k]).map(k => `${k}=${process.env[k]}`);
+  const { writeFileSync } = await import('fs');
+  writeFileSync(path.join(process.cwd(), '.env'), proxyEnvLines.join('\n') + '\n');
+
   const { PROXY_BIND_HOST } = await import('nanoclaw/container-runtime.js');
   const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);
   const proxyAddr = proxyServer.address();
