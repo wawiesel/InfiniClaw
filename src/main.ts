@@ -14,12 +14,14 @@ import path from 'path';
 import './nanoclaw-patches.js';
 import {
   ASSISTANT_NAME,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
   TIMEZONE,
 } from 'nanoclaw/config.js';
+import { startCredentialProxy } from 'nanoclaw/credential-proxy.js';
 import {
   ASSISTANT_ROLE,
   CAPTAIN_USER_ID,
@@ -1564,6 +1566,12 @@ async function main(): Promise<void> {
   initDatabaseExt();
   logger.info('Database initialized');
   pruneOldSessions();
+
+  // Start credential proxy so BB containers can reach the Anthropic API
+  const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT);
+  const proxyAddr = proxyServer.address();
+  const proxyPort = typeof proxyAddr === 'object' && proxyAddr ? proxyAddr.port : CREDENTIAL_PROXY_PORT;
+  logger.info({ port: proxyPort }, 'Credential proxy started');
 
   // Validate config and warn about missing values
   const configWarnings = validateConfig();
