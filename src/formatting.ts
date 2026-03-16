@@ -120,7 +120,7 @@ export interface UnifiedShipDisplayParams {
 }
 
 /** Build a unified ship display string.
- *  Long:  🦁 Herc 🛳️cruiser·⭐[1]rank·🟢[A]health·🔥[500K tok/d]
+ *  Long:  🦁 Herc 🛳️cruiser·⭐[1]·🟢[A]·🔥[500K tok/d]
  *  Short: 🦁 Herc 🛳️⭐🟢🔥
  */
 export function unifiedShipDisplay(p: UnifiedShipDisplayParams, verbosity: Verbosity): string {
@@ -132,12 +132,12 @@ export function unifiedShipDisplay(p: UnifiedShipDisplayParams, verbosity: Verbo
     return `${p.emoji} ${p.name} ${p.typeEmoji}${medal}${healthEmoji}${actEmoji}`;
   }
 
-  // Long: 🦁 Herc 🛳️cruiser·⭐[1]rank·🟢[A]health·🔥[500K tok/d]
+  // Long: 🦁 Herc 🛳️cruiser·⭐[1]·🟢[A]·🔥[500K tok/d]
   const typePart = `${p.typeEmoji}${p.type}`;
-  const rankPart = `${medal}[${p.rank}]rank`;
+  const rankPart = `${medal}[${p.rank}]`;
   const healthPart = !p.commissioned
-    ? '💤[decom]health'
-    : `${healthEmoji}[${p.health || '?'}]health`;
+    ? '💤[decom]'
+    : `${healthEmoji}[${p.health || '?'}]`;
   const actPart = actEmoji ? `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]` : '';
 
   return `${p.emoji} ${p.name} ${typePart}·${rankPart}·${healthPart}${actPart}`;
@@ -233,7 +233,7 @@ function fmtTok(tok: number): string {
 }
 
 /** Build a unified bot display string.
- *  Long:  🦁🏠 Tali ⚙️engineer·🥈[2]rank·🟢[A]health·🔥[16K tok/d]
+ *  Long:  🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16K tok/d]
  *  Short: 🦁🏠 Tali ⚙️🥈🟢🔥
  */
 export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosity): string {
@@ -248,10 +248,10 @@ export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosi
     return `${prefix} ${name} ${roleIcon}${medal}${healthEmoji}${actEmoji}`;
   }
 
-  // Long format: 🦁🏠 Tali ⚙️engineer·🥈[2]rank·🟢[A]health·🔥[16K tok/d]
+  // Long format: 🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16K tok/d]
   const rolePart = `${roleIcon}${p.role}`;
-  const rankPart = `${medal}[${p.rank}]rank`;
-  const healthPart = `${healthEmoji}[${p.health || '?'}]health`;
+  const rankPart = `${medal}[${p.rank}]`;
+  const healthPart = `${healthEmoji}[${p.health || '?'}]`;
   const actPart = actEmoji ? `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]` : '';
 
   return `${prefix} ${name} ${rolePart}·${rankPart}·${healthPart}${actPart}`;

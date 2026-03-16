@@ -3615,7 +3615,7 @@ function registerRelayCommands(): void {
               commissioned,
               health: worstGrade,
               tokPerDay: shipTok,
-            }, 'long'));
+            }, 'short'));
           }
 
           // Warn when a commissioned ship has active bots but no health report — relay likely offline (#135)
@@ -3630,7 +3630,7 @@ function registerRelayCommands(): void {
           // Build flat list for CO detection — per duty room (design: 12-co.md)
           const allBotList = Object.entries(allBots).map(([name, e]) => ({ name, role: e.role, rank: e.rank, status: e.localStatus }));
 
-          for (const [, [, entry]] of bots.entries()) {
+          for (const [idx, [, entry]] of bots.entries()) {
             const role = entry.role?.toLowerCase() ?? '';
             const roleRoom = ROLE_ROOMS[role];
             const co = findRoomChief(roleRoom?.room ?? '', allBotList) === entry.name;
@@ -3638,9 +3638,11 @@ function registerRelayCommands(): void {
             const isOnDuty = entry.localStatus === 'onduty';
             const locEmoji = isOnDuty ? (roleRoom?.icon ?? '') : '🏠';
             const isSleeping = entry.localStatus === 'sleep' || entry.localStatus === 'dream';
-            lines.push(unifiedBotDisplay({
+            const isLast = idx === bots.length - 1;
+            const tree = isLast ? '└ ' : '├ ';
+            const botLine = unifiedBotDisplay({
               name: entry.name,
-              shipEmoji: sConfig?.emoji ?? '',
+              shipEmoji: '',
               locationEmoji: locEmoji,
               health: entry.grade || (isSleeping ? 'A' : ''),
               tokPerDay: entry.tokPerDay ?? 0,
@@ -3648,11 +3650,20 @@ function registerRelayCommands(): void {
               role,
               rank: entry.rank,
               isChief: co,
-            }, 'long'));
+            }, 'short');
+            lines.push(`${tree}${botLine}`);
           }
         }
 
-        if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
+        // Add blank lines between ship groups for readability
+        const spaced = lines.reduce<string[]>((acc, line, i) => {
+          // Insert blank line before ship headers (lines that don't start with tree chars), skip first
+          if (i > 0 && !line.startsWith('├') && !line.startsWith('└')) acc.push('');
+          acc.push(line);
+          return acc;
+        }, []);
+
+        if (threadRoot) await threadReply(conn, threadRoot, spaced.join('\n'));
       } catch (err) {
         await reply(conn, `⛔ fleet failed — ${errStr(err)}`);
       }
