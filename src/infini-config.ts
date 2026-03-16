@@ -23,6 +23,8 @@ export const DUTY_CYCLE_MS = envInt('DUTY_CYCLE_MS', 4 * 60 * 60_000); // 4 hour
 export const RETROSPECTIVE_TIMEOUT_MS = envInt('RETROSPECTIVE_TIMEOUT_MS', 30 * 60_000); // 30 min
 // Podman image for isolated branch brain containers. Set to empty string to disable containerization.
 export const BRANCH_BRAIN_IMAGE = process.env.BRANCH_BRAIN_IMAGE ?? 'localhost/infiniclaw-branch-brain:latest';
+// Max wall-clock time for a branch brain session (ms). After timeout, relay sends interrupt; BB gets 30s to finalize.
+export const BRANCH_BRAIN_TIMEOUT_MS = envInt('BRANCH_BRAIN_TIMEOUT_MS', 600_000); // 10 minutes
 
 // Matrix channel config
 export const MATRIX_HOMESERVER = process.env.MATRIX_HOMESERVER || '';
