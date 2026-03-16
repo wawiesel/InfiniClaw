@@ -3608,7 +3608,7 @@ function registerRelayCommands(): void {
           const hasActiveBots = bots.some(([, e]) =>
             e.localStatus !== 'sleep' && e.localStatus !== 'dream' && e.localStatus !== 'transit',
           );
-          if (!hasReport && hasActiveBots && commissioned && shipName !== thisShipName()) {
+          if (!hasReport && hasActiveBots && sConfig?.commissioned !== false && shipName !== thisShipName()) {
             lines.push(`  ⚠️ relay offline — bots may be unreachable`);
           }
 
