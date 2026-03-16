@@ -89,9 +89,10 @@ export function isBotCO(
   botStatus: string,
   allBots: Array<{ role: string; rank: number; status: string }>,
 ): boolean {
-  if (botStatus !== 'onduty') return false;
+  const awake = ['onduty', 'quarters'];
+  if (!awake.includes(botStatus)) return false;
   return !allBots.some(
-    b => b.role === botRole && b.status === 'onduty' && b.rank < botRank,
+    b => b.role === botRole && awake.includes(b.status) && b.rank < botRank,
   );
 }
 
