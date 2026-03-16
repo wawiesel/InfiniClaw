@@ -5,7 +5,7 @@ Every bot has up to three types of brain process. Each serves a different purpos
 | Type | Engine | Where it posts | Initiated by | Can branch? | Can lobe? |
 |------|--------|---------------|--------------|-------------|-----------|
 | **Main** | claude-code (persistent) | Current room main timeline | Always running | Yes | Yes |
-| **Branch** | claude-code (one-shot) | Thread in current room | Main brain | No | Yes |
+| **Branch** | claude-code (fork-session) | Thread in current room | Main brain | No | Yes |
 | **Lobe** | Arbitrary (MCP) | Thread in quarters | Main or branch | No | No |
 
 ## Main Brain
@@ -20,12 +20,14 @@ The turn timeout enforces this model — if the brain takes too long, the contai
 
 ## Branch Brain
 
-A one-shot `claude` process that works in a visible Matrix thread in the bot's current room. The main brain initiates a branch when a request is too complex for inline triage.
+An interactive `claude` process that forks from the main brain's session and works in a visible Matrix thread in the bot's current room. The main brain initiates a branch when a request is too complex for inline triage.
 
-- **Runs in a container** — isolated podman container (`--network none`, memory/pid limits). Falls back to host `claude --print` if `BRANCH_BRAIN_IMAGE` unset. Spawned by the relay.
+- **Forks main brain context** — uses `--continue --fork-session` to inherit the main brain's full conversation history. The BB starts with awareness of everything the main brain knows.
+- **Runs in a container** — isolated podman container (`--network slirp4netns`, memory/pid limits). Falls back to host `claude` if `BRANCH_BRAIN_IMAGE` unset. Spawned by the relay.
+- **Interactive** — stdin stays open for context injection from the main timeline (see [08-threading](08-threading.md)).
 - **Model selection** — the bot chooses from its configured branch models (e.g. main=haiku, branch=[haiku, sonnet]).
 - **No nested branching** — a branch brain should not branch again (enforced by prompt instruction; see issue #25 for programmatic enforcement).
-- **Streaming output** — progress is posted into the thread as it arrives.
+- **Streaming output** — each assistant text block is posted into the thread as it arrives, so the Captain can follow progress in real-time.
 
 See [08-threading](08-threading.md) for the branching protocol and implementation.
 

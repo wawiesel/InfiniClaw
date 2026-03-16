@@ -19,7 +19,7 @@ Main Brain (persistent, in container)
 
 ## Branch Brains
 
-Branch brains run as isolated **podman containers** when `BRANCH_BRAIN_IMAGE` is set (default: `localhost/infiniclaw-branch-brain:latest`). They are one-shot `claude --print` processes that stream output into a Matrix thread in the bot's current room. Set `BRANCH_BRAIN_IMAGE=` (empty) to fall back to host-side spawn.
+Branch brains run as isolated **podman containers** when `BRANCH_BRAIN_IMAGE` is set (default: `localhost/infiniclaw-branch-brain:latest`). They are interactive `claude` processes (stdin open) that stream output into a Matrix thread in the bot's current room. Set `BRANCH_BRAIN_IMAGE=` (empty) to fall back to host-side spawn.
 
 ### How Branching Works
 
@@ -28,9 +28,10 @@ Branch brains run as isolated **podman containers** when `BRANCH_BRAIN_IMAGE` is
 3. Relay picks up the file, calls `spawnBranchBrain()`
 4. Relay posts announcement on main timeline: `🧵 Branch Brain: {objective first line}`
 5. Announcement event ID becomes the thread root
-6. Relay spawns container: `podman run --rm --network none --memory 2g` with credentials as `--env` args; falls back to host `claude --print` if `BRANCH_BRAIN_IMAGE` unset
-7. Branch brain streams output — each message posted into the Matrix thread
-8. Captain can follow along or ignore
+6. Relay finds the bot's latest session ID from `_runtime/instances/{bot}/data/sessions/main/.claude/`
+7. Relay spawns container: `podman run --rm -i --network slirp4netns --memory 2g` with `--continue --fork-session` to inherit the main brain's context. Falls back to host `claude` if `BRANCH_BRAIN_IMAGE` unset
+8. Branch brain streams assistant output — each text block posted into the Matrix thread as it arrives
+9. Captain can follow progress in real-time or ignore
 
 ### Model Selection
 
@@ -51,8 +52,9 @@ The relay parses `stream-json` format from the Claude CLI:
 
 When a branch brain exits:
 1. 30-second debounce timer starts (reset if another branch exits)
-2. After debounce: main bot wakes to pick up findings
-3. Thread remains in Matrix history permanently
+2. After debounce: main timeline summary posted (`🧵 <title> — ✅ done` or `⛔ failed`)
+3. BB notes persisted to `_runtime/instances/{bot}/data/bb-pending-*.md`
+4. Thread remains in Matrix history permanently
 
 ### Credentials
 
@@ -65,22 +67,18 @@ Branch brains receive credentials from the bot's env file:
 
 Also inherits: `ANTHROPIC_BASE_URL`, `NODE_EXTRA_CA_CERTS`, `GH_TOKEN` (from `secrets/operator/github-bot.json` so PR reviews appear as the fleet bot account).
 
-### Branch Brain Upgrade: Full Interactive Session
+### Full Interactive Session
 
-> **Status:** Not yet implemented. Current implementation uses one-shot `claude --print`.
+Branch brains run as interactive sessions with full context from the main brain:
 
-The planned upgrade replaces one-shot `claude --print` with a full nanoclaw group container session. Upgraded branch brains:
-
-- **Resumable** — session ID stored in todo entry for context recovery on relay restart
-- **Interactive** — receives new messages from the relay via IPC (same mechanism as main brain)
-- **Time-limited** — 10-minute countdown (`BRANCH_BRAIN_TIMEOUT_MS`); relay sends interrupt when expired, branch brain gets ~30s to finalize
-- **Titled** — thread title derived from the todo item content
+- **Forked context** — uses `--continue --fork-session` to inherit the main brain's full conversation history. The BB starts already knowing everything the main brain knows.
+- **Interactive** — stdin stays open. The relay can inject context (main timeline messages) during execution.
+- **Time-limited** — `BRANCH_BRAIN_TIMEOUT_MS` (default 10 min); relay sends interrupt when expired, BB gets ~30s (`BRANCH_BRAIN_FINALIZE_MS`) to finalize before SIGKILL.
+- **Resumable** — session ID stored in `branch-tasks.json` for relay restart recovery.
 
 ### Context Injection
 
-> **Status:** Not yet implemented.
-
-When a message arrives on the main timeline, the relay fans it out to all active branch brain IPC queues with:
+When a message arrives on the main timeline, the relay fans it out to all active branch brain stdin pipes with:
 
 ```
 You are branch brain <title>. Here is a message from main timeline: <msg>. It may not apply to you. If it does, modify your task accordingly.
@@ -117,8 +115,9 @@ Lobes always post to quarters regardless of which room the bot is currently in. 
 When a branch brain completes:
 1. **Thread summary** — completion message posted inside the thread
 2. **Main timeline summary** — `🧵 <title> — ✅ done` (or `⛔ failed`) posted on main timeline after a 30-second debounce, so the Captain sees the result without watching the thread
-3. **Bot wake** — after the debounce, the main bot restarts to pick up findings
-4. **Termination** — branch brain exits, thread remains in Matrix history permanently
+3. **Notes persisted** — BB findings written to `_runtime/instances/{bot}/data/bb-pending-*.md` for the main brain to read on its next turn
+4. **No restart needed** — since the BB forked from the main brain's session, the main brain already has full context. Findings are available via the thread and persisted notes.
+5. **Termination** — branch brain exits, thread remains in Matrix history permanently
 
 ## Thread Reactivation
 

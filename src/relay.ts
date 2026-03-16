@@ -1923,9 +1923,34 @@ export function mapBrainEnv(
 }
 
 /**
- * Spawn a Branch Brain as a host-side claude process (BUG-14 fix).
- * Branch Brain runs independently of the bot container, capturing stdout
- * and posting results to the specified Matrix thread.
+ * Find the most recent Claude session ID for a bot by scanning its session JSONL files.
+ * Returns the UUID session ID or null if none found.
+ */
+function findLatestBotSessionId(bot: string): string | null {
+  const sessBase = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude', 'projects');
+  try {
+    if (!fs.existsSync(sessBase)) return null;
+    // Walk project dirs to find .jsonl files (excluding subagents)
+    let latest: { id: string; mtime: number } | null = null;
+    const projDirs = fs.readdirSync(sessBase, { withFileTypes: true }).filter(d => d.isDirectory());
+    for (const projDir of projDirs) {
+      const projPath = path.join(sessBase, projDir.name);
+      const files = fs.readdirSync(projPath).filter(f => f.endsWith('.jsonl'));
+      for (const f of files) {
+        const stat = fs.statSync(path.join(projPath, f));
+        if (!latest || stat.mtimeMs > latest.mtime) {
+          latest = { id: path.basename(f, '.jsonl'), mtime: stat.mtimeMs };
+        }
+      }
+    }
+    return latest?.id ?? null;
+  } catch { return null; }
+}
+
+/**
+ * Spawn a Branch Brain as a host-side claude process.
+ * Branch Brain forks the main brain's session (--continue --fork-session) to inherit context,
+ * streams assistant output into a visible Matrix thread in the triggering room.
  */
 async function spawnBranchBrain(
   task: { thread_id: string; objective: string; chat_jid: string; bot?: string },
@@ -1954,6 +1979,12 @@ async function spawnBranchBrain(
   }
   // Use the announcement event as the thread root; fall back to the triggering thread_id.
   const replyThreadId = announcementEventId ?? thread_id;
+
+  // Try to fork from the bot's active session so BB inherits main brain context.
+  const mainSessionId = bot ? findLatestBotSessionId(bot) : null;
+  if (mainSessionId) {
+    log(`branchBrain: forking from main session=${mainSessionId}`);
+  }
 
   // Generate a session ID for this BB instance (stored for context recovery on relay restart).
   const sessionId = crypto.randomUUID();
@@ -1985,9 +2016,17 @@ async function spawnBranchBrain(
     '- Work sequentially with no sub-agents. The branch_to_thread tool is unavailable here.',
     '- Skip any preamble — go straight to the work.',
     '',
-    'Before finishing: if you have persistent findings, decisions, or architecture notes worth saving,',
-    `write them in Markdown to: ${notesFilePromptPath}`,
-    '(Create parent directories as needed. Omit this step if nothing persistent to record.)',
+    `Before finishing, write a structured merge summary to: ${notesFilePromptPath}`,
+    'This summary will be posted to the thread and read by the main brain. Format:',
+    '```',
+    '## Merge Summary',
+    '**Objective:** <what was asked>',
+    '**Result:** <success/partial/failed>',
+    '**Key findings:** <bullet list of important results>',
+    '**Files changed:** <list of files modified, if any>',
+    '**Open items:** <anything left undone>',
+    '```',
+    '(Create parent directories as needed.)',
     '',
     'Objective:',
     objective,
@@ -2013,16 +2052,33 @@ async function spawnBranchBrain(
     }
     // Mount corporate CA cert if present on host so SSL works through proxy.
     // Mount InfiniClaw repo read-only so BB can read source and docs (#99).
+    // Mount bot's session data so --continue --fork-session inherits context.
     const infraRoot = resolveRoot();
     const volumeArgs: string[] = [
       `${notesDir}:/relay-notes:rw`,
       `${infraRoot}:/workspace/extra/InfiniClaw:ro`,
     ];
+    // Mount the bot's .claude session dir for fork-session context inheritance.
+    if (bot && mainSessionId) {
+      const hostClaudeDir = path.join(infraRoot, '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude');
+      if (fs.existsSync(hostClaudeDir)) {
+        volumeArgs.push(`${hostClaudeDir}:/home/claude/.claude:ro`);
+      }
+    }
     const hostCaCert = process.env['NODE_EXTRA_CA_CERTS'];
     if (hostCaCert && fs.existsSync(hostCaCert)) {
       const containerCaPath = '/etc/ssl/certs/corporate-ca.pem';
       volumeArgs.push(`${hostCaCert}:${containerCaPath}:ro`);
       envArgs.push('--env', `NODE_EXTRA_CA_CERTS=${containerCaPath}`);
+    }
+    // Build claude args: fork from main brain session if available, else fresh.
+    const claudeArgs: string[] = [
+      '--verbose',
+      '--dangerously-skip-permissions',
+      '--output-format', 'stream-json',
+    ];
+    if (mainSessionId) {
+      claudeArgs.push('--continue', '--fork-session');
     }
     child = spawn('podman', [
       'run', '--rm', '-i',
@@ -2032,21 +2088,24 @@ async function spawnBranchBrain(
       ...volumeArgs.map(v => ['--volume', v]).flat(),
       ...envArgs,
       BRANCH_BRAIN_IMAGE,
-      '--verbose',
-      '--dangerously-skip-permissions',
-      '--output-format', 'stream-json',
+      ...claudeArgs,
     ], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    log(`branchBrain: spawning in container image=${BRANCH_BRAIN_IMAGE} session=${sessionId}`);
+    log(`branchBrain: spawning in container image=${BRANCH_BRAIN_IMAGE} fork=${!!mainSessionId} session=${sessionId}`);
   } else {
-    log(`branchBrain: BRANCH_BRAIN_IMAGE unset — falling back to host spawn session=${sessionId}`);
-    child = spawn('claude', [
+    // Host fallback: fork from main brain session if available.
+    const claudeArgs: string[] = [
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
       '--add-dir', resolveRoot(),
-    ], {
+    ];
+    if (mainSessionId) {
+      claudeArgs.push('--continue', '--fork-session');
+    }
+    log(`branchBrain: BRANCH_BRAIN_IMAGE unset — falling back to host spawn fork=${!!mainSessionId} session=${sessionId}`);
+    child = spawn('claude', claudeArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: childEnv,
     });
@@ -2108,8 +2167,18 @@ async function spawnBranchBrain(
           } catch { /* best-effort */ }
           log(`branchBrain: captured session_id=${capturedSessionId}`);
         }
-        // Only post the final result — suppress intermediate assistant steps (#95)
-        if (event.type === 'result' && typeof event.result === 'string' && event.result.trim()) {
+        // Stream assistant text blocks into the thread as they arrive (design: 08-threading.md).
+        // Post each assistant content block individually so the Captain can follow progress.
+        if (event.type === 'assistant' && event.message?.content) {
+          for (const block of event.message.content) {
+            if (block.type === 'text' && block.text?.trim()) {
+              postedCount++;
+              threadReply(conn, replyThreadId, block.text.trim()).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
+            }
+          }
+        }
+        // Post final result only if nothing was streamed (fallback for non-streaming output).
+        if (event.type === 'result' && typeof event.result === 'string' && event.result.trim() && postedCount === 0) {
           postedCount++;
           threadReply(conn, replyThreadId, event.result.trim()).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
         }
@@ -2140,42 +2209,39 @@ async function spawnBranchBrain(
       threadReply(conn, replyThreadId, `Branch Brain completed with no output (exit ${code ?? 'null'})`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }
 
+    // Read merge summary from notes file and post as final thread message.
+    let mergeContent = '';
+    try { mergeContent = fs.readFileSync(notesFile, 'utf-8').trim(); } catch { /* no notes written */ }
+
+    // Post merge message in thread — structured summary for the main brain to read.
+    if (mergeContent) {
+      threadReply(conn, replyThreadId, `🔀 **Merge**\n\n${mergeContent}`).catch((err) => log(`branchBrain: merge post failed: ${errStr(err)}`));
+    }
+
     // Persist BB notes to bot's data dir so they survive restarts/sleep (#123).
-    // injectResumeMessage reads bb-pending-*.md on bot start and includes them as context.
     if (bot) {
       try {
         const botDataDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data');
         fs.mkdirSync(botDataDir, { recursive: true });
         let content = `# Branch Brain: ${announcedTitle}\n\nThread: ${replyThreadId}\n\n`;
-        try { content += fs.readFileSync(notesFile, 'utf-8'); } catch { content += '(no notes written)'; }
+        content += mergeContent || '(no notes written)';
         fs.writeFileSync(path.join(botDataDir, `bb-pending-${replyThreadId.slice(0, 12)}.md`), content);
       } catch (err) { log(`branchBrain: failed to write pending delivery: ${errStr(err)}`); }
     }
 
-    // Schedule debounced main-brain restart so it picks up Branch Brain findings (30s delay).
-    // Reset timer on each successive TB exit; fires once all TBs for this bot are done.
-    if (bot && getActiveBots().includes(bot)) {
+    // Post debounced main-timeline merge notice so Captain sees completion.
+    // No bot restart needed — BB forks from main brain session, context is already shared.
+    if (bot) {
       const existing = branchBrainRestartTimers.get(bot);
       if (existing) clearTimeout(existing);
       const brainSucceeded = postedCount > 0;
       const timer = setTimeout(() => {
         branchBrainRestartTimers.delete(bot);
-        // Post main-timeline summary so Captain sees completion without watching thread.
-        // Use the bot's own room connection (conn.accessToken), not the loudspeaker, so
-        // the summary appears as the bot in their quarters room (#80).
-        const status = brainSucceeded ? '✅ done' : '⛔ failed';
+        const status = brainSucceeded ? '✅ merged' : '⛔ failed';
         if (conn.accessToken) {
           relaySend(conn.homeserver, conn.accessToken, conn.roomId, `[${replyTag()}] 🧵 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
         }
-        log(`branchBrain: restarting ${bot} to pick up findings`);
-        try {
-          bootstrapBot(resolveRoot(), bot);
-          writeCrewStatus(resolveRoot(), bot);
-          injectWbsTasks(resolveRoot(), bot);
-          log(`branchBrain: ${bot} restarted`);
-        } catch (err) {
-          log(`branchBrain: restart ${bot} failed: ${errStr(err)}`);
-        }
+        log(`branchBrain: ${bot} BB completed (${status})`);
       }, BRANCH_BRAIN_RESTART_DELAY);
       branchBrainRestartTimers.set(bot, timer);
     }
