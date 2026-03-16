@@ -3750,7 +3750,8 @@ function registerRelayCommands(): void {
           .filter(b => b.localStatus !== 'sleep' && b.localStatus !== 'transit' && b.grade)
           .map(b => b.grade as HealthGrade);
         const fleetGrade = botGrades.length > 0 ? computeFleetHealthGrade(botGrades) : 'A' as HealthGrade;
-        threadRoot = await reply(conn, `📋 Fleet · ${gradeEmoji(fleetGrade)}${fleetGrade}`);
+        const fleetTokPerDay = Object.values(allBots).reduce((sum, b) => sum + (b.tokPerDay ?? 0), 0);
+        threadRoot = await reply(conn, `🌌InfiniClaw00·${gradeEmoji(fleetGrade)}${fleetGrade}${activityEmoji(fleetTokPerDay)}`);
 
         const shipOrder = Object.keys(byShip).sort((a, b) => {
           if (a === 'drydock') return 1;
