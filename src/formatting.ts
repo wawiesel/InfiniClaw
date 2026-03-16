@@ -109,7 +109,7 @@ export interface UnifiedShipDisplayParams {
 
 /** Build a unified ship display string.
  *  Long:  🦁 Herc 🛳️cruiser·⭐[1]·🟢[A]·🔥[500K tok/d]
- *  Short: 🦁 Herc 🛳️⭐🟢🔥
+ *  Short: 🦁 Herc 🛳️ ⭐ 🟢 🔥
  */
 export function unifiedShipDisplay(p: UnifiedShipDisplayParams, verbosity: Verbosity): string {
   const medal = !p.commissioned ? '💤' : p.isSpeaker ? '⭐' : rankMedal(p.rank, false);
@@ -117,7 +117,8 @@ export function unifiedShipDisplay(p: UnifiedShipDisplayParams, verbosity: Verbo
   const actEmoji = !p.commissioned ? '' : activityEmoji(p.tokPerDay);
 
   if (verbosity === 'short') {
-    return `${p.emoji} ${p.name} ${p.typeEmoji}${medal}${healthEmoji}${actEmoji}`;
+    const icons = [p.typeEmoji, medal, healthEmoji, actEmoji].filter(Boolean).join(' ');
+    return `${p.emoji} ${p.name} ${icons}`;
   }
 
   // Long: 🦁 Herc 🛳️cruiser·⭐[1]·🟢[A]·🔥[500K tok/d]
@@ -238,7 +239,7 @@ function statusHealthEmoji(status: string, health: string): string {
 
 /** Build a unified bot display string.
  *  Long:  🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16K tok/d]
- *  Short: 🦁🏠 Tali ⚙️🥈🟢🔥
+ *  Short: 🦁🏠 Tali ⚙️ 🥈 🟢 🔥
  *  Pass nameWidth to pad the name for column alignment in fleet output.
  */
 export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosity, nameWidth = 0): string {
@@ -250,7 +251,8 @@ export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosi
   const name = capitalizeName(p.name).padEnd(nameWidth);
 
   if (verbosity === 'short') {
-    return `${prefix} ${name} ${roleIcon}${medal}${healthEmoji}${actEmoji}`;
+    const icons = [roleIcon, medal, healthEmoji, actEmoji].filter(Boolean).join(' ');
+    return `${prefix} ${name} ${icons}`;
   }
 
   // Long format: 🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16K tok/d]

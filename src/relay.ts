@@ -1499,6 +1499,10 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
       .map(([name, b]) => ({ name, b, rank: liveFleet[name]?.rank ?? 99 }))
       .sort((a, b) => a.rank - b.rank);
 
+    // Compute max name length for alignment within this ship group
+    const maxNameLen = sortedBots.reduce((max, { name }) => Math.max(max, capitalizeName(name).length), 0);
+    const allBotList = Object.entries(liveFleet).map(([n, e]) => ({ name: n, role: e.role, rank: e.rank, status: e.status }));
+
     for (const [i, { name, b }] of sortedBots.entries()) {
       const r = rolling24h?.bots?.[name];
       const r7 = r7d?.bots?.[name];
@@ -1509,13 +1513,23 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
 
       const isLast = i === sortedBots.length - 1;
       const tree = isLast ? '└ ' : '├ ';
-      const role = liveFleet[name]?.role?.toLowerCase() ?? '';
-      const roleIcon = ROLE_ICONS[role] ?? '';
+      const entry = liveFleet[name];
+      const role = entry?.role?.toLowerCase() ?? '';
+      const roleRoom = ROLE_ROOMS[role];
+      const isOnDuty = entry?.status === 'onduty';
+      const locEmoji = isOnDuty ? (roleRoom?.icon ?? '') : '🏠';
+      const co = findRoomChief(roleRoom?.room ?? '', allBotList) === name;
+      const botLine = unifiedBotDisplay({
+        name, shipEmoji: '', locationEmoji: locEmoji,
+        health: '', tokPerDay: 0,
+        status: entry?.status ?? 'sleep', role,
+        rank: entry?.rank ?? 99, isChief: co,
+      }, 'short', maxNameLen);
       const mem = b.rss_mb != null ? `mem ${b.rss_mb}/${b.limit_mb ?? '?'}MB` : '';
       const stats24 = `SK+${sk24} OOM+${oom24} (1d)`;
       const stats7d = r7 ? `SK+${r7.sigkills ?? 0} OOM+${r7.oom_kills ?? 0} (7d)` : '';
       const parts = [mem, stats24, stats7d].filter(Boolean).join(' · ');
-      lines.push(`${tree}${roleIcon} ${capitalizeName(name)} · ${parts}`);
+      lines.push(`${tree}${botLine} · ${parts}`);
     }
   }
 
@@ -3146,7 +3160,7 @@ async function handleLifecycleCommand(
         const medal = rankMedal(rank, false);
         const ver = botVersion(root, bot);
         await setBotDisplayStatus(root, bot, 'online');
-        await step(`🟢 online · ${roleIcon}${medal} · ${model}${ver}`);
+        await step(`🟢 online · ${[roleIcon, medal].filter(Boolean).join(' ')} · ${model}${ver}`);
         await reply(progressConn, `✅ ${name} ${doneVerb}`);
         publishFleetReport().catch(() => {});
       } catch (err) {

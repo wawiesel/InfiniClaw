@@ -100,9 +100,9 @@ const BASE: UnifiedBotDisplayParams = {
 };
 
 describe('unifiedBotDisplay — short', () => {
-  it('format: prefix Name roleIcon+medal+health+activity', () => {
+  it('format: prefix Name roleIcon medal health activity (spaced)', () => {
     const out = unifiedBotDisplay(BASE, 'short');
-    expect(out).toBe('🦁⚙️ Cid ⚙️🥇🟢🔥');
+    expect(out).toBe('🦁⚙️ Cid ⚙️ 🥇 🟢 🔥');
   });
 
   it('idle activity shows ⏸ pause', () => {
@@ -213,9 +213,9 @@ const SHIP_BASE: UnifiedShipDisplayParams = {
 };
 
 describe('unifiedShipDisplay — short', () => {
-  it('format: emoji Name typeEmoji+medal+health+activity', () => {
+  it('format: emoji Name typeEmoji medal health activity (spaced)', () => {
     const out = unifiedShipDisplay(SHIP_BASE, 'short');
-    expect(out).toBe('🦁 Herc 🛳️⭐🟢🔥');
+    expect(out).toBe('🦁 Herc 🛳️ ⭐ 🟢 🔥');
   });
 
   it('non-speaker shows rank medal', () => {
@@ -228,7 +228,7 @@ describe('unifiedShipDisplay — short', () => {
     const out = unifiedShipDisplay({ ...SHIP_BASE, commissioned: false }, 'short');
     expect(out).toContain('💤');
     expect(out).not.toContain('🔥');
-    expect(out).not.toContain('·');
+    expect(out).not.toContain('⏸');
   });
 
   it('idle commissioned ship shows ⏸ pause', () => {
