@@ -2061,14 +2061,19 @@ async function spawnBranchBrain(
         volumeArgs.push(`${hostClaudeDir}:/home/claude/.claude:rw`);
       }
     }
-    // Ensure .claude.json exists in the container — Claude Code refuses to start without it.
-    // The main bot containers create this via agent-runner, but BB containers need it provided.
+    // Copy host's ~/.claude.json to a world-readable location for BB containers.
+    // Claude Code needs the oauthAccount data to authenticate. The host file is mode 600
+    // (owner-only), but the container runs as user `claude` (UID 1001) which can't read it.
     const claudeJsonDir = path.join(infraRoot, '_runtime', 'data', 'bb-config');
     const claudeJsonPath = path.join(claudeJsonDir, '.claude.json');
-    if (!fs.existsSync(claudeJsonPath)) {
-      fs.mkdirSync(claudeJsonDir, { recursive: true });
+    const hostClaudeJson = path.join(os.homedir(), '.claude.json');
+    fs.mkdirSync(claudeJsonDir, { recursive: true });
+    if (fs.existsSync(hostClaudeJson)) {
+      fs.copyFileSync(hostClaudeJson, claudeJsonPath);
+    } else if (!fs.existsSync(claudeJsonPath)) {
       fs.writeFileSync(claudeJsonPath, JSON.stringify({ firstStartTime: new Date().toISOString() }));
     }
+    fs.chmodSync(claudeJsonPath, 0o644);
     volumeArgs.push(`${claudeJsonPath}:/home/claude/.claude.json:ro`);
     const hostCaCert = process.env['NODE_EXTRA_CA_CERTS'];
     if (hostCaCert && fs.existsSync(hostCaCert)) {

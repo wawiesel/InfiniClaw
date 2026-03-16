@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install claude CLI
-RUN npm install -g @anthropic-ai/claude-code --ignore-scripts
+RUN npm install -g @anthropic-ai/claude-code
 
 # claude CLI refuses --dangerously-skip-permissions as root
 RUN useradd -m -s /bin/bash claude
