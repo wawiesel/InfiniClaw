@@ -878,6 +878,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
+  // Skip idle brain turns: if all actionable messages are from bots (e.g. heartbeat nudges)
+  // and none are from humans or system, skip the API call to avoid wasting credits (#129).
+  const hasNonBotMessage = actionableMessages.some(m => !botMatrixUserIds.has(m.sender));
+  if (!hasNonBotMessage) {
+    logger.info({ chatJid, count: actionableMessages.length }, 'Skipping idle turn — only bot-sourced messages');
+    lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    return true;
+  }
+
   // Response decision
   const hasTrigger = actionableMessages.some(m => TRIGGER_PATTERN.test(m.content.trim()));
   const hasParticipatingThread = actionableMessages.some(
