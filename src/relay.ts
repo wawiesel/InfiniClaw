@@ -2072,7 +2072,7 @@ async function spawnBranchBrain(
     }
     child = spawn('podman', [
       'run', '--rm', '-i',
-      '--network', 'bridge',
+      '--network', 'host',
       '--memory', '2g',
       '--pids-limit', '256',
       ...volumeArgs.map(v => ['--volume', v]).flat(),
