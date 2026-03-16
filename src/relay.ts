@@ -2935,14 +2935,10 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
 
 // ── Combined metrics + health handler ────────────────────────────
 
-/** Handle !metrics and !health (alias). Both run the same combined observability output. */
+/** Handle !metrics — combined observability output (health + metrics). */
 async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
   try {
-    // Scope resolution: !health defaults to 'fleet', !metrics is context-aware.
-    const isHealthAlias = cmd.startsWith('!health');
-    let scope = isHealthAlias
-      ? cmd.slice('!health'.length).trim() || 'fleet'
-      : cmd.slice('!metrics'.length).trim();
+    let scope = cmd.slice('!metrics'.length).trim();
     if (!scope) {
       const roomName = conn.name.toLowerCase();
       if (conn.name === 'BehindTheCurtain' || conn.roomId === curtainRoomId) {
@@ -3090,7 +3086,6 @@ function registerRelayCommands(): void {
     },
 
     metrics: async (cmd, conn) => { await handleMetricsHealth(cmd, conn); },
-    health:  async (cmd, conn) => { await handleMetricsHealth(cmd, conn); },
 
     decommission: async (cmd, conn) => {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;

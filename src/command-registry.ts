@@ -50,7 +50,6 @@ function startsWith(name: string): (cmd: string) => boolean {
 export const COMMANDS: CommandDef[] = [
   { name: 'todo',          usage: '!todo [bot]',               description: "show bot's active tasks",              match: prefix('todo') },
   { name: 'fleet',         usage: '!fleet',                    description: 'fleet + ship status',                  match: prefix('fleet') },
-  { name: 'health',        usage: '!health',                   description: 'fleet health summary',                 match: exact('health') },
   { name: 'report',        usage: '!report [bot]',             description: 'send awake bot(s) to duty room',       match: prefix('report') },
   { name: 'dismiss',       usage: '!dismiss [bot]',            description: 'remove from duty, back to quarters',   match: prefix('dismiss') },
   { name: 'go',            usage: '!go [room] [bot]',          description: 'send bot to a room (no args = list)',  match: prefix('go') },

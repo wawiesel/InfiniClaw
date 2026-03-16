@@ -102,7 +102,7 @@ Election algorithm:
 2. If this ship is not commissioned, it is not the speaker
 3. Sort commissioned ships by rank (ascending); lowest rank wins
 
-The speaker result is cached and triggers async re-election in the background. Speaker election runs before aggregate commands (`!fleet`, `!health`, `!promote`/`!demote` for ships).
+The speaker result is cached and triggers async re-election in the background. Speaker election runs before aggregate commands (`!fleet`, `!metrics`, `!promote`/`!demote` for ships).
 
 ## Relay X-Commands
 
