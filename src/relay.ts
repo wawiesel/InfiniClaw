@@ -2002,7 +2002,7 @@ async function spawnBranchBrain(
   const announcedTitle = objective.split('\n')[0].trim().slice(0, 80);
   let announcementEventId: string | undefined;
   try {
-    announcementEventId = await reply(conn, `🧵 Branch Brain: ${announcedTitle}`);
+    announcementEventId = await reply(conn, `🧵 Branch Brain: ${announcedTitle}`, undefined, { skipMirror: true });
   } catch (err) {
     log(`branchBrain: announce failed: ${errStr(err)}`);
   }
@@ -4074,7 +4074,7 @@ function replyTag(): string {
   return shipTag(undefined, isSpeakerCached ? '⭐' : undefined);
 }
 
-async function reply(conn: RoomConn, text: string, threadRootId?: string): Promise<string | undefined> {
+async function reply(conn: RoomConn, text: string, threadRootId?: string, opts?: { skipMirror?: boolean }): Promise<string | undefined> {
   const tagged = `[${replyTag()}] ${text}`;
   const ls = loadLoudspeakerConfig();
   let eventId: string | undefined;
@@ -4084,7 +4084,7 @@ async function reply(conn: RoomConn, text: string, threadRootId?: string): Promi
       eventId = await relaySend(ls.homeserver, token, conn.roomId, tagged, threadRootId);
       if (eventId) {
         // Mirror non-thread command output to BehindTheCurtain
-        if (!threadRootId && curtainRoomId && conn.roomId !== curtainRoomId) {
+        if (!threadRootId && !opts?.skipMirror && curtainRoomId && conn.roomId !== curtainRoomId) {
           relaySend(ls.homeserver, token, curtainRoomId, tagged).catch(() => {});
         }
         return eventId;
