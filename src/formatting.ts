@@ -174,6 +174,21 @@ export function botTreeLine(
 
 export const GRADE_EMOJI: Record<string, string> = { A: '🟢', B: '🟡', C: '🟠', F: '🔴' };
 
+/** Format a rerank confirmation for a ship swap. */
+export function formatRerankShipMsg(target: string, targetRank: number, swap: string, swapRank: number): string {
+  return `✅ ${target} → ${rankMedal(targetRank, false)}, ${swap} → ${rankMedal(swapRank, false)}`;
+}
+
+/** Format a rerank confirmation for a bot swap. */
+export function formatRerankBotMsg(targetDisplay: string, targetRank: number, swapDisplay: string, swapRank: number, role: string): string {
+  return `✅ ${targetDisplay} → ${rankMedal(targetRank, false)}, ${swapDisplay} → ${rankMedal(swapRank, false)} (${role})`;
+}
+
+/** Format a rerank notification for a single bot. */
+export function formatRerankNotification(displayName: string, rank: number): string {
+  return `📡 ${displayName} reranked → ${rankMedal(rank, false)}`;
+}
+
 // ── Unified display format ────────────────────────────────────────
 
 export type Verbosity = 'short' | 'long';
