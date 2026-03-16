@@ -3937,6 +3937,54 @@ function registerRelayCommands(): void {
       await threadReply(conn, threadRoot, lines.join('\n').trim());
     },
 
+    wbs: async (cmd, conn) => {
+      // !wbs [room] — show Work Breakdown Structure for a duty room.
+      // Defaults to the current room. Only duty rooms have WBS files.
+      const arg = cmd.slice('!wbs'.length).trim().toLowerCase();
+      const dutyRooms = Object.values(ROLE_ROOMS).map(r => r.room);
+
+      // Resolve room: explicit arg, or infer from conn.name
+      let room = arg || conn.name.toLowerCase();
+      if (!dutyRooms.includes(room)) {
+        // BehindTheCurtain or non-duty room: require explicit room arg
+        if (!arg) {
+          if (await electSpeaker()) await reply(conn, `📋 WBS — specify a duty room: ${dutyRooms.join(', ')}`);
+          return;
+        }
+        if (!dutyRooms.includes(arg)) {
+          if (await electSpeaker()) await reply(conn, `⚠️ No WBS for "${arg}" — duty rooms: ${dutyRooms.join(', ')}`);
+          return;
+        }
+        room = arg;
+      }
+
+      if (!await electSpeaker()) return;
+      const dataDir = path.join(resolveRoot(), '_runtime', 'data');
+      const wbs = readWbs(dataDir, room);
+
+      if (wbs.items.length === 0) {
+        await reply(conn, `📋 WBS ${room} — empty`);
+        return;
+      }
+
+      const STATUS_ICON: Record<string, string> = { done: '✅', in_progress: '🔄', ready: '⬜', backlog: '📥' };
+      const lines: string[] = [];
+      // Group by status for readability
+      for (const status of ['in_progress', 'ready', 'backlog', 'done'] as const) {
+        const items = wbs.items.filter(i => i.status === status);
+        if (items.length === 0) continue;
+        for (const item of items.sort((a, b) => a.priority - b.priority)) {
+          const icon = STATUS_ICON[item.status] ?? '❓';
+          const assignee = item.assigned_to ? ` → ${capitalizeName(item.assigned_to)}` : '';
+          const deps = item.depends_on.length > 0 ? ` [deps: ${item.depends_on.join(',')}]` : '';
+          lines.push(`${icon} **${item.id}** ${item.title}${assignee}${deps}`);
+        }
+      }
+
+      const threadRoot = await reply(conn, `📋 WBS ${room} — ${wbs.items.length} items`);
+      if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
+    },
+
     allow: async (cmd, conn) => {
       // Try 3-arg form: !allow <bot> <path> [minutes]
       let match = cmd.match(/^!allow\s+(\S+)\s+(\S+)(?:\s+(\d+))?$/);

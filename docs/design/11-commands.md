@@ -39,6 +39,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 
 | Command | Effect |
 |---------|--------|
+| `!wbs [room]` | Show work breakdown structure. Defaults to current room. Duty rooms only. |
 | `!fleet` | Fleet status — each ship reports its local bots. |
 | `!fleet room` | Bots in this room only. _(not yet implemented — same as `!fleet`)_ |
 | `!metrics [scope]` | Metrics + health (1d/7d rolling). Context-aware — see below. |
