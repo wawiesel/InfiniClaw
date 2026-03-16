@@ -13,7 +13,7 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 | `db.ts` | SQLite message/chat/group store |
 | `group-queue.ts` | Per-group container queue — serializes agent runs, IPC piping, fair slot scheduling |
 | `container-runner.ts` | Spawns podman containers for agent runs |
-| `container-runtime.ts` | Container runtime detection |
+| `container-runtime.ts` | Container runtime detection; defaults to `podman`, overridable via `CONTAINER_RUNTIME_BIN` env var |
 | `credential-proxy.ts` | Credential proxy for secure secret injection |
 | `ipc.ts` | IPC watcher — task/message/context dirs |
 | `task-scheduler.ts` | Cron/interval task scheduler |
