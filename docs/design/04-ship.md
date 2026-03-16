@@ -1,6 +1,20 @@
 # 04 — Ships
 
-A ship is a machine running a relay. The relay is the always-on process that connects the ship to the fleet via Matrix, manages bot lifecycle, and syncs repos.
+## Hierarchy
+
+The fleet has three levels of organization:
+
+| Level | What it is | Mobility | Multiplicity |
+|-------|-----------|----------|-------------|
+| **System** | A physical or virtual machine with a hostname and IP | Fixed | One relay, one operator per system |
+| **Ship** | A logical unit of deployment — a named group of bots | Can move between systems | A system can host multiple ships |
+| **Bot** | An autonomous AI agent running in a container | Can move between ships (`!transport`) | A ship can have many bots |
+
+**System** = the machine. It runs one relay process and one operator tmux session. The relay manages all ships hosted on that system. The system is identified by `os.hostname()`.
+
+**Ship** = a named, ranked entity in `ships.json`. A ship is *hosted on* a system (via the `hostname` field), but is not the system itself. Ships can be moved between systems by updating `hostname` in `ships.json`. A single system can host multiple ships.
+
+**Bot** = an agent assigned to a ship (via the `ship` field in `fleet.json`). Bots move between ships via `!transport`.
 
 ## Ship Registry
 
@@ -31,20 +45,21 @@ The `commissioned` flag is a **ship-level** override in `ships.json` — distinc
 
 ## The Relay
 
-The relay is a pm2-managed Node.js process that runs on the host machine — one per ship, always on. It is the ship's control plane: it connects to Matrix, listens for x-commands, manages bot lifecycle, syncs code, and spawns branch brains. Bots cannot function without a relay — it is the bridge between the Captain and the fleet.
+The relay is a pm2-managed Node.js process — one per **system**, always on. It is the system's control plane: it connects to Matrix, listens for x-commands, manages bot lifecycle for all ships hosted on this system, syncs code, and spawns branch brains. Bots cannot function without a relay — it is the bridge between the Captain and the fleet.
 
 **What the relay does:**
 - Watches Matrix rooms for x-commands from the Captain or operator
-- Wakes, sleeps, reports, and dismisses bots
+- Wakes, sleeps, reports, and dismisses bots on all local ships
 - Pulls and deploys code (git sync loops + `!pull`)
 - Spawns branch brains on the host
 - Sets bot display names and room names
 - Publishes fleet status to S3 for speaker election
 - Forwards Captain messages to the operator tmux session
+- Resets the operator session (`!operator reset`)
 
-**The relay runs on every ship, always.** Even decommissioned ships keep their relay running — they just don't wake bots.
+**The relay runs on every system, always.** Even systems with only decommissioned ships keep their relay running — they just don't wake bots.
 
-When a command arrives (e.g. `!wake cid`), every ship's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning ship acts — the rest silently ignore.
+When a command arrives (e.g. `!wake cid`), every system's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning system acts — the rest silently ignore.
 
 ### Matrix Accounts
 
@@ -132,6 +147,7 @@ Flow: code changes → `!push [ship]` (send to GitHub) → `!pull` (each ship pu
 | `!commission [ship]` | Target ship | Set `commissioned: true`, wake onduty bots |
 | `!decommission [ship]` | Target ship | Sleep all bots, set `commissioned: false`. Relay keeps running. |
 | `!operator on/off [ship]` | Target ship | Enable/disable operator relay (forwarding Captain messages to operator tmux) |
+| `!operator reset [ship]` | Target ship | Restart operator Claude Code session: exit → fresh instance → enable remote-control → post URL to BTC |
 
 ## Per-Machine Configuration
 
