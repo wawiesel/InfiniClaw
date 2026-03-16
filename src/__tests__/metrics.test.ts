@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
+// Mock child_process so getPm2Info() returns [] — tests must not depend on real PM2 state
+vi.mock('child_process', () => ({
+  execSync: () => '[]',
+}));
+
 import {
   initMetrics,
   resetMetrics,
