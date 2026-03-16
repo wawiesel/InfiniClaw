@@ -9,7 +9,7 @@
 | Push code to remote | IPC task `git_push` |
 | Fix broken MCP config | Edit persona `.mcp.json`, request restart |
 | Monitor health | Collect metrics, report via Matrix |
-| Move between machines | Transporter skill: S3 sync + Matrix coordination |
+| Move between machines | `!transport` command: S3 sync + Matrix coordination |
 | Update own instructions | Edit persona CLAUDE.md via writable mount |
 | Add/modify skills | Write SKILL.md to persona skills directory |
 | Request peer verification | IPC task `request_verification` — asks another bot to verify work against criteria |
@@ -37,7 +37,7 @@ Bot detects problem (MCP down, health check fails, OOM)
 
 ## Holodeck
 
-Architects can test changes in isolation before deploying to production. The holodeck creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), and runs as its own pm2 process in terminal-only mode (no Matrix). CLI commands: `holodeck create|chat|teardown|promote`.
+Architects can test changes in isolation before deploying to production. The holodeck creates a git worktree from a feature branch, deploys to a separate instance (`_runtime/instances/{bot}-holodeck/`), and runs as its own pm2 process in terminal-only mode (no Matrix). IPC tasks: `holodeck_create`, `holodeck_send`, `holodeck_read`, `holodeck_teardown`, `holodeck_promote`, `holodeck_status`.
 
 Engineers must use the holodeck as part of the deployment chain — code cannot merge to main until it passes a full end-to-end simulation with a fake crew. See [18-deployment](18-deployment.md) for the full spec.
 
