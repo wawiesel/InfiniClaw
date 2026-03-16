@@ -41,7 +41,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, rankMedal, shipHeaderLine, unifiedShipDisplay, botTreeLine, unifiedBotDisplay } from './formatting.js';
+import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, isBotCO, shipHeaderLine, unifiedShipDisplay, botTreeLine, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -3653,7 +3653,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
     }
     writeShips(ships);
     secretsGitCommit(['operator/ships.json'], `rerank ships: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
-    await send(`✅ ${result.target} → ${rankMedal(result.targetRank, false)}, ${result.swap} → ${rankMedal(result.swapRank, false)}`);
+    await send(formatRerankShipMsg(result.target, result.targetRank, result.swap, result.swapRank));
     return;
   }
 
@@ -3680,14 +3680,14 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   fleetDirty = false;
   const swapEnv = (() => { try { return loadProfileEnv(root, result.swap); } catch { return null; } })();
   const swapDisplayName = swapEnv?.ASSISTANT_NAME || capitalizeName(result.swap);
-  await send(`✅ ${botDisplayName} → ${rankMedal(result.targetRank, false)}, ${swapDisplayName} → ${rankMedal(result.swapRank, false)} (${role})`);
+  await send(formatRerankBotMsg(botDisplayName, result.targetRank, swapDisplayName, result.swapRank, role));
 
   const botRoom = botDutyRoom(target);
 
   const targetConn = allConns.find(c => c.name === botRoom) || conn;
   if (targetConn.accessToken) {
-    await reply(targetConn, `📡 ${botDisplayName} reranked → ${rankMedal(result.targetRank, false)}`);
-    await reply(targetConn, `📡 ${swapDisplayName} reranked → ${rankMedal(result.swapRank, false)}`);
+    await reply(targetConn, formatRerankNotification(botDisplayName, result.targetRank));
+    await reply(targetConn, formatRerankNotification(swapDisplayName, result.swapRank));
   }
   sendLifecycleMsg(target, 'reranked', result.targetRank).catch(() => {});
   sendLifecycleMsg(result.swap, 'reranked', result.swapRank).catch(() => {});
