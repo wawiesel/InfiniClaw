@@ -94,18 +94,6 @@ export function findRoomChief(
   return roomBots.reduce((a, b) => (a.rank < b.rank ? a : b)).name;
 }
 
-/** Ship header line: "🦁⭐ **Herc** · 🏅1" (legacy — prefer unifiedShipDisplay) */
-export function shipHeaderLine(
-  emoji: string,
-  name: string,
-  rank: number | string,
-  commissioned: boolean,
-  isSpeaker: boolean,
-): string {
-  const statusChar = !commissioned ? '💤' : isSpeaker ? '⭐' : '◉';
-  return `${emoji}${statusChar} **${name}** · 🏅${rank}`;
-}
-
 /** Parameters for unified ship display. */
 export interface UnifiedShipDisplayParams {
   name: string;          // e.g. "Herc"
@@ -188,6 +176,38 @@ export function formatRerankNotification(displayName: string, rank: number): str
   return `📡 ${displayName} reranked → ${rankMedal(rank, false)}`;
 }
 
+// ── Shared formatting helpers (single source of truth) ───────────
+
+/** Format a duration in ms to human-readable: "5s", "3m", "1.2h", "2.5d". */
+export function formatDuration(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.round(ms / 60_000);
+  if (min < 60) return `${min}m`;
+  const hrs = ms / 3_600_000;
+  if (hrs < 24) return `${hrs.toFixed(1).replace(/\.0$/, '')}h`;
+  return `${(ms / 86_400_000).toFixed(1).replace(/\.0$/, '')}d`;
+}
+
+/** Format token count: 0→"0", 5000→"5K", 1200000→"1.2M". */
+export function fmtTok(tok: number): string {
+  if (tok >= 1_000_000) {
+    const m = tok / 1_000_000;
+    return m >= 10 ? `${Math.round(m)}M` : `${+m.toFixed(1)}M`;
+  }
+  if (tok >= 1000) return `${Math.round(tok / 1000)}K`;
+  return String(Math.round(tok));
+}
+
+/** Activity emoji from token throughput. Single source — used by !fleet, !metrics, publishFleetReport. */
+export function activityEmoji(tokPerDay: number): string {
+  if (tokPerDay <= 0) return '·';
+  if (tokPerDay >= 500_000) return '🔥';
+  if (tokPerDay >= 50_000) return '⚡';
+  if (tokPerDay >= 5_000) return '🔹';
+  return '·';
+}
+
 // ── Unified display format ────────────────────────────────────────
 
 export type Verbosity = 'short' | 'long';
@@ -212,24 +232,6 @@ function statusHealthEmoji(status: string, health: string): string {
   if (status === 'starting') return '🚀';
   if (status === 'waiting') return '🟡';
   return GRADE_EMOJI[health] ?? '';
-}
-
-/** Activity emoji from token throughput. Mirrors metrics.ts activityIcon thresholds. */
-function activityEmoji(tokPerDay: number): string {
-  if (tokPerDay >= 500_000) return '🔥';
-  if (tokPerDay >= 50_000) return '⚡';
-  if (tokPerDay >= 5_000) return '🔹';
-  return '·';
-}
-
-/** Format tok/day for display: 0→"0", 5000→"5K", 1200000→"1.2M" */
-function fmtTok(tok: number): string {
-  if (tok >= 1_000_000) {
-    const m = tok / 1_000_000;
-    return m >= 10 ? `${Math.round(m)}M` : `${+m.toFixed(1)}M`;
-  }
-  if (tok >= 1000) return `${Math.round(tok / 1000)}K`;
-  return String(Math.round(tok));
 }
 
 /** Build a unified bot display string.

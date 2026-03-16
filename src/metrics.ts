@@ -11,7 +11,7 @@ import path from 'path';
 
 import { logger } from 'nanoclaw/logger.js';
 
-import { botBadge, capitalizeName, GRADE_EMOJI } from './formatting.js';
+import { botBadge, capitalizeName, GRADE_EMOJI, formatDuration as formatDurationMs, activityEmoji } from './formatting.js';
 import { matrixGetMessages } from './matrix-api.js';
 import { uploadContent } from './s3-sync.js';
 import { resolveRoot } from './service.js';
@@ -123,14 +123,8 @@ export function computeFleetHealthGrade(grades: HealthGrade[]): HealthGrade {
   return 'A';
 }
 
-/** Activity icon based on tokens per day. */
-export function activityIcon(tokensPerDay: number): string {
-  if (tokensPerDay <= 0) return '·';
-  if (tokensPerDay >= 500_000) return '🔥';
-  if (tokensPerDay >= 50_000) return '⚡';
-  if (tokensPerDay >= 5_000) return '🔹';
-  return '·';
-}
+/** @deprecated Use activityEmoji from formatting.ts — re-exported for backward compat. */
+export const activityIcon = activityEmoji;
 
 export interface MetricsSnapshot {
   ship: string;
@@ -613,7 +607,7 @@ export function formatBotMetrics(b: BotMetrics): string {
 }
 
 export function formatShipMetrics(m: ShipMetrics): string {
-  const uptime = formatDuration(m.relayUptimeSeconds);
+  const uptime = formatDurationMs(m.relayUptimeSeconds * 1000);
   const ships = safeLoadShips();
   const entry = ships[m.name];
   const tag = entry?.emoji ? `${entry.emoji} ${m.name}` : m.name;
@@ -662,13 +656,6 @@ export function formatScopeMetrics(snapshot: MetricsSnapshot, scope: string): st
   if (/^[a-z][a-z0-9_-]*$/.test(scope) && scope.length <= 20) return '';
 
   return formatAllMetrics(snapshot);
-}
-
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600 * 10) / 10}h`;
-  return `${Math.round(seconds / 86400 * 10) / 10}d`;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

@@ -41,7 +41,7 @@ import {
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, botBadge, findRoomChief, rankMedal, shipHeaderLine, unifiedShipDisplay, botTreeLine, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification } from './formatting.js';
+import { capitalizeName, formatBotDisplayName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -61,7 +61,6 @@ import {
   computeBotHealthGrade,
   computeFleetHealthGrade,
   gradeEmoji,
-  activityIcon,
   type MetricsSnapshot,
   type HealthGrade,
 } from './metrics.js';
@@ -126,22 +125,6 @@ const failureStates: Record<string, FailureState> = {};
 
 function findEngConn(conns: RoomConn[]): RoomConn | undefined {
   return conns.find(c => c.name === 'engineering') || conns[0];
-}
-
-function formatDuration(ms: number): string {
-  const sec = Math.round(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.round(ms / 60_000);
-  if (min < 60) return `${min}m`;
-  const hrs = (ms / 3_600_000).toFixed(1).replace(/\.0$/, '');
-  return `${hrs}h`;
-}
-
-/** Format token count: 1234 → "1.2K", 1234567 → "1.2M" */
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }
 
 function formatTimestamp(): string {
@@ -1169,7 +1152,7 @@ async function publishFleetReport(): Promise<FleetReport> {
       status: entry.status,
       gitVersion: botVersion(root, botId),
       grade,
-      activity: activityIcon(tokPerDay),
+      activity: activityEmoji(tokPerDay),
       tokPerDay: tokPerDay > 0 ? tokPerDay : 0,
     };
     if ((RUNNING_STATUSES as readonly string[]).includes(entry.status) && !running) {
@@ -1320,21 +1303,44 @@ function formatCombinedMetrics(
 
   for (const s of sorted) {
     const cfg = ships[s.ship];
-    const rank = cfg?.rank ?? '?';
+    const rank = cfg?.rank ?? 99;
     const commissioned = cfg?.commissioned !== false;
     const isThisShipSpeaker = commissioned && isSpeakerCached && cfg?.rank != null &&
       Object.values(ships).filter(sh => sh.commissioned).every(sh => (sh.rank ?? 99) >= (cfg?.rank ?? 99));
-    // Uptime %: % of last 24h the relay was running (approximated from continuous uptime since last start)
+
+    // Aggregate ship health (worst grade) and throughput (sum) — same as !fleet
+    const gradeOrder = ['A', 'B', 'C', 'F'];
+    let worstGrade = 'A';
+    let shipTok = 0;
+    for (const bot of s.bots) {
+      const botGrade = computeBotHealthGrade(bot);
+      if (gradeOrder.indexOf(botGrade) > gradeOrder.indexOf(worstGrade)) worstGrade = botGrade;
+      shipTok += bot.tokenThroughput?.day1 ?? 0;
+    }
+    const shipHeader = unifiedShipDisplay({
+      name: s.ship,
+      emoji: cfg?.emoji ?? '',
+      typeEmoji: cfg?.typeEmoji ?? '',
+      type: cfg?.type ?? '',
+      rank,
+      isSpeaker: isThisShipSpeaker,
+      commissioned,
+      health: worstGrade,
+      tokPerDay: shipTok,
+    }, 'short');
+
+    // Ship-level metrics suffix
     const uptimePct = Math.min(Math.round(s.shipMetrics.relayUptimeSeconds / 864), 100);
-    const uptimeTag = `up ${uptimePct}% (1d)`;
+    const uptimeTag = `up ${uptimePct}%`;
     const infraRaw = s.shipMetrics.infraFailures as { day1?: number; day7?: number } | number;
     const syncFail = typeof infraRaw === 'number' ? infraRaw : (infraRaw?.day1 ?? 0);
-    const syncTag = syncFail > 0 ? `⚠️${syncFail} sync/day` : 'sync OK';
+    const syncTag = syncFail > 0 ? `⚠️${syncFail} sync` : '';
     const rstRaw = s.shipMetrics.relayRestarts as { day1?: number; day7?: number } | number;
     const rst = typeof rstRaw === 'number' ? { day1: rstRaw, day7: rstRaw } : { day1: rstRaw?.day1 ?? 0, day7: rstRaw?.day7 ?? 0 };
-    const rstTag = `↻${rst.day1}/${rst.day7}`;
+    const rstTag = rst.day1 > 0 ? `↻${rst.day1}` : '';
     const codeVer = s.shipMetrics.codeVersion || '';
-    lines.push(`${shipHeaderLine(cfg?.emoji ?? '', s.ship, rank, commissioned, isThisShipSpeaker)} · ${uptimeTag} · ${rstTag} · ${syncTag}${codeVer}`);
+    const metricsParts = [uptimeTag, rstTag, syncTag].filter(Boolean).join(' · ');
+    lines.push(`${shipHeader} · ${metricsParts}${codeVer}`);
 
     // Build bot list: merge metrics snapshot + health + liveFleet role/rank
     const health = healthByShip.get(s.ship);
@@ -1350,14 +1356,8 @@ function formatCombinedMetrics(
       role: liveFleet[b.name]?.role ?? '',
     })).sort((a, b) => a.rank - b.rank);
 
-    // Compute column widths for alignment
-    let maxName = 0;
-    let maxRole = 0;
-    for (const b of botsWithMeta) {
-      maxName = Math.max(maxName, capitalizeName(b.name).length);
-      const roleCap = b.role ? capitalizeName(b.role) : '';
-      maxRole = Math.max(maxRole, roleCap.length);
-    }
+    // Max name length for column alignment (matches !fleet)
+    const maxNameLen = botsWithMeta.reduce((max, b) => Math.max(max, capitalizeName(b.name).length), 0);
 
     // Build flat list for CO detection (all bots across all ships)
     const allBotList = sorted.flatMap(ss => ss.bots.map(b => ({
@@ -1369,17 +1369,27 @@ function formatCombinedMetrics(
 
     for (const [i, bot] of botsWithMeta.entries()) {
       const isLast = i === botsWithMeta.length - 1;
+      const role = bot.role?.toLowerCase() ?? '';
+      const roleRoom = ROLE_ROOMS[role];
+      const co = findRoomChief(roleRoom?.room ?? '', allBotList) === bot.name;
+      const isOnDuty = bot.status === 'onduty';
+      const locEmoji = isOnDuty ? (roleRoom?.icon ?? '') : '🏠';
+      const isSleeping = bot.status === 'sleep' || bot.status === 'dream';
+      const botGrade = isSleeping ? '' : computeBotHealthGrade(bot);
+      const tree = isLast ? '└ ' : '├ ';
+      const botLine = unifiedBotDisplay({
+        name: bot.name,
+        shipEmoji: '',
+        locationEmoji: locEmoji,
+        health: botGrade || '',
+        tokPerDay: bot.tokenThroughput?.day1 ?? 0,
+        status: bot.status,
+        role,
+        rank: bot.rank,
+        isChief: co,
+      }, 'short', maxNameLen);
 
-      const dutyRoom = ROLE_ROOMS[bot.role?.toLowerCase()]?.room ?? '';
-      const co = findRoomChief(dutyRoom, allBotList) === bot.name;
-      const badge = botBadge(bot.status, bot.processRunning ?? null);
-
-      const nameDisplay = capitalizeName(bot.name) + NBSP.repeat(maxName - capitalizeName(bot.name).length);
-      const roleCap = bot.role ? capitalizeName(bot.role) : '';
-      const roleIcon = ROLE_ICONS[bot.role?.toLowerCase()] ?? '';
-      const rolePad = NBSP.repeat(maxRole - roleCap.length);
-
-      // Health data
+      // Metrics suffix: mem, kills, tok, latency
       const r24 = rolling24h?.bots?.[bot.name];
       const t24 = trends[bot.name];
       const oom24 = r24?.oom_kills ?? t24?.oom_kills ?? 0;
@@ -1390,21 +1400,18 @@ function formatCombinedMetrics(
       totalRssMb += rss;
       const rssStr = rss > 0 ? String(rss) : '?';
       const limitStr = hBot?.limit_mb != null ? String(hBot.limit_mb) : '?';
-      const mem = ` · mem ${rssStr}/${limitStr}MB`;
-      const kills = (sk24 > 0 || oom24 > 0) ? ` · SK+${sk24} OOM+${oom24} (1d)` : '';
-      // Token throughput: prefer health report, fall back to metrics snapshot rolling rate
+      const mem = `mem ${rssStr}/${limitStr}MB`;
+      const kills = (sk24 > 0 || oom24 > 0) ? `SK+${sk24} OOM+${oom24}` : '';
       const tokData = (health?.tokens as Record<string, { total_24h?: number }> | undefined)?.[bot.name];
       const tok24k = tokData?.total_24h != null ? Math.round(tokData.total_24h / 1000) : null;
       const tokFromMetrics = bot.tokenThroughput?.day1 != null && bot.tokenThroughput.day1 > 0
-        ? formatTokens(bot.tokenThroughput.day1) : null;
+        ? fmtTok(bot.tokenThroughput.day1) : null;
       const tokStr = tok24k != null && tok24k > 0 ? `${tok24k}K` : (tokFromMetrics ?? '?');
-      const tokTag = ` · tok ${tokStr}/day`;
-      // Response latency p50/p95 — always show slot, ? when no data
       const p50 = bot.responseLatencyP50 != null ? `${bot.responseLatencyP50}s` : '?';
       const p95 = bot.responseLatencyP95 != null ? `${bot.responseLatencyP95}s` : '?';
-      const latTag = ` · lat ${p50}/${p95} (1d)`;
+      const metricsSuffix = [mem, kills, `tok ${tokStr}/d`, `lat ${p50}/${p95}`].filter(Boolean).join(' · ');
 
-      lines.push(botTreeLine(isLast, badge, nameDisplay, roleCap, roleIcon, bot.rank, co, rolePad, `${mem}${kills}${tokTag}${latTag}`));
+      lines.push(`${tree}${botLine} · ${metricsSuffix}`);
     }
 
     totalInterventions.day1 += s.operator.interventions.day1;
@@ -1438,61 +1445,65 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
   const hostnameToName = new Map<string, string>();
   for (const [name, entry] of Object.entries(ships)) {
     if (entry.hostname) hostnameToName.set(entry.hostname, name);
-    hostnameToName.set(name, name); // canonical name maps to itself
+    hostnameToName.set(name, name);
   }
-  const deduped = new Map<string, { ship: string; data: Record<string, unknown> }>();
+  const deduped = new Map<string, { shipName: string; data: Record<string, unknown> }>();
   for (const report of reports) {
     const canonical = hostnameToName.get(report.ship) ?? report.ship;
-    const emoji = ships[canonical]?.emoji;
-    const displayName = emoji ? `${emoji} ${canonical}` : canonical;
     const existing = deduped.get(canonical);
     const reportTs = Number(report.data.ts || 0);
     const existingTs = Number(existing?.data.ts || 0);
     if (!existing || reportTs > existingTs) {
-      deduped.set(canonical, { ship: displayName, data: report.data });
+      deduped.set(canonical, { shipName: canonical, data: report.data });
     }
   }
 
-  // Only show bots that are in the current fleet — filters stale/removed bot names
   const knownBots = new Set(Object.keys(liveFleet));
-
-  const lines: string[] = [`## 4 · Health — ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC\n`];
+  const lines: string[] = [`## 4 · Health\n`];
   let total24hOom = 0;
-  for (const { ship, data } of deduped.values()) {
-    const allBots = (data.bots || {}) as Record<string, Record<string, unknown>>;
-    // Filter to known fleet bots only — ignore stale entries from prior configurations
-    const bots = Object.fromEntries(Object.entries(allBots).filter(([n]) => knownBots.has(n)));
-    const active = Object.entries(bots).filter(([, b]) => b.status === 'ACTIVE').map(([n]) => capitalizeName(n));
-    // Show data age so the Captain knows if it's fresh
+
+  for (const { shipName, data } of deduped.values()) {
+    const cfg = ships[shipName];
     const reportTs = data.ts ? new Date(String(data.ts)) : null;
     const ageMs = reportTs ? Date.now() - reportTs.getTime() : null;
     const age = ageMs != null ? (ageMs < 120_000 ? 'live' : `${Math.round(ageMs / 60_000)}m ago`) : '?';
-    lines.push(`**${ship}** (${age})`);
-    lines.push(`  Active: ${active.length > 0 ? active.join(', ') : 'none'}`);
+    const shipDisplay = cfg?.emoji ? `${cfg.emoji} ${shipName}` : shipName;
+    lines.push(`**${shipDisplay}** (${age})`);
 
-    // Use 24h rolling data — cumulative totals have no time context
-    const rolling24h = (data.rolling as Record<string, unknown> | undefined)?.[`24h`] as
+    const allBots = (data.bots || {}) as Record<string, Record<string, unknown>>;
+    const bots = Object.entries(allBots).filter(([n]) => knownBots.has(n));
+
+    const rolling24h = (data.rolling as Record<string, unknown> | undefined)?.['24h'] as
       { bots?: Record<string, { sigkills?: number; oom_kills?: number }> } | undefined;
-    const r7d = (data.rolling as Record<string, unknown> | undefined)?.[`7d`] as
+    const r7d = (data.rolling as Record<string, unknown> | undefined)?.['7d'] as
       { bots?: Record<string, { sigkills?: number; oom_kills?: number }> } | undefined;
 
-    for (const [name, b] of Object.entries(bots)) {
+    // Sort by rank for consistent ordering
+    const sortedBots = bots
+      .map(([name, b]) => ({ name, b, rank: liveFleet[name]?.rank ?? 99 }))
+      .sort((a, b) => a.rank - b.rank);
+
+    for (const [i, { name, b }] of sortedBots.entries()) {
       const r = rolling24h?.bots?.[name];
       const r7 = r7d?.bots?.[name];
       const oom24 = r?.oom_kills ?? 0;
       const sk24 = r?.sigkills ?? 0;
       total24hOom += oom24;
-      // Show bot if active OR has rolling activity in 24h
-      if (b.status === 'ACTIVE' || oom24 > 0 || sk24 > 0) {
-        const mem = b.rss_mb != null ? `${b.rss_mb}/${b.limit_mb ?? '?'}MB` : '';
-        const stats24 = `24h: SK+${sk24} OOM+${oom24}`;
-        const stats7d = r7 ? ` · 7d: SK+${r7.sigkills ?? 0} OOM+${r7.oom_kills ?? 0}` : '';
-        lines.push(`  ${capitalizeName(name)}: ${b.status} ${mem} ${stats24}${stats7d}`);
-      }
+      if (b.status !== 'ACTIVE' && oom24 === 0 && sk24 === 0) continue;
+
+      const isLast = i === sortedBots.length - 1;
+      const tree = isLast ? '└ ' : '├ ';
+      const role = liveFleet[name]?.role?.toLowerCase() ?? '';
+      const roleIcon = ROLE_ICONS[role] ?? '';
+      const mem = b.rss_mb != null ? `mem ${b.rss_mb}/${b.limit_mb ?? '?'}MB` : '';
+      const stats24 = `SK+${sk24} OOM+${oom24} (1d)`;
+      const stats7d = r7 ? `SK+${r7.sigkills ?? 0} OOM+${r7.oom_kills ?? 0} (7d)` : '';
+      const parts = [mem, stats24, stats7d].filter(Boolean).join(' · ');
+      lines.push(`${tree}${roleIcon} ${capitalizeName(name)} · ${parts}`);
     }
   }
 
-  lines.push(`**Totals:** ${deduped.size} ships · OOM+${total24hOom} (24h)`);
+  lines.push(`\n**Totals** · ${deduped.size} ships · OOM+${total24hOom} (24h)`);
   return lines.join('\n');
 }
 
@@ -2907,7 +2918,7 @@ async function dutyCycleLoop(conns: RoomConn[]): Promise<void> {
 /**
  * Broadcast a lifecycle event for a bot via its duty room intercom connection.
  * Bots' handleLifecycleMessage() listens for these to update roomRoster / CO election.
- * Format: `<shipEmoji>HOSTNAME: BotName stopped|started (rank N)|reranked (rank N)`
+ * Format: `[🦁⭐ Herc] BotName stopped|started (rank N)|reranked (rank N)`
  */
 async function sendLifecycleMsg(
   botId: string,
@@ -2933,8 +2944,8 @@ async function sendLifecycleMsg(
     }
     if (!conn?.accessToken) return;
     const rankPart = rank !== undefined ? ` (rank ${rank})` : '';
-    const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
-    await relaySend(conn.homeserver, conn.accessToken, conn.roomId, `${shipEmoji}${HOSTNAME}: ${botName} ${event}${rankPart}`);
+    const tag = replyTag();
+    await relaySend(conn.homeserver, conn.accessToken, conn.roomId, `[${tag}] ${botName} ${event}${rankPart}`);
   } catch { /* non-fatal — lifecycle broadcast is best-effort */ }
 }
 
@@ -3068,7 +3079,7 @@ async function handleLifecycleCommand(
       const progressConn = (currentStatus === 'quarters' && qRoom)
         ? (activeConns.find(c => c.roomId === qRoom) ?? conn)
         : conn;
-      const threadRoot = await reply(progressConn, `📡 ${verb} ${name} ...`);
+      const threadRoot = await reply(progressConn, `📡 ${verb} ${name}`);
       if (!threadRoot) continue;
       let stepN = 0;
       const totalSteps = 4;
@@ -3092,12 +3103,12 @@ async function handleLifecycleCommand(
         await setBotPip(root, bot, '🟡');
         await step('🟡 waiting for first output');
         const model = env?.BRAIN_MODEL || '?';
+        const roleIcon = ROLE_ICONS[role.toLowerCase()] ?? '';
+        const medal = rankMedal(rank, false);
         const ver = botVersion(root, bot);
         await setBotPip(root, bot, '🟢');
-        await step(`🟢 online · ${role}[${rank}] · ${model}${ver}`);
-        const done = `✅ ${name} ${doneVerb}`;
-        await threadReply(progressConn, threadRoot, done);
-        await reply(progressConn, done);
+        await step(`🟢 online · ${roleIcon}${medal} · ${model}${ver}`);
+        await reply(progressConn, `✅ ${name} ${doneVerb}`);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
@@ -3371,7 +3382,7 @@ function registerRelayCommands(): void {
       const branch = 'main';
       const root = resolveRoot();
       const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
-      const tr = await reply(conn, `📡 push ...`);
+      const tr = await reply(conn, `📡 push`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         execFileSync('git', ['push', 'origin', branch], execOpts);
@@ -3388,7 +3399,7 @@ function registerRelayCommands(): void {
     decommission: async (cmd, conn) => {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
-      const tr = await reply(conn, `📡 decommission ...`);
+      const tr = await reply(conn, `📡 decommission`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         const ships = loadShips();
@@ -3411,7 +3422,7 @@ function registerRelayCommands(): void {
     commission: async (cmd, conn) => {
       const targetShip = cmd.slice('!commission'.length).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
-      const tr = await reply(conn, `📡 commission ...`);
+      const tr = await reply(conn, `📡 commission`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         const ships = loadShips();
@@ -3435,7 +3446,7 @@ function registerRelayCommands(): void {
       if (targetShip && !isThisShip(targetShip)) return;
       const startedAt = Date.now();
 
-      const threadRoot = await reply(conn, `📡 pull starting ...`);
+      const threadRoot = await reply(conn, `📡 pull`);
       if (!threadRoot) return;
       const elapsed = () => Date.now() - startedAt;
 
@@ -3588,7 +3599,7 @@ function registerRelayCommands(): void {
       if (liveFleet[bot].ship !== HOSTNAME) return;
       const botEnv = (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })();
       const botDisplayName = botEnv?.ASSISTANT_NAME || capitalizeName(bot);
-      const tr = await reply(conn, `📡 transport ${botDisplayName} → ${targetName} ...`);
+      const tr = await reply(conn, `📡 transport ${botDisplayName} → ${targetName}`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         stopBot(bot);
@@ -3965,7 +3976,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   if (shipName) {
     const target = shipName;
     if (!await electSpeaker()) return;
-    const tr = await reply(conn, `📡 ${verb} ${target} ...`);
+    const tr = await reply(conn, `📡 ${verb} ${target}`);
     const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
     const result = rankSwap(Object.entries(ships), target, direction);
     if (!result) {
@@ -3985,7 +3996,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   const root = resolveRoot();
   const botEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
   const botDisplayName = botEnv?.ASSISTANT_NAME || capitalizeName(target);
-  const tr = await reply(conn, `📡 ${verb} ${botDisplayName} ...`);
+  const tr = await reply(conn, `📡 ${verb} ${botDisplayName}`);
   const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
   const role = liveFleet[target].role;
   const sameRole = Object.entries(liveFleet).filter(([_, b]) => b.role === role);
