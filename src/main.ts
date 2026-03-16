@@ -115,13 +115,30 @@ import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
-import { capitalizeName, formatBotDisplayName } from './formatting.js';
-import { loadFleet } from './ship-config.js';
+import { capitalizeName, formatBotDisplayName, unifiedBotDisplay } from './formatting.js';
+import { loadFleet, findShipByHostname, ROLE_ROOMS } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
 
 // ── Display name helper ────────────────────────────────────────────────
+/** Build unified short display name. badge is used to derive health grade.
+ *  Falls back to old format if fleet data is unavailable. */
 function botDisplayName(badge: string): string {
-  return formatBotDisplayName(ASSISTANT_NAME, badge);
+  try {
+    const fleet = loadFleet();
+    const entry = fleet[ASSISTANT_NAME.toLowerCase()];
+    if (!entry) return formatBotDisplayName(ASSISTANT_NAME, badge);
+    const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
+    const role = entry.role?.toLowerCase() ?? '';
+    const isOnDuty = entry.status === 'onduty';
+    const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
+    const isChief = process.env.IS_CO === 'true' || badge === '⭐';
+    // Map transient pips to health grades; default to 'A' (🟢)
+    const healthMap: Record<string, string> = { '🔴': 'F', '🟡': 'B', '🟠': 'C' };
+    const health = healthMap[badge] ?? 'A';
+    return unifiedBotDisplay({ name: ASSISTANT_NAME, shipEmoji, locationEmoji, health, tokPerDay: 0, status: entry.status, role, rank: entry.rank, isChief }, 'short');
+  } catch {
+    return formatBotDisplayName(ASSISTANT_NAME, badge); // fallback if fleet unavailable
+  }
 }
 
 // ── Module-level state ─────────────────────────────────────────────────
