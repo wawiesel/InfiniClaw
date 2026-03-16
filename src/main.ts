@@ -1167,6 +1167,10 @@ async function runAgent(
     if (output.newSessionId && output.status !== 'error') {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+      // Persist session ID to a file so relay can use --resume --fork-session for Branch Brains (#81).
+      if (group.folder === MAIN_GROUP_FOLDER) {
+        try { fs.writeFileSync(path.join(DATA_DIR, 'current-session-id'), output.newSessionId); } catch { /* best-effort */ }
+      }
     }
 
     if (output.status === 'error') {

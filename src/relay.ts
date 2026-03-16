@@ -1926,31 +1926,31 @@ export function mapBrainEnv(
  * Find the most recent Claude session ID for a bot by scanning its session JSONL files.
  * Returns the UUID session ID or null if none found.
  */
-function findLatestBotSessionId(bot: string): string | null {
-  const sessBase = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude', 'projects');
+/**
+ * Read the bot's current session ID from the file written by main.ts after each turn (#81).
+ * Returns null if the file doesn't exist or can't be read.
+ */
+/** UUID v4 pattern — session IDs written by main.ts are always UUIDs. */
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Read the bot's current session ID from the file written by main.ts after each turn (#81).
+ * Returns null if the file doesn't exist, can't be read, or contains an unexpected value.
+ */
+function readBotSessionId(bot: string): string | null {
+  const sessionFile = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'current-session-id');
   try {
-    if (!fs.existsSync(sessBase)) return null;
-    // Walk project dirs to find .jsonl files (excluding subagents)
-    let latest: { id: string; mtime: number } | null = null;
-    const projDirs = fs.readdirSync(sessBase, { withFileTypes: true }).filter(d => d.isDirectory());
-    for (const projDir of projDirs) {
-      const projPath = path.join(sessBase, projDir.name);
-      const files = fs.readdirSync(projPath).filter(f => f.endsWith('.jsonl'));
-      for (const f of files) {
-        const stat = fs.statSync(path.join(projPath, f));
-        if (!latest || stat.mtimeMs > latest.mtime) {
-          latest = { id: path.basename(f, '.jsonl'), mtime: stat.mtimeMs };
-        }
-      }
-    }
-    return latest?.id ?? null;
+    const id = fs.readFileSync(sessionFile, 'utf-8').trim();
+    return SESSION_ID_RE.test(id) ? id : null;
   } catch { return null; }
 }
 
 /**
  * Spawn a Branch Brain as a host-side claude process.
- * Branch Brain forks the main brain's session (--continue --fork-session) to inherit context,
- * streams assistant output into a visible Matrix thread in the triggering room.
+ * Branch Brain forks the main brain's session (--resume <sessionId> --fork-session) to inherit
+ * full conversation context. The session ID is written to current-session-id by main.ts after
+ * each turn (#81). Falls back to cold-start if no session file exists yet.
+ * Streams assistant output into a visible Matrix thread in the triggering room.
  */
 async function spawnBranchBrain(
   task: { thread_id: string; objective: string; chat_jid: string; bot?: string },
@@ -1981,9 +1981,10 @@ async function spawnBranchBrain(
   const replyThreadId = announcementEventId ?? thread_id;
 
   // Try to fork from the bot's active session so BB inherits main brain context.
-  const mainSessionId = bot ? findLatestBotSessionId(bot) : null;
+  // Session ID is written by main.ts after each turn to current-session-id (#81).
+  const mainSessionId = bot ? readBotSessionId(bot) : null;
   if (mainSessionId) {
-    log(`branchBrain: forking from main session=${mainSessionId}`);
+    log(`branchBrain: forking from main session=${mainSessionId.slice(0, 8)}...`);
   }
 
   // Generate a session ID for this BB instance (stored for context recovery on relay restart).
@@ -2068,7 +2069,7 @@ async function spawnBranchBrain(
       '--output-format', 'stream-json',
     ];
     if (mainSessionId) {
-      claudeArgs.push('--continue', '--fork-session');
+      claudeArgs.push('--resume', mainSessionId, '--fork-session');
     }
     child = spawn('podman', [
       'run', '--rm', '-i',
@@ -2084,7 +2085,7 @@ async function spawnBranchBrain(
     });
     log(`branchBrain: spawning in container image=${BRANCH_BRAIN_IMAGE} fork=${!!mainSessionId} session=${sessionId}`);
   } else {
-    // Host fallback: fork from main brain session if available.
+    // Host path: fork from main brain session if available, else cold-start.
     const claudeArgs: string[] = [
       '--verbose',
       '--dangerously-skip-permissions',
@@ -2092,9 +2093,9 @@ async function spawnBranchBrain(
       '--add-dir', resolveRoot(),
     ];
     if (mainSessionId) {
-      claudeArgs.push('--continue', '--fork-session');
+      claudeArgs.push('--resume', mainSessionId, '--fork-session');
     }
-    log(`branchBrain: BRANCH_BRAIN_IMAGE unset — falling back to host spawn fork=${!!mainSessionId} session=${sessionId}`);
+    log(`branchBrain: host spawn fork=${!!mainSessionId} session=${sessionId}`);
     child = spawn('claude', claudeArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: childEnv,
