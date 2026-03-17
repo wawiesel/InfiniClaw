@@ -2108,6 +2108,8 @@ async function spawnBranchBrain(
   let child: ReturnType<typeof spawn>;
   if (useContainer) {
     const notesDir = path.dirname(notesFile);
+    fs.mkdirSync(notesDir, { recursive: true });
+    fs.chmodSync(notesDir, 0o777);
     // Only pass specific env vars to container — host env vars like HOME break claude CLI.
     const containerEnv: Record<string, string> = {};
     const envKeys = [
@@ -2130,13 +2132,8 @@ async function spawnBranchBrain(
       `${notesDir}:/relay-notes:rw`,
       `${infraRoot}:/workspace/extra/InfiniClaw:rw`,
     ];
-    // Mount the bot's .claude session dir rw — fork-session needs to write the forked session file.
-    if (bot && mainSessionId) {
-      const hostClaudeDir = path.join(infraRoot, '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude');
-      if (fs.existsSync(hostClaudeDir)) {
-        volumeArgs.push(`${hostClaudeDir}:/home/claude/.claude:rw`);
-      }
-    }
+    // Removed: .claude session dir mount was causing UID mismatch (host UID 1000 vs container UID 1001)
+    // which made /home/claude/.claude unwritable, breaking all Bash tool calls in BB containers.
     // Copy host's ~/.claude.json to a world-readable location for BB containers.
     // Claude Code needs the oauthAccount data to authenticate. The host file is mode 600
     // (owner-only), but the container runs as user `claude` (UID 1001) which can't read it.
