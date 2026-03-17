@@ -2049,6 +2049,13 @@ async function spawnBranchBrain(
   const bot = rawBot?.toLowerCase();
   log(`branchBrain: spawning for thread=${thread_id.slice(0, 20)}`);
 
+  // Guard: if a bot is named, it must be on duty — branch brains should not
+  // spawn in rooms with no active bots (#171).
+  if (bot && liveFleet[bot]?.status !== 'onduty') {
+    log(`branchBrain: skipped — ${bot} is not on duty (status=${liveFleet[bot]?.status ?? 'unknown'})`);
+    return;
+  }
+
   // Find the connection for this room (strip matrix: prefix if present)
   const roomId = chat_jid.replace(/^matrix:/, '');
   const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
@@ -3289,8 +3296,10 @@ async function handleLifecycleCommand(
         fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME, ondutyAt: Date.now() });
         writeFleet(liveFleet);
         clearShipConfigCache();
-        // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild)
-        restartBotForRoom(root, bot);
+        // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild).
+        // Pass dutyRoomId so the seed uses the exact room rather than an intercom.json
+        // lookup that may not be populated (#193).
+        restartBotForRoom(root, bot, dutyRoomId);
         writeCrewStatus(root, bot);
         injectWbsTasks(root, bot);
         await tr(`✅ ${name} on duty`);
