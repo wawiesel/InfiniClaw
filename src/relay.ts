@@ -157,21 +157,23 @@ async function reportFailure(system: string, detail: string, conns: RoomConn[]):
     // First failure — create thread
     const rootId = await reply(conn, statusLine('⚠️', system, 'down', 0));
     if (!rootId) return;
-    await threadReply(conn, rootId, detail.slice(0, 500));
+    // Set backoff state BEFORE threadReply so a throw doesn't lose the state and cause spam.
     failureStates[system] = {
       startedAt: now,
       threadRootId: rootId,
       nextAlertAt: now + FAILURE_INITIAL_INTERVAL,
       intervalMs: FAILURE_INITIAL_INTERVAL,
     };
+    await threadReply(conn, rootId, detail.slice(0, 500));
     return;
   }
 
   // Subsequent failure — only post if past nextAlertAt
   if (now < existing.nextAlertAt) return;
-  await threadReply(conn, existing.threadRootId, statusLine('⚠️', system, 'down', now - existing.startedAt));
+  // Advance backoff BEFORE threadReply so a throw doesn't reset the timer and cause spam.
   existing.intervalMs = Math.min(existing.intervalMs * 2, FAILURE_MAX_INTERVAL);
   existing.nextAlertAt = now + existing.intervalMs;
+  await threadReply(conn, existing.threadRootId, statusLine('⚠️', system, 'down', now - existing.startedAt));
 }
 
 async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> {

@@ -168,3 +168,5 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`ipc-commands.ts` WBS handlers**: IPC command handlers for WBS assign/complete/update operations. Relay manages `_runtime/data/wbs-{room}.json`; bots interact via MCP tools.
 
 - **Branch brain HOME fix** (`relay.ts`): `childEnv['HOME']` is now explicitly set to `process.env.HOME` so host-path branch brains write `.claude` session data to the correct writable location, not the container-era `/home/claude` path.
+
+- **reportFailure backoff ordering** (`relay.ts`): `failureStates[system]` and backoff timers now set BEFORE `await threadReply()` so a thrown exception can't reset backoff state and cause infinite spam (issue #134).
