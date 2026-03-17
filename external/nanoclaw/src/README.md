@@ -20,7 +20,7 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 | `sender-allowlist.ts` | Per-room sender allow/block rules |
 | `channels/` | Channel implementations |
 | `index.ts` | Re-exports |
-| `config.ts` | `ASSISTANT_NAME`, `TRIGGER_PATTERN` (`<m>Name</m>` match), shared constants (trailing newline cleanup) |
+| `config.ts` | `ASSISTANT_NAME`, `TRIGGER_PATTERN` (global `<m>Name</m>` match), `buildTriggerPattern(name)` (per-group trigger regex), shared constants |
 | `env-utils.ts` | Env file parsing: `parseEnvLine`, `parseEnvFile`, `upsertEnvLine`, `isOllamaBaseUrl` |
 | `logger.ts` | Pino logger setup |
 | `timezone.ts` | Timezone resolution |

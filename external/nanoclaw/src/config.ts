@@ -62,10 +62,11 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export const TRIGGER_PATTERN = new RegExp(
-  `<m>${escapeRegex(ASSISTANT_NAME)}</m>`,
-  'i',
-);
+export function buildTriggerPattern(name: string): RegExp {
+  return new RegExp(`<m>${escapeRegex(name)}</m>`, 'i');
+}
+
+export const TRIGGER_PATTERN = buildTriggerPattern(ASSISTANT_NAME);
 
 
 // Timezone for scheduled tasks (cron expressions, etc.)
