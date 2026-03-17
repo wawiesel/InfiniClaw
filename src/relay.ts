@@ -2072,7 +2072,7 @@ async function spawnBranchBrain(
   // Capture the returned event ID so Branch Brain replies thread under this
   // announcement (not under the triggering message).
   // Send as the bot's own Matrix account so it looks like the bot is threading out work.
-  const announcedTitle = objective.split('\n')[0].trim().slice(0, 80);
+  const announcedTitle = objective.split('\n')[0].trim();
   let announcementEventId: string | undefined;
   let botSendToken: string | undefined;
   let botSendHomeserver: string | undefined;
@@ -2087,9 +2087,9 @@ async function spawnBranchBrain(
   }
   try {
     if (botSendToken && botSendHomeserver) {
-      announcementEventId = await relaySend(botSendHomeserver, botSendToken, conn.roomId, `🧵 ${announcedTitle}`);
+      announcementEventId = await relaySend(botSendHomeserver, botSendToken, conn.roomId, `🪾 ${announcedTitle}`);
     } else {
-      announcementEventId = await reply(conn, `🧵 Branch Brain: ${announcedTitle}`, undefined, { skipMirror: true });
+      announcementEventId = await reply(conn, `🪾 Branch Brain: ${announcedTitle}`, undefined, { skipMirror: true });
     }
   } catch (err) {
     log(`branchBrain: announce failed: ${errStr(err)}`);
@@ -2409,7 +2409,7 @@ async function spawnBranchBrain(
         branchBrainRestartTimers.delete(bot);
         const status = brainSucceeded ? '✅ merged' : '⛔ failed';
         if (conn.accessToken) {
-          relaySend(conn.homeserver, conn.accessToken, conn.roomId, `[${replyTag()}] 🧵 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
+          relaySend(conn.homeserver, conn.accessToken, conn.roomId, `[${replyTag()}] 🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
         }
         log(`branchBrain: ${bot} BB completed (${status})`);
       }, BRANCH_BRAIN_RESTART_DELAY);
