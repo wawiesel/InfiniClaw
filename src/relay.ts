@@ -3194,6 +3194,11 @@ async function handleLifecycleCommand(
         await tr(`⛔ ${name} dismiss failed — ${errStr(err)}`);
       }
     } else if (action === 'sleep') {
+      // Sleep only allowed from quarters — bot must be in quarters status
+      if (liveFleet[bot]?.status !== 'quarters') {
+        await tr(`⚠️ ${name} must be in quarters to sleep — use !dismiss first`);
+        continue;
+      }
       try {
         stopBot(bot);
         killStaleContainers(bot);
@@ -4223,6 +4228,34 @@ function registerRelayCommands(): void {
         await reply(conn, `⛔ deny failed — ${errStr(err)}`);
       }
     },
+
+    version: async (cmd, conn) => {
+      if (!await electSpeaker()) return;
+      const arg = cmd.slice('?version'.length).trim();
+      const count = Math.min(Math.max(parseInt(arg, 10) || 10, 1), 50);
+      const root = resolveRoot();
+      try {
+        // Get the N most recent version tags with their one-line messages
+        const raw = execSync(
+          `git tag -l 'v*' --sort=-v:refname --format='%(refname:short) %(subject)' | head -${count}`,
+          { cwd: root, encoding: 'utf-8', timeout: 10000 },
+        ).trim();
+        if (!raw) {
+          await reply(conn, '📦 no version tags found');
+          return;
+        }
+        const lines = raw.split('\n').map(line => {
+          const spaceIdx = line.indexOf(' ');
+          const tag = spaceIdx > 0 ? line.slice(0, spaceIdx) : line;
+          const msg = spaceIdx > 0 ? line.slice(spaceIdx + 1) : '';
+          return `\`${tag}\` ${msg}`;
+        });
+        const threadRoot = await reply(conn, `📦 last ${lines.length} version${lines.length !== 1 ? 's' : ''}`);
+        if (threadRoot) await threadReply(conn, threadRoot, lines.join('\n'));
+      } catch (err) {
+        await reply(conn, `⛔ version failed — ${errStr(err)}`);
+      }
+    },
   });
 }
 
@@ -4289,8 +4322,8 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
 
 async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[]): Promise<void> {
   // ! (bare) — print help via help account (speaker only, one reply)
-  
-  if (cmd === '!') {
+
+  if (cmd === '!' || cmd === '?') {
     if (!await electSpeaker()) return;
     await helpReply(conn, buildHelpText());
     return;
@@ -4298,7 +4331,7 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
   const matched = await dispatch(cmd, conn, allConns || []);
   if (!matched) {
     const cmdName = cmd.split(/\s/)[0];
-    await helpReply(conn, `Unknown command: \`${cmdName}\`. Use \`!\` for help.`);
+    await helpReply(conn, `Unknown command: \`${cmdName}\`. Use \`!\` or \`?\` for help.`);
   }
 }
 
@@ -4471,7 +4504,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           if (event.type !== 'm.room.message') continue;
           if (event.content?.msgtype !== 'm.text') continue;
           // Skip own non-command messages (operator commands should still be processed)
-          if (event.sender === userId && !event.content.body?.trim()?.startsWith('!')) continue;
+          if (event.sender === userId && !event.content.body?.trim()?.startsWith('!') && !event.content.body?.trim()?.startsWith('?')) continue;
           const body = event.content.body?.trim();
           if (!body) continue;
 
@@ -4505,8 +4538,8 @@ async function curtainLoop(captainUserId: string): Promise<void> {
             }
           }
 
-          // ! commands — process from any room the operator can see (quarters, BehindTheCurtain, etc.)
-          if (body.startsWith('!') && isAuthorized(event.sender, captainUserId, userId) && markProcessed(event.event_id)) {
+          // !/?  commands — process from any room the operator can see (quarters, BehindTheCurtain, etc.)
+          if ((body.startsWith('!') || body.startsWith('?')) && isAuthorized(event.sender, captainUserId, userId) && markProcessed(event.event_id)) {
             const cmdConn: RoomConn = {
               name: rid === roomId ? 'BehindTheCurtain' : (roomIdToName[rid] ?? `operator:${rid}`),
               roomId: rid, homeserver,
@@ -4716,7 +4749,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               continue;
             }
 
-            if (!body.startsWith('!')) continue;
+            if (!body.startsWith('!') && !body.startsWith('?')) continue;
 
             if (!isAuthorized(event.sender, captainUserId, operatorUserId)) {
               log(`${conn.name}: unauthorized command from ${event.sender}: ${body.slice(0, 50)}`);

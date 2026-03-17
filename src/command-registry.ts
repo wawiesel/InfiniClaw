@@ -47,14 +47,21 @@ function startsWith(name: string): (cmd: string) => boolean {
   return (cmd) => cmd.startsWith(withSpace);
 }
 
+/** Query prefix match: cmd === '?name' or cmd starts with '?name ' */
+function qPrefix(name: string): (cmd: string) => boolean {
+  const full = `?${name}`;
+  const withSpace = `${full} `;
+  return (cmd) => cmd === full || cmd.startsWith(withSpace);
+}
+
 export const COMMANDS: CommandDef[] = [
   { name: 'todo',          usage: '!todo [bot]',               description: "show bot's active tasks",              match: prefix('todo') },
   { name: 'fleet',         usage: '!fleet',                    description: 'fleet + ship status',                  match: prefix('fleet') },
   { name: 'report',        usage: '!report [bot]',             description: 'send awake bot(s) to duty room',       match: prefix('report') },
   { name: 'dismiss',       usage: '!dismiss [bot]',            description: 'remove from duty, back to quarters',   match: prefix('dismiss') },
   { name: 'go',            usage: '!go [room] [bot]',          description: 'send bot to a room (no args = list)',  match: prefix('go') },
-  { name: 'wake',          usage: '!wake [bot]',               description: 'start container in quarters',          match: prefix('wake') },
-  { name: 'sleep',         usage: '!sleep [bot]',              description: 'stop container, quarters only',        match: prefix('sleep') },
+  { name: 'wake',          usage: '!wake [bot]',               description: 'restart bot wherever it is',           match: prefix('wake') },
+  { name: 'sleep',         usage: '!sleep [bot]',              description: 'stop container (quarters only)',       match: prefix('sleep') },
 { name: 'transport',     usage: '!transport <bot> <ship>',   description: 'beam bot to another ship',             match: startsWith('transport') },
   { name: 'promote',       usage: '!promote <target>',         description: 'raise rank (bot or ship)',             match: startsWith('promote') },
   { name: 'demote',        usage: '!demote <target>',          description: 'lower rank (bot or ship)',             match: startsWith('demote') },
@@ -67,6 +74,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'operator',      usage: '!operator [on|off|reset] [ship]', description: 'operator relay toggle or restart',  match: prefix('operator') },
   { name: 'metrics',       usage: '!metrics [scope]',            description: 'metrics (context-aware, 1d/7d)',       match: prefix('metrics') },
   { name: 'wbs',           usage: '!wbs [room] | !wbs x <id>',   description: 'show WBS; x <id> marks item done',     match: prefix('wbs') },
+  { name: 'version',       usage: '?version [n]',                 description: 'list recent versions (default 10)',     match: qPrefix('version') },
 ];
 
 /** Register a handler for a command by name. */
@@ -103,10 +111,10 @@ export async function dispatch(cmd: string, conn: RoomConn, allConns: RoomConn[]
   return false;
 }
 
-/** Generate help text for the ! command (code block for fixed-width alignment). */
+/** Generate help text for the !/? commands (code block for fixed-width alignment). */
 export function buildHelpText(): string {
   const maxUsage = Math.max(...COMMANDS.map(c => c.usage.length));
   const lines = COMMANDS.map(c => `  ${c.usage.padEnd(maxUsage)} — ${c.description}`);
-  const body = [...lines, `  ${'!'.padEnd(maxUsage)} — this help`].join('\n');
-  return `📟 X-commands:\n\`\`\`\n${body}\n\`\`\``;
+  const body = [...lines, `  ${'! or ?'.padEnd(maxUsage)} — this help`].join('\n');
+  return `📟 Commands:\n\`\`\`\n${body}\n\`\`\``;
 }

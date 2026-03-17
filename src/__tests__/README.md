@@ -18,7 +18,7 @@ Integration and unit tests for InfiniClaw source modules that don't live next to
 
 | File | Tests |
 |------|-------|
-| `command-registry.test.ts` | Validates `COMMANDS` array registration |
+| `command-registry.test.ts` | Validates `COMMANDS` array registration (supports both `!` and `?` prefixed commands) |
 | `ipc-auth.test.ts` | IPC auth boundary checks (includes sendReaction mock) |
 | `matrix-format.test.ts` | Matrix HTML formatting correctness |
 | `matrix-mentions.test.ts` | Mention pill symmetry: inbound `<m>` wrapping (handles bare `Name` and `@name` from pills, case-insensitive), outbound `<m>` → pill conversion, raw `@Name` → `<m>` conversion (display names use realistic pip-prefix format) |

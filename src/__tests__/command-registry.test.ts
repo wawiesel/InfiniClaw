@@ -47,9 +47,10 @@ describe('command registry', () => {
   it('every COMMANDS entry has a valid match function', () => {
     for (const cmd of COMMANDS) {
       expect(typeof cmd.match).toBe('function');
-      // Match either "!name" (prefix/exact) or "!name arg" (startsWith)
-      const matchesBare = cmd.match(`!${cmd.name}`);
-      const matchesWithArg = cmd.match(`!${cmd.name} test`);
+      // Match either "!name"/"?name" (prefix/exact) or with arg (startsWith)
+      const prefix = cmd.usage.startsWith('?') ? '?' : '!';
+      const matchesBare = cmd.match(`${prefix}${cmd.name}`);
+      const matchesWithArg = cmd.match(`${prefix}${cmd.name} test`);
       expect(matchesBare || matchesWithArg).toBe(true);
     }
   });

@@ -96,7 +96,16 @@ function profileEnvPath(_root: string, bot: string): string {
   return path.join(config.secretsPath, 'bots', bot, 'env');
 }
 
-/** Seed the registered_groups table with the main room from profile env. */
+/** Clear all room registrations so room transitions are atomic. */
+function clearRoomRegistrations(instanceBase: string): void {
+  const storeDir = path.join(instanceBase, 'store');
+  fs.mkdirSync(storeDir, { recursive: true });
+  const db = new Database(path.join(storeDir, 'messages.db'));
+  try { db.exec(`DELETE FROM registered_groups`); } catch { /* table may not exist yet */ }
+  finally { db.close(); }
+}
+
+/** Seed the registered_groups table with a room. */
 function seedMainRoomRegistration(instanceBase: string, mainJid: string, mainGroupName: string, mainGroupFolder: string, requiresTrigger: boolean): void {
   const storeDir = path.join(instanceBase, 'store');
   fs.mkdirSync(storeDir, { recursive: true });
@@ -293,11 +302,14 @@ export function deployBot(root: string, bot: string): void {
   // on every restart (#83).
   try { fs.copyFileSync(path.join(instance, 'package-lock.json'), lockDst); } catch { /* ok */ }
 
-  // Pre-register room: quarters room when status is 'quarters', duty room otherwise
+  // Pre-register room: quarters room when status is 'quarters', duty room otherwise.
+  // Clear stale registrations first — without this, a bot !wake'd in quarters still
+  // monitors the duty room from its previous !report deployment.
   const profileEnv = loadProfileEnv(root, bot);
   const fleet = loadFleet();
   const botStatus = fleet[bot]?.status;
   const quartersRoom = fleet[bot]?.quartersRoom;
+  clearRoomRegistrations(instance);
 
   if (botStatus === 'quarters' && quartersRoom) {
     // Bot is in quarters — seed quarters room as main
@@ -678,7 +690,8 @@ export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: s
   const botStatus = fleet[bot]?.status;
   const quartersRoom = fleet[bot]?.quartersRoom;
 
-  // Re-seed main room registration based on current fleet status
+  // Clear stale rooms then re-seed based on current fleet status
+  clearRoomRegistrations(instance);
   if (botStatus === 'quarters' && quartersRoom) {
     const quartersJid = `matrix:${quartersRoom}`;
     const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
