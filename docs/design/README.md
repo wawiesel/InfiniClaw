@@ -36,7 +36,8 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `17-skills.md` — Pooled capability modules per role
 - `18-deployment.md` — Code pipeline, holodeck simulation gates
 - `19-infrastructure.md` — Ships as VMs, Gitea/MinIO redundancy
-- `20-metrics.md` — Full metrics taxonomy: Productivity (messages/day, token throughput, score, task completion), Reliability (fleet availability ✅, uptime %, response latency, crashes, OOM, RSS), Autonomy (interventions, autonomy score, MTBI), Infrastructure (relay restarts, sync failures, fleet RSS). Marks ✅ tracked vs 🔲 planned. Token throughput, response latency, MTBI, fleet availability now ✅ implemented. Messages/day still 🔲 planned. All rolling 1d/7d — no cumulative totals.
+- `20-metrics.md` — Full metrics taxonomy
+- `21-fleets.md` — Fleet instances and staging: InfiniClaw00 (production/main) and InfiniClaw01 (staging/develop), branch model (feature→develop→main), `!promote` command, fleet-scoped S3 keys, bot transport between fleets for compatibility testing: Productivity (messages/day, token throughput, score, task completion), Reliability (fleet availability ✅, uptime %, response latency, crashes, OOM, RSS), Autonomy (interventions, autonomy score, MTBI), Infrastructure (relay restarts, sync failures, fleet RSS). Marks ✅ tracked vs 🔲 planned. Token throughput, response latency, MTBI, fleet availability now ✅ implemented. Messages/day still 🔲 planned. All rolling 1d/7d — no cumulative totals.
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
 
