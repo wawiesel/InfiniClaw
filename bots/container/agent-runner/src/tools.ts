@@ -872,6 +872,119 @@ Item fields for upsert:
     },
   );
 
+  // ── Metrics ─────────────────────────────────────────────────────────
+
+  server.tool(
+    'get_metrics',
+    'Get this bot\'s own performance metrics: current status, model, active groups, last error, and token usage from session history.',
+    {},
+    async () => {
+      const botName = process.env.NANOCLAW_ASSISTANT_NAME || 'unknown';
+      const lines: string[] = [`**Metrics for ${botName}**`];
+
+      // Read status snapshot written by main.ts every 30s
+      const statusPath = path.join(ipcDir, 'status.json');
+      let statusData: null | {
+        timestamp?: string;
+        bot?: string;
+        role?: string;
+        model?: string;
+        provider?: string;
+        groups?: Array<{
+          name: string;
+          active?: boolean;
+          hasProcess?: boolean;
+          currentObjective?: string;
+          lastProgress?: string;
+          lastProgressAt?: number;
+          lastError?: string;
+          lastErrorAt?: number;
+          pendingMessages?: boolean;
+          pendingTasks?: number;
+        }>;
+      } = null;
+
+      try {
+        statusData = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
+      } catch { /* not yet written */ }
+
+      if (statusData) {
+        lines.push(`Snapshot: ${statusData.timestamp ?? 'unknown'}`);
+        lines.push(`Model: ${statusData.model ?? '?'} (${statusData.provider ?? '?'})`);
+        lines.push(`Role: ${statusData.role ?? '?'}`);
+        lines.push('');
+
+        for (const g of statusData.groups ?? []) {
+          lines.push(`**Group: ${g.name}**`);
+          lines.push(`  active=${g.active ?? false}  process=${g.hasProcess ?? false}  pendingTasks=${g.pendingTasks ?? 0}`);
+          if (g.currentObjective) {
+            const obj = g.currentObjective.length > 120 ? g.currentObjective.slice(0, 117) + '...' : g.currentObjective;
+            lines.push(`  objective: ${obj}`);
+          }
+          if (g.lastProgress) {
+            const prog = g.lastProgress.length > 120 ? g.lastProgress.slice(0, 117) + '...' : g.lastProgress;
+            const agoMs = g.lastProgressAt ? Date.now() - g.lastProgressAt : null;
+            const ago = agoMs != null ? ` (${Math.round(agoMs / 60000)}m ago)` : '';
+            lines.push(`  last progress${ago}: ${prog}`);
+          }
+          if (g.lastError) {
+            const err = g.lastError.length > 120 ? g.lastError.slice(0, 117) + '...' : g.lastError;
+            const agoMs = g.lastErrorAt ? Date.now() - g.lastErrorAt : null;
+            const ago = agoMs != null ? ` (${Math.round(agoMs / 60000)}m ago)` : '';
+            lines.push(`  last error${ago}: ${err}`);
+          }
+        }
+      } else {
+        lines.push('Status snapshot unavailable (written every 30s).');
+      }
+
+      // Token usage from JSONL session files (mounted at /home/node/.claude/projects)
+      const sessionDir = '/home/node/.claude/projects';
+      const cutoff1d = Date.now() - 86_400_000;
+      let totalTokens1d = 0;
+      let hasTokenData = false;
+
+      try {
+        for (const projectDir of fs.readdirSync(sessionDir)) {
+          const projectPath = path.join(sessionDir, projectDir);
+          try { if (!fs.statSync(projectPath).isDirectory()) continue; } catch { continue; }
+          for (const file of fs.readdirSync(projectPath)) {
+            if (!file.endsWith('.jsonl')) continue;
+            const filePath = path.join(projectPath, file);
+            try { if (fs.statSync(filePath).mtimeMs < cutoff1d) continue; } catch { continue; }
+            try {
+              const content = fs.readFileSync(filePath, 'utf-8');
+              for (const line of content.split('\n')) {
+                if (!line.trim()) continue;
+                try {
+                  const d = JSON.parse(line) as {
+                    timestamp?: string;
+                    message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } };
+                  };
+                  if (!d.timestamp || !d.message?.usage) continue;
+                  if (new Date(d.timestamp).getTime() < cutoff1d) continue;
+                  const u = d.message.usage;
+                  totalTokens1d += (u.input_tokens ?? 0) + (u.output_tokens ?? 0)
+                    + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+                  hasTokenData = true;
+                } catch { /* skip bad lines */ }
+              }
+            } catch { /* skip unreadable files */ }
+          }
+        }
+      } catch { /* sessionDir unavailable */ }
+
+      lines.push('');
+      if (hasTokenData) {
+        lines.push(`Token usage (1d): ${totalTokens1d.toLocaleString()} tokens`);
+      } else {
+        lines.push('Token usage: no session data found.');
+      }
+
+      return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    },
+  );
+
   // ── Delegate tools ──────────────────────────────────────────────────
 
   registerDelegateTools(server, {
