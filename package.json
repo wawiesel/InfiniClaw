@@ -7,7 +7,7 @@
     "external/nanoclaw"
   ],
   "scripts": {
-    "build": "npm install --ignore-scripts 2>/dev/null; npm run build -w nanoclaw; npx tsc",
+    "build": "npm install --ignore-scripts 2>/dev/null; npm rebuild better-sqlite3 -w nanoclaw; npm run build -w nanoclaw; npx tsc",
     "dev": "npm run build -w nanoclaw && tsc --watch",
     "cli": "node dist/cli.js",
     "test": "vitest run --root .",

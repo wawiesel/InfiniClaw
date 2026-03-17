@@ -92,6 +92,14 @@ npx vitest run --root .
 
 Test timeout is configured in `vitest.config.ts` (10s default to accommodate pm2-dependent metrics tests).
 
+If tests fail with `better-sqlite3` native module errors (e.g. after a Node.js version change), rebuild the native module:
+
+```bash
+cd external/nanoclaw && npm rebuild better-sqlite3
+```
+
+The `npm run build` script includes this rebuild step automatically.
+
 ## Hooks
 
 `.claude/hooks/` contains PostToolUse hooks that enforce architectural rules:
