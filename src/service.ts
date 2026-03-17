@@ -658,17 +658,44 @@ export function restartBotForRoom(root: string, bot: string): void {
     const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
     seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
   } else {
-    // Bot is onduty — derive duty room from ROLE_ROOMS, not env MAIN_GROUP_NAME
+    // Bot is onduty — derive duty room from ROLE_ROOMS + intercom.json
     const role = (fleet[bot]?.role ?? '').toLowerCase();
     const dutyRoom = ROLE_ROOMS[role];
-    const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
     const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
     if (dutyRoom) {
-      // Use the duty room name (e.g. "engineering") as the group name
-      seedMainRoomRegistration(instance, mainJid || '', dutyRoom.room, mainGroupFolder, true);
-    } else if (mainJid && profileEnv.MAIN_GROUP_NAME) {
-      // Fallback: use env MAIN_GROUP_NAME (shouldn't normally reach here for onduty bots)
-      seedMainRoomRegistration(instance, mainJid, profileEnv.MAIN_GROUP_NAME, mainGroupFolder, true);
+      // Look up the duty room's Matrix room ID from intercom.json
+      let dutyRoomJid = '';
+      try {
+        const secretsPath = path.join(root, '..', '..', '.config', 'infiniclaw', 'secrets');
+        const intercom = JSON.parse(fs.readFileSync(path.join(secretsPath, 'operator', 'intercom.json'), 'utf-8'));
+        const roomConfig = intercom.rooms?.[dutyRoom.room];
+        if (roomConfig?.roomId) {
+          dutyRoomJid = `matrix:${roomConfig.roomId}`;
+        }
+      } catch { /* intercom.json not found — fall through */ }
+      if (!dutyRoomJid) {
+        // Fallback: try SECRETS_PATH from process.env
+        const envSecretsPath = process.env['SECRETS_PATH'] || process.env['INFINICLAW_SECRETS'];
+        if (envSecretsPath) {
+          try {
+            const intercom = JSON.parse(fs.readFileSync(path.join(envSecretsPath, 'operator', 'intercom.json'), 'utf-8'));
+            const roomConfig = intercom.rooms?.[dutyRoom.room];
+            if (roomConfig?.roomId) {
+              dutyRoomJid = `matrix:${roomConfig.roomId}`;
+            }
+          } catch { /* not available */ }
+        }
+      }
+      if (dutyRoomJid) {
+        seedMainRoomRegistration(instance, dutyRoomJid, dutyRoom.room, mainGroupFolder, true);
+      }
+    }
+    if (!dutyRoom) {
+      // No duty room for this role — use env MAIN_GROUP_NAME as fallback
+      const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
+      if (mainJid && profileEnv.MAIN_GROUP_NAME) {
+        seedMainRoomRegistration(instance, mainJid, profileEnv.MAIN_GROUP_NAME, mainGroupFolder, true);
+      }
     }
   }
 
