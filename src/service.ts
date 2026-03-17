@@ -13,10 +13,9 @@ import Database from 'better-sqlite3';
 
 import { parseEnvFile } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
-import { ROLE_ROOMS } from './ship-config.js';
 import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 
-import { loadShipConfig, loadFleet, isValidBotName } from './ship-config.js';
+import { loadShipConfig, loadFleet, isValidBotName, ROLE_ROOMS } from './ship-config.js';
 import { shellQuote, errStr } from './utils.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -307,13 +306,36 @@ export function deployBot(root: string, bot: string): void {
     seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
     console.log(`${bot}: pre-registered quarters (${quartersName})`);
   } else {
-    // Bot is on duty or other — seed duty room
-    const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
-    const mainGroupName = profileEnv.MAIN_GROUP_NAME;
-    const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
-    if (mainJid && mainGroupName) {
-      seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
-      console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
+    // Bot is on duty or other — derive duty room from ROLE_ROOMS + intercom.json
+    const role = (fleet[bot]?.role ?? '').toLowerCase();
+    const dutyRoom = ROLE_ROOMS[role];
+    if (dutyRoom) {
+      // Look up the duty room's Matrix room ID from intercom.json
+      let dutyRoomJid = '';
+      const secretsPath = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets');
+      try {
+        const intercom = JSON.parse(fs.readFileSync(path.join(secretsPath, 'operator', 'intercom.json'), 'utf-8'));
+        const roomConfig = intercom.rooms?.[dutyRoom.room];
+        if (roomConfig?.roomId) {
+          dutyRoomJid = `matrix:${roomConfig.roomId}`;
+        }
+      } catch { /* intercom.json not found — fall through */ }
+      if (dutyRoomJid) {
+        seedMainRoomRegistration(instance, dutyRoomJid, dutyRoom.room, dutyRoom.room, true);
+        console.log(`${bot}: pre-registered duty room ${dutyRoom.room}`);
+      } else {
+        console.log(`${bot}: no intercom.json entry for ${dutyRoom.room} — room seed skipped`);
+      }
+    }
+    if (!dutyRoom) {
+      // No duty room for this role — use env MAIN_GROUP_NAME as fallback
+      const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
+      const mainGroupName = profileEnv.MAIN_GROUP_NAME;
+      const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+      if (mainJid && mainGroupName) {
+        seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
+        console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
+      }
     }
   }
 
