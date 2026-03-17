@@ -30,7 +30,7 @@ export function gitSyncRepo(cwd: string, targetRef = 'origin/main'): { pulled: n
   if (fs.existsSync(path.join(cwd, '.git', 'REBASE_HEAD'))) {
     try { execSync('git rebase --abort', opts); } catch { /* ignore */ }
   }
-  execSync('git fetch origin --tags', opts);
+  execSync('git fetch origin --tags --force', opts);
   const pulled = parseInt(
     execSync(`git rev-list HEAD..${targetRef} --count`, { ...opts, timeout: 5_000 }).trim(),
     10,
