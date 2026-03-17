@@ -698,6 +698,7 @@ function botVersion(root: string, bot: string): string {
 const RELAY_S3_PREFIX = 'relay';
 const FLEET_S3_PREFIX = 'fleet-report';
 const FLEET_ASSEMBLED_S3_KEY = 'fleet-assembled/latest.json';
+const METRICS_ASSEMBLED_S3_KEY = 'metrics-assembled/latest.json';
 let localCommitEpoch = 0; // epoch seconds of HEAD commit the relay is running
 
 /** Read the commit timestamp of the code this relay is actually running. Called once at startup and after rebuilds. */
@@ -3412,10 +3413,37 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
       if (healthReport) uploadHealthToS3(healthReport).catch(() => {});
     }
 
+    const cmdTs = Date.now();
     const qBot = Object.entries(liveFleet).find(([, e]) => e.quartersRoom === conn.roomId);
     const isLocal = !!qBot; // quarters-room commands are always local; BTC goes through speaker check
     const speaker = !isLocal && await electSpeaker();
-    if (!isLocal && !speaker) return;
+
+    if (!isLocal && !speaker) {
+      // Speaker failover: stagger by rank, then check if speaker already responded.
+      // If S3 is unavailable, stay silent to avoid duplicate responses.
+      const s3 = getS3Client();
+      if (!s3) return;
+      const myRank = findShipByHostname()?.[1]?.rank ?? 99;
+      await sleep(myRank * 3_000);
+      try {
+        const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: METRICS_ASSEMBLED_S3_KEY }));
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+        const claim = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { ts: number };
+        if (claim.ts && claim.ts > cmdTs - 1_000) return; // speaker already responded
+      } catch { /* no claim yet — proceed as fallback assembler */ }
+    }
+
+    // Write assembly claim so other relays know this ship is responding
+    const s3ForClaim = getS3Client();
+    if (s3ForClaim && !isLocal) {
+      s3ForClaim.client.send(new PutObjectCommand({
+        Bucket: s3ForClaim.bucket,
+        Key: METRICS_ASSEMBLED_S3_KEY,
+        Body: Buffer.from(JSON.stringify({ assembler: HOSTNAME, ts: Date.now() })),
+        ContentType: 'application/json',
+      })).catch(() => {});
+    }
 
     // For 'all' scope: aggregate metrics from all ships via S3.
     let text: string;
@@ -3424,7 +3452,7 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
       const allSnapshots = await fetchAllMetricsSnapshots();
       // Fetch health in parallel with the already-elapsed wait
       let healthReports: Array<{ ship: string; data: Record<string, unknown> }> = [];
-      if (wantsHealth && speaker) {
+      if (wantsHealth) {
         healthReports = await fetchAllHealthReports();
       }
       text = allSnapshots.length > 0
@@ -3432,8 +3460,8 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
         : formatScopeMetrics(snapshot, scope);
     } else {
       text = formatScopeMetrics(snapshot, scope);
-      // Speaker appends health summary to fleet scope output.
-      if (wantsHealth && speaker) {
+      // Assembler appends health summary to fleet scope output.
+      if (wantsHealth && !isLocal) {
         await sleep(3_000);
         const healthReports = await fetchAllHealthReports();
         if (healthReports.length > 0) {
