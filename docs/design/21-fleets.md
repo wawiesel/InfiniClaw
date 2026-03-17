@@ -82,9 +82,9 @@ git rev-list HEAD..origin/<branch> --count
 git pull --rebase origin <branch>
 ```
 
-## Fleet Isolation
+## Matrix Topology
 
-### Matrix Rooms
+### Fleet Spaces (bot work)
 
 Each fleet instance has its own Matrix space and duty rooms:
 
@@ -94,6 +94,58 @@ Each fleet instance has its own Matrix space and duty rooms:
 | IC01 | 🧪 InfiniClaw01 | 🧪⚙️ Engineering | 🧪🌉 Bridge | 🧪🔭 Astrometrics |
 
 BehindTheCurtain is shared — the Captain sees both fleets.
+
+### Systems Space (infrastructure)
+
+A **Systems** space contains one room per system (physical machine). This separates infrastructure from bot work.
+
+```
+🖥️ Systems (space)
+├── 🖥️🦁 HERACLES          # system room for HERACLES
+├── 🖥️🔱 Poseidon           # system room for Poseidon
+├── 🖥️🪽 Herm               # system room for Herm
+└── 🖥️🧪 Staging1           # system room for staging host
+```
+
+Each system room has exactly two permanent members:
+- **Relay** — posts heartbeat status, git sync results, health summaries, build results
+- **Operator** — receives Captain messages targeted to this system, posts intervention logs
+
+The Captain joins all system rooms. Bots do not join system rooms.
+
+#### Purpose
+
+| Use case | How |
+|----------|-----|
+| Talk to one operator | `@operator` in that system's room |
+| See relay heartbeat | Relay posts periodic status to its system room |
+| Debug a system | Read the system room — all relay events are there |
+| Isolate noise | Relay status no longer pollutes Engineering or Bridge |
+
+#### Relay Heartbeat
+
+The relay posts a periodic status message to its system room (not duty rooms):
+
+```
+🟢 Herc · v1.3.14 · 3h uptime · ↻2 restarts · sync 30s ago
+├ murdock: quarters · 2h · 0 restarts
+└ nora: sleep
+```
+
+Frequency: every 5 minutes, or on significant events (restart, sync, bot lifecycle change).
+
+#### Operator Addressing
+
+Today, `@operator` in BTC is received by all ships' operators (speaker gate controls who replies). With system rooms, the Captain can address a specific system's operator directly:
+
+- `@operator` in 🖥️🦁 HERACLES → only Herc's operator responds
+- `@operator` in BTC → speaker gate as before (fleet-wide)
+
+This replaces the need for `!operator on herc` — just message the system room directly.
+
+#### Intercom Accounts
+
+Each system room uses the ship's existing intercom account (or a new `@systems-intercom` if isolation is needed). The relay connects to its system room the same way it connects to duty rooms.
 
 ### Secrets Repo
 
