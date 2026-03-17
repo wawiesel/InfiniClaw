@@ -493,6 +493,9 @@ function rebuildInfiniClaw(): string {
     const execOpts = { cwd: root, encoding: 'utf-8' as const, stdio: 'pipe' as const, env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` } };
     // Install deps, build workspace package, then compile TypeScript
     execSync('npm install --ignore-scripts', { ...execOpts, timeout: 120_000 });
+    // Rebuild native modules for the running Node version — prebuilt binaries from
+    // npm install may be compiled for a different Node ABI (e.g. Node 22 vs 24).
+    execSync('npm rebuild better-sqlite3', { ...execOpts, timeout: 60_000 });
     execSync('npm run build -w nanoclaw', { ...execOpts, timeout: 120_000 });
     execSync('npx tsc', { ...execOpts, timeout: 180_000 });
     try { installGitHooks(); } catch { /* best effort */ }
@@ -694,6 +697,7 @@ function botVersion(root: string, bot: string): string {
 
 const RELAY_S3_PREFIX = 'relay';
 const FLEET_S3_PREFIX = 'fleet-report';
+const FLEET_ASSEMBLED_S3_KEY = 'fleet-assembled/latest.json';
 let localCommitEpoch = 0; // epoch seconds of HEAD commit the relay is running
 
 /** Read the commit timestamp of the code this relay is actually running. Called once at startup and after rebuilds. */
@@ -3727,17 +3731,44 @@ function registerRelayCommands(): void {
 
     fleet: async (cmd, conn) => {
       try {
-        // Every ship publishes its report, then only the speaker assembles
-        // Run publish + election concurrently for instant thread root
+        // Every relay publishes its own report to S3, then the lowest-rank available relay
+        // assembles and responds. FLEET_ASSEMBLED_S3_KEY is used as a coordination lock so
+        // only one relay posts the assembled view even when the elected speaker is down.
+        const cmdTs = Date.now();
         const [report, isSpeaker] = await Promise.all([publishFleetReport(), electSpeaker()]);
-        if (!isSpeaker) return;
+        const s3 = getS3Client();
+
+        if (!isSpeaker) {
+          // Non-speaker: stagger by ship rank so the speaker gets first crack.
+          // If S3 is unavailable, stay silent (can't coordinate — risk of duplicates).
+          if (!s3) return;
+          const myRank = findShipByHostname()?.[1]?.rank ?? 99;
+          await sleep(myRank * 3_000);
+          // Check if another relay already assembled (fresh claim within 30s of this command)
+          try {
+            const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: FLEET_ASSEMBLED_S3_KEY }));
+            const chunks: Uint8Array[] = [];
+            for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
+            const claim = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { ts: number };
+            if (claim.ts && claim.ts > cmdTs - 1_000) return; // already assembled
+          } catch { /* no claim yet — proceed as fallback assembler */ }
+        }
 
         // Fleet health grade computed after assembling all reports
         let threadRoot: string | undefined;
 
         const ships = safeLoadShips();
         const allShipNames = Object.keys(ships);
-        const s3 = getS3Client();
+
+        // Write assembly claim to S3 so other relays know someone is assembling
+        if (s3) {
+          s3.client.send(new PutObjectCommand({
+            Bucket: s3.bucket,
+            Key: FLEET_ASSEMBLED_S3_KEY,
+            Body: Buffer.from(JSON.stringify({ assembler: HOSTNAME, ts: Date.now() })),
+            ContentType: 'application/json',
+          })).catch(() => {});
+        }
 
         // Poll S3 for fresh reports (up to 5s), then read stale as fallback
         const freshReports: Record<string, FleetReport> = { [thisShipName()]: report };
