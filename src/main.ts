@@ -112,7 +112,7 @@ import { uploadContent, uploadHtml, getPresignedUrl } from './s3-sync.js';
 import { errStr, escapeRegex, envInt } from './utils.js';
 import { exportHistoryToS3 } from './history-export.js';
 
-import { GIT_VERSION, SEMVER_TAG } from './version.js';
+import { GIT_VERSION, SEMVER_TAG, getLatestSemverTag } from './version.js';
 import { runContainerAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
@@ -138,7 +138,8 @@ function botDisplayName(badge: string): string {
     // Map transient pips to health grades; default to 'A' (🟢)
     const healthMap: Record<string, string> = { '🔴': 'F', '🟡': 'B', '🟠': 'C' };
     const health = healthMap[badge] ?? 'A';
-    return unifiedBotDisplay({ name: ASSISTANT_NAME, shipEmoji, locationEmoji, health, tokPerDay: 0, status: entry.status, role, rank: entry.rank, isChief, version: SEMVER_TAG ?? undefined }, 'short');
+    const version = SEMVER_TAG ?? getLatestSemverTag(resolveRoot()) ?? undefined;
+    return unifiedBotDisplay({ name: ASSISTANT_NAME, shipEmoji, locationEmoji, health, tokPerDay: 0, status: entry.status, role, rank: entry.rank, isChief, version }, 'short');
   } catch {
     return `${badge} ${capitalizeName(ASSISTANT_NAME)}`; // fallback if fleet unavailable
   }
