@@ -84,8 +84,8 @@ if [[ "$role" == "engineer" ]]; then
     exit 1
   fi
   if echo "$staged" | grep -q '^external/'; then
-    if [[ "${IS_CO:-}" != "true" ]]; then
-      echo "ERROR: only the CO engineer can modify external/"
+    if [[ "${IsChief:-}" != "true" ]]; then
+      echo "ERROR: only the Chief engineer can modify external/"
       exit 1
     fi
   fi

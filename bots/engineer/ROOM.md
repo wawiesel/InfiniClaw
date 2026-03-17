@@ -12,7 +12,7 @@ If there are open GitHub issues labeled `bug`, the commanding engineer must addr
 
 ## Activation
 
-The Commanding Officer (CO) — defined as the lowest rank present via `fleet.json` and the `IS_CO` env var — handles all general messages on the main timeline. 
+The Commanding Officer (CO) — defined as the lowest rank present via `fleet.json` and the `IsChief` env var — handles all general messages on the main timeline. 
 
 Other engineers respond when:
 - Addressed by name (e.g., `Cid` or `@Parker`)

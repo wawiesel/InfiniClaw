@@ -312,10 +312,10 @@ function writeCrewStatus(root: string, bot: string): void {
 
   interface CrewEntry {
     name: string; role: string; rank: number; title?: string;
-    room: string; present: boolean; isCommandingOfficer: boolean;
+    room: string; present: boolean; isChief: boolean;
   }
 
-  const raw: (Omit<CrewEntry, 'isCommandingOfficer'>)[] = [];
+  const raw: (Omit<CrewEntry, 'isChief'>)[] = [];
   for (const [name, entry] of Object.entries(liveFleet)) {
     const present = entry.status !== 'sleep' && entry.status !== 'dream';
     let room = 'Quarters';
@@ -323,7 +323,7 @@ function writeCrewStatus(root: string, bot: string): void {
       const dutyRoom = ROLE_ROOMS[entry.role?.toLowerCase() ?? '']?.room;
       room = dutyRoom ? capitalizeName(dutyRoom) : 'Duty Room';
     }
-    const e: Omit<CrewEntry, 'isCommandingOfficer'> = { name: capitalizeName(name), role: entry.role, rank: entry.rank, room, present };
+    const e: Omit<CrewEntry, 'isChief'> = { name: capitalizeName(name), role: entry.role, rank: entry.rank, room, present };
     if (entry.title) e.title = entry.title;
     raw.push(e);
   }
@@ -340,7 +340,7 @@ function writeCrewStatus(root: string, bot: string): void {
 
   const crew: CrewEntry[] = raw
     .sort((a, b) => a.rank - b.rank)
-    .map(e => ({ ...e, isCommandingOfficer: e.present && coByRoom[e.room] === e.name }));
+    .map(e => ({ ...e, isChief: e.present && coByRoom[e.room] === e.name }));
 
   try {
     fs.writeFileSync(

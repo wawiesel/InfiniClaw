@@ -134,7 +134,7 @@ function botDisplayName(badge: string): string {
     const isOnDuty = entry.status === 'onduty';
     const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
     // Chief is a duty room concept — only show ⭐ when onduty (design: 09-roles-and-rooms.md).
-    const isChief = isOnDuty && (process.env.IS_CO === 'true' || badge === '⭐');
+    const isChief = isOnDuty && (process.env.IsChief === 'true' || badge === '⭐');
     // Map transient pips to health grades; default to 'A' (🟢)
     const healthMap: Record<string, string> = { '🔴': 'F', '🟡': 'B', '🟠': 'C' };
     const health = healthMap[badge] ?? 'A';
@@ -256,11 +256,11 @@ async function rerankCO(chatJid: string): Promise<void> {
 
   if (coBotName === ASSISTANT_NAME && previousCO !== ASSISTANT_NAME) {
     // This bot was promoted to CO
-    process.env.IS_CO = 'true';
+    process.env.IsChief = 'true';
     await matrixRef.setDisplayName(botDisplayName('⭐'));
   } else if (previousCO === ASSISTANT_NAME && coBotName !== ASSISTANT_NAME) {
     // This bot was demoted from CO
-    process.env.IS_CO = '';
+    process.env.IsChief = '';
     await matrixRef.setDisplayName(botDisplayName('🟢'));
   }
 }
@@ -1663,7 +1663,7 @@ async function main(): Promise<void> {
       roomCO[jid] = coBotName;
       if (coBotName === ASSISTANT_NAME) {
         initialBadge = '⭐';
-        process.env.IS_CO = 'true';
+        process.env.IsChief = 'true';
       }
     }
   } catch (err) {
