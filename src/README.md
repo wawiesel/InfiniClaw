@@ -171,3 +171,5 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Branch brain HOME fix** (`relay.ts`): `childEnv['HOME']` is now explicitly set to `process.env.HOME` so host-path branch brains write `.claude` session data to the correct writable location, not the container-era `/home/claude` path.
 
 - **S3 shutdown flush** (`relay.ts`): `shutdown()` handler now calls `await pushAll(resolveRoot())` on SIGTERM/SIGINT to back up fleet state to S3 on every graceful stop.
+
+- **Health watchdog** (`relay.ts`): `healthWatchdogLoop()` runs every `HEALTH_WATCHDOG_INTERVAL_MS` (default 5 min). The elected speaker checks all ships' S3 health report timestamps; if any report is >30 min stale, posts a warning to BTC via `postToBTC()`. Clears the alert when the report recovers. Uses `stalenessAlerted` set to fire each alert only once per staleness episode.
