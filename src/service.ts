@@ -13,6 +13,7 @@ import Database from 'better-sqlite3';
 
 import { parseEnvFile } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
+import { ROLE_ROOMS } from './ship-config.js';
 import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
 
 import { loadShipConfig, loadFleet, isValidBotName } from './ship-config.js';
@@ -657,11 +658,17 @@ export function restartBotForRoom(root: string, bot: string): void {
     const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
     seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
   } else {
+    // Bot is onduty — derive duty room from ROLE_ROOMS, not env MAIN_GROUP_NAME
+    const role = (fleet[bot]?.role ?? '').toLowerCase();
+    const dutyRoom = ROLE_ROOMS[role];
     const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
-    const mainGroupName = profileEnv.MAIN_GROUP_NAME;
     const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
-    if (mainJid && mainGroupName) {
-      seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
+    if (dutyRoom) {
+      // Use the duty room name (e.g. "engineering") as the group name
+      seedMainRoomRegistration(instance, mainJid || '', dutyRoom.room, mainGroupFolder, true);
+    } else if (mainJid && profileEnv.MAIN_GROUP_NAME) {
+      // Fallback: use env MAIN_GROUP_NAME (shouldn't normally reach here for onduty bots)
+      seedMainRoomRegistration(instance, mainJid, profileEnv.MAIN_GROUP_NAME, mainGroupFolder, true);
     }
   }
 
