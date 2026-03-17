@@ -106,6 +106,7 @@ const GITHUB_REPO_URL = 'https://github.com/wawiesel/InfiniClaw';
 const GIT_SYNC_INTERVAL = envInt('GIT_SYNC_INTERVAL', 3 * 60_000);          // default 3 min
 const SECRETS_SYNC_INTERVAL = envInt('SECRETS_SYNC_INTERVAL', 30_000);       // default 30s
 const HEALTH_INTERVAL = envInt('HEALTH_INTERVAL', 30 * 60_000);              // default 30 min
+const STALE_HEALTH_ALERT_MS = envInt('STALE_HEALTH_ALERT_MS', STALE_HEALTH_THRESHOLD_MS); // default 30 min
 const GIT_SYNC_PUSH_TIMEOUT_MS = envInt('GIT_SYNC_PUSH_TIMEOUT_MS', 60_000); // default 60s (#104)
 
 // ── Failure alerting (thread + exponential backoff) ─────────────────
@@ -1309,7 +1310,7 @@ async function checkCrossShipHealthStaleness(): Promise<void> {
   const now = Date.now();
   for (const { ship, data } of reports) {
     if (ship === myShip) continue; // we just uploaded ours
-    if (isHealthReportStale(data, STALE_HEALTH_THRESHOLD_MS, now)) {
+    if (isHealthReportStale(data, STALE_HEALTH_ALERT_MS, now)) {
       const ts = parseHealthReportTs(data);
       const ageMin = Math.round((now - ts) / 60_000);
       await postToBTC(
