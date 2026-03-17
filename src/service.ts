@@ -687,7 +687,10 @@ export function restartBotForRoom(root: string, bot: string): void {
         }
       }
       if (dutyRoomJid) {
-        seedMainRoomRegistration(instance, dutyRoomJid, dutyRoom.room, mainGroupFolder, true);
+        // Use the duty room name as BOTH the group name AND folder name.
+        // The relay writes IPC messages to ipc/<roomName>/input/, so the
+        // folder must match the room name for the IPC watcher to find them.
+        seedMainRoomRegistration(instance, dutyRoomJid, dutyRoom.room, dutyRoom.room, true);
       }
     }
     if (!dutyRoom) {
