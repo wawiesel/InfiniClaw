@@ -89,6 +89,9 @@ RUN printf '#!/bin/bash\nset -e\ncat > /tmp/input.json\nnode /app/dist/index.js 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace
 
+# Claude Code v2.1.76+ Bash sandbox uses /home/claude/ regardless of $HOME
+RUN mkdir -p /home/claude/.claude && chown -R node:node /home/claude
+
 # Switch to non-root user
 USER node
 
