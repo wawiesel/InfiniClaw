@@ -128,7 +128,7 @@ function buildVolumeMounts(
 
   // Project root — rw for engineers (they need to edit code), ro for others
   if (isMain) {
-    const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
+    const role = (normalizedSecrets.ASSISTANT_ROLE || process.env.ASSISTANT_ROLE || '').toLowerCase();
     const projectReadonly = role !== 'engineer';
     mounts.push({ hostPath: projectRoot, containerPath: '/workspace/project', readonly: projectReadonly });
   }
@@ -174,6 +174,7 @@ function buildVolumeMounts(
   // InfiniClaw additional mounts (persona, memory, cache, ssh, home ro, allowlist)
   mounts.push(...buildInfiniClawMounts({
     group, isMain, groupSessionsDir, groupsDir: GROUPS_DIR, dataDir: DATA_DIR, projectRoot,
+    secrets: normalizedSecrets,
   }));
 
   return mounts;

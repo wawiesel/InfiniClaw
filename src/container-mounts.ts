@@ -21,6 +21,7 @@ export interface InfiniClawMountOptions {
   groupsDir: string;
   dataDir: string;
   projectRoot: string;
+  secrets?: Record<string, string>;
 }
 
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/;
@@ -117,16 +118,16 @@ function normalizePathSegment(value: string | undefined, envVar: string): string
  * Returns additional VolumeMount entries to append to the base mounts.
  */
 export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount[] {
-  const { group, isMain, groupSessionsDir, groupsDir: _groupsDir, dataDir, projectRoot } = opts;
+  const { group, isMain, groupSessionsDir, groupsDir: _groupsDir, dataDir, projectRoot, secrets } = opts;
   void isMain;
   void _groupsDir;
   const mounts: VolumeMount[] = [];
   const homeDir = os.homedir();
 
-  const rootDir = process.env.INFINICLAW_ROOT?.trim();
+  const rootDir = (secrets?.INFINICLAW_ROOT || process.env.INFINICLAW_ROOT)?.trim();
   const rootBase = rootDir ? normalizeBasePath(rootDir) : undefined;
-  const role = normalizePathSegment((process.env.ASSISTANT_ROLE || '').toLowerCase(), 'ASSISTANT_ROLE');
-  const personaName = normalizePathSegment(process.env.PERSONA_NAME, 'PERSONA_NAME');
+  const role = normalizePathSegment((secrets?.ASSISTANT_ROLE || process.env.ASSISTANT_ROLE || '').toLowerCase(), 'ASSISTANT_ROLE');
+  const personaName = normalizePathSegment(secrets?.PERSONA_NAME || process.env.PERSONA_NAME, 'PERSONA_NAME');
 
   // Sync role-assigned skills from the pool
   const skillsDst = path.join(groupSessionsDir, 'skills');
