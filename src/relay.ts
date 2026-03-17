@@ -2798,6 +2798,42 @@ async function healthLoop(): Promise<void> {
   }
 }
 
+// ── Health watchdog — alert BTC when a ship's S3 health report goes stale ──
+
+const HEALTH_WATCHDOG_INTERVAL_MS = envInt('HEALTH_WATCHDOG_INTERVAL_MS', 5 * 60_000);
+const HEALTH_STALE_THRESHOLD_MS = 30 * 60_000;
+const stalenessAlerted = new Set<string>();
+
+async function healthWatchdogLoop(): Promise<void> {
+  await sleep(2 * 60_000);
+  while (true) {
+    try {
+      if (getS3Client() && await electSpeaker()) {
+        const reports = await fetchAllHealthReports();
+        const now = Date.now();
+        for (const { ship, data } of reports) {
+          const tsMs = new Date(String(data.ts ?? '')).getTime();
+          if (isNaN(tsMs)) continue;
+          const ageMs = now - tsMs;
+          if (ageMs > HEALTH_STALE_THRESHOLD_MS) {
+            if (!stalenessAlerted.has(ship)) {
+              stalenessAlerted.add(ship);
+              const ageMin = Math.round(ageMs / 60_000);
+              await postToBTC(`⚠️ Health watchdog: ${ship} S3 health report stale ${ageMin}min — relay may be down`);
+            }
+          } else if (stalenessAlerted.has(ship)) {
+            stalenessAlerted.delete(ship);
+            await postToBTC(`✅ Health watchdog: ${ship} health report recovered`);
+          }
+        }
+      }
+    } catch (err) {
+      log(`health watchdog error: ${errStr(err)}`);
+    }
+    await sleep(HEALTH_WATCHDOG_INTERVAL_MS);
+  }
+}
+
 // ── Metrics loop — periodic S3 publish ──────────────────────────────
 
 const METRICS_INTERVAL = envInt('METRICS_INTERVAL_MS', 5 * 60_000); // 5 min default
@@ -4826,6 +4862,7 @@ async function main(): Promise<void> {
   dutyCycleLoop(conns).catch((err) => log(`duty cycle loop fatal: ${errStr(err)}`));
   curtainLoop(captainUserId).catch((err) => log(`curtain loop fatal: ${errStr(err)}`));
   metricsLoop().catch((err) => log(`metrics loop fatal: ${errStr(err)}`));
+  healthWatchdogLoop().catch((err) => log(`health watchdog fatal: ${errStr(err)}`));
 
   await Promise.all(loops);
 }
