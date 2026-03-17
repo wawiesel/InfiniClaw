@@ -21,11 +21,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build TypeScript
-        run: npx tsc
-
       - name: Build nanoclaw
         run: npm run build -w nanoclaw
+
+      - name: Build TypeScript
+        run: npx tsc
 
       - name: Run tests
         run: npx vitest run
