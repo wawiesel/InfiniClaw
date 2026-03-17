@@ -66,7 +66,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'deny',          usage: '!deny <bot> <path>',        description: 'revoke rw mount (authorized)',         match: startsWith('deny') },
   { name: 'operator',      usage: '!operator [on|off|reset] [ship]', description: 'operator relay toggle or restart',  match: prefix('operator') },
   { name: 'metrics',       usage: '!metrics [scope]',            description: 'metrics (context-aware, 1d/7d)',       match: prefix('metrics') },
-  { name: 'wbs',           usage: '!wbs [room]',                 description: 'show work breakdown structure',        match: prefix('wbs') },
+  { name: 'wbs',           usage: '!wbs [room] | !wbs x <id>',   description: 'show WBS; x <id> marks item done',     match: prefix('wbs') },
 ];
 
 /** Register a handler for a command by name. */
