@@ -22,6 +22,25 @@ Captain ←→ Matrix ←→ Bots (direct)
 - **Reactions**: relay reacts to messages (📡 for acknowledgment) to signal coordination to other relays.
 - **Announcements**: relay posts its own messages via loudspeaker (lifecycle events, heartbeats, alerts).
 
+### Relay Performance
+
+The relay is pure event processing — no LLM calls, no heavy computation. Response time is bounded by Matrix + S3 latency, never by compute. If an operation takes >100ms, it's a bug or needs to be made async with immediate acknowledgment.
+
+Slow operations (git fetch, podman run, image build) are fire-and-forget with instant acknowledgment. The relay posts "starting..." immediately and updates when the operation completes.
+
+### Relay as Metrics Engine
+
+Since the relay observes every Matrix event across every room, it computes all metrics in real-time from the event stream — no polling, no log parsing, no separate collector.
+
+| Scope | Metrics |
+|-------|---------|
+| Per-bot | message count, token throughput, response latency, activity level, health grade, crash rate, uptime |
+| Per-room | message volume, active participants, thread count, BB success rate |
+| Per-system | relay uptime, sync frequency, container health, memory usage |
+| Per-fleet | aggregate availability, autonomy score, total throughput, fleet health grade |
+
+All computed as rolling windows (1d/7d). S3 stores the computed metrics for cross-system aggregation. Every relay computes the same way from the same event stream — metrics are consistent across systems.
+
 ### S3 as Coordination Plane
 
 S3 replaces git-based fleet coordination. Every state change is an atomic S3 PUT — no merge conflicts, no git stash failures, no "could not write index" errors.
