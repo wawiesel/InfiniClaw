@@ -166,3 +166,5 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`wbs-initial.json`**: Written by `injectWbsTasks(root, bot)` in `relay.ts` after every `bootstrapBot` call. Lands at `_runtime/instances/{bot}/data/wbs-initial.json`. Contains the bot's currently-assigned WBS items so it can load its task list at startup. Relay manages the shared WBS at `_runtime/data/wbs-{room}.json`: reabsorbs items on dismiss/sleep, auto-assigns on heartbeat, unblocks dependents on `wbs_complete` relay-task.
 
 - **`ipc-commands.ts` WBS handlers**: IPC command handlers for WBS assign/complete/update operations. Relay manages `_runtime/data/wbs-{room}.json`; bots interact via MCP tools.
+
+- **Branch brain HOME fix** (`relay.ts`): `childEnv['HOME']` is now explicitly set to `process.env.HOME` so host-path branch brains write `.claude` session data to the correct writable location, not the container-era `/home/claude` path.

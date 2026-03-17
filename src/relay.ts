@@ -2069,6 +2069,10 @@ async function spawnBranchBrain(
   // Raw env file uses BRAIN_* names; map to CLAUDE_CODE_* / ANTHROPIC_* as needed.
   const botEnv = bot ? (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch (err) { log(`branchBrain: loadProfileEnv failed for ${bot}: ${errStr(err)}`); return null; } })() : null;
   const childEnv = mapBrainEnv(botEnv);
+  // Ensure HOME is always the current process HOME so the branch brain writes session-env to the
+  // correct location. Old sessions may reference /home/claude (container era) but host branches
+  // must use the host HOME so the .claude dir is writable.
+  childEnv['HOME'] = process.env['HOME'] ?? os.homedir();
   log(`branchBrain: credentials for ${bot}: oauth=${!!childEnv['CLAUDE_CODE_OAUTH_TOKEN']} apiKey=${!!childEnv['ANTHROPIC_API_KEY']} model=${childEnv['ANTHROPIC_MODEL'] ?? 'none'}`);
   // Use fleet GitHub bot for PR reviews so comments appear as the bot, not the Captain.
   // Fall back to host GH_TOKEN if no bot token configured (#100).
