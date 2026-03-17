@@ -644,8 +644,12 @@ export function refreshBot(root: string, bot: string): void {
  * Lightweight room reconfiguration: re-seed main room from fleet.json, restart pm2.
  * No rebuild, no rsync, no npm install. Used by !report and !dismiss to switch
  * the bot's monitored room without a full deploy cycle.
+ *
+ * @param knownDutyRoomId - When called from !report, the relay already knows the
+ *   exact Matrix room ID the bot was sent to. Pass it here to seed that room
+ *   directly, bypassing the fragile intercom.json lookup that caused #193.
  */
-export function restartBotForRoom(root: string, bot: string): void {
+export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: string): void {
   const instance = instanceDir(root, bot);
   const profileEnv = loadProfileEnv(root, bot);
   const fleet = loadFleet();
@@ -657,6 +661,14 @@ export function restartBotForRoom(root: string, bot: string): void {
     const quartersJid = `matrix:${quartersRoom}`;
     const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
     seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
+  } else if (botStatus === 'onduty' && knownDutyRoomId) {
+    // Relay provided the exact room ID — seed it directly (#193).
+    // Use the duty room name as BOTH group name AND folder name so the IPC
+    // watcher (ipc/<roomName>/input/) finds messages in the right directory.
+    const role = (fleet[bot]?.role ?? '').toLowerCase();
+    const dutyRoom = ROLE_ROOMS[role];
+    const roomName = dutyRoom?.room ?? (profileEnv.MAIN_GROUP_NAME || 'main');
+    seedMainRoomRegistration(instance, `matrix:${knownDutyRoomId}`, roomName, roomName, true);
   } else {
     // Bot is onduty — derive duty room from ROLE_ROOMS + intercom.json
     const role = (fleet[bot]?.role ?? '').toLowerCase();
