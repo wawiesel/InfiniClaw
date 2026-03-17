@@ -192,56 +192,84 @@ The Captain can see what bots are remembering and correct them directly in the R
 
 ## Duty Cycle
 
-> **Status:** Not yet implemented.
-
 A bot's operational life is a repeating **duty cycle**. The relay manages transitions mechanically — no operator intervention needed for normal operation.
 
 ### Cycle Phases
 
 ```
-quarters → report → ON DUTY → dismiss → quarters → retrospective → sleep → dream → ready
-    ↑                                                                                 │
-    └─────────────────────────────────────────────────────────────────────────────────────┘
+quarters → report → ON DUTY → dismiss → retrospective → sleep → dream → compaction → wake
+    ↑                                                                                    │
+    └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Phase | Where | What happens | Duration |
-|-------|-------|-------------|----------|
-| **Quarters** | Quarters room | Idle, ready for assignment. `triggerType=always`. | Until `!report` or WBS assignment |
-| **On duty** | Duty room | Working WBS items, responding to callouts. `triggerType=callout`. **No code resyncs.** | `DUTY_CYCLE_MS` (configurable) |
-| **Retrospective** | Quarters room | Save memory, update CLAUDE.md, distill learnings. | Until complete or timeout |
-| **Sleep** | Quarters room | Container stopped. `triggerType=never`. | Until deferred syncs complete |
-| **Dream** | — | Deferred code changes apply (git sync, rebuild). Persona/skill updates land. | Automatic |
-| **Ready** | Quarters room | Container starts fresh with latest code. `triggerType=always`. | Immediate → next cycle |
+| # | Phase | Where | What happens | Duration |
+|---|-------|-------|-------------|----------|
+| 0 | **On duty** | Duty room | Working WBS items, responding to callouts. `triggerType=callout`. **No code resyncs.** | `DUTY_CYCLE_MS` (configurable) |
+| 1 | **Retrospective** | Quarters room | Loudspeaker asks structured questions (what went well, what went poorly, learnings). Bot reflects, updates MEMORY.md and CLAUDE.md. | Until complete or timeout |
+| 2 | **Sleep** | Quarters room | Container stopped. Everything rebuilt to latest versions — git sync, `npm ci`, container image rebuild. Native modules recompiled. | Until rebuild complete |
+| 3 | **Dream** | Quarters room | Trippy what-if scenarios thrown at the bot — creative, lateral-thinking prompts that push the bot outside its normal operating patterns. | Configurable |
+| 4 | **Compaction** | Quarters room | Session gets compacted (standard Claude compaction). Context distilled to essentials. | Automatic |
+| 5 | **Wake** | Quarters room → duty room | Bot starts fresh with latest code, compacted context, and updated persona. `triggerType=always` until `!report`. | Immediate → next cycle |
 
 ### No Resync While On Duty
 
-**Critical rule:** The git sync loop must NOT restart a bot that is on duty. Code changes detected during a duty cycle are **queued** and applied during the Dream phase. To interrupt a duty cycle, use `!dismiss` then `!sleep` manually.
+**Critical rule:** The git sync loop must NOT restart a bot that is on duty. Code changes detected during a duty cycle are **queued** and applied during the Sleep phase. To interrupt a duty cycle, use `!dismiss` then `!sleep` manually.
 
 Change classification:
-- **Runtime** (`src/*.ts`, `package.json`, `Dockerfile`): queued until Dream phase
-- **Persona** (`bots/*/CLAUDE.md`, `skills/*`): queued until Dream phase
+- **Runtime** (`src/*.ts`, `package.json`, `Dockerfile`): queued until Sleep phase
+- **Persona** (`bots/*/CLAUDE.md`, `skills/*`): queued until Sleep phase
 - **No-op** (`README.md`, `docs/*`, test files): never trigger restarts
 
 ### Duty Timer
 
 `ondutyAt` is tracked per bot in `fleet.json` (set by `fleetUpdate` on `!report`, cleared on `!dismiss`). The `dutyCycleLoop` checks every 60s whether any onduty bot has exceeded `DUTY_CYCLE_MS`.
 
-### Retrospective Sequence
+### Phase 1: Retrospective
 
-On duty period expiry:
+On duty period expiry, the relay dismisses the bot to quarters and the loudspeaker sends structured retrospective questions:
 
-1. **Dismiss to quarters** — Relay runs `!dismiss` with `RETROSPECTIVE=1` in the IPC message
-2. **Retrospective questions** — Relay sends to the bot's quarters room, waiting for each reply:
+1. **Dismiss to quarters** — Relay runs `!dismiss`, WBS items reabsorbed
+2. **Retrospective questions** — Loudspeaker sends to the bot's quarters room:
    - "What went well since your last duty cycle?"
    - "What didn't go well? Any blockers or mistakes?"
    - "How could you do better next time?"
    - "Which parts of your CLAUDE.md helped you achieve your goals? Which parts didn't?"
    - "Update your CLAUDE.md and MEMORY.md now. Post 'Update complete.' when done."
-3. **Sleep** — Relay runs `!sleep`, container stops
-4. **Dream** — Deferred code changes apply (git sync, rebuild image if needed)
-5. **Ready** — Relay runs `!wake`, bot starts fresh with latest code and updated persona
+3. Bot responds to each question in quarters (visible to Captain)
 
 The retrospective prompt template lives as a skill: `skills/retrospective/SKILL.md`.
+
+### Phase 2: Sleep
+
+After retrospective completes:
+
+1. Container stops
+2. Git sync pulls latest code
+3. `npm ci` installs fresh dependencies (including native module recompilation)
+4. Container image rebuilt if Dockerfile or dependencies changed
+5. All deferred code/persona changes land
+
+This is the only phase where rebuilds happen — never during wake. This prevents native module ABI mismatches (e.g. better-sqlite3) that occur when rebuilding while a process is running.
+
+### Phase 3: Dream
+
+Creative phase — the relay sends the bot unusual, lateral-thinking prompts:
+- "What if the fleet had no operator?"
+- "What would happen if all bots shared one brain?"
+- "Redesign the WBS system from scratch in 3 sentences."
+
+Dream prompts push the bot to think outside its operational patterns. Responses are posted to quarters (visible to Captain). Dream scenarios are defined in `skills/dream/SKILL.md`.
+
+### Phase 4: Compaction
+
+Standard Claude session compaction. The bot's conversation context is distilled to its essential elements — key decisions, active work state, and critical learnings. This ensures the next duty cycle starts with a clean, focused context rather than a bloated history.
+
+### Phase 5: Wake
+
+1. Container starts with latest code and rebuilt image
+2. Bot loads compacted context + updated persona
+3. `status=quarters`, `triggerType=always`
+4. Ready for `!report` to begin next duty cycle
 
 ## Implementation
 
