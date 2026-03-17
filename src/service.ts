@@ -666,7 +666,7 @@ export function restartBotForRoom(root: string, bot: string): void {
       // Look up the duty room's Matrix room ID from intercom.json
       let dutyRoomJid = '';
       try {
-        const secretsPath = path.join(root, '..', '..', '.config', 'infiniclaw', 'secrets');
+        const secretsPath = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets');
         const intercom = JSON.parse(fs.readFileSync(path.join(secretsPath, 'operator', 'intercom.json'), 'utf-8'));
         const roomConfig = intercom.rooms?.[dutyRoom.room];
         if (roomConfig?.roomId) {
