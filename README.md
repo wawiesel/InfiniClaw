@@ -103,3 +103,5 @@ Test timeout is configured in `vitest.config.ts` (10s default to accommodate pm2
 - Container images are per-persona: `nanoclaw-cid`, `nanoclaw-johnny5`, `nanoclaw-nora`, `nanoclaw-parker`, `nanoclaw-albert`.
 - Cross-bot communication: `<m>BotName</m> message` in any room auto-forwards to the target bot's room.
 - NanoClaw dependency: `external/nanoclaw/` tracks upstream. InfiniClaw extensions in `src/nanoclaw-ext.d.ts` and friends.
+
+- **WBS 3.1 MCP tools**: `wbs_read`, `wbs_get_assigned`, `wbs_update` added to agent-runner tools. Bots can now read and update the Work Breakdown Structure directly from their tool context.

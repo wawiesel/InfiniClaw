@@ -37,6 +37,7 @@ import {
 } from './service.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { capitalizeName, statusMessage } from './formatting.js';
+import { readWbs, writeWbs, assignItem, completeItem } from './wbs.js';
 
 // ── Cooldown tracking ───────────────────────────────────────────────────
 
@@ -1047,6 +1048,44 @@ async function handleSubmitVerification(data: CommandData, ctx: InfiniClawIpcCon
   await safeSend(ctx, parseChatJid(data), `${icon} Verification ${record.id}: ${record.status.toUpperCase()}\nEvidence: ${record.evidence}`);
 }
 
+// ── WBS ──────────────────────────────────────────────────────────────────
+
+async function handleWbsAssign(data: CommandData, _ctx: InfiniClawIpcContext): Promise<void> {
+  const root = resolveRoot();
+  const room = typeof data.room === 'string' ? data.room : '';
+  const itemId = typeof data.item_id === 'string' ? data.item_id : '';
+  const assignee = typeof data.assignee === 'string' ? data.assignee
+    : typeof data.bot === 'string' ? data.bot : '';
+  if (!room || !itemId || !assignee) {
+    logger.warn({ data }, 'wbs_assign: missing room, item_id, or assignee');
+    return;
+  }
+  const dataDir = path.join(root, '_runtime', 'data');
+  const wbs = readWbs(dataDir, room);
+  const ok = assignItem(wbs, itemId, assignee.toLowerCase());
+  if (ok) {
+    writeWbs(dataDir, room, wbs);
+    logger.info({ room, itemId, assignee }, 'WBS item assigned');
+  } else {
+    logger.warn({ room, itemId }, 'WBS item not found or already done');
+  }
+}
+
+async function handleWbsComplete(data: CommandData, _ctx: InfiniClawIpcContext): Promise<void> {
+  const root = resolveRoot();
+  const room = typeof data.room === 'string' ? data.room : '';
+  const itemId = typeof data.item_id === 'string' ? data.item_id : '';
+  if (!room || !itemId) {
+    logger.warn({ data }, 'wbs_complete: missing room or item_id');
+    return;
+  }
+  const dataDir = path.join(root, '_runtime', 'data');
+  const wbs = readWbs(dataDir, room);
+  const unblocked = completeItem(wbs, itemId);
+  writeWbs(dataDir, room, wbs);
+  logger.info({ room, itemId, unblocked }, 'WBS item completed, unblocked: %o', unblocked);
+}
+
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_brain_mode: handleSetBrainMode,
   refresh_bot: handleRefreshBot,
@@ -1071,6 +1110,9 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   holodeck_send: handleHolodeckSend,
   holodeck_read: handleHolodeckRead,
   holodeck_status: handleHolodeckStatus,
+
+  wbs_assign: handleWbsAssign,
+  wbs_complete: handleWbsComplete,
 };
 
 export async function handleInfiniClawCommand(

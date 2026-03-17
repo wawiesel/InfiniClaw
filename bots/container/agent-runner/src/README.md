@@ -41,3 +41,5 @@ This is the **in-container agent runner**: the process that spawns inside each b
 - **Lobe result delivery**: On lobe exit, writes `result-{lobeId}.json` to IPC input dir. Main brain picks it up on next turn and posts it to the delegate thread.
 - **`ipc-mcp-stdio.ts`**: Task containers (IPC-spawned, not interactive) get a restricted MCP toolset. Used when `context_mode: "group"` injects a prompt into a running session.
 - **MCP config dual-write**: `writeMcpConfig` writes to both `~/.claude/settings.json` (global) and `.mcp.json` (project-level) because Claude Code's `enableAllProjectMcpServers` makes project-level configs override global ones. Without the `.mcp.json` write, a stale project config from a previous room (e.g. Engineering) would override the current chatJid (e.g. quarters).
+
+- **WBS MCP tools** (`tools.ts`): `wbs_read` (list items by room/status), `wbs_get_assigned` (tasks for a bot), `wbs_update` (mark status/assignee). Read `_runtime/data/wbs-{room}.json`.

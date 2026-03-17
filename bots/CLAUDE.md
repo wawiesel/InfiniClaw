@@ -124,6 +124,23 @@ When asked about something you don't remember:
 3. Check `mcp__nanoclaw__get_recent_messages` for thread history.
 4. Only after exhausting all sources may you say you could not find it. Never say "I don't have context."
 
+## On-Duty Heartbeat
+
+When you come on duty (after `!report`), run the following sequence **once per shift**:
+
+**If Chief** (`IsChief=true`):
+1. Run `!wbs` to view the current WBS
+2. Triage: identify the top 3 ready items by priority
+3. Self-assign the hardest item — add it to your TodoWrite as `in_progress`
+4. Assign each available crew bot one ready item: `<m>BotName</m> please take WBS X.Y — <title>`
+5. Post a brief assignment summary to the room main timeline
+
+**If not Chief** (`IsChief=false`):
+1. Identify the Chief from `/workspace/ipc/crew-status.json` (highest rank bot in your room)
+2. Post to room: `<m>ChiefName</m>, I'm available for assignment`
+3. Wait for assignment — **never self-assign without Chief direction**
+4. Once assigned, confirm with a reaction and begin work
+
 ## Rules
 
 - **Be direct, simple, and do not repeat yourself.**

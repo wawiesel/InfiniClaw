@@ -702,6 +702,131 @@ Use this after completing a task that requires cross-bot verification. The assig
     },
   );
 
+  // ── WBS ──────────────────────────────────────────────────────────────
+
+  const WBS_DATA_DIR = '/workspace/project/_runtime/data';
+
+  type WbsStatus = 'backlog' | 'ready' | 'in_progress' | 'done';
+  interface WbsItem {
+    id: string; title: string; source?: string;
+    depends_on: string[]; assigned_to: string | null;
+    status: WbsStatus; priority: number;
+  }
+
+  function inferRoom(): string {
+    const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
+    const map: Record<string, string> = { engineer: 'engineering', navigator: 'bridge', architect: 'astrometrics' };
+    return map[role] || role;
+  }
+
+  function readWbsItems(room: string): WbsItem[] | null {
+    const safe = room.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const p = path.join(WBS_DATA_DIR, `wbs-${safe}.json`);
+    try {
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as { items?: unknown };
+      return Array.isArray(parsed.items) ? (parsed.items as WbsItem[]) : [];
+    } catch { return null; }
+  }
+
+  const STATUS_ICON: Record<WbsStatus, string> = {
+    backlog: '⬜', ready: '🔵', in_progress: '🔄', done: '✅',
+  };
+
+  server.tool(
+    'wbs_read',
+    'Read the Work Breakdown Structure (WBS) for this room. Shows all tasks, their status, priority, and assignments.',
+    {
+      room: z.string().optional().describe('Room name (e.g. "engineering"). Defaults to your current role room.'),
+      status: z.enum(['all', 'backlog', 'ready', 'in_progress', 'done']).default('all').describe('Filter by status'),
+    },
+    async (args) => {
+      const room = args.room || inferRoom();
+      const items = readWbsItems(room);
+      if (items === null) {
+        return { content: [{ type: 'text' as const, text: `No WBS file found for room: ${room}` }] };
+      }
+      const filtered = args.status === 'all' ? items : items.filter(i => i.status === args.status);
+      if (filtered.length === 0) {
+        return { content: [{ type: 'text' as const, text: `No items with status "${args.status}" in WBS for ${room}.` }] };
+      }
+      const lines = filtered.map(i => {
+        const icon = STATUS_ICON[i.status] ?? '?';
+        const assignee = i.assigned_to ? ` → ${i.assigned_to}` : '';
+        const deps = i.depends_on.length > 0 ? ` [deps: ${i.depends_on.join(',')}]` : '';
+        return `${icon} **${i.id}** p${i.priority} ${i.title}${assignee}${deps}`;
+      });
+      return { content: [{ type: 'text' as const, text: `**WBS: ${room}** (${filtered.length} items)\n\n${lines.join('\n')}` }] };
+    },
+  );
+
+  server.tool(
+    'wbs_get_assigned',
+    'Get WBS tasks currently assigned to this bot (or another bot).',
+    {
+      bot: z.string().optional().describe('Bot name to query. Defaults to yourself.'),
+      room: z.string().optional().describe('Room name. Defaults to your current role room.'),
+    },
+    async (args) => {
+      const room = args.room || inferRoom();
+      const bot = (args.bot || process.env.NANOCLAW_ASSISTANT_NAME || '').toLowerCase();
+      const items = readWbsItems(room);
+      if (items === null) {
+        return { content: [{ type: 'text' as const, text: `No WBS file found for room: ${room}` }] };
+      }
+      const assigned = items.filter(i => i.assigned_to?.toLowerCase() === bot && i.status !== 'done');
+      if (assigned.length === 0) {
+        return { content: [{ type: 'text' as const, text: `No active WBS assignments for ${bot} in ${room}.` }] };
+      }
+      const lines = assigned.map(i => `🔄 **${i.id}** p${i.priority} ${i.title}`);
+      return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    },
+  );
+
+  server.tool(
+    'wbs_assign',
+    'Assign a WBS task to a bot. Chief only. Marks the item in_progress.',
+    {
+      item_id: z.string().describe('WBS item ID (e.g. "3.1")'),
+      assignee: z.string().optional().describe('Bot name to assign to. Defaults to yourself.'),
+      room: z.string().optional().describe('Room name. Defaults to your current role room.'),
+    },
+    async (args) => {
+      const room = args.room || inferRoom();
+      const assignee = args.assignee || process.env.NANOCLAW_ASSISTANT_NAME || '';
+      writeIpcFile(tasksDir, {
+        type: 'wbs_assign',
+        item_id: args.item_id,
+        assignee,
+        room,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `WBS ${args.item_id} assigned to ${assignee} in ${room}.` }] };
+    },
+  );
+
+  server.tool(
+    'wbs_complete',
+    'Mark a WBS task as done. Unblocks any dependent items. Chief only.',
+    {
+      item_id: z.string().describe('WBS item ID to mark complete (e.g. "3.1")'),
+      room: z.string().optional().describe('Room name. Defaults to your current role room.'),
+    },
+    async (args) => {
+      const room = args.room || inferRoom();
+      writeIpcFile(tasksDir, {
+        type: 'wbs_complete',
+        item_id: args.item_id,
+        room,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `WBS ${args.item_id} marked complete in ${room}. Dependent items will be unblocked.` }] };
+    },
+  );
+
   // ── Delegate tools ──────────────────────────────────────────────────
 
   registerDelegateTools(server, {
