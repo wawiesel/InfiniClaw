@@ -2858,9 +2858,29 @@ function hasRunningContainer(bot: string): boolean {
 }
 
 /**
+ * Check if a bot is idle: onduty, no running container, and heartbeat stale (or missing).
+ * Used by the heartbeat loop to identify bots eligible for WBS assignment and nudging.
+ */
+function isBotIdle(root: string, bot: string): boolean {
+  if (liveFleet[bot]?.status !== 'onduty') return false;
+  if (hasRunningContainer(bot)) return false;
+  try {
+    const hbPath = path.join(root, '_runtime', 'instances', bot, 'data', 'heartbeat');
+    const hbAge = Date.now() - fs.statSync(hbPath).mtimeMs;
+    if (hbAge < HEARTBEAT_INTERVAL) return false; // heartbeat recent — not truly idle
+  } catch { /* no heartbeat file — treat as idle */ }
+  return true;
+}
+
+/**
  * Periodic heartbeat: nudge idle bots to do autonomous work.
  * Sends a message to the bot's room mentioning it by name, which triggers
  * the bot's trigger pattern and wakes it to do autonomous work.
+ *
+ * Chief behaviour (WBS 7.0): when the chief is idle, it assigns WBS items to ALL
+ * idle non-chief bots in the same room before being nudged to do its own work.
+ * Non-chief behaviour: if idle with no WBS assignment, the bot is told to ask
+ * the chief for work instead of falling back to GitHub issue scanning.
  */
 async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
   await sleep(5 * 60_000); // wait 5 min before first heartbeat
@@ -2868,15 +2888,9 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
     try {
       const root = resolveRoot();
       const botRooms = buildBotRoomMap();
+      const allBotList = Object.entries(liveFleet).map(([n, e]) => ({ name: n, role: e.role, rank: e.rank, status: e.status }));
       for (const bot of getActiveBots()) {
-        if (liveFleet[bot]?.status !== 'onduty') continue; // not on duty — skip nudges
-        if (hasRunningContainer(bot)) continue; // container running — active
-        // Also check heartbeat file: if written recently, bot just restarted — skip nudge
-        try {
-          const hbPath = path.join(root, '_runtime', 'instances', bot, 'data', 'heartbeat');
-          const hbAge = Date.now() - fs.statSync(hbPath).mtimeMs;
-          if (hbAge < HEARTBEAT_INTERVAL) continue; // heartbeat recent — not truly idle
-        } catch { /* no heartbeat file — proceed */ }
+        if (!isBotIdle(root, bot)) continue;
         const roomName = botRooms[bot];
         if (!roomName) continue;
         const conn = conns.find((c) => c.name === roomName);
@@ -2884,11 +2898,11 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         // Get the bot's display name for the trigger
         const env = loadProfileEnv(root, bot);
         const name = env?.ASSISTANT_NAME || capitalizeName(bot);
-        // Auto-assign a WBS item if the bot has none; include it in the nudge prompt
-        const assignedTitle = autoAssignWbsItem(root, bot);
-        const nudge = assignedTitle
-          ? `<m>${name}</m>, work on your next task: "${assignedTitle}".`
-          : `<m>${name}</m>, check GitHub issues and work on the highest priority item you can act on.`;
+
+        // Determine if this bot is the chief of its room
+        const chiefBot = findRoomChief(roomName, allBotList);
+        const isChief = chiefBot === bot;
+
         // Auto-sleep: if bot has been idle longer than AUTO_SLEEP_IDLE_MS, sleep it instead of nudging
         if (AUTO_SLEEP_IDLE_MS > 0) {
           try {
@@ -2909,8 +2923,52 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
           } catch { /* no heartbeat file — skip auto-sleep check */ }
         }
 
+        let nudge: string;
+        if (isChief) {
+          // Chief path (WBS 7.0): assign WBS items to idle non-chief bots in the same room,
+          // then nudge the chief to review the WBS and assign any remaining unassigned work.
+          const crewAssignments: string[] = [];
+          for (const crewBot of getActiveBots()) {
+            if (crewBot === bot) continue; // skip self
+            if (botRooms[crewBot] !== roomName) continue; // different room
+            if (!isBotIdle(root, crewBot)) continue; // not idle
+            const crewTitle = autoAssignWbsItem(root, crewBot);
+            if (crewTitle) {
+              const crewEnv = loadProfileEnv(root, crewBot);
+              const crewName = crewEnv?.ASSISTANT_NAME || capitalizeName(crewBot);
+              crewAssignments.push(`${crewName}: "${crewTitle}"`);
+              log(`heartbeat: chief ${name} assigned WBS "${crewTitle}" to ${crewName}`);
+            }
+          }
+          // Self-assign for the chief as well
+          const chiefTitle = autoAssignWbsItem(root, bot);
+          if (crewAssignments.length > 0) {
+            const assignList = crewAssignments.join('; ');
+            nudge = chiefTitle
+              ? `<m>${name}</m>, you are the chief. Crew assignments dispatched: ${assignList}. Your task: "${chiefTitle}".`
+              : `<m>${name}</m>, you are the chief. Crew assignments dispatched: ${assignList}. Check the WBS for any remaining unassigned items.`;
+          } else {
+            nudge = chiefTitle
+              ? `<m>${name}</m>, you are the chief. Work on your next task: "${chiefTitle}".`
+              : `<m>${name}</m>, you are the chief. Review the WBS for unassigned ready items and assign work to available crew.`;
+          }
+          log(`heartbeat: nudged chief ${name} in ${roomName}${chiefTitle ? ` (WBS: "${chiefTitle}")` : ''}${crewAssignments.length > 0 ? ` (assigned ${crewAssignments.length} crew item(s))` : ''}`);
+        } else {
+          // Non-chief path (WBS 7.0): if idle with no WBS item, ask the chief for work.
+          const assignedTitle = autoAssignWbsItem(root, bot);
+          if (assignedTitle) {
+            nudge = `<m>${name}</m>, work on your next task: "${assignedTitle}".`;
+          } else if (chiefBot) {
+            const chiefEnv = loadProfileEnv(root, chiefBot);
+            const chiefName = chiefEnv?.ASSISTANT_NAME || capitalizeName(chiefBot);
+            nudge = `<m>${name}</m>, you have no WBS assignment. Ask <m>${chiefName}</m> for your next task.`;
+          } else {
+            nudge = `<m>${name}</m>, check GitHub issues and work on the highest priority item you can act on.`;
+          }
+          log(`heartbeat: nudged ${name} in ${roomName}${assignedTitle ? ` (WBS: "${assignedTitle}")` : ''}`);
+        }
+
         await relaySend(conn.homeserver, conn.accessToken, conn.roomId, nudge);
-        log(`heartbeat: nudged ${name} in ${roomName}${assignedTitle ? ` (WBS: "${assignedTitle}")` : ''}`);
       }
     } catch (err) {
       log(`heartbeat error: ${errStr(err)}`);
