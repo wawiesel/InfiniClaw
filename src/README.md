@@ -169,4 +169,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 
 - **Branch brain HOME fix** (`relay.ts`): `childEnv['HOME']` is now explicitly set to `process.env.HOME` so host-path branch brains write `.claude` session data to the correct writable location, not the container-era `/home/claude` path.
 
-- **Loudspeaker for lifecycle announcements** (`relay.ts`): `sendLifecycleMsg` now calls `reply()` (Loudspeaker-first) instead of `relaySend` directly, so bot start/stop/rerank announcements come from Loudspeaker, not Intercom.
+- **S3 shutdown flush** (`relay.ts`): `shutdown()` handler now calls `await pushAll(resolveRoot())` on SIGTERM/SIGINT to back up fleet state to S3 on every graceful stop.

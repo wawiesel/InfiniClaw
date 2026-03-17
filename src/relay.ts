@@ -83,6 +83,7 @@ import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_IMAGE, BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
+import { pushAll } from './s3-sync.js';
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -4733,14 +4734,16 @@ async function main(): Promise<void> {
     log(`fleet: S3 state read failed: ${errStr(err)}`);
   }
 
-  // Persist fleet on shutdown
-  const shutdown = () => {
+  // Persist fleet on shutdown and push to S3
+  const shutdown = async () => {
     log('shutting down — persisting fleet state');
     persistFleet();
+    try { await pushAll(resolveRoot()); }
+    catch (err) { log(`S3 push on shutdown failed: ${errStr(err)}`); }
     process.exit(0);
   };
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', () => { void shutdown(); });
+  process.on('SIGINT', () => { void shutdown(); });
 
   // Start Matrix sync loops immediately so we catch up on lifecycle messages
   const loops = conns.map((conn, i) =>
