@@ -3998,13 +3998,38 @@ function registerRelayCommands(): void {
     },
 
     wbs: async (cmd, conn) => {
-      // !wbs [room] — show Work Breakdown Structure for a duty room.
+      // !wbs [room]      — show Work Breakdown Structure for a duty room.
+      // !wbs x <id>      — mark item <id> done (completes item, unblocks dependents).
       // Defaults to the current room. Only duty rooms have WBS files.
-      const arg = cmd.slice('!wbs'.length).trim().toLowerCase();
+      const arg = cmd.slice('!wbs'.length).trim();
       const dutyRooms = Object.values(ROLE_ROOMS).map(r => r.room);
 
+      // !wbs x <id> — complete an item by ID
+      const xMatch = arg.match(/^x\s+(\S+)$/i);
+      if (xMatch) {
+        if (!await electSpeaker()) return;
+        const itemId = xMatch[1];
+        const dataDir = path.join(resolveRoot(), '_runtime', 'data');
+        // Search all duty rooms for the item
+        let found = false;
+        for (const r of dutyRooms) {
+          const wbs = readWbs(dataDir, r);
+          const item = wbs.items.find(i => i.id === itemId);
+          if (item) {
+            const unblocked = completeItem(wbs, itemId);
+            writeWbs(dataDir, r, wbs);
+            const unblockedMsg = unblocked.length > 0 ? ` — unblocked: ${unblocked.join(', ')}` : '';
+            await reply(conn, `✅ WBS ${itemId} done${unblockedMsg}`);
+            found = true;
+            break;
+          }
+        }
+        if (!found) await reply(conn, `⚠️ WBS item "${itemId}" not found`);
+        return;
+      }
+
       // Resolve room: explicit arg, or infer from conn.name
-      let room = arg || conn.name.toLowerCase();
+      let room = arg.toLowerCase() || conn.name.toLowerCase();
       if (!dutyRooms.includes(room)) {
         // BehindTheCurtain or non-duty room: require explicit room arg
         if (!arg) {
