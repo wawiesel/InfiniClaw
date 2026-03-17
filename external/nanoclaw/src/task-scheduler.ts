@@ -4,8 +4,9 @@ import fs from 'fs';
 
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
+  ContainerInput,
   ContainerOutput,
-  runContainerAgent,
+  runContainerAgent as defaultRunContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
@@ -73,6 +74,12 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  runContainerAgent?: (
+    group: RegisteredGroup,
+    input: ContainerInput,
+    onProcess: (proc: ChildProcess, containerName: string) => void,
+    onOutput?: (output: ContainerOutput) => Promise<void>,
+  ) => Promise<ContainerOutput>;
 }
 
 async function runTask(
@@ -169,7 +176,8 @@ async function runTask(
   };
 
   try {
-    const output = await runContainerAgent(
+    const runAgent = deps.runContainerAgent ?? defaultRunContainerAgent;
+    const output = await runAgent(
       group,
       {
         prompt: task.prompt,
