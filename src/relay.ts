@@ -1469,6 +1469,7 @@ function formatCombinedMetrics(
         role,
         rank: bot.rank,
         isChief: co,
+        version: botSemver(resolveRoot(), bot.name) ?? undefined,
       }, 'short', maxNameLen);
 
       // Metrics suffix: mem, kills, tok, latency
@@ -1590,6 +1591,7 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
         health: '', tokPerDay: 0,
         status: entry?.status ?? 'sleep', role,
         rank: entry?.rank ?? 99, isChief: co,
+        version: botSemver(resolveRoot(), name) ?? undefined,
       }, 'short', maxNameLen);
       const mem = b.rss_mb != null ? `mem ${b.rss_mb}/${b.limit_mb ?? '?'}MB` : '';
       const stats24 = `SK+${sk24} OOM+${oom24} (1d)`;
@@ -3905,6 +3907,7 @@ function registerRelayCommands(): void {
               role,
               rank: entry.rank,
               isChief: co,
+              version: entry.gitVersion || undefined,
             }, 'short', globalMaxNameLen);
             lines.push(`${tree}${botLine}`);
           }
