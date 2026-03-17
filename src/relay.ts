@@ -3003,10 +3003,10 @@ async function sendLifecycleMsg(
       const roomName = botDutyRoom(botId);
       conn = activeConns.find(c => c.name.toLowerCase() === roomName);
     }
-    if (!conn?.accessToken) return;
+    if (!conn) return;
     const rankPart = rank !== undefined ? ` (rank ${rank})` : '';
-    const tag = replyTag();
-    await relaySend(conn.homeserver, conn.accessToken, conn.roomId, `[${tag}] ${botName} ${event}${rankPart}`);
+    // Use reply() so Loudspeaker sends the announcement (not Intercom directly).
+    await reply(conn, `${botName} ${event}${rankPart}`);
   } catch { /* non-fatal — lifecycle broadcast is best-effort */ }
 }
 
