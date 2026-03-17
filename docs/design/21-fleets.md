@@ -1,6 +1,89 @@
-# Fleet Instances and Staging
+# Fleet Instances, Systems, and Coordination
 
-InfiniClaw supports multiple fleet instances sharing the same codebase but tracking different branches. This enables live integration testing before production deployment.
+InfiniClaw supports multiple fleet instances sharing the same codebase but tracking different branches. All communication and state changes flow through relays. S3 provides atomic coordination between systems.
+
+## Core Architecture
+
+### Relay as Single Gateway
+
+All communication flows through the relay. No bot communicates with Matrix directly.
+
+```
+Captain ←→ Matrix ←→ Relay ←→ Bot containers
+                       ↕
+                      S3 (shared state)
+```
+
+- **Messages**: relay reads from Matrix, dispatches to bots; bot output goes through relay to Matrix
+- **Status changes**: relay is the only writer of fleet state (bot status, ship status, health)
+- **X-commands**: relay processes all commands; bots never handle `!` commands directly
+
+### S3 as Coordination Plane
+
+S3 replaces git-based fleet coordination. Every state change is an atomic S3 PUT — no merge conflicts, no git stash failures, no "could not write index" errors.
+
+```
+s3://infiniclaw/
+  fleet-state/
+    infiniclaw00/fleet.json     # IC00 fleet state (atomic)
+    infiniclaw01/fleet.json     # IC01 fleet state (atomic)
+  health/
+    infiniclaw00/Herc.json      # per-system health
+    infiniclaw01/Stg1.json
+  fleet-report/
+    infiniclaw00/Herc.json      # per-system fleet report
+    infiniclaw01/Stg1.json
+```
+
+Each relay:
+1. Reads fleet state from S3 on startup
+2. Writes its own fleet-report to S3 periodically
+3. Writes fleet state to S3 on every status change (atomic PUT)
+4. On shutdown, flushes all state to S3
+
+Conflict resolution: S3 PUTs are last-writer-wins per key. Each system writes its own bots' state to a system-scoped key. A fleet-wide view is assembled by reading all system keys.
+
+### Nearest Relay Routing
+
+There is no speaker election. Any relay can handle any x-command. When the Captain sends `!fleet` or `!wake parker`, the **nearest relay** picks it up.
+
+"Nearest" is determined by:
+1. **Latency** — which relay sees the Matrix event first (natural network proximity)
+2. **Availability** — dead relays don't respond; the next-fastest relay handles it
+3. **Scope** — commands targeting a specific bot route to the relay hosting that bot
+
+```
+Captain: !fleet
+  → All relays see the event
+  → First relay to respond claims it (reacts with 📡)
+  → Other relays see the 📡 and skip
+```
+
+```
+Captain: !wake parker
+  → All relays see the event
+  → Only the relay hosting Parker acts on it
+  → That relay reacts with 📡
+```
+
+This eliminates:
+- Speaker election bugs
+- Single-point-of-failure when the speaker ship goes down
+- The "Herc is dead and nobody responds" problem
+- `!operator on/off` complexity
+
+#### Claim Protocol
+
+To prevent duplicate responses:
+
+1. Relay sees x-command in Matrix
+2. Checks if command is already claimed (📡 reaction from another relay)
+3. If unclaimed and relay can handle it: react with 📡, then execute
+4. If already claimed: skip
+
+The 📡 reaction is the distributed lock. Matrix event ordering provides consistency — relays that see the reaction before processing will skip.
+
+For bot-targeted commands (`!wake parker`, `!sleep cid`), only the hosting relay acts. No claim needed — routing is deterministic.
 
 ## Fleet Instances
 
@@ -36,7 +119,7 @@ feature/* ──→ develop ──→ main
 
 ### Promotion
 
-`!promote` is a relay x-command (Captain-only, from BTC):
+`!promote` is an x-command (Captain-only, from BTC):
 
 1. Verify IC01 health (S3 health reports, no F-grade bots)
 2. Verify CI passes on `develop`
@@ -45,9 +128,9 @@ feature/* ──→ develop ──→ main
 
 If `develop` has diverged from `main` (hotfix on main), `!promote` aborts and reports the divergence. Captain resolves manually.
 
-## Ship Configuration
+## System Configuration
 
-Each ship knows which fleet and branch it belongs to via `ships.json`:
+Each system (physical machine) knows which fleet and branch it belongs to via `ships.json`:
 
 ```json
 {
@@ -57,7 +140,8 @@ Each ship knows which fleet and branch it belongs to via `ships.json`:
     "shortname": "Herc",
     "rank": 1,
     "fleet": "infiniclaw00",
-    "branch": "main"
+    "branch": "main",
+    "systemRoom": "!abc123:a-gis.org"
   },
   "Staging1": {
     "hostname": "staging-host",
@@ -65,14 +149,16 @@ Each ship knows which fleet and branch it belongs to via `ships.json`:
     "shortname": "Stg1",
     "rank": 1,
     "fleet": "infiniclaw01",
-    "branch": "develop"
+    "branch": "develop",
+    "systemRoom": "!def456:a-gis.org"
   }
 }
 ```
 
-New fields:
-- `fleet` — which fleet instance this ship belongs to (`infiniclaw00`, `infiniclaw01`)
+Fields:
+- `fleet` — which fleet instance (`infiniclaw00`, `infiniclaw01`)
 - `branch` — which git branch the relay tracks (default: `main`)
+- `systemRoom` — Matrix room ID for this system's infrastructure room
 
 The relay's git sync loop uses `branch` instead of hardcoded `main`:
 
@@ -136,16 +222,12 @@ Frequency: every 5 minutes, or on significant events (restart, sync, bot lifecyc
 
 #### Operator Addressing
 
-Today, `@operator` in BTC is received by all ships' operators (speaker gate controls who replies). With system rooms, the Captain can address a specific system's operator directly:
+The Captain addresses a specific system's operator by messaging that system room:
 
 - `@operator` in 🖥️🦁 HERACLES → only Herc's operator responds
-- `@operator` in BTC → speaker gate as before (fleet-wide)
+- `@operator` in BTC → nearest relay routes (fleet-wide)
 
-This replaces the need for `!operator on herc` — just message the system room directly.
-
-#### Intercom Accounts
-
-Each system room uses the ship's existing intercom account (or a new `@systems-intercom` if isolation is needed). The relay connects to its system room the same way it connects to duty rooms.
+This replaces `!operator on/off herc` — just message the system room directly.
 
 ### Secrets Repo
 
@@ -154,29 +236,16 @@ Shared repo, separate fleet configs:
 ```
 secrets/
   bots/
-    fleet.json        # IC00 bot assignments
-    fleet01.json      # IC01 bot assignments
+    fleet.json        # IC00 bot assignments (disk cache of S3 state)
+    fleet01.json      # IC01 bot assignments (disk cache of S3 state)
     {bot}/env         # Shared — bot credentials don't change per fleet
   operator/
-    ships.json        # All ships, fleet field distinguishes
+    ships.json        # All systems, fleet field distinguishes
     intercom.json     # IC00 room credentials
     intercom01.json   # IC01 room credentials
 ```
 
-The relay loads the fleet config matching its ship's `fleet` field.
-
-### S3
-
-S3 keys include the fleet name:
-
-```
-health/infiniclaw00/Herc.json
-health/infiniclaw01/Stg1.json
-fleet-report/infiniclaw00/Herc.json
-fleet-report/infiniclaw01/Stg1.json
-```
-
-`!fleet` shows only the current fleet's ships by default. `!fleet all` shows both.
+The relay loads the fleet config matching its system's `fleet` field. On startup, S3 state is overlaid onto the disk cache — S3 is authoritative, disk is fallback.
 
 ## Bot Transport Between Fleets
 
@@ -188,9 +257,9 @@ Bots can be transported between fleet instances for testing:
 
 This moves Parker from IC00 to IC01:
 1. Dismiss from IC00 duty room
-2. Update `fleet01.json` with Parker's entry
-3. Remove from `fleet.json`
-4. IC01 relay picks up Parker on next sync
+2. Update IC01 fleet state in S3 with Parker's entry
+3. Remove from IC00 fleet state in S3
+4. IC01 relay picks up Parker on next state read
 5. Parker now runs `develop` branch code
 
 To return: `!transport parker infiniclaw00`
@@ -205,13 +274,14 @@ The primary use case: transport a bot running old code (from IC00) to IC01 where
 
 ## Verification
 
-1. `!fleet` on IC00 shows only IC00 ships and bots
-2. `!fleet` on IC01 shows only IC01 ships and bots
-3. `!fleet all` from BTC shows both fleets
-4. PR merged to `develop` appears on IC01 within one git sync cycle (3 min)
-5. `!promote` fast-forwards `main` to `develop` HEAD
-6. IC00 relays pick up new code within one git sync cycle
-7. `!transport bot infiniclaw01` moves bot to staging fleet
-8. Bot on IC01 interacts normally with IC01's relay and rooms
+1. `!fleet` shows only the current fleet's systems and bots
+2. `!fleet all` from BTC shows both fleets
+3. PR merged to `develop` appears on IC01 within one git sync cycle (3 min)
+4. `!promote` fast-forwards `main` to `develop` HEAD
+5. X-command with no target: nearest relay claims and responds
+6. X-command targeting a bot: hosting relay handles it
+7. Dead relay: other relays handle fleet-wide commands seamlessly
+8. System room: Captain messages `@operator` and only that system's operator responds
+9. Relay heartbeat appears in system room every 5 minutes
 
-> **Status:** Not yet implemented. This document describes the target architecture. Implementation requires: (1) `branch` field in ships.json, (2) relay git sync parameterized by branch, (3) IC01 Matrix rooms created, (4) `!promote` x-command, (5) fleet-scoped S3 keys.
+> **Status:** Not yet implemented. This document describes the target architecture. Implementation requires: (1) `fleet`/`branch`/`systemRoom` fields in ships.json, (2) relay git sync parameterized by branch, (3) S3 fleet-state read/write replacing git-based fleet.json coordination, (4) nearest-relay claim protocol (📡 reaction lock), (5) Systems space and rooms created in Matrix, (6) `!promote` x-command, (7) relay heartbeat to system room.
