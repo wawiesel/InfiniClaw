@@ -296,12 +296,13 @@ function persistFleet(): void {
   if (!fleetDirty) return;
   try {
     writeFleet(liveFleet);
-    secretsGitCommit(['bots/fleet.json'], `fleet: persist on ${HOSTNAME}`);
     fleetDirty = false;
     log('fleet: persisted to fleet.json');
   } catch (err) {
     log(`fleet: persist failed: ${errStr(err)}`);
   }
+  // Upload to S3 as live source of truth (fire-and-forget)
+  writeFleetState(liveFleet).catch(() => {});
 }
 
 /**
@@ -1198,6 +1199,41 @@ async function publishFleetReport(): Promise<FleetReport> {
   }
 
   return report;
+}
+
+const FLEET_STATE_S3_KEY = () => `fleet-state/${thisShipName()}.json`;
+
+/** Upload current fleet state to S3. No-op if S3 not configured. Fire-and-forget. */
+async function writeFleetState(fleet: Record<string, FleetEntry>): Promise<void> {
+  const s3 = getS3Client();
+  if (!s3) return;
+  try {
+    await s3.client.send(new PutObjectCommand({
+      Bucket: s3.bucket,
+      Key: FLEET_STATE_S3_KEY(),
+      Body: Buffer.from(JSON.stringify({ ts: Date.now(), bots: fleet })),
+      ContentType: 'application/json',
+    }));
+  } catch (err) { log(`fleet state S3 write failed: ${errStr(err)}`); }
+}
+
+/** Download fleet state from S3. Returns null if unavailable or S3 not configured. */
+async function readFleetState(): Promise<Record<string, FleetEntry> | null> {
+  const s3 = getS3Client();
+  if (!s3) return null;
+  try {
+    const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: FLEET_STATE_S3_KEY() }));
+    const body = await resp.Body?.transformToString();
+    if (!body) return null;
+    const parsed = JSON.parse(body) as { ts?: number; bots?: Record<string, FleetEntry> };
+    return parsed.bots ?? null;
+  } catch (err: unknown) {
+    const code = (err as { name?: string })?.name;
+    if (code !== 'NoSuchKey' && code !== 'AccessDenied') {
+      log(`fleet state S3 read failed: ${errStr(err)}`);
+    }
+    return null;
+  }
 }
 
 function runHealthCheck(): string | null {
@@ -4677,12 +4713,24 @@ async function main(): Promise<void> {
   // Ensure git hooks are installed
   try { installGitHooks(); } catch (err) { log(`git hooks install failed: ${errStr(err)}`); }
 
-  // Initialize in-memory fleet state from fleet.json
+  // Initialize in-memory fleet state: disk first, then overlay S3 (fresher after restart)
   try {
     liveFleet = loadFleet();
     log(`fleet: loaded ${Object.keys(liveFleet).length} bot(s) from fleet.json`);
   } catch (err) {
     log(`fleet: failed to load fleet.json: ${errStr(err)}`);
+  }
+  try {
+    const s3Fleet = await readFleetState();
+    if (s3Fleet) {
+      let merged = 0;
+      for (const [bot, entry] of Object.entries(s3Fleet)) {
+        if (liveFleet[bot]) { Object.assign(liveFleet[bot], entry); merged++; }
+      }
+      if (merged > 0) log(`fleet: merged ${merged} bot(s) from S3 state`);
+    }
+  } catch (err) {
+    log(`fleet: S3 state read failed: ${errStr(err)}`);
   }
 
   // Persist fleet on shutdown
