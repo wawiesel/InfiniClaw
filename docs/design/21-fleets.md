@@ -4,19 +4,23 @@ InfiniClaw supports multiple fleet instances sharing the same codebase but track
 
 ## Core Architecture
 
-### Relay as Single Gateway
+### Relay as Observer and Reactor
 
-All communication flows through the relay. No bot communicates with Matrix directly.
+The relay watches Matrix and reacts — it does not intercept or proxy messages. Bots communicate directly with Matrix via their own accounts.
 
 ```
-Captain ←→ Matrix ←→ Relay ←→ Bot containers
-                       ↕
-                      S3 (shared state)
+Captain ←→ Matrix ←→ Bots (direct)
+              ↑
+           Relay (watches, reacts, manages)
+              ↕
+           S3 (shared state)
 ```
 
-- **Messages**: relay reads from Matrix, dispatches to bots; bot output goes through relay to Matrix
-- **Status changes**: relay is the only writer of fleet state (bot status, ship status, health)
-- **X-commands**: relay processes all commands; bots never handle `!` commands directly
+- **Messages**: bots send and receive directly on Matrix. The relay does not proxy bot messages.
+- **X-commands**: relay watches rooms for `!` commands and acts on them. Bots never handle x-commands.
+- **Status changes**: relay is the only writer of fleet state (bot status, system status, health). It observes bot activity and updates state accordingly.
+- **Reactions**: relay reacts to messages (📡 for acknowledgment) to signal coordination to other relays.
+- **Announcements**: relay posts its own messages via loudspeaker (lifecycle events, heartbeats, alerts).
 
 ### S3 as Coordination Plane
 
