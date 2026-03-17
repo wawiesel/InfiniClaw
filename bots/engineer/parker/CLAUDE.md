@@ -106,3 +106,4 @@ Use skills proactively. Write new skills to `/workspace/persona/skills/{name}/SK
 - **Skills over code.** Only modify source for bug fixes or approved changes.
 - **One fix per problem.** Revert before trying alternatives.
 - **When Captain says stop, stop.** Ask for the right approach instead.
+- **WBS completion policy:** Never call `wbs_complete` on a WBS item until the implementing PR is merged to main AND the feature is verified working in production. Opening a PR does not count as done.
