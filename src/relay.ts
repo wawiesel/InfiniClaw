@@ -925,24 +925,43 @@ async function botLeaveRoom(token: string, homeserver: string, roomId: string): 
   await matrixLeave(homeserver, token, roomId);
 }
 
+/** Build the full set of display params for a bot — single source of truth.
+ *  All unifiedBotDisplay call sites MUST use this instead of assembling params ad-hoc.
+ *  Optional overrides allow transient statuses (building, starting) and external data (health, tokPerDay). */
+function buildBotDisplayParams(
+  botName: string,
+  overrides?: { status?: string; health?: string; tokPerDay?: number; shipEmoji?: string; version?: string },
+): import('./formatting.js').UnifiedBotDisplayParams {
+  const entry = liveFleet[botName];
+  const root = resolveRoot();
+  const role = (entry?.role ?? '').toLowerCase();
+  const status = overrides?.status ?? entry?.status ?? 'sleep';
+  const isOnDuty = status === 'onduty';
+  const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
+  const allBotList = Object.entries(liveFleet).map(([n, e]) => ({ name: n, role: e.role, rank: e.rank, status: e.status }));
+  const dutyRoom = ROLE_ROOMS[role]?.room ?? '';
+  const co = findRoomChief(dutyRoom, allBotList) === botName;
+  return {
+    name: botName,
+    shipEmoji: overrides?.shipEmoji ?? findShipByHostname()?.[1]?.emoji ?? '',
+    locationEmoji,
+    health: overrides?.health ?? '',
+    tokPerDay: overrides?.tokPerDay ?? 0,
+    status,
+    role,
+    rank: entry?.rank ?? 99,
+    isChief: co,
+    version: overrides?.version ?? botSemver(root, botName) ?? undefined,
+  };
+}
+
 /** Update a bot's Matrix display name to unified format with a given display status.
  *  Display statuses: 'sleep', 'building', 'starting', 'waiting', 'online', 'ready',
  *  or the bot's actual fleet status (onduty/quarters) for grade-based display. */
 async function setBotDisplayStatus(root: string, bot: string, displayStatus: string): Promise<void> {
   try {
-    const entry = liveFleet[bot];
-    if (!entry) return;
-    const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
-    const role = entry.role?.toLowerCase() ?? '';
-    const isOnDuty = entry.status === 'onduty';
-    const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
-    const dutyRoom = ROLE_ROOMS[role]?.room ?? '';
-    const allBotList = Object.entries(liveFleet).map(([n, e]) => ({ name: n, role: e.role, rank: e.rank, status: e.status }));
-    const co = findRoomChief(dutyRoom, allBotList) === bot;
-    const displayName = unifiedBotDisplay({
-      name: bot, shipEmoji, locationEmoji, health: '', tokPerDay: 0,
-      status: displayStatus, role, rank: entry.rank, isChief: co, version: botSemver(root, bot) ?? undefined,
-    }, 'short');
+    if (!liveFleet[bot]) return;
+    const displayName = unifiedBotDisplay(buildBotDisplayParams(bot, { status: displayStatus }), 'short');
     const { token, homeserver, userId } = await botMatrixLogin(root, bot);
     await matrixSetDisplayName(homeserver, token, userId, displayName);
   } catch (err) {
@@ -953,27 +972,9 @@ async function setBotDisplayStatus(root: string, bot: string, displayStatus: str
 /** Sync display names for ALL bots on this ship (including sleeping ones). */
 async function syncBotDisplayNames(): Promise<void> {
   const root = resolveRoot();
-  const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
-  const allBotList = Object.entries(liveFleet).map(([name, e]) => ({ name, role: e.role, rank: e.rank, status: e.status }));
   for (const [bot, entry] of Object.entries(liveFleet)) {
     if (entry.ship !== HOSTNAME) continue;
-    const role = entry.role?.toLowerCase() ?? '';
-    const isOnDuty = entry.status === 'onduty';
-    const locationEmoji = isOnDuty ? (ROLE_ROOMS[role]?.icon ?? '') : '🏠';
-    const dutyRoom = ROLE_ROOMS[role]?.room ?? '';
-    const co = findRoomChief(dutyRoom, allBotList) === bot;
-    const displayName = unifiedBotDisplay({
-      name: bot,
-      shipEmoji,
-      locationEmoji,
-      health: '',
-      tokPerDay: 0,
-      status: entry.status,
-      role,
-      rank: entry.rank,
-      isChief: co,
-      version: botSemver(root, bot) ?? undefined,
-    }, 'short');
+    const displayName = unifiedBotDisplay(buildBotDisplayParams(bot), 'short');
     try {
       const { token, homeserver, userId } = await botMatrixLogin(root, bot);
       await matrixSetDisplayName(homeserver, token, userId, displayName);
@@ -1452,25 +1453,15 @@ function formatCombinedMetrics(
     for (const [i, bot] of botsWithMeta.entries()) {
       const isLast = i === botsWithMeta.length - 1;
       const role = bot.role?.toLowerCase() ?? '';
-      const roleRoom = ROLE_ROOMS[role];
-      const co = findRoomChief(roleRoom?.room ?? '', allBotList) === bot.name;
-      const isOnDuty = bot.status === 'onduty';
-      const locEmoji = isOnDuty ? (roleRoom?.icon ?? '') : '🏠';
       const isSleeping = bot.status === 'sleep' || bot.status === 'dream';
       const botGrade = isSleeping ? '' : computeBotHealthGrade(bot);
       const tree = isLast ? '└ ' : '├ ';
-      const botLine = unifiedBotDisplay({
-        name: bot.name,
+      const botLine = unifiedBotDisplay(buildBotDisplayParams(bot.name, {
         shipEmoji: '',
-        locationEmoji: locEmoji,
+        status: bot.status,
         health: botGrade || '',
         tokPerDay: bot.tokenThroughput?.day1 ?? 0,
-        status: bot.status,
-        role,
-        rank: bot.rank,
-        isChief: co,
-        version: botSemver(resolveRoot(), bot.name) ?? undefined,
-      }, 'short', maxNameLen);
+      }), 'short', maxNameLen);
 
       // Metrics suffix: mem, kills, tok, latency
       const r24 = rolling24h?.bots?.[bot.name];
@@ -1580,19 +1571,7 @@ function formatHealthSummary(reports: Array<{ ship: string; data: Record<string,
 
       const isLast = i === sortedBots.length - 1;
       const tree = isLast ? '└ ' : '├ ';
-      const entry = liveFleet[name];
-      const role = entry?.role?.toLowerCase() ?? '';
-      const roleRoom = ROLE_ROOMS[role];
-      const isOnDuty = entry?.status === 'onduty';
-      const locEmoji = isOnDuty ? (roleRoom?.icon ?? '') : '🏠';
-      const co = findRoomChief(roleRoom?.room ?? '', allBotList) === name;
-      const botLine = unifiedBotDisplay({
-        name, shipEmoji: '', locationEmoji: locEmoji,
-        health: '', tokPerDay: 0,
-        status: entry?.status ?? 'sleep', role,
-        rank: entry?.rank ?? 99, isChief: co,
-        version: botSemver(resolveRoot(), name) ?? undefined,
-      }, 'short', maxNameLen);
+      const botLine = unifiedBotDisplay(buildBotDisplayParams(name, { shipEmoji: '' }), 'short', maxNameLen);
       const mem = b.rss_mb != null ? `mem ${b.rss_mb}/${b.limit_mb ?? '?'}MB` : '';
       const stats24 = `SK+${sk24} OOM+${oom24} (1d)`;
       const stats7d = r7 ? `SK+${r7.sigkills ?? 0} OOM+${r7.oom_kills ?? 0} (7d)` : '';
@@ -3897,18 +3876,13 @@ function registerRelayCommands(): void {
             const isSleeping = entry.localStatus === 'sleep' || entry.localStatus === 'dream';
             const isLast = idx === bots.length - 1;
             const tree = isLast ? '└ ' : '├ ';
-            const botLine = unifiedBotDisplay({
-              name: entry.name,
+            const botLine = unifiedBotDisplay(buildBotDisplayParams(entry.name, {
               shipEmoji: '',
-              locationEmoji: locEmoji,
+              status: entry.localStatus,
               health: entry.grade || (isSleeping ? 'A' : ''),
               tokPerDay: entry.tokPerDay ?? 0,
-              status: entry.localStatus,
-              role,
-              rank: entry.rank,
-              isChief: co,
               version: entry.gitVersion || undefined,
-            }, 'short', globalMaxNameLen);
+            }), 'short', globalMaxNameLen);
             lines.push(`${tree}${botLine}`);
           }
         }
