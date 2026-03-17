@@ -98,7 +98,7 @@ The pip reflects **operational status**, not which room the bot is in. A bot's r
 | 🟢 | online | Running, responding |
 | ⭐ | Chief | Room lead — highest-rank active bot in duty room |
 
-Display name format: `<pip> <name> <shipEmoji>` (e.g. `🟢 Cid 🦁`). Chief is elected automatically — lowest-rank-number active bot in a duty room (see [12-co](12-co.md)).
+Display name format: `<shipEmoji><locEmoji> <Name> <roleIcon><medal><healthEmoji><actEmoji>` (e.g. `🦁🏠 Cid ⚙️🥈🟢🔥`). Chief is elected automatically — lowest-rank-number active bot in a duty room (see [12-co](12-co.md)).
 
 ### Room assignment
 

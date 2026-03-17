@@ -45,7 +45,7 @@ description: When and how to use this skill.
 
 The `pm` skill is planned for engineer-role bots. Capabilities:
 
-- Maintain a WBS (Work Breakdown Structure) JSON at `_runtime/data/wbs-{bot}.json`
+- Maintain a WBS (Work Breakdown Structure) via S3 at `wbs/{room}.json` (see [12-co](12-co.md))
 - Render GANTT as HTML and upload to S3 presigned URL for the Captain
 - Track task dependencies
 - Predict time-to-completion from task complexity and historical branch brain durations

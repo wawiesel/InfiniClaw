@@ -257,7 +257,7 @@ Activity is shown for all bot statuses, including sleep/dream/transit — it rep
 
 | Medal | Meaning |
 |-------|---------|
-| ⭐ | Chief — lowest-rank awake bot in its role (onduty or quarters) |
+| ⭐ | Chief — lowest-rank-number active bot in its duty room |
 | 🥇 | Rank 1 (not chief) |
 | 🥈 | Rank 2 |
 | 🥉 | Rank 3+ |
