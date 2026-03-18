@@ -827,6 +827,51 @@ Use this after completing a task that requires cross-bot verification. The assig
     },
   );
 
+  server.tool(
+    'wbs_write',
+    `Create or update a WBS item. Chief only.
+
+Use to add new tasks (upsert) or remove items (delete) from the Work Breakdown Structure.
+- upsert: creates the item if it doesn't exist, or updates fields of an existing item
+- delete: removes the item from the WBS
+
+Item fields for upsert:
+- id: hierarchical WBS code (e.g. "3.2.1")
+- title: deliverable description
+- priority: number, lower = higher priority (default 50)
+- depends_on: list of item IDs that must be done first
+- status: "backlog" | "ready" (default "backlog")
+- source: optional GitHub issue/PR reference`,
+    {
+      op: z.enum(['upsert', 'delete']).describe('Operation: upsert (create/update) or delete'),
+      room: z.string().optional().describe('Room name. Defaults to your current role room.'),
+      item: z.object({
+        id: z.string().describe('WBS item ID (e.g. "3.2.1")'),
+        title: z.string().optional().describe('Deliverable title (required for upsert)'),
+        priority: z.number().int().optional().describe('Priority — lower number = higher priority (default 50)'),
+        depends_on: z.array(z.string()).optional().describe('IDs of items that must be done before this one'),
+        status: z.enum(['backlog', 'ready']).optional().describe('Initial status (default: backlog)'),
+        source: z.string().optional().describe('GitHub issue, PR, or Captain directive reference'),
+      }).describe('Item to create/update/delete'),
+    },
+    async (args) => {
+      const room = args.room || inferRoom();
+      writeIpcFile(tasksDir, {
+        type: 'wbs_write',
+        op: args.op,
+        item: args.item,
+        room,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      const msg = args.op === 'delete'
+        ? `WBS ${args.item.id} delete queued in ${room}.`
+        : `WBS ${args.item.id} upsert queued in ${room}.`;
+      return { content: [{ type: 'text' as const, text: msg }] };
+    },
+  );
+
   // ── Delegate tools ──────────────────────────────────────────────────
 
   registerDelegateTools(server, {

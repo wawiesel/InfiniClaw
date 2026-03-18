@@ -1086,6 +1086,65 @@ async function handleWbsComplete(data: CommandData, _ctx: InfiniClawIpcContext):
   logger.info({ room, itemId, unblocked }, 'WBS item completed, unblocked: %o', unblocked);
 }
 
+async function handleWbsWrite(data: CommandData, _ctx: InfiniClawIpcContext): Promise<void> {
+  const root = resolveRoot();
+  const room = typeof data.room === 'string' ? data.room : '';
+  const op = typeof data.op === 'string' ? data.op : '';
+  const item = data.item && typeof data.item === 'object' ? data.item as Record<string, unknown> : null;
+  const itemId = item && typeof item.id === 'string' ? item.id : '';
+
+  if (!room || !op || !item || !itemId) {
+    logger.warn({ data }, 'wbs_write: missing room, op, or item.id');
+    return;
+  }
+
+  const dataDir = path.join(root, '_runtime', 'data');
+  const wbs = readWbs(dataDir, room);
+
+  if (op === 'delete') {
+    const before = wbs.items.length;
+    wbs.items = wbs.items.filter((i) => i.id !== itemId);
+    writeWbs(dataDir, room, wbs);
+    logger.info({ room, itemId, removed: before - wbs.items.length }, 'WBS item deleted');
+    return;
+  }
+
+  if (op === 'upsert') {
+    const title = typeof item.title === 'string' ? item.title : '';
+    const existing = wbs.items.find((i) => i.id === itemId);
+    if (existing) {
+      if (title) existing.title = title;
+      if (typeof item.priority === 'number') existing.priority = item.priority;
+      if (Array.isArray(item.depends_on)) existing.depends_on = item.depends_on as string[];
+      if (typeof item.source === 'string') existing.source = item.source;
+      // Only update status if still backlog/ready (don't override in_progress/done)
+      if (typeof item.status === 'string' && (existing.status === 'backlog' || existing.status === 'ready')) {
+        existing.status = item.status as 'backlog' | 'ready';
+      }
+      logger.info({ room, itemId }, 'WBS item updated');
+    } else {
+      if (!title) {
+        logger.warn({ data }, 'wbs_write upsert: missing title for new item');
+        return;
+      }
+      wbs.items.push({
+        id: itemId,
+        title,
+        source: typeof item.source === 'string' ? item.source : undefined,
+        depends_on: Array.isArray(item.depends_on) ? item.depends_on as string[] : [],
+        assigned_to: null,
+        status: (typeof item.status === 'string' ? item.status : 'backlog') as 'backlog' | 'ready',
+        priority: typeof item.priority === 'number' ? item.priority : 50,
+      });
+      logger.info({ room, itemId }, 'WBS item created');
+    }
+    writeWbs(dataDir, room, wbs);
+    return;
+  }
+
+  logger.warn({ data }, 'wbs_write: unknown op "%s"', op);
+}
+
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_brain_mode: handleSetBrainMode,
   refresh_bot: handleRefreshBot,
@@ -1113,6 +1172,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
 
   wbs_assign: handleWbsAssign,
   wbs_complete: handleWbsComplete,
+  wbs_write: handleWbsWrite,
 };
 
 export async function handleInfiniClawCommand(
