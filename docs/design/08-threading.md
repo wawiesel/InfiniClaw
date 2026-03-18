@@ -155,6 +155,10 @@ One call — the tool handles the thread title post automatically:
 
 The tool posts `🌿 <title> — <purpose>` on the main timeline and uses that event as the thread root. No manual `get_last_event_id` or title posting needed.
 
+## Signals Integration
+
+Thread routing for non-branch messages uses the Signals protocol (see [22-signals](22-signals.md)). Bots use `{{send thread="$eventId"}}` to route a message to a specific thread, or rely on default echo-back routing (response goes to wherever the message came from). The `set_thread` MCP tool is deprecated in favor of Signals.
+
 ## Verification
 
 1. **Branch creates thread** — Send a complex request.
