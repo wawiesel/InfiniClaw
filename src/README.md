@@ -84,7 +84,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 
 ## Key flows
 
-**Start:** `cli.ts` → `service.ts:startAll()` → for each bot in fleet.json: `deployBot()` → rsync nanoclaw, write crew status, start via pm2. After all bots start, also starts the relay process.
+**Start:** `cli.ts` → `service.ts:startAll()` → for each bot in fleet.json: `deployBot()` → rsync nanoclaw, write crew status, start via pm2. After all bots start, also starts the relay process. Deploy timeouts: `npm ci` 600s, `npm rebuild better-sqlite3` 60s, `npm run build` 120s.
 
 **Message:** Matrix event → `main.ts` message loop → `processGroupMessages()` → `container-spawn.ts:runContainerAgent()` → podman container runs agent-runner → output markers parsed → sent to Matrix. Containers route API calls through the credential proxy started in `main.ts` (imported from `nanoclaw/credential-proxy.js`). The proxy binds to `PROXY_BIND_HOST` (from `nanoclaw/container-runtime.js`) so containers can reach it via the docker0 bridge. A `.env` file is written from `process.env` before proxy startup so it can read the bot's credentials.
 
