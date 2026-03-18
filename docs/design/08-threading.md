@@ -48,13 +48,19 @@ The tool posts the `🌿 title — purpose` thread header automatically. Model i
 5. Captain can converse with the branch normally while it runs
 6. Bot says "Branch dispatched." and stops inline work
 
+**Ralph loop:** After every turn, the branch's purpose is re-injected into the branch context. This ensures the branch never loses track of its objective, regardless of how much other context accumulates during a long-running session.
+
 ### Model Selection
 
 Model is fixed per bot for prompt caching — not selectable per branch call. Configured in the bot's persona/env.
 
 ### Main Timeline Injection
 
-While a branch is running, all messages on the main timeline (main brain, Captain, other bots) are injected into the branch's stdin so the branch stays aware of main context. The main brain does NOT receive thread context while the branch is running.
+While a branch is running, all messages on the main timeline are injected into the branch's stdin so the branch stays aware of main context. This includes messages from the Captain, other bots, and the same Matrix bot — every message in the room identified by `room_id` is injected, without exception. The main brain does NOT receive thread context while the branch is running.
+
+### Thread Conversation
+
+Messages sent in the thread are added to the branch's conversation naturally, exactly as they would be in a normal Claude conversation. The branch sees thread replies as direct conversation turns — no special injection or formatting is applied.
 
 ### Merge and Thread Closure
 
