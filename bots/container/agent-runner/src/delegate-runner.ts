@@ -372,10 +372,11 @@ export function registerDelegateTools(
 
   server.tool(
     'branch_to_thread',
-    `Spawn a new Claude Branch Brain in the background and return immediately.`,
+    `Spawn a new Claude Branch Brain in the background and return immediately. The tool posts 🌿 <title> — <objective> on the main timeline and uses that event as the thread root. No manual get_last_event_id or title posting needed.`,
     {
+      title: z.string().min(1).describe('Short keyword label — used for the 🌿 thread header and 🪾 merge marker'),
       objective: z.string().min(1).describe('Objective for the spawned Branch Brain'),
-      thread_id: z.string().min(1).describe('Matrix event ID of the thread root — MUST be a real $... event ID obtained via get_last_event_id immediately after posting the thread title on the main timeline. Do NOT use a custom string or label.'),
+      thread_id: z.string().optional().describe('Optional Matrix event ID of the thread root — if omitted, the tool posts the thread title automatically and uses that as the root.'),
     },
     async (args) => {
       // Write a relay task so the HOST-side relay spawns the Branch Brain as an independent
@@ -389,6 +390,7 @@ export function registerDelegateTools(
         const tempPath = `${taskFile}.tmp`;
         const payload = {
           type: 'branch_brain',
+          title: args.title,
           thread_id: args.thread_id,
           objective: args.objective,
           bot: process.env.ASSISTANT_NAME || '',
@@ -408,7 +410,7 @@ export function registerDelegateTools(
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({ status: 'Branch created', thread_id: args.thread_id }),
+          text: JSON.stringify({ status: 'Branch created', title: args.title, thread_id: args.thread_id }),
         }],
       };
     },
