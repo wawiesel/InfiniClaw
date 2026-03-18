@@ -204,13 +204,16 @@ export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
 }
 
 /**
- * Write fleet state: upload this ship's bots to S3, then write full fleet to disk as cache.
+ * Write fleet state: disk first (synchronous cache), then S3 upload (async).
+ * Disk-first ensures loadFleet() always sees the latest state immediately.
  * Filters to bots on this ship for the S3 upload to avoid cross-ship conflicts.
  */
 export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<void> {
+  // Disk first — synchronous so loadFleet() immediately sees updated state
+  writeFleet(fleet);
+  // S3 second — upload this ship's runtime fields
   const hostname = os.hostname();
   const shipName = findShipByHostname(hostname)?.[0] ?? hostname;
-  // Extract only this ship's bots' runtime fields for S3
   const shipBots: Record<string, Partial<BotEntry>> = {};
   for (const [bot, entry] of Object.entries(fleet)) {
     if (entry.ship !== hostname) continue;
@@ -226,9 +229,7 @@ export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<
   try {
     const { uploadJson } = await s3Helpers();
     await uploadJson(`fleet-state/${shipName}.json`, { ts: Date.now(), bots: shipBots });
-  } catch { /* S3 write failed — disk still written below */ }
-  // Always write to disk as cache
-  writeFleet(fleet);
+  } catch { /* S3 write failed — disk was already written above */ }
 }
 
 export interface ShipEntry {
