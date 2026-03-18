@@ -8,10 +8,10 @@ InfiniClaw uses a "Branch and Merge" model. The main brain stays responsive on t
 Main Brain (persistent, in container)
   ├── Simple request → reply on main timeline
   ├── Complex request → branch_to_thread(objective)
-  │     → Bot posts thread title on main timeline
-  │     → Relay forks bot's session via claude --fork-session
-  │     → Fork streams into visible Matrix thread (same room as bot)
-  │     → On exit: merge message posted, bot assimilates results
+  │     → Bot posts 🌿 thread title on main timeline
+  │     → Bot spawns branch (forks session, streams output into thread)
+  │     → Main timeline messages injected into branch while running
+  │     → On finish: branch posts 🪾 merge marker, injects summary into main history
   └── Heavy/async work → invoke lobe MCP tool
         → Lobe works in a quarters thread (any provider)
         → On completion: summary posted to quarters main timeline
@@ -20,42 +20,59 @@ Main Brain (persistent, in container)
 
 ## Branch Brains
 
-Branch brains run as isolated **podman containers** when `BRANCH_BRAIN_IMAGE` is set (default: `localhost/infiniclaw-branch-brain:latest`). They are interactive `claude` processes (stdin open) that stream output into a Matrix thread in the bot's current room. Set `BRANCH_BRAIN_IMAGE=` (empty) to fall back to host-side spawn.
+Branch brains are spawned directly by the bot — the relay does not announce or spawn them. They are interactive `claude` processes (stdin open) that stream output into a Matrix thread in the bot's current room.
+
+**Constraint:** A branch brain can be spawned anywhere a bot is active **except inside a thread**. Branching from within a thread is not allowed (no nested threads).
+
+### Signature
+
+```
+branch_to_thread(title, purpose, duration, room_id)
+```
+
+| Param | Description |
+|---|---|
+| `title` | Short keyword label — used for the 🌿 post and 🪾 merge marker |
+| `purpose` | Full objective passed to the branch brain |
+| `duration` | Expected run time (e.g. `"5m"`, `"30m"`) — used for timeout planning |
+| `room_id` | Target room where the thread will appear |
+
+The tool posts the `🌿 title — purpose` thread header automatically. Model is fixed (not a parameter) for prompt caching reasons.
 
 ### How Branching Works
 
-1. Main brain calls `branch_to_thread(objective, thread_id)`
-2. Agent-runner writes a relay task file: `_runtime/relay-tasks/branch-brain-*.json`
-3. Relay picks up the file, calls `spawnBranchBrain()`
-4. Relay posts announcement on main timeline: `🧵 Branch Brain: {objective first line}`
-5. Announcement event ID becomes the thread root
-6. Relay finds the bot's latest session ID from `_runtime/instances/{bot}/data/sessions/main/.claude/`
-7. Relay spawns container: `podman run --rm -i --network slirp4netns --memory 2g` with `--continue --fork-session` to inherit the main brain's context. Falls back to host `claude` if `BRANCH_BRAIN_IMAGE` unset
-8. Branch brain streams assistant output — each text block posted into the Matrix thread as it arrives
-9. Captain can follow progress in real-time or ignore
+1. Bot calls `branch_to_thread(title, purpose, duration, room_id)`
+2. Tool posts `🌿 <title> — <purpose>` on the target room's main timeline
+3. Branch is spawned, forks the bot's session (`--continue --fork-session`) to inherit full context
+4. Branch streams output into the Matrix thread as it arrives
+5. Captain can converse with the branch normally while it runs
+6. Bot says "Branch dispatched." and stops inline work
+
+**Ralph loop:** After every turn, the branch's purpose is re-injected into the branch context. This ensures the branch never loses track of its objective, regardless of how much other context accumulates during a long-running session.
 
 ### Model Selection
 
-The bot chooses which model to use from its configured branch models. For example, a bot with main=haiku and branch=[haiku, sonnet] might pick sonnet for a complex engineering task and haiku for a quick investigation. This is configured in the bot's persona and memory.
+Model is fixed per bot for prompt caching — not selectable per branch call. Configured in the bot's persona/env.
 
-### Streaming Output
+### Main Timeline Injection
 
-The relay parses `stream-json` format from the Claude CLI:
-- `event.type === 'assistant'` with `event.message.content[].text` — posted as it arrives
-- `event.type === 'result'` — fallback if no streaming output captured
-- Messages posted individually (not batched)
+While a branch is running, all messages on the main timeline are injected into the branch's stdin so the branch stays aware of main context. This includes messages from the Captain, other bots, and the same Matrix bot — every message in the room identified by `room_id` is injected, without exception. The main brain does NOT receive thread context while the branch is running.
+
+### Thread Conversation
+
+Messages sent in the thread are added to the branch's conversation naturally, exactly as they would be in a normal Claude conversation. The branch sees thread replies as direct conversation turns — no special injection or formatting is applied.
+
+### Merge and Thread Closure
+
+When the branch finishes:
+1. Branch posts `🪾 <keyword-link-to-thread>` + full result description as the merge marker
+2. Branch injects its final summary into main brain history — so the main brain has the result in context even though it came from the branch
+3. Thread is now **closed** — no further posting allowed. Any new message in that thread receives a loudspeaker reply: "this thread is closed"
+4. Main timeline summary posted: `🪾 <keyword> — ✅ done` (or `⛔ failed`)
 
 ### Concurrency Limit
 
 `MAX_BRANCH_BRAINS_PER_BOT` (default 3, configurable via env) caps concurrent branch brains per bot. Excess requests are rejected with a warning posted into the triggering thread.
-
-### After Completion
-
-When a branch brain exits:
-1. Merge message posted to the thread — a normal Matrix message with any level of detail the BB chooses (summary, full results, code snippets, etc.)
-2. Main timeline summary posted: `🧵 <title> — ✅ done` (or `⛔ failed`)
-3. Thread remains in Matrix history permanently
-4. No restart needed — the main brain assimilates results on its next turn
 
 ### Credentials
 
@@ -133,15 +150,13 @@ Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour
 
 ## Correct branch_to_thread Protocol
 
-Bots must follow this exact sequence:
+One call — the tool handles the thread title post automatically:
 
-1. Post a thread title on the main timeline FIRST (e.g. "Branching: fix the display formatting")
-2. Call `get_last_event_id` — this returns both `lastSent` and `lastReceived`
-3. Use **`lastSent`** as the thread_id (your title post). **NEVER use `lastReceived`** — that is the Captain's message, branching off it creates a broken thread
-4. Call `branch_to_thread(objective, thread_id)` with the `lastSent` event ID
-5. Say "Branch dispatched." and STOP — do NOT dispatch more in the same turn
+1. Call `branch_to_thread(title, purpose, duration, room_id)`
+2. Say "Branch dispatched." and STOP — do not dispatch more in the same turn
+3. Cannot be called from inside a thread
 
-**Critical:** The thread root is YOUR title post, not the Captain's message. The bot owns the thread.
+The tool posts `🌿 <title> — <purpose>` on the main timeline and uses that event as the thread root. No manual `get_last_event_id` or title posting needed.
 
 ## Verification
 

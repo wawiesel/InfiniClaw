@@ -20,14 +20,17 @@ The turn timeout enforces this model — if the brain takes too long, the contai
 
 ## Branch Brain
 
-An interactive `claude` process that forks from the main brain's session and works in a visible Matrix thread in the bot's current room. The main brain initiates a branch when a request is too complex for inline triage.
+An interactive `claude` process that forks from the main brain's session and works in a visible Matrix thread in the bot's current room. The bot itself initiates a branch when a request is too complex for inline triage.
 
-- **Forks main brain context** — uses `--continue --fork-session` to inherit the main brain's full conversation history. The BB starts with awareness of everything the main brain knows.
-- **Runs in a container** — isolated podman container (`--network slirp4netns`, memory/pid limits). Falls back to host `claude` if `BRANCH_BRAIN_IMAGE` unset. Spawned by the relay.
-- **Interactive** — stdin stays open for context injection from the main timeline (see [08-threading](08-threading.md)).
+- **Bot-driven spawn** — the bot posts a `🌿` title, gets `lastSent` via `get_last_event_id`, then calls `branch_to_thread(objective, lastSent)`. The relay does not announce or spawn branches.
+- **Forks main brain context** — uses `--continue --fork-session` to inherit the main brain's conversation history at branch start.
+- **Interactive** — while running, the branch can converse normally in-thread.
+- **Main timeline injection** — all main timeline messages (main brain, Captain, other bots) are injected into any live branch so the branch keeps main-context awareness.
 - **Model selection** — the bot chooses from its configured branch models (e.g. main=haiku, branch=[haiku, sonnet]).
 - **No nested branching** — a branch brain should not branch again (enforced by prompt instruction; see issue #25 for programmatic enforcement).
-- **Streaming output** — each assistant text block is posted into the thread as it arrives, so the Captain can follow progress in real-time.
+- **Delayed main assimilation** — the main brain does not receive thread context while the branch is running.
+- **Merge closes thread** — when work completes, the branch posts a merge marker (`🪾`) at thread end, injects its final summary into main brain history, and the thread becomes closed. New posts in that thread receive a loudspeaker "thread is closed" response.
+- **Streaming output** — assistant output is posted into the thread as it arrives, so the Captain can follow progress in real-time.
 
 See [08-threading](08-threading.md) for the branching protocol and implementation.
 
