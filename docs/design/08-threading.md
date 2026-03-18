@@ -24,19 +24,33 @@ Branch brains are spawned directly by the bot — the relay does not announce or
 
 **Constraint:** A branch brain can be spawned anywhere a bot is active **except inside a thread**. Branching from within a thread is not allowed (no nested threads).
 
+### Signature
+
+```
+branch_to_thread(title, purpose, duration, room_id)
+```
+
+| Param | Description |
+|---|---|
+| `title` | Short keyword label — used for the 🌿 post and 🪾 merge marker |
+| `purpose` | Full objective passed to the branch brain |
+| `duration` | Expected run time (e.g. `"5m"`, `"30m"`) — used for timeout planning |
+| `room_id` | Target room where the thread will appear |
+
+The tool posts the `🌿 title — purpose` thread header automatically. Model is fixed (not a parameter) for prompt caching reasons.
+
 ### How Branching Works
 
-1. Bot posts `🌿 <keyword> - <purpose>` as thread title on main timeline
-2. Bot calls `get_last_event_id` and uses `lastSent` as the thread root
-3. Bot calls `branch_to_thread(objective, lastSent)` — branch is spawned
-4. Bot says "Branch dispatched." and stops inline work
-5. Branch forks the bot's session (`--continue --fork-session`) to inherit full context
-6. Branch streams assistant output into the Matrix thread as it arrives
-7. Captain can converse with the branch normally while it is running
+1. Bot calls `branch_to_thread(title, purpose, duration, room_id)`
+2. Tool posts `🌿 <title> — <purpose>` on the target room's main timeline
+3. Branch is spawned, forks the bot's session (`--continue --fork-session`) to inherit full context
+4. Branch streams output into the Matrix thread as it arrives
+5. Captain can converse with the branch normally while it runs
+6. Bot says "Branch dispatched." and stops inline work
 
 ### Model Selection
 
-The bot chooses which model to use from its configured branch models. For example, a bot with main=haiku and branch=[haiku, sonnet] might pick sonnet for a complex engineering task and haiku for a quick investigation. This is configured in the bot's persona and memory.
+Model is fixed per bot for prompt caching — not selectable per branch call. Configured in the bot's persona/env.
 
 ### Main Timeline Injection
 
@@ -130,15 +144,13 @@ Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour
 
 ## Correct branch_to_thread Protocol
 
-Bots must follow this exact sequence:
+One call — the tool handles the thread title post automatically:
 
-1. Post a thread title on the main timeline FIRST (e.g. "Branching: fix the display formatting")
-2. Call `get_last_event_id` — this returns both `lastSent` and `lastReceived`
-3. Use **`lastSent`** as the thread_id (your title post). **NEVER use `lastReceived`** — that is the Captain's message, branching off it creates a broken thread
-4. Call `branch_to_thread(objective, thread_id)` with the `lastSent` event ID
-5. Say "Branch dispatched." and STOP — do NOT dispatch more in the same turn
+1. Call `branch_to_thread(title, purpose, duration, room_id)`
+2. Say "Branch dispatched." and STOP — do not dispatch more in the same turn
+3. Cannot be called from inside a thread
 
-**Critical:** The thread root is YOUR title post, not the Captain's message. The bot owns the thread.
+The tool posts `🌿 <title> — <purpose>` on the main timeline and uses that event as the thread root. No manual `get_last_event_id` or title posting needed.
 
 ## Verification
 
