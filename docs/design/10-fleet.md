@@ -1,10 +1,17 @@
 # 10 — Fleet
 
-The fleet is the aggregate of all ships and bots, coordinated via `fleet.json` as the single source of truth.
+The fleet is the aggregate of all ships and bots. S3 is the authoritative store for complete bot state; `fleet.json` (git-synced) serves as bootstrap fallback.
 
 ## Fleet Configuration
 
-Fleet-wide bot availability is tracked in `fleet.json` and synced via git. The relay on each ship maintains an in-memory copy (`liveFleet`) as the runtime source of truth.
+Fleet-wide bot state is stored in S3 (`fleet-state/<ship>.json`) with complete bot entries — all fields including role, rank, ship, status, triggerType, activeBrainModel, ondutyAt, etc. The relay on each ship maintains an in-memory copy (`liveFleet`) as the runtime source of truth, persisted to both disk and S3 on mutation.
+
+### State flow
+
+1. **Bootstrap**: `loadFleetAsync()` reads disk `fleet.json`, then overlays ALL fields from S3 per-ship state files. S3 wins for any field present.
+2. **Runtime**: `liveFleet` is the single in-memory authority. All mutations go through `fleetUpdate()`.
+3. **Persist**: `writeFleetAsync()` writes disk first (synchronous, for immediate `loadFleet()` reads), then uploads this ship's complete bot entries to S3.
+4. **Brain model changes**: `applyBrainMode()` persists via `writeFleetAsync()` so model switches propagate to S3 immediately.
 
 ```json
 {

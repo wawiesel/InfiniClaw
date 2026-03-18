@@ -13,7 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from './env-utils.js';
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
-import { loadShipConfig, loadFleet, writeFleet, shipTag } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, writeFleetAsync, shipTag } from './ship-config.js';
 import { runHealthCheck as healthCheck } from './health.js';
 import { logger } from 'nanoclaw/logger.js';
 import { errStr } from './utils.js';
@@ -179,12 +179,17 @@ function applyBrainMode(
     upsertEnvLine(envFile, 'BRAIN_API_KEY', '');
     upsertEnvLine(envFile, 'BRAIN_OAUTH_TOKEN', '');
   }
-  // Persist model switch to fleet.json so activeBrainModel stays in sync
+  // Persist model switch to fleet.json + S3 so activeBrainModel stays in sync
   try {
     const fleet = loadFleet();
-    if (fleet[bot]) { fleet[bot].activeBrainModel = effectiveModel; writeFleet(fleet); }
+    if (fleet[bot]) {
+      fleet[bot].activeBrainModel = effectiveModel;
+      writeFleetAsync(fleet).catch((err) => {
+        logger.warn({ err, bot }, 'applyBrainMode: S3 persist failed (disk write succeeded)');
+      });
+    }
   } catch (err) {
-    logger.warn({ err, bot }, 'applyBrainMode: could not update activeBrainModel in fleet.json');
+    logger.warn({ err, bot }, 'applyBrainMode: could not update activeBrainModel in fleet');
   }
   return `Updated ${bot} to ${mode}/${effectiveModel}. Restart required.`;
 }
