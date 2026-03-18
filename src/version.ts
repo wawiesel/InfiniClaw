@@ -3,9 +3,19 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-/** Semver tag stamped at deploy time (e.g. "v1.3.12"), or null if untagged. */
+/** Semver tag stamped at deploy time (e.g. "v1.3.12"), or null if untagged.
+ *  Checks instance-level stamp first (written by deployBot), then project root. */
 export const SEMVER_TAG: string | null = (() => {
   const root = process.env.INFINICLAW_ROOT || process.cwd();
+  const bot = (process.env.ASSISTANT_NAME || '').toLowerCase();
+  // Instance-level stamp (written by deployBot → stampSemverVersion)
+  if (bot) {
+    try {
+      const tag = fs.readFileSync(path.join(root, '_runtime', 'instances', bot, 'SEMVER_VERSION'), 'utf-8').trim();
+      if (tag) return tag;
+    } catch { /* fall through */ }
+  }
+  // Project-root fallback
   try {
     const tag = fs.readFileSync(path.join(root, 'SEMVER_VERSION'), 'utf-8').trim();
     return tag || null;
