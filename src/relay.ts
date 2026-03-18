@@ -2073,10 +2073,11 @@ async function spawnBranchBrain(
   const bot = rawBot?.toLowerCase();
   log(`branchBrain: spawning for thread=${thread_id.slice(0, 20)}`);
 
-  // Guard: if a bot is named, it must be on duty — branch brains should not
-  // spawn in rooms with no active bots (#171).
-  if (bot && liveFleet[bot]?.status !== 'onduty') {
-    log(`branchBrain: skipped — ${bot} is not on duty (status=${liveFleet[bot]?.status ?? 'unknown'})`);
+  // Guard: reject branch requests from unknown bots. Presence is proven by
+  // the IPC call itself — do not gate on duty status (#171 original concern
+  // was rooms with no active bot, but bot making the call IS proof of presence).
+  if (bot && !liveFleet[bot]) {
+    log(`branchBrain: skipped — ${bot} is not in fleet`);
     return;
   }
 
