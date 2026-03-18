@@ -1,0 +1,86 @@
+name: Auto Semver Tag
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  auto-tag:
+    name: Semver Tag from PR Title
+    runs-on: ubuntu-latest
+    # Only run on merge commits (not direct pushes)
+    if: contains(github.event.head_commit.message, 'Merge pull request')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Parse PR title and compute version
+        id: version
+        run: |
+          # Extract PR title from merge commit message (second line)
+          PR_TITLE=$(git log -1 --format=%b | head -1)
+          echo "PR title: $PR_TITLE"
+
+          # Determine bump type from prefix
+          BUMP=""
+          if echo "$PR_TITLE" | grep -qiE '^(breaking|major):'; then
+            BUMP="major"
+          elif echo "$PR_TITLE" | grep -qiE '^(feat|minor):'; then
+            BUMP="minor"
+          elif echo "$PR_TITLE" | grep -qiE '^(fix|patch):'; then
+            BUMP="patch"
+          fi
+
+          if [ -z "$BUMP" ]; then
+            echo "No semver prefix found in PR title — skipping tag"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Bump type: $BUMP"
+
+          # Get latest semver tag
+          LATEST=$(git tag -l 'v*.*.*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            LATEST="v0.0.0"
+          fi
+          echo "Latest tag: $LATEST"
+
+          # Parse version components
+          VERSION="${LATEST#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          # Compute next version
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "Next version: $NEXT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Update package.json version
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          NEXT="${{ steps.version.outputs.next }}"
+          VERSION="${NEXT#v}"
+          npm version "$VERSION" --no-git-tag-version
+
+      - name: Commit and tag
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          NEXT="${{ steps.version.outputs.next }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "release: ${NEXT}" || echo "No changes to commit"
+          git tag -a "$NEXT" -m "Release ${NEXT}"
+          git push origin main --follow-tags

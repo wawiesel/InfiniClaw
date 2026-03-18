@@ -39,7 +39,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
 import {
@@ -77,13 +77,14 @@ import {
   rebuildImageIfChanged,
   syncDistToInstance,
   collectBotMatrixUserMap,
+  readRoomStateStamp,
 } from './service.js';
 import { getLatestSemverTag, getStampedSemverTag, getLatestSemverTagOnRef, commitsAheadOfTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_IMAGE, BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
-import { pushAll } from './s3-sync.js';
+import { pushAll, getClient as getS3Client } from './s3-sync.js';
 import { isHealthReportStale, parseHealthReportTs, STALE_HEALTH_THRESHOLD_MS } from './health-staleness.js';
 
 // ── Config ─────────────────────────────────────────────────────────
@@ -296,31 +297,24 @@ function fleetUpdate(bot: string, updates: Partial<FleetEntry>): void {
 
 function persistFleet(): void {
   if (!fleetDirty) return;
-  try {
-    writeFleet(liveFleet);
-    fleetDirty = false;
-    log('fleet: persisted to fleet.json');
-  } catch (err) {
-    log(`fleet: persist failed: ${errStr(err)}`);
-  }
-  // Upload to S3 as live source of truth (fire-and-forget)
-  writeFleetState(liveFleet).catch(() => {});
+  // S3 first (async, fire-and-forget), disk second (sync cache)
+  writeFleetAsync(liveFleet).catch((err) => {
+    log(`fleet: S3 persist failed: ${errStr(err)}`);
+  });
+  fleetDirty = false;
+  log('fleet: persisted (S3 + disk)');
 }
 
-/** Synchronous persist + blocking S3 write — use before process exit. */
+/** Blocking persist: S3 + disk — use before process exit. */
 async function persistFleetSync(): Promise<void> {
   try {
-    writeFleet(liveFleet);
+    await writeFleetAsync(liveFleet);
     fleetDirty = false;
-    log('fleet: persisted to fleet.json (sync)');
+    log('fleet: persisted to S3 + disk (sync)');
   } catch (err) {
     log(`fleet: persist failed: ${errStr(err)}`);
-  }
-  try {
-    await writeFleetState(liveFleet);
-    log('fleet: persisted to S3 (sync)');
-  } catch (err) {
-    log(`fleet: S3 persist failed: ${errStr(err)}`);
+    // Fallback: at least write to disk
+    try { writeFleet(liveFleet); fleetDirty = false; } catch { /* give up */ }
   }
 }
 
@@ -1028,7 +1022,7 @@ function restartRunningBots(root: string): { started: string[]; failed: string[]
       failed.push(bot);
     }
   }
-  if (started.length > 0 || failed.length > 0) writeFleet(liveFleet);
+  if (started.length > 0 || failed.length > 0) { fleetDirty = true; persistFleet(); }
   return { started, failed };
 }
 
@@ -1110,22 +1104,7 @@ function resolveBots(target: string | undefined, conn: RoomConn, scope: 'present
 
 const HEALTH_S3_PREFIX = 'health';
 
-function getS3Client(): { client: S3Client; bucket: string } | null {
-  try {
-    const config = loadShipConfig();
-    if (!config.s3) return null;
-    const { endpoint, bucket, accessKey, secretKey } = config.s3;
-    return {
-      client: new S3Client({
-        endpoint,
-        region: 'us-east-1',
-        credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
-        forcePathStyle: true,
-      }),
-      bucket,
-    };
-  } catch { return null; }
-}
+// getS3Client imported from s3-sync.ts as getClient → getS3Client
 
 /** Upload an error log to S3 and return a presigned markdown link (7 days), or empty string on failure. */
 async function uploadErrorLog(label: string, error: unknown): Promise<string> {
@@ -1225,40 +1204,7 @@ async function publishFleetReport(): Promise<FleetReport> {
   return report;
 }
 
-const FLEET_STATE_S3_KEY = () => `fleet-state/${thisShipName()}.json`;
-
-/** Upload current fleet state to S3. No-op if S3 not configured. Fire-and-forget. */
-async function writeFleetState(fleet: Record<string, FleetEntry>): Promise<void> {
-  const s3 = getS3Client();
-  if (!s3) return;
-  try {
-    await s3.client.send(new PutObjectCommand({
-      Bucket: s3.bucket,
-      Key: FLEET_STATE_S3_KEY(),
-      Body: Buffer.from(JSON.stringify({ ts: Date.now(), bots: fleet })),
-      ContentType: 'application/json',
-    }));
-  } catch (err) { log(`fleet state S3 write failed: ${errStr(err)}`); }
-}
-
-/** Download fleet state from S3. Returns null if unavailable or S3 not configured. */
-async function readFleetState(): Promise<Record<string, FleetEntry> | null> {
-  const s3 = getS3Client();
-  if (!s3) return null;
-  try {
-    const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: FLEET_STATE_S3_KEY() }));
-    const body = await resp.Body?.transformToString();
-    if (!body) return null;
-    const parsed = JSON.parse(body) as { ts?: number; bots?: Record<string, FleetEntry> };
-    return parsed.bots ?? null;
-  } catch (err: unknown) {
-    const code = (err as { name?: string })?.name;
-    if (code !== 'NoSuchKey' && code !== 'AccessDenied') {
-      log(`fleet state S3 read failed: ${errStr(err)}`);
-    }
-    return null;
-  }
-}
+// Fleet state read/write moved to ship-config.ts (loadFleetAsync/writeFleetAsync)
 
 function runHealthCheck(): string | null {
   const root = resolveRoot();
@@ -2635,10 +2581,10 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
       } else if (result.newCommits > 0) {
         await reportRecovery('secrets sync', conns);
         log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
-        // Reload fleet.json from disk (may have transport assignments from other ships)
+        // Reload static config from disk (transport assignments come via git).
+        // Only merge structural/static fields — don't overwrite runtime state (status, triggerType, etc.)
         try {
           const diskFleet = loadFleet();
-          // Merge disk state into liveFleet — transport assignments come via git
           for (const [bot, entry] of Object.entries(diskFleet)) {
             if (!liveFleet[bot]) { liveFleet[bot] = entry; continue; }
             // Transport pickup: bot assigned to us but inactive (phase 1 by another ship)
@@ -2646,6 +2592,11 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
               liveFleet[bot].ship = HOSTNAME;
               liveFleet[bot].status = 'transit'; // will be materialized below
             }
+            // Merge static fields only (role, rank, title, quartersRoom, ship)
+            liveFleet[bot].role = entry.role;
+            liveFleet[bot].rank = entry.rank;
+            if (entry.title !== undefined) liveFleet[bot].title = entry.title;
+            if (entry.quartersRoom !== undefined) liveFleet[bot].quartersRoom = entry.quartersRoom;
           }
         } catch { /* no fleet on disk */ }
 
@@ -2656,10 +2607,9 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
             if (entry.ship === HOSTNAME && entry.status === 'transit') {
               log(`transport: materializing ${bot}`);
               fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
-              writeFleet(liveFleet);
+              fleetDirty = true;
+              persistFleet();
               clearShipConfigCache();
-              secretsGitCommit(['bots/fleet.json'], `transport: ${bot} materialized on ${thisShipName()}`);
-              fleetDirty = false;
               const root = resolveRoot();
               try {
                 ensurePodmanReady();
@@ -2922,7 +2872,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
               await setBotDisplayStatus(root, bot, 'sleep');
               reabsorbWbsItems(root, bot);
               fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
-              writeFleet(liveFleet);
+              persistFleet();
               sendLifecycleMsg(bot, 'stopped').catch(() => {});
               publishFleetReport().catch(() => {});
               continue;
@@ -2969,7 +2919,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     } catch { /* non-fatal */ }
     // status=retrospective: container keeps running, bot reflects in quarters
     fleetUpdate(bot, { status: 'retrospective', triggerType: 'always', ondutyAt: undefined });
-    writeFleet(liveFleet);
+    persistFleet();
     clearShipConfigCache();
     reabsorbWbsItems(root, bot);
     restartBotForRoom(root, bot);
@@ -3017,7 +2967,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     reabsorbWbsItems(root, bot);
     // status=dream: container stopped, deferred git changes can now apply
     fleetUpdate(bot, { status: 'dream', triggerType: 'never' });
-    writeFleet(liveFleet);
+    persistFleet();
     sendLifecycleMsg(bot, 'stopped').catch(() => {});
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} asleep — Dream phase`);
@@ -3037,7 +2987,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     killStaleContainers(bot);
     // status=ready: like quarters but signals the bot just completed a duty cycle
     fleetUpdate(bot, { status: 'ready', triggerType: 'always' });
-    writeFleet(liveFleet);
+    persistFleet();
     clearShipConfigCache();
     bootstrapBot(root, bot);
     writeCrewStatus(root, bot);
@@ -3201,7 +3151,7 @@ async function handleLifecycleCommand(
           log(`${name}: room leave failed (non-fatal): ${errStr(roomErr)}`);
         }
         fleetUpdate(bot, { status: 'quarters', triggerType: 'always', ondutyAt: undefined });
-        writeFleet(liveFleet);
+        persistFleet();
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
         reabsorbWbsItems(root, bot);
@@ -3234,7 +3184,7 @@ async function handleLifecycleCommand(
         } catch { /* non-fatal */ }
         reabsorbWbsItems(root, bot);
         fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
-        writeFleet(liveFleet);
+        persistFleet();
         await tr(`✅ ${name} asleep`);
         sendLifecycleMsg(bot, 'stopped').catch(() => {});
         publishFleetReport().catch(() => {});
@@ -3264,7 +3214,7 @@ async function handleLifecycleCommand(
         await step('🔄 building');
         if (!isRestart) {
           fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
-          writeFleet(liveFleet);
+          persistFleet();
           clearShipConfigCache();
         }
         stopBot(bot);
@@ -3324,7 +3274,7 @@ async function handleLifecycleCommand(
           continue;
         }
         fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME, ondutyAt: Date.now() });
-        writeFleet(liveFleet);
+        persistFleet();
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild).
         // Pass dutyRoomId so the seed uses the exact room rather than an intercom.json
@@ -3783,10 +3733,8 @@ function registerRelayCommands(): void {
         killStaleContainers(bot);
         removeBotMounts(bot);
         fleetUpdate(bot, { status: 'transit', triggerType: 'never', ship: targetShip });
-        writeFleet(liveFleet);
-        const result = secretsGitCommit(['bots/fleet.json'], `transport: ${bot} dematerialized → ${targetName}`);
-        fleetDirty = false;
-        if (!result.ok) throw new Error(result.error);
+        fleetDirty = true;
+        persistFleet();
         await send(`✅ ${botDisplayName} dematerialized — awaiting materialization on ${targetName}`);
       } catch (err) {
         await send(`⛔ transport failed — ${errStr(err)}`);
@@ -4323,9 +4271,8 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   }
   fleetUpdate(result.target, { rank: result.targetRank });
   fleetUpdate(result.swap, { rank: result.swapRank });
-  writeFleet(liveFleet);
-  secretsGitCommit(['bots/fleet.json'], `rerank ${role}: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
-  fleetDirty = false;
+  fleetDirty = true;
+  persistFleet();
   const swapEnv = (() => { try { return loadProfileEnv(root, result.swap); } catch { return null; } })();
   const swapDisplayName = swapEnv?.ASSISTANT_NAME || capitalizeName(result.swap);
   await send(formatRerankBotMsg(botDisplayName, result.targetRank, swapDisplayName, result.swapRank, role));
@@ -4869,24 +4816,13 @@ async function main(): Promise<void> {
   // Ensure git hooks are installed
   try { installGitHooks(); } catch (err) { log(`git hooks install failed: ${errStr(err)}`); }
 
-  // Initialize in-memory fleet state: disk first, then overlay S3 (fresher after restart)
+  // Initialize in-memory fleet state: disk (static) + S3 (runtime) via loadFleetAsync
   try {
-    liveFleet = loadFleet();
-    log(`fleet: loaded ${Object.keys(liveFleet).length} bot(s) from fleet.json`);
+    liveFleet = await loadFleetAsync();
+    log(`fleet: loaded ${Object.keys(liveFleet).length} bot(s) (disk + S3 overlay)`);
   } catch (err) {
-    log(`fleet: failed to load fleet.json: ${errStr(err)}`);
-  }
-  try {
-    const s3Fleet = await readFleetState();
-    if (s3Fleet) {
-      let merged = 0;
-      for (const [bot, entry] of Object.entries(s3Fleet)) {
-        if (liveFleet[bot]) { Object.assign(liveFleet[bot], entry); merged++; }
-      }
-      if (merged > 0) log(`fleet: merged ${merged} bot(s) from S3 state`);
-    }
-  } catch (err) {
-    log(`fleet: S3 state read failed: ${errStr(err)}`);
+    log(`fleet: async load failed, falling back to disk: ${errStr(err)}`);
+    try { liveFleet = loadFleet(); } catch { /* give up */ }
   }
 
   // Persist fleet on shutdown — blocking S3 write before exit
@@ -4933,6 +4869,17 @@ async function main(): Promise<void> {
         log(`bootstrap: ${alreadyRunning.size} bot(s) already running — preserving: ${[...alreadyRunning].join(', ')}`);
       }
 
+      // Check ROOM_STATE stamps for preserved bots — restart if stale (Tali bug fix)
+      for (const bot of alreadyRunning) {
+        const entry = liveFleet[bot];
+        if (!entry || entry.ship !== HOSTNAME) continue;
+        const stamp = readRoomStateStamp(root, bot);
+        if (stamp && stamp.status !== entry.status) {
+          log(`bootstrap: ${bot} ROOM_STATE mismatch (stamp=${stamp.status}, fleet=${entry.status}) — restarting`);
+          alreadyRunning.delete(bot); // will be picked up by the bootstrap loop below
+        }
+      }
+
       const started: string[] = [];
       const failed: string[] = [];
       for (const [bot, entry] of Object.entries(liveFleet)) {
@@ -4951,7 +4898,7 @@ async function main(): Promise<void> {
           failed.push(bot);
         }
       }
-      if (started.length > 0 || failed.length > 0) writeFleet(liveFleet);
+      if (started.length > 0 || failed.length > 0) { fleetDirty = true; persistFleet(); }
       log(`bootstrap: ${started.length} started, ${failed.length} failed, ${alreadyRunning.size} preserved`);
     } catch (err) {
       log(`bootstrap failed: ${errStr(err)}`);

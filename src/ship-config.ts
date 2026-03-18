@@ -9,6 +9,11 @@ import os from 'os';
 import path from 'path';
 import { errStr, isRecord, readJson, writeJson } from './utils.js';
 
+// Lazy import to break circular dependency: ship-config ↔ s3-sync
+async function s3Helpers() {
+  return import('./s3-sync.js');
+}
+
 export interface S3Config {
   endpoint: string;
   bucket: string;
@@ -166,6 +171,64 @@ export function writeFleet(fleet: Record<string, BotEntry>): void {
   const raw = readJson<Record<string, unknown>>(FLEET_PATH);
   raw.bots = fleet;
   writeJson(FLEET_PATH, raw);
+}
+
+/** Runtime fields stored in S3 (not git-tracked). */
+const RUNTIME_FIELDS: (keyof BotEntry)[] = ['status', 'triggerType', 'ondutyAt', 'activeBrainModel'];
+
+/**
+ * Load fleet state: disk fleet.json (static) → overlay runtime fields from S3.
+ * Falls back to disk-only if S3 is unavailable.
+ */
+export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
+  const fleet = loadFleet();
+  try {
+    const { listKeys, downloadJson } = await s3Helpers();
+    const keys = await listKeys('fleet-state/');
+    for (const key of keys) {
+      const shipState = await downloadJson<{ ts?: number; bots?: Record<string, Partial<BotEntry>> }>(key);
+      if (!shipState?.bots) continue;
+      for (const [bot, runtime] of Object.entries(shipState.bots)) {
+        if (!fleet[bot]) continue;
+        // Only overlay runtime fields from S3
+        for (const field of RUNTIME_FIELDS) {
+          if (field in runtime) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (fleet[bot] as any)[field] = (runtime as any)[field];
+          }
+        }
+      }
+    }
+  } catch { /* S3 unavailable — disk-only fallback */ }
+  return fleet;
+}
+
+/**
+ * Write fleet state: upload this ship's bots to S3, then write full fleet to disk as cache.
+ * Filters to bots on this ship for the S3 upload to avoid cross-ship conflicts.
+ */
+export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<void> {
+  const hostname = os.hostname();
+  const shipName = findShipByHostname(hostname)?.[0] ?? hostname;
+  // Extract only this ship's bots' runtime fields for S3
+  const shipBots: Record<string, Partial<BotEntry>> = {};
+  for (const [bot, entry] of Object.entries(fleet)) {
+    if (entry.ship !== hostname) continue;
+    const runtime: Partial<BotEntry> = {};
+    for (const field of RUNTIME_FIELDS) {
+      if (field in entry) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (runtime as any)[field] = (entry as any)[field];
+      }
+    }
+    shipBots[bot] = runtime;
+  }
+  try {
+    const { uploadJson } = await s3Helpers();
+    await uploadJson(`fleet-state/${shipName}.json`, { ts: Date.now(), bots: shipBots });
+  } catch { /* S3 write failed — disk still written below */ }
+  // Always write to disk as cache
+  writeFleet(fleet);
 }
 
 export interface ShipEntry {

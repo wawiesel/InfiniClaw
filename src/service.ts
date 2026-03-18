@@ -355,6 +355,9 @@ export function deployBot(root: string, bot: string): void {
   fs.mkdirSync(dataDir, { recursive: true });
 
   fs.writeFileSync(path.join(dataDir, 'run-id'), `${Date.now()}`);
+
+  // Write ROOM_STATE stamp so relay can detect stale room assignments on restart
+  writeRoomStateStamp(instance, bot);
 }
 
 /**
@@ -749,6 +752,9 @@ export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: s
     }
   }
 
+  // Write ROOM_STATE stamp so relay can detect stale room assignments on restart
+  writeRoomStateStamp(instance, bot);
+
   // Fast restart: kill containers, restart pm2 (no rebuild)
   killStaleContainers(bot);
   const logs = logDir(root);
@@ -1026,6 +1032,35 @@ export function holodeckPromote(bot: string): void {
   bootstrapBot(root, bot);
 
   console.log(`\nHolodeck promoted: '${branch}' merged, ${bot} redeployed.`);
+}
+
+// ── Room state stamp ───────────────────────────────────────────────────
+
+/**
+ * Write a ROOM_STATE stamp to a bot's instance directory.
+ * Contains the bot's current fleet status so the relay can detect mismatches on restart.
+ */
+function writeRoomStateStamp(instanceBase: string, bot: string): void {
+  try {
+    const fleet = loadFleet();
+    const entry = fleet[bot];
+    if (!entry) return;
+    const stamp = {
+      status: entry.status,
+      quartersRoom: entry.quartersRoom ?? null,
+      ts: Date.now(),
+    };
+    fs.writeFileSync(path.join(instanceBase, 'ROOM_STATE'), JSON.stringify(stamp) + '\n');
+  } catch { /* non-fatal — stamp is advisory */ }
+}
+
+/** Read a bot's ROOM_STATE stamp. Returns null if not found or invalid. */
+export function readRoomStateStamp(root: string, bot: string): { status: string; quartersRoom: string | null; ts: number } | null {
+  try {
+    const stampPath = path.join(instanceDir(root, bot), 'ROOM_STATE');
+    if (!fs.existsSync(stampPath)) return null;
+    return JSON.parse(fs.readFileSync(stampPath, 'utf-8'));
+  } catch { return null; }
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────

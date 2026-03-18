@@ -1,9 +1,16 @@
 /**
- * S3 backup for bot conversation state.
- * Push: automatic on stop — backs up messages.db, matrix-bot.json, sessions.
- * Pull: manual only (`cli sync pull`) — for transporting a bot to another machine.
- * Pull overwrites local files without merging. Never auto-pull on start.
- * Skips silently if S3 is not configured. Warns and continues on network failure.
+ * S3 sync — shared S3 client + bot state backup.
+ *
+ * Shared helpers:
+ *   getClient()       — returns { client, bucket } or null if S3 not configured
+ *   downloadJson<T>() — GET + parse JSON, null on NoSuchKey
+ *   uploadJson()      — PUT JSON with application/json content-type
+ *   listKeys()        — paginated ListObjectsV2
+ *
+ * Bot state backup:
+ *   pushBot/pullBot   — backs up messages.db, matrix-bot.json, sessions
+ *   Push: automatic on stop. Pull: manual only (`cli sync pull`).
+ *   Skips silently if S3 is not configured. Warns and continues on network failure.
  */
 import fs from 'fs';
 import path from 'path';
@@ -57,7 +64,7 @@ function assertNoSymlinkOnPath(baseDir: string, targetPath: string): void {
   }
 }
 
-function getClient(): { client: S3Client; bucket: string } | null {
+export function getClient(): { client: S3Client; bucket: string } | null {
   const config = loadShipConfig();
   if (!config.s3) return null;
   const { endpoint, bucket, accessKey, secretKey } = config.s3;
@@ -72,6 +79,58 @@ function getClient(): { client: S3Client; bucket: string } | null {
     forcePathStyle: true,
   });
   return { client, bucket };
+}
+
+/** Download and parse a JSON object from S3. Returns null on NoSuchKey or if S3 not configured. */
+export async function downloadJson<T>(key: string): Promise<T | null> {
+  assertSafeS3Key(key);
+  const s3 = getClient();
+  if (!s3) return null;
+  try {
+    const resp = await s3.client.send(new GetObjectCommand({ Bucket: s3.bucket, Key: key }));
+    const body = await resp.Body?.transformToString();
+    if (!body) return null;
+    return JSON.parse(body) as T;
+  } catch (err: unknown) {
+    const code = (err as { name?: string })?.name;
+    if (code === 'NoSuchKey') return null;
+    throw err;
+  }
+}
+
+/** Upload a JSON object to S3. No-op if S3 not configured. */
+export async function uploadJson(key: string, data: unknown): Promise<void> {
+  assertSafeS3Key(key);
+  const s3 = getClient();
+  if (!s3) return;
+  await s3.client.send(new PutObjectCommand({
+    Bucket: s3.bucket,
+    Key: key,
+    Body: JSON.stringify(data),
+    ContentType: 'application/json',
+  }));
+}
+
+/** List all S3 keys under a prefix, with pagination. */
+export async function listKeys(prefix: string): Promise<string[]> {
+  const s3 = getClient();
+  if (!s3) return [];
+  const keys: string[] = [];
+  let continuationToken: string | undefined;
+  do {
+    const resp = await s3.client.send(new ListObjectsV2Command({
+      Bucket: s3.bucket,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    }));
+    if (resp.Contents) {
+      for (const obj of resp.Contents) {
+        if (obj.Key) keys.push(obj.Key);
+      }
+    }
+    continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return keys;
 }
 
 async function uploadFile(client: S3Client, bucket: string, key: string, filePath: string): Promise<void> {
