@@ -1135,7 +1135,7 @@ type FleetReport = {
   ship: string;
   ts: number;
   relayVersion: string;
-  bots: Record<string, { name: string; badge: string; role: string; rank: number; status: string; gitVersion: string; grade?: string; activity?: string; tokPerDay?: number }>;
+  bots: Record<string, { name: string; badge: string; role: string; rank: number; status: string; gitVersion: string; semver?: string; grade?: string; activity?: string; tokPerDay?: number }>;
 };
 
 /** Build and publish this ship's fleet report to S3. Returns the report. */
@@ -1180,6 +1180,7 @@ async function publishFleetReport(): Promise<FleetReport> {
       rank: entry.rank,
       status: entry.status,
       gitVersion: botVersion(root, botId),
+      semver: botSemver(root, botId) ?? undefined,
       grade,
       activity: activityEmoji(tokPerDay),
       tokPerDay: tokPerDay > 0 ? tokPerDay : 0,
@@ -3823,7 +3824,7 @@ function registerRelayCommands(): void {
         const allReports: Record<string, FleetReport> = { ...staleReports, ...freshReports };
 
         // Assemble output
-        const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; localStatus: string; grade?: string; activity?: string; tokPerDay?: number }> = {};
+        const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; semver?: string; localStatus: string; grade?: string; activity?: string; tokPerDay?: number }> = {};
         for (const [botId, entry] of Object.entries(liveFleet)) {
           allBots[botId] = { ...entry, name: capitalizeName(botId), gitVersion: '', localStatus: entry.status };
         }
@@ -3832,6 +3833,7 @@ function registerRelayCommands(): void {
             if (allBots[botId]) {
               allBots[botId].name = botData.name;
               allBots[botId].gitVersion = botData.gitVersion;
+              allBots[botId].semver = botData.semver;
               allBots[botId].localStatus = botData.status;
               allBots[botId].grade = botData.grade;
               allBots[botId].activity = botData.activity;
@@ -3933,7 +3935,7 @@ function registerRelayCommands(): void {
               status: entry.localStatus,
               health: entry.grade || (isSleeping ? 'A' : ''),
               tokPerDay: entry.tokPerDay ?? 0,
-              version: entry.gitVersion || undefined,
+              version: entry.semver || undefined,
             }), 'short', globalMaxNameLen);
             lines.push(`${tree}${botLine}`);
           }
