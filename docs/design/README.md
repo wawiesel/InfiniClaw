@@ -50,3 +50,4 @@ Engineers cannot modify these files (enforced by pre-commit hook). Architecture 
 See `docs/solutions/matrix.md` for Element Desktop math rendering setup.
 
 Historical planning files (`_old/IMPLEMENTATION_ROADMAP.md`) have been removed. Design history lives in git log.
+
