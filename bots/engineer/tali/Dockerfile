@@ -63,6 +63,9 @@ RUN mkdir -p /home/claude/.claude && chown -R node:node /home/claude
 # Switch to non-root user
 USER node
 
+# Allow git operations on mounted repos (host UID may differ from container UID)
+RUN git config --global --add safe.directory '*'
+
 WORKDIR /workspace/persona/temp
 
 ENTRYPOINT ["/app/entrypoint.sh"]

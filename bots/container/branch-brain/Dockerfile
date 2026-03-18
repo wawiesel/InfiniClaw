@@ -16,6 +16,10 @@ RUN mkdir -p /home/claude/.claude/session-env && \
     chown -R claude:claude /home/claude/.claude
 
 USER claude
+
+# Allow git operations on mounted repos (host UID may differ from container UID)
+RUN git config --global --add safe.directory '*'
+
 WORKDIR /home/claude
 
 ENTRYPOINT ["claude"]
