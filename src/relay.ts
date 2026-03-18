@@ -307,6 +307,23 @@ function persistFleet(): void {
   writeFleetState(liveFleet).catch(() => {});
 }
 
+/** Synchronous persist + blocking S3 write — use before process exit. */
+async function persistFleetSync(): Promise<void> {
+  try {
+    writeFleet(liveFleet);
+    fleetDirty = false;
+    log('fleet: persisted to fleet.json (sync)');
+  } catch (err) {
+    log(`fleet: persist failed: ${errStr(err)}`);
+  }
+  try {
+    await writeFleetState(liveFleet);
+    log('fleet: persisted to S3 (sync)');
+  } catch (err) {
+    log(`fleet: S3 persist failed: ${errStr(err)}`);
+  }
+}
+
 /**
  * Write crew-status.json to a bot's instance data dir.
  * Called after bootstrapBot so the container's crew_roster MCP tool has current roster.
@@ -1852,7 +1869,10 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             if (hasRelayChanges(resolveRoot(), result.newCommits)) {
               try {
                 log('git sync: relay-specific files changed — restarting relay');
-                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `📡 relay code changed — restarting...`);
+                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `📡 relay code changed — restarting (bots preserved)...`);
+                // Persist fleet state synchronously before relay restart — prevents
+                // status loss when new relay process loads fleet.json from disk.
+                await persistFleetSync();
                 execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
               } catch (err) {
                 log(`git sync: relay self-restart failed: ${errStr(err)}`);
@@ -4868,10 +4888,10 @@ async function main(): Promise<void> {
     log(`fleet: S3 state read failed: ${errStr(err)}`);
   }
 
-  // Persist fleet on shutdown and push to S3
+  // Persist fleet on shutdown — blocking S3 write before exit
   const shutdown = async () => {
     log('shutting down — persisting fleet state');
-    persistFleet();
+    await persistFleetSync();
     try { await pushAll(resolveRoot()); }
     catch (err) { log(`S3 push on shutdown failed: ${errStr(err)}`); }
     process.exit(0);
@@ -4888,14 +4908,50 @@ async function main(): Promise<void> {
   log('warming up — syncing Matrix for 30s before bootstrap...');
   await sleep(30_000);
 
-  // Bootstrap all running bots (preserving their fleet status)
+  // Bootstrap bots — only start bots that aren't already running.
+  // When the relay restarts (code update), bot pm2 processes survive — don't disrupt them.
   if (isShipCommissioned()) {
     try {
       ensurePodmanReady();
       const root = resolveRoot();
       removeStaleProcesses();
-      const { started, failed } = restartRunningBots(root);
-      log(`bootstrap: ${started.length} started, ${failed.length} failed`);
+      // Check which bots already have running pm2 processes
+      const alreadyRunning = new Set<string>();
+      try {
+        const pm2List = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', {
+          cwd: root, encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
+        })) as Array<{ name: string; pm2_env?: { status?: string } }>;
+        for (const p of pm2List) {
+          if (p.pm2_env?.status === 'online' && p.name.startsWith('infiniclaw-') && p.name !== 'infiniclaw-relay') {
+            alreadyRunning.add(p.name.replace('infiniclaw-', ''));
+          }
+        }
+      } catch { /* pm2 not available or no processes */ }
+
+      if (alreadyRunning.size > 0) {
+        log(`bootstrap: ${alreadyRunning.size} bot(s) already running — preserving: ${[...alreadyRunning].join(', ')}`);
+      }
+
+      const started: string[] = [];
+      const failed: string[] = [];
+      for (const [bot, entry] of Object.entries(liveFleet)) {
+        if (entry.ship !== HOSTNAME) continue;
+        if (!(RUNNING_STATUSES as readonly string[]).includes(entry.status)) continue;
+        if (alreadyRunning.has(bot)) continue; // Don't restart already-running bots
+        try {
+          stopBot(bot);
+          killStaleContainers(bot);
+          bootstrapBot(root, bot);
+          writeCrewStatus(root, bot);
+          injectWbsTasks(root, bot);
+          started.push(bot);
+        } catch (err) {
+          log(`bootstrap: ${bot} failed — ${errStr(err)}`);
+          failed.push(bot);
+        }
+      }
+      if (started.length > 0 || failed.length > 0) writeFleet(liveFleet);
+      log(`bootstrap: ${started.length} started, ${failed.length} failed, ${alreadyRunning.size} preserved`);
     } catch (err) {
       log(`bootstrap failed: ${errStr(err)}`);
     }
