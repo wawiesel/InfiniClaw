@@ -110,6 +110,7 @@ import { statusMessage, escapeHtml } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { uploadContent, uploadHtml, getPresignedUrl } from './s3-sync.js';
 import { errStr, escapeRegex, envInt } from './utils.js';
+import { extractSignals, processSignals, auditSignals, formatSignalError } from './signals.js';
 import { exportHistoryToS3 } from './history-export.js';
 
 import { GIT_VERSION, SEMVER_TAG } from './version.js';
@@ -816,25 +817,84 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   markProgress(ctx.chatJid, text);
   // Set state before channel send to preserve original behavior if send throws
   ctx.onOutputSent(text);
-  const ch = findChannel(channels, ctx.chatJid);
+
+  // ── Signals protocol (22-signals.md) ─────────────────────────────────
+  const { signals, cleanText } = extractSignals(text);
+  const group = registeredGroups[ctx.chatJid];
+  const botName = group?.name ?? 'unknown';
+  const roomName = group?.name ?? ctx.chatJid;
+  let sendText = cleanText;
+  let sendJid = ctx.chatJid;
+  let sendThread = activeReplyThreadIds[ctx.chatJid];
+
+  if (signals.length > 0) {
+    // Build room lookup from registered groups
+    const roomLookup = (name: string): string | undefined => {
+      const lower = name.toLowerCase();
+      for (const [jid, g] of Object.entries(registeredGroups)) {
+        if (g.name?.toLowerCase() === lower) return jid;
+      }
+      return undefined;
+    };
+
+    const { processed, routeOverride, callouts } = processSignals(signals, {
+      botName,
+      roomName,
+      roomId: ctx.chatJid,
+      threadId: activeReplyThreadIds[ctx.chatJid],
+      roomLookup,
+    });
+
+    // Apply route overrides
+    if (routeOverride?.room) sendJid = routeOverride.room;
+    if (routeOverride?.thread) sendThread = routeOverride.thread;
+
+    // Convert callouts to <m> tags for existing pillify pipeline
+    for (const name of callouts) {
+      sendText = `<m>${name}</m> ${sendText}`;
+    }
+
+    // Audit trail: upload to S3 and get suffix
+    const { suffix } = await auditSignals(processed, botName, roomName);
+    if (suffix) sendText = `${sendText}\n\n${suffix}`;
+
+    // Error handling: loudspeaker notification for failed signals
+    const failedSignals = processed.filter(s => s.status === 'error');
+    if (failedSignals.length > 0) {
+      const ch = findChannel(channels, ctx.chatJid);
+      if (ch) {
+        const fallbackLocation = `${roomName} main timeline`;
+        for (const failed of failedSignals) {
+          const errMsg = formatSignalError(failed, botName, fallbackLocation);
+          // Post via loudspeaker in bot's room
+          void ch.sendMessage(ctx.chatJid, errMsg).catch(() => {});
+        }
+      }
+      // Reset routing to default on error (fail safe)
+      sendJid = ctx.chatJid;
+      sendThread = activeReplyThreadIds[ctx.chatJid];
+    }
+  }
+  // ── End Signals ──────────────────────────────────────────────────────
+
+  const ch = findChannel(channels, sendJid);
   if (ch) {
-    if (ch.setTyping) await ch.setTyping(ctx.chatJid, true);
+    if (ch.setTyping) await ch.setTyping(sendJid, true);
     try {
       let sentEventId: string | undefined;
       threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
       if (ch.sendMessageReturningId) {
-        sentEventId = await ch.sendMessageReturningId(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
+        sentEventId = await ch.sendMessageReturningId(sendJid, sendText, sendThread);
       } else {
-        await ch.sendMessage(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
+        await ch.sendMessage(sendJid, sendText, sendThread);
       }
       threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
-      storeOutgoing(ctx.chatJid, text, activeReplyThreadIds[ctx.chatJid]);
+      storeOutgoing(ctx.chatJid, sendText, sendThread);
       if (sentEventId) {
-        const group = registeredGroups[ctx.chatJid];
         if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
       }
     } finally {
-      if (ch.setTyping) await ch.setTyping(ctx.chatJid, false);
+      if (ch.setTyping) await ch.setTyping(sendJid, false);
     }
   }
 }
