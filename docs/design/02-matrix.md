@@ -193,6 +193,8 @@ Bot outgoing messages are converted from Markdown to Matrix HTML before sending.
 
 Full conversion rules are in [05-bot](05-bot.md#mentions-and-callouts).
 
+> **Migration:** The `<m>Name</m>` syntax is being replaced by the Signals protocol `{{m Name}}` (see [22-signals](22-signals.md)). Double-brace syntax survives Matrix HTML rendering, unlike raw `<m>` tags. The relay will support both during transition.
+
 ## Reactions
 
 > **Status:** All reactions are implemented. Status reactions (📡 👀 🔔) signal message processing pipeline. Scoring reactions (👍 👎 💯 ❌) are recorded by the relay for metrics.
