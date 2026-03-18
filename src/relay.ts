@@ -647,10 +647,11 @@ function saveSyncToken(key: string, token: string): void {
 
 // ── Git version helper ────────────────────────────────────────────
 
-/** Format version string: ` · 📦 [sha](github) (age) ↑N|↓N` */
-function fmtVersion(sha: string, ageMs: number, ud: string): string {
+/** Format version string: ` · 📦 v1.4.0 [sha](github) (age) ↑N|↓N` */
+function fmtVersion(sha: string, ageMs: number, ud: string, tag?: string | null): string {
   const url = `${GITHUB_REPO_URL}/commit/${sha}`;
-  return ` · 📦 [${sha}](${url}) (${formatDuration(ageMs)}) ${ud}`;
+  const tagPrefix = tag ? `${tag} ` : '';
+  return ` · 📦 ${tagPrefix}[${sha}](${url}) (${formatDuration(ageMs)}) ${ud}`;
 }
 
 /** Compute ↑N/↓N relation between two refs. */
@@ -677,7 +678,8 @@ function repoVersion(repoDir: string): string {
     const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: repoDir };
     const sha = execSync('git rev-parse --short HEAD', execOpts).trim();
     if (!sha) return '';
-    return fmtVersion(sha, commitAge(repoDir, sha), gitRelation(repoDir, 'HEAD', 'origin/main'));
+    const tag = getLatestSemverTag(repoDir);
+    return fmtVersion(sha, commitAge(repoDir, sha), gitRelation(repoDir, 'HEAD', 'origin/main'), tag);
   } catch { return ''; }
 }
 
@@ -700,7 +702,7 @@ function botVersion(root: string, bot: string): string {
     const versionFile = path.join(root, '_runtime', 'instances', bot, 'GIT_VERSION');
     const sha = fs.readFileSync(versionFile, 'utf-8').trim().split(' ')[0];
     if (!sha || !/^[a-f0-9]{7,40}$/.test(sha)) return '';
-    return fmtVersion(sha, commitAge(root, sha), gitRelation(root, sha, 'HEAD'));
+    return fmtVersion(sha, commitAge(root, sha), gitRelation(root, sha, 'HEAD'), botSemver(root, bot));
   } catch { return ''; }
 }
 
