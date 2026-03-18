@@ -2341,8 +2341,7 @@ async function spawnBranchBrain(
     // The main brain sees this as a high-priority message on its next turn.
     if (bot && lastPostedText) {
       try {
-        const fleet = loadFleet();
-        const botEntry = fleet[bot];
+        const botEntry = liveFleet[bot];
         const role = botEntry?.role?.toLowerCase() ?? '';
         const roleRoom = ROLE_ROOMS[role];
         // Determine the IPC folder for the bot's active room

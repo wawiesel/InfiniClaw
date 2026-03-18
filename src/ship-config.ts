@@ -173,11 +173,9 @@ export function writeFleet(fleet: Record<string, BotEntry>): void {
   writeJson(FLEET_PATH, raw);
 }
 
-/** Runtime fields stored in S3 (not git-tracked). */
-const RUNTIME_FIELDS: (keyof BotEntry)[] = ['status', 'triggerType', 'ondutyAt', 'activeBrainModel'];
-
 /**
- * Load fleet state: disk fleet.json (static) → overlay runtime fields from S3.
+ * Load fleet state: disk fleet.json (static) → overlay ALL fields from S3.
+ * S3 is the authoritative source for runtime state; disk is the bootstrap fallback.
  * Falls back to disk-only if S3 is unavailable.
  */
 export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
@@ -188,15 +186,10 @@ export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
     for (const key of keys) {
       const shipState = await downloadJson<{ ts?: number; bots?: Record<string, Partial<BotEntry>> }>(key);
       if (!shipState?.bots) continue;
-      for (const [bot, runtime] of Object.entries(shipState.bots)) {
+      for (const [bot, s3Entry] of Object.entries(shipState.bots)) {
         if (!fleet[bot]) continue;
-        // Only overlay runtime fields from S3
-        for (const field of RUNTIME_FIELDS) {
-          if (field in runtime) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (fleet[bot] as any)[field] = (runtime as any)[field];
-          }
-        }
+        // Overlay all S3 fields — S3 is authoritative for complete bot state
+        Object.assign(fleet[bot], s3Entry);
       }
     }
   } catch { /* S3 unavailable — disk-only fallback */ }
@@ -206,25 +199,18 @@ export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
 /**
  * Write fleet state: disk first (synchronous cache), then S3 upload (async).
  * Disk-first ensures loadFleet() always sees the latest state immediately.
- * Filters to bots on this ship for the S3 upload to avoid cross-ship conflicts.
+ * Uploads complete bot state to S3 (all fields) for bots on this ship.
  */
 export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<void> {
   // Disk first — synchronous so loadFleet() immediately sees updated state
   writeFleet(fleet);
-  // S3 second — upload this ship's runtime fields
+  // S3 second — upload this ship's complete bot state
   const hostname = os.hostname();
   const shipName = findShipByHostname(hostname)?.[0] ?? hostname;
-  const shipBots: Record<string, Partial<BotEntry>> = {};
+  const shipBots: Record<string, BotEntry> = {};
   for (const [bot, entry] of Object.entries(fleet)) {
     if (entry.ship !== hostname) continue;
-    const runtime: Partial<BotEntry> = {};
-    for (const field of RUNTIME_FIELDS) {
-      if (field in entry) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (runtime as any)[field] = (entry as any)[field];
-      }
-    }
-    shipBots[bot] = runtime;
+    shipBots[bot] = entry;
   }
   try {
     const { uploadJson } = await s3Helpers();
