@@ -2875,7 +2875,6 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
               reabsorbWbsItems(root, bot);
               fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
               persistFleet();
-              sendLifecycleMsg(bot, 'stopped').catch(() => {});
               publishFleetReport().catch(() => {});
               continue;
             }
@@ -2926,7 +2925,6 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     reabsorbWbsItems(root, bot);
     restartBotForRoom(root, bot);
     writeCrewStatus(root, bot);
-    sendLifecycleMsg(bot, 'stopped').catch(() => {});
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} dismissed → retrospective`);
   } catch (err) {
@@ -2970,7 +2968,6 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     // status=dream: container stopped, deferred git changes can now apply
     fleetUpdate(bot, { status: 'dream', triggerType: 'never' });
     persistFleet();
-    sendLifecycleMsg(bot, 'stopped').catch(() => {});
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} asleep — Dream phase`);
   } catch (err) {
@@ -3160,7 +3157,6 @@ async function handleLifecycleCommand(
         restartBotForRoom(root, bot);
         writeCrewStatus(root, bot);
         await tr(`✅ ${name} dismissed`);
-        sendLifecycleMsg(bot, 'stopped').catch(() => {});
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!dismiss ${name} failed: ${errStr(err)}`);
@@ -3188,7 +3184,6 @@ async function handleLifecycleCommand(
         fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
         persistFleet();
         await tr(`✅ ${name} asleep`);
-        sendLifecycleMsg(bot, 'stopped').catch(() => {});
         publishFleetReport().catch(() => {});
       } catch (err) {
         await tr(`⛔ ${name} sleep failed — ${errStr(err)}`);
