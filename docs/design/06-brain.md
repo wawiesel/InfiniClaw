@@ -22,7 +22,7 @@ The turn timeout enforces this model — if the brain takes too long, the contai
 
 An interactive `claude` process that forks from the main brain's session and works in a visible Matrix thread in the bot's current room. The bot itself initiates a branch when a request is too complex for inline triage.
 
-- **Bot-driven spawn** — the bot posts a `🌿` title, gets `lastSent` via `get_last_event_id`, then calls `branch_to_thread(objective, lastSent)`. The relay does not announce or spawn branches.
+- **Bot-driven spawn** — the bot calls `branch_to_thread(title, purpose, duration, room_id)`. The tool posts the `🌿 title — purpose` thread header automatically. The relay does not announce or spawn branches.
 - **Forks main brain context** — uses `--continue --fork-session` to inherit the main brain's conversation history at branch start.
 - **Interactive** — while running, the branch can converse normally in-thread.
 - **Main timeline injection** — all main timeline messages (main brain, Captain, other bots) are injected into any live branch so the branch keeps main-context awareness.

@@ -96,10 +96,10 @@ Branch brains run as interactive sessions with full context from the main brain:
 
 ### Context Injection
 
-When a message arrives on the main timeline, the relay fans it out to all active branch brain stdin pipes with:
+Branch brains use `--input-format stream-json` so stdin stays open for context injection. When a message arrives on the main timeline from any sender (Captain, bots, main brain), the relay fans it out to all active branch brain stdin pipes as a stream-json `user_message`:
 
-```
-You are branch brain <title>. Here is a message from main timeline: <msg>. It may not apply to you. If it does, modify your task accordingly.
+```json
+{"type":"user_message","content":"You are branch brain <title>. Here is a message from main timeline: <msg>. It may not apply to you. If it does, modify your task accordingly."}
 ```
 
 Branch brain responds in its thread if relevant; ignores silently if not.
@@ -131,20 +131,17 @@ Lobes always post to quarters regardless of which room the bot is currently in. 
 ## The Merge
 
 When a branch brain completes:
-1. **Merge message** — BB posts a normal Matrix message in the thread with its results. This can be any level of detail: a one-line summary, full analysis, code snippets, or structured output. The BB decides the format.
-2. **Main timeline summary** — `🧵 <title> — ✅ done` (or `⛔ failed`) posted on main timeline so the Captain sees the result without watching the thread
-3. **Assimilation** — the main brain MUST process BB results on its next turn. This is enforced via MCP: the relay queues a merge event that the main brain receives as a message, containing the thread ID and summary. The bot reads the thread and decides how to incorporate the findings.
+1. **Merge marker in thread** — BB posts `🪾 <keyword> — <full result description>` at the end of the thread. This closes the thread.
+2. **Main timeline summary** — `🪾 <keyword> — ✅ merged` (or `⛔ failed`) posted on main timeline so the Captain sees the result without watching the thread.
+3. **Assimilation** — the branch injects its final summary into main brain history via IPC, so the main brain has the result in context even though it came from the branch.
 4. **No restart needed** — the main brain assimilates results naturally. A restart is never necessary.
-5. **Termination** — branch brain fork exits, thread remains in Matrix history permanently
+5. **Termination** — branch brain fork exits, thread remains in Matrix history permanently.
 
-## Thread Reactivation
+## Thread Closure
 
-Matrix threads are permanent. Branch brains are ephemeral. But the thread context is immortal.
+After a branch merges, the thread is **dead**. No further productive posting is allowed.
 
-When the Captain sends a follow-up in a completed BB thread:
-1. The relay detects the message is in a thread the bot previously completed
-2. A new branch brain spawns with the original objective + follow-up message as context
-3. The branch brain answers in the thread and exits normally
+When anyone sends a message in a completed BB thread, the relay responds via loudspeaker: "This thread is closed. The branch has merged — start a new branch if you need follow-up work."
 
 Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour TTL. The registry is pruned on every read.
 
@@ -161,7 +158,7 @@ The tool posts `🌿 <title> — <purpose>` on the main timeline and uses that e
 ## Verification
 
 1. **Branch creates thread** — Send a complex request.
-   *Check:* Thread appears in current room with `🧵 Branch Brain: <title>`.
+   *Check:* Thread appears in current room with `🌿 <title> — <purpose>`.
 
 2. **Branch posts in thread** — Branch brain works on the task.
    *Check:* Progress appears inside the thread, not on main timeline.
@@ -169,17 +166,20 @@ The tool posts `🌿 <title> — <purpose>` on the main timeline and uses that e
 3. **Main stays responsive** — While a branch is working, send another message.
    *Check:* Main brain responds immediately.
 
-4. **Merge posts summary** — Branch brain completes.
-   *Check:* Completion message in thread; `🧵 <title> — ✅ done` appears on main timeline after 30s.
+4. **Context injection** — While a branch is running, post on main timeline.
+   *Check:* Branch receives the message via stdin injection.
 
-5. **Thread reactivation** — Reply in a completed thread later.
-   *Check:* New branch brain spawns with original objective + follow-up as context, answers in thread.
+5. **Merge posts summary** — Branch brain completes.
+   *Check:* `🪾 <keyword> — <result>` in thread; `🪾 <keyword> — ✅ merged` on main timeline.
 
-6. **Concurrency limit** — Trigger more than `MAX_BRANCH_BRAINS_PER_BOT` branches.
+6. **Thread closure** — Reply in a completed thread.
+   *Check:* Loudspeaker responds "this thread is closed".
+
+7. **Concurrency limit** — Trigger more than `MAX_BRANCH_BRAINS_PER_BOT` branches.
    *Check:* Excess rejected with warning.
 
-7. **Lobe posts to quarters** — Bot delegates to a lobe.
+8. **Lobe posts to quarters** — Bot delegates to a lobe.
    *Check:* Thread appears in quarters (not current room). Summary on quarters timeline when done.
 
-8. **No nested branching** — Branch brain attempts to branch.
+9. **No nested branching** — Branch brain attempts to branch.
    *Check:* Rejected.

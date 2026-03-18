@@ -4,21 +4,24 @@ import { formatContextInjectionMessage } from '../relay.js';
 // ── formatContextInjectionMessage ──────────────────────────────────
 
 describe('formatContextInjectionMessage', () => {
-  it('formats the context injection message correctly', () => {
+  it('returns valid JSON stream-json user_message', () => {
     const result = formatContextInjectionMessage('Fix auth bug', 'Hey, the login endpoint is also broken.');
-    expect(result).toBe(
-      'You are branch brain Fix auth bug. Here is a message from main timeline: Hey, the login endpoint is also broken.. It may not apply to you. If it does, modify your task accordingly.\n',
-    );
+    const parsed = JSON.parse(result.trim());
+    expect(parsed.type).toBe('user_message');
+    expect(parsed.content).toContain('You are branch brain Fix auth bug.');
+    expect(parsed.content).toContain('Hey, the login endpoint is also broken.');
   });
 
-  it('includes the BB title in the message', () => {
+  it('includes the BB title in the message content', () => {
     const result = formatContextInjectionMessage('Deploy pipeline', 'Server is down');
-    expect(result).toContain('You are branch brain Deploy pipeline.');
+    const parsed = JSON.parse(result.trim());
+    expect(parsed.content).toContain('You are branch brain Deploy pipeline.');
   });
 
-  it('includes the main timeline message', () => {
+  it('includes the main timeline message in content', () => {
     const result = formatContextInjectionMessage('Fix bug', 'Urgent: rollback needed');
-    expect(result).toContain('Here is a message from main timeline: Urgent: rollback needed.');
+    const parsed = JSON.parse(result.trim());
+    expect(parsed.content).toContain('Here is a message from main timeline: Urgent: rollback needed.');
   });
 
   it('always ends with a trailing newline', () => {
@@ -28,6 +31,7 @@ describe('formatContextInjectionMessage', () => {
 
   it('includes the non-applicable note', () => {
     const result = formatContextInjectionMessage('t', 'm');
-    expect(result).toContain('It may not apply to you. If it does, modify your task accordingly.');
+    const parsed = JSON.parse(result.trim());
+    expect(parsed.content).toContain('It may not apply to you. If it does, modify your task accordingly.');
   });
 });

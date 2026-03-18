@@ -1924,10 +1924,12 @@ function completeBranchTask(threadId: string): void {
 
 /**
  * Format the context injection message that is fanned out to active branch brains.
+ * Returns a newline-terminated stream-json user_message for stdin injection.
  * Pure function — exported for testability.
  */
 export function formatContextInjectionMessage(title: string, msg: string): string {
-  return `You are branch brain ${title}. Here is a message from main timeline: ${msg}. It may not apply to you. If it does, modify your task accordingly.\n`;
+  const text = `You are branch brain ${title}. Here is a message from main timeline: ${msg}. It may not apply to you. If it does, modify your task accordingly.`;
+  return JSON.stringify({ type: 'user_message', content: text }) + '\n';
 }
 
 /**
@@ -2058,9 +2060,9 @@ async function spawnBranchBrain(
   }
   try {
     if (botSendToken && botSendHomeserver) {
-      announcementEventId = await relaySend(botSendHomeserver, botSendToken, conn.roomId, `🪾 ${announcedTitle}`);
+      announcementEventId = await relaySend(botSendHomeserver, botSendToken, conn.roomId, `🌿 ${announcedTitle}`);
     } else {
-      announcementEventId = await reply(conn, `🪾 Branch Brain: ${announcedTitle}`, undefined, { skipMirror: true });
+      announcementEventId = await reply(conn, `🌿 ${announcedTitle}`, undefined, { skipMirror: true });
     }
   } catch (err) {
     log(`branchBrain: announce failed: ${errStr(err)}`);
@@ -2179,10 +2181,12 @@ async function spawnBranchBrain(
     // Build claude args: fresh session in container (fork-session loads the entire
     // conversation transcript into V8 memory before producing output — for long-running
     // bots this exceeds the 10min BB timeout and wastes gigabytes of RAM).
+    // Use --input-format stream-json so stdin stays open for context injection.
     const claudeArgs: string[] = [
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
+      '--input-format', 'stream-json',
     ];
     child = spawn('podman', [
       'run', '--rm', '-i',
@@ -2199,10 +2203,12 @@ async function spawnBranchBrain(
     log(`branchBrain: spawning in container image=${BRANCH_BRAIN_IMAGE} fork=${!!mainSessionId} session=${sessionId}`);
   } else {
     // Host path: fork from main brain session if available, else cold-start.
+    // Use --input-format stream-json so stdin stays open for context injection.
     const claudeArgs: string[] = [
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
+      '--input-format', 'stream-json',
       '--add-dir', resolveRoot(),
     ];
     if (mainSessionId) {
@@ -2215,25 +2221,23 @@ async function spawnBranchBrain(
     });
   }
 
-  // Write the prompt to stdin then close it. Claude in stream-json mode on a pipe
-  // (non-TTY) requires EOF to start processing — without it the process hangs forever.
-  // This means context injection via stdin won't work (needs a different approach),
-  // but BB must produce output to be useful at all.
+  // Write the prompt to stdin as a stream-json user message. stdin stays open
+  // so context injection (main timeline fan-out) can send follow-up messages.
   setTimeout(() => {
-    child.stdin?.write(fullPrompt + '\n');
-    child.stdin?.end();
-    log(`branchBrain: prompt written to stdin (closed)`);
+    const promptMsg = JSON.stringify({ type: 'user_message', content: fullPrompt });
+    child.stdin?.write(promptMsg + '\n');
+    log(`branchBrain: prompt written to stdin (kept open for context injection)`);
   }, 3000);
 
-  // Register this process (stdin is closed, so context injection is a no-op for now)
+  // Register this process — stdin stays open for context injection via fanOutToBranchBrains.
   activeBranchBrainProcs.set(replyThreadId, { title: announcedTitle, stdin: child.stdin });
 
   // Time-limited: after BRANCH_BRAIN_TIMEOUT_MS, send interrupt then SIGKILL
   const timeoutTimer = setTimeout(() => {
     log(`branchBrain: timeout (${BRANCH_BRAIN_TIMEOUT_MS}ms) thread=${replyThreadId.slice(0, 20)}`);
-    const interruptMsg = '\nYour allotted time has expired. Please finalize your work immediately and output a summary of what you accomplished.\n';
+    const interruptMsg = JSON.stringify({ type: 'user_message', content: 'Your allotted time has expired. Please finalize your work immediately and output a summary of what you accomplished.' });
     try {
-      child.stdin?.write(interruptMsg);
+      child.stdin?.write(interruptMsg + '\n');
       child.stdin?.end();
     } catch { /* stdin may already be closed */ }
     bbThreadReply('⏱️ Branch Brain time limit reached — finalizing…').catch(() => {});
@@ -2332,10 +2336,10 @@ async function spawnBranchBrain(
       bbThreadReply(`Branch Brain completed with no output (exit ${code ?? 'null'})${errDetail}`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }
 
-    // Post merge marker in thread so the main brain can find and read it.
-    if (lastPostedText) {
-      bbThreadReply(`🔀 **Merge complete**`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
-    }
+    // Post merge marker in thread — 🪾 keyword + full result description.
+    // This closes the thread; any future posts receive a "thread is closed" reply.
+    const mergeDescription = lastPostedText ? lastPostedText.slice(0, 2000) : '(no output)';
+    bbThreadReply(`🪾 ${announcedTitle} — ${mergeDescription}`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
 
     // Inject merge content into the main brain via IPC so it processes the BB findings.
     // The main brain sees this as a high-priority message on its next turn.
@@ -4720,37 +4724,22 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               relayAck(conn.homeserver, conn.accessToken, conn.roomId, event.event_id);
             }
 
-            // ── Branch Brain: context injection + thread reactivation ──────────
-            if (event.sender === captainUserId && body && !body.startsWith('!')) {
+            // ── Branch Brain: context injection + thread closure ──────────
+            if (body && !body.startsWith('!')) {
               const relates = (event.content as Record<string, unknown>)?.['m.relates_to'] as { rel_type?: string; event_id?: string } | undefined;
               const isThreadReply = relates?.rel_type === 'm.thread' && !!relates.event_id;
 
               if (isThreadReply && relates?.event_id) {
-                // Check if this is a reply inside a completed BB thread — if so, reactivate
+                // Thread closure: completed BB threads are dead. Reply via loudspeaker.
                 const tasks = readBranchTasks();
                 const task = tasks[relates.event_id];
-                if (task?.completed) {
-                  log(`dialtone: BB thread reactivation for thread=${relates.event_id.slice(0, 20)}`);
-                  const taskTitle = task.objective.split('\n')[0].trim().slice(0, 80);
-                  const reactivationObjective = buildReactivationObjective(task.objective, body, taskTitle);
-                  const botKey = task.bot ?? '__relay__';
-                  const count = activeBranchBrainCount.get(botKey) ?? 0;
-                  if (count < MAX_BRANCH_BRAINS_PER_BOT) {
-                    activeBranchBrainCount.set(botKey, count + 1);
-                    void spawnBranchBrain(
-                      { thread_id: relates.event_id, objective: reactivationObjective, chat_jid: task.chat_jid, bot: task.bot },
-                      conns,
-                    ).finally(() => {
-                      const n = activeBranchBrainCount.get(botKey) ?? 1;
-                      if (n <= 1) activeBranchBrainCount.delete(botKey);
-                      else activeBranchBrainCount.set(botKey, n - 1);
-                    });
-                  } else {
-                    log(`dialtone: BB reactivation rejected — ${botKey} at limit`);
-                  }
+                if (task?.completed && event.sender !== conn.userId) {
+                  log(`dialtone: closed BB thread reply from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
+                  void threadReply(conn, relates.event_id, '📢 This thread is closed. The branch has merged — start a new branch if you need follow-up work.');
                 }
               } else if (!isThreadReply) {
-                // Main-timeline Captain message — fan out to all active branch brain IPC queues
+                // Main-timeline message from ANY sender — fan out to all active branch brains.
+                // Spec: main brain, Captain, and other bot messages are all injected.
                 fanOutToBranchBrains(body);
               }
             }
