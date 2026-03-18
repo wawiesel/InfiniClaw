@@ -570,6 +570,52 @@ Use holodeck_send to inject test messages and holodeck_read to check responses.`
     },
   );
 
+  server.tool(
+    'git_pull',
+    'Pull latest code from origin, rebuild, and deploy to all bot instances. Use when code sync is stale or broken.',
+    {},
+    async () => {
+      if (!isMain) {
+        return {
+          content: [{ type: 'text' as const, text: 'Only MAIN can pull.' }],
+          isError: true,
+        };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'git_pull',
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return {
+        content: [{ type: 'text' as const, text: 'git_pull queued — relay will fetch, rebuild, and deploy.' }],
+      };
+    },
+  );
+
+  server.tool(
+    'restart_relay',
+    'Restart the InfiniClaw relay process. Use when relay is stuck, sync is broken, or after code changes need to take effect.',
+    {},
+    async () => {
+      if (!isMain) {
+        return {
+          content: [{ type: 'text' as const, text: 'Only MAIN can restart relay.' }],
+          isError: true,
+        };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'restart_relay',
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return {
+        content: [{ type: 'text' as const, text: 'restart_relay queued — relay will restart shortly.' }],
+      };
+    },
+  );
+
   // ── Cross-bot verification ──────────────────────────────────────────
 
   server.tool(
