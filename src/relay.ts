@@ -2127,6 +2127,16 @@ async function spawnBranchBrain(
 
   // Spawn branch brain: prefer isolated podman container; fall back to host claude if image unset.
   const useContainer = !!BRANCH_BRAIN_IMAGE;
+  // Validate image exists before attempting spawn — avoids silent exit 125 failures (#166).
+  if (useContainer) {
+    const imageCheck = spawnSync('podman', ['image', 'exists', BRANCH_BRAIN_IMAGE], { timeout: 10_000 });
+    if (imageCheck.status !== 0) {
+      const msg = `⛔ Branch brain image not found: \`${BRANCH_BRAIN_IMAGE}\` — run \`podman build\` on Poseidon to create it.`;
+      log(`branchBrain: image not found: ${BRANCH_BRAIN_IMAGE} — skipping spawn`);
+      await bbThreadReply(msg);
+      return;
+    }
+  }
   let child: ReturnType<typeof spawn>;
   if (useContainer) {
     const notesDir = path.dirname(notesFile);
