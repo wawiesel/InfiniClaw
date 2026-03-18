@@ -1854,6 +1854,9 @@ const MAX_BRANCH_BRAINS_PER_BOT = envInt('MAX_BRANCH_BRAINS_PER_BOT', 3);
 const branchBrainRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const activeBranchBrainCount = new Map<string, number>(); // bot → active TB count
 
+// Closed branch threads — after merge, no further posting allowed
+const closedBranchThreads = new Set<string>();
+
 // Active branch brain processes indexed by replyThreadId — used for context injection fan-out
 const activeBranchBrainProcs = new Map<string, { title: string; stdin: ReturnType<typeof spawn>['stdin'] }>();
 
@@ -2058,9 +2061,9 @@ async function spawnBranchBrain(
   }
   try {
     if (botSendToken && botSendHomeserver) {
-      announcementEventId = await relaySend(botSendHomeserver, botSendToken, conn.roomId, `🪾 ${announcedTitle}`);
+      announcementEventId = await relaySend(botSendHomeserver, botSendToken, conn.roomId, `🌿 ${announcedTitle}`);
     } else {
-      announcementEventId = await reply(conn, `🪾 Branch Brain: ${announcedTitle}`, undefined, { skipMirror: true });
+      announcementEventId = await reply(conn, `🌿 Branch Brain: ${announcedTitle}`, undefined, { skipMirror: true });
     }
   } catch (err) {
     log(`branchBrain: announce failed: ${errStr(err)}`);
@@ -2215,17 +2218,14 @@ async function spawnBranchBrain(
     });
   }
 
-  // Write the prompt to stdin then close it. Claude in stream-json mode on a pipe
-  // (non-TTY) requires EOF to start processing — without it the process hangs forever.
-  // This means context injection via stdin won't work (needs a different approach),
-  // but BB must produce output to be useful at all.
+  // Write the prompt to stdin but keep it open for context injection.
+  // The branch brain receives main timeline messages via stdin while running.
   setTimeout(() => {
     child.stdin?.write(fullPrompt + '\n');
-    child.stdin?.end();
-    log(`branchBrain: prompt written to stdin (closed)`);
+    log(`branchBrain: prompt written to stdin (kept open for context injection)`);
   }, 3000);
 
-  // Register this process (stdin is closed, so context injection is a no-op for now)
+  // Register this process for context injection fan-out
   activeBranchBrainProcs.set(replyThreadId, { title: announcedTitle, stdin: child.stdin });
 
   // Time-limited: after BRANCH_BRAIN_TIMEOUT_MS, send interrupt then SIGKILL
@@ -2334,8 +2334,11 @@ async function spawnBranchBrain(
 
     // Post merge marker in thread so the main brain can find and read it.
     if (lastPostedText) {
-      bbThreadReply(`🔀 **Merge complete**`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
+      bbThreadReply(`🪾 **Merge complete**`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
     }
+
+    // Close the thread — no further posting allowed after merge
+    closedBranchThreads.add(replyThreadId);
 
     // Inject merge content into the main brain via IPC so it processes the BB findings.
     // The main brain sees this as a high-priority message on its next turn.
@@ -2349,7 +2352,7 @@ async function spawnBranchBrain(
         const roomFolder = roleRoom?.room ?? 'main';
         const ipcInputDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'ipc', roomFolder, 'input');
         fs.mkdirSync(ipcInputDir, { recursive: true });
-        const mergeMsg = `🔀 Branch Brain "${announcedTitle}" completed. Last output:\n\n${lastPostedText.slice(0, 4000)}`;
+        const mergeMsg = `🪾 Branch Brain "${announcedTitle}" completed. Last output:\n\n${lastPostedText.slice(0, 4000)}`;
         const filename = `message-${Date.now()}.json`;
         const filepath = path.join(ipcInputDir, filename);
         const tempPath = `${filepath}.tmp`;
@@ -4561,6 +4564,14 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           const body = event.content.body?.trim();
           if (!body) continue;
 
+          // 🪾 Enforce thread closure — replies to closed branch threads get a loudspeaker notice
+          {
+            const relates = (event.content as Record<string, unknown>)?.['m.relates_to'] as { rel_type?: string; event_id?: string } | undefined;
+            if (relates?.rel_type === 'm.thread' && relates.event_id && closedBranchThreads.has(relates.event_id)) {
+              void relaySend(homeserver, accessToken, rid, '📢 This thread is closed.', relates.event_id).catch(() => {});
+            }
+          }
+
           // 📡 — relay received acknowledgement for Captain messages
           if (event.sender === captainUserId && event.event_id) {
             relayAck(homeserver, accessToken, rid, event.event_id);
@@ -4730,6 +4741,8 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 const tasks = readBranchTasks();
                 const task = tasks[relates.event_id];
                 if (task?.completed) {
+                  // Reactivation reopens the thread — remove from closed set
+                  closedBranchThreads.delete(relates.event_id);
                   log(`dialtone: BB thread reactivation for thread=${relates.event_id.slice(0, 20)}`);
                   const taskTitle = task.objective.split('\n')[0].trim().slice(0, 80);
                   const reactivationObjective = buildReactivationObjective(task.objective, body, taskTitle);
