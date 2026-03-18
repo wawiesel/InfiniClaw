@@ -22,6 +22,8 @@ Main Brain (persistent, in container)
 
 Branch brains are spawned directly by the bot — the relay does not announce or spawn them. They are interactive `claude` processes (stdin open) that stream output into a Matrix thread in the bot's current room.
 
+**Constraint:** A branch brain can be spawned anywhere a bot is active **except inside a thread**. Branching from within a thread is not allowed (no nested threads).
+
 ### How Branching Works
 
 1. Bot posts `🌿 <keyword> - <purpose>` as thread title on main timeline
