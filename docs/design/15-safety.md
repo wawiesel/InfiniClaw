@@ -20,9 +20,7 @@ Three limits must be coordinated:
 
 ### Prevention Layers
 
-1. **Session file size cap** — `SESSION_MAX_BYTES` (2MB) in agent-runner. Sessions exceeding this rotate to a fresh session with a system note prepended (no summary extraction — the bot is told the previous session was rotated and should check MEMORY.md for context).
-
-> **BUG:** The size check is necessary (OOM happens at `--resume` before compaction can run), but the response is wrong. Deleting the entire session destroys working context. Instead, **truncate older JSONL entries** from the session file before resume — keep recent context intact so the bot doesn't lose what it was just working on. The bot should never lose its working context.
+1. **Session file size cap** — `SESSION_MAX_BYTES` (2MB) in agent-runner. When a session JSONL exceeds this limit, older conversation entries are truncated from the file while preserving session metadata (`queue-operation`, `summary`) and recent turns. The session ID is kept — the bot continues with recent context intact, never losing what it was just working on.
 2. **V8 heap limit** — set in each bot's Dockerfile via `NODE_OPTIONS`. Must be large enough to deserialize a worst-case session but smaller than the container limit.
 3. **Host-side exit-137 handling** — on exit 137, the host tracks consecutive kills per room via `kill137Consecutive` and enforces cooldown via `kill137CooldownUntil`. The session is cleared from memory (no toxic session loop).
 4. **Session recovery skill** — bots extract memories from old session files using a Python script (avoids loading large JSONL into the main brain).

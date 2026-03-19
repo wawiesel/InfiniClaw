@@ -50,8 +50,9 @@ const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
-// Rotate session to a fresh one if the JSONL file exceeds this size (default 2MB).
+// Truncate older JSONL entries when session file exceeds this size (default 2MB).
 // Prevents V8 heap spikes on --resume of large sessions (deserialization is 2-5x file size).
+// Keeps session metadata (queue-operation, summary, last-prompt) and recent conversation turns.
 const SESSION_MAX_BYTES = parseInt(process.env.SESSION_MAX_BYTES || String(2 * 1024 * 1024), 10);
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -188,6 +189,61 @@ function findSessionFile(sessionId: string): string | null {
     }
   } catch { /* ignore */ }
   return null;
+}
+
+/**
+ * Truncate older JSONL entries to bring file under maxBytes.
+ * Keeps: session metadata lines (queue-operation, summary) at the top,
+ * last-prompt at the bottom, and as many recent conversation turns as fit.
+ * Returns the number of bytes removed.
+ */
+function truncateSessionFile(filePath: string, maxBytes: number): number {
+  const content = fs.readFileSync(filePath, 'utf-8');
+  if (content.length <= maxBytes) return 0;
+
+  const lines = content.split('\n').filter((l) => l.trim());
+  // Separate metadata (queue-operation, summary) from conversation turns
+  const metadata: string[] = [];
+  const tail: string[] = []; // last-prompt
+  const conversation: string[] = [];
+
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line);
+      if (obj.type === 'queue-operation' || obj.type === 'summary') {
+        metadata.push(line);
+      } else if (obj.type === 'last-prompt') {
+        tail.push(line);
+      } else {
+        conversation.push(line);
+      }
+    } catch {
+      conversation.push(line); // unparseable → treat as conversation
+    }
+  }
+
+  // Calculate how much space metadata + tail take
+  const fixedSize = metadata.reduce((s, l) => s + l.length + 1, 0)
+    + tail.reduce((s, l) => s + l.length + 1, 0);
+  const budget = maxBytes - fixedSize;
+
+  // Keep as many recent conversation lines as fit within budget
+  const kept: string[] = [];
+  let usedBytes = 0;
+  for (let i = conversation.length - 1; i >= 0; i--) {
+    const lineSize = conversation[i].length + 1;
+    if (usedBytes + lineSize > budget) break;
+    kept.unshift(conversation[i]);
+    usedBytes += lineSize;
+  }
+
+  const removed = conversation.length - kept.length;
+  if (removed === 0) return 0;
+
+  const truncated = [...metadata, ...kept, ...tail].join('\n') + '\n';
+  const bytesRemoved = content.length - truncated.length;
+  fs.writeFileSync(filePath, truncated);
+  return bytesRemoved;
 }
 
 // --- Claude CLI spawning ---
@@ -576,18 +632,20 @@ async function main(): Promise<void> {
   // Main loop: run claude -> check for messages -> resume
   try {
     while (true) {
-      // Rotate session if JSONL file exceeds size limit — prevents OOM on --resume
+      // Truncate older session entries if JSONL file exceeds size limit — prevents OOM on --resume
       if (sessionId && SESSION_MAX_BYTES > 0) {
         const sessionFile = findSessionFile(sessionId);
         if (sessionFile) {
           try {
             const { size } = fs.statSync(sessionFile);
             if (size > SESSION_MAX_BYTES) {
-              log(`Session file ${Math.round(size / 1024)}KB > ${Math.round(SESSION_MAX_BYTES / 1024)}KB limit — rotating to fresh session`);
-              prompt = `[System: Previous session (${Math.round(size / 1024)}KB) exceeded the ${Math.round(SESSION_MAX_BYTES / 1024)}KB size limit and was rotated to prevent OOM. Check MEMORY.md for context.]\n\n${prompt}`;
-              sessionId = undefined;
+              log(`Session file ${Math.round(size / 1024)}KB > ${Math.round(SESSION_MAX_BYTES / 1024)}KB limit — truncating older entries`);
+              const removed = truncateSessionFile(sessionFile, SESSION_MAX_BYTES);
+              if (removed > 0) {
+                log(`Truncated ${Math.round(removed / 1024)}KB of older conversation entries`);
+              }
             }
-          } catch { /* stat failed — proceed as-is */ }
+          } catch { /* stat/truncate failed — proceed as-is */ }
         }
       }
 
