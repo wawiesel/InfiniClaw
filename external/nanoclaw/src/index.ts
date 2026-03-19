@@ -31,6 +31,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  deleteSession,
   getMessagesSince,
   getNewMessages,
   getRegisteredGroup,
@@ -305,6 +306,11 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
+        if (output.isSessionError) {
+          logger.warn({ group: group.name }, 'Stale session detected, clearing session ID');
+          delete sessions[group.folder];
+          deleteSession(group.folder);
+        }
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
@@ -328,6 +334,12 @@ async function runAgent(
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
     );
+
+    if (output.isSessionError) {
+      logger.warn({ group: group.name }, 'Stale session detected, clearing session ID');
+      delete sessions[group.folder];
+      deleteSession(group.folder);
+    }
 
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;

@@ -10,16 +10,16 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 |------|---------|
 | `types.ts` | Core interfaces: `Channel`, `NewMessage`, `RegisteredGroup` |
 | `router.ts` | `formatMessages` (XML → bot prompt), `findChannel` |
-| `db.ts` | SQLite message/chat/group store |
+| `db.ts` | SQLite message/chat/group/session store (`deleteSession` clears stale sessions) |
 | `group-queue.ts` | Per-group container queue — serializes agent runs, IPC piping, fair slot scheduling |
-| `container-runner.ts` | Spawns podman containers for agent runs |
+| `container-runner.ts` | Spawns podman containers for agent runs; `ContainerOutput.isSessionError` signals stale session recovery |
 | `container-runtime.ts` | Container runtime detection; defaults to `podman`, overridable via `CONTAINER_RUNTIME_BIN` env var |
 | `credential-proxy.ts` | Credential proxy for secure secret injection |
 | `ipc.ts` | IPC watcher — task/message/context dirs |
 | `task-scheduler.ts` | Cron/interval task scheduler |
 | `sender-allowlist.ts` | Per-room sender allow/block rules |
 | `channels/` | Channel implementations |
-| `index.ts` | Main loop: `processGroupMessages` sends only the last agent result to prevent duplicates |
+| `index.ts` | Main loop: `processGroupMessages` sends only the last agent result; auto-clears stale sessions on `isSessionError` |
 | `config.ts` | `ASSISTANT_NAME`, `TRIGGER_PATTERN` (`<m>Name</m>` match), shared constants (trailing newline cleanup) |
 | `env-utils.ts` | Env file parsing: `parseEnvLine`, `parseEnvFile`, `upsertEnvLine`, `isOllamaBaseUrl` |
 | `logger.ts` | Pino logger setup |

@@ -43,6 +43,7 @@ interface ContainerOutput {
   newSessionId?: string;
   error?: string;
   isProgress?: boolean;
+  isSessionError?: boolean;
   model?: string;
 }
 
@@ -600,8 +601,9 @@ async function main(): Promise<void> {
 
       // If claude failed with a session ID (stale session), retry without resume
       if (runResult.exitCode !== 0 && !runResult.result && !runResult.interrupted && sessionId) {
-        log('Claude failed with session ID, retrying without --resume');
+        log('Claude failed with session ID, retrying without --resume (stale session)');
         sessionId = undefined;
+        writeOutput({ status: 'success', result: null, newSessionId: undefined, isSessionError: true });
         runResult = await runClaude(
           prompt, sessionId, model,
           containerInput.disallowedTools, env, emitProgress,
