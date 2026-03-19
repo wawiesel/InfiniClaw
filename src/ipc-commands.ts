@@ -13,7 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from './env-utils.js';
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
-import { loadShipConfig, loadFleet, writeFleet, writeFleetAsync, shipTag } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, writeFleetAsync, shipTag, ROLE_ROOMS } from './ship-config.js';
 import { runHealthCheck as healthCheck } from './health.js';
 import { logger } from 'nanoclaw/logger.js';
 import { errStr } from './utils.js';
@@ -1055,7 +1055,7 @@ async function handleSubmitVerification(data: CommandData, ctx: InfiniClawIpcCon
 
 // ── WBS ──────────────────────────────────────────────────────────────────
 
-async function handleWbsAssign(data: CommandData, _ctx: InfiniClawIpcContext): Promise<void> {
+async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   const root = resolveRoot();
   const room = typeof data.room === 'string' ? data.room : '';
   const itemId = typeof data.item_id === 'string' ? data.item_id : '';
@@ -1065,9 +1065,29 @@ async function handleWbsAssign(data: CommandData, _ctx: InfiniClawIpcContext): P
     logger.warn({ data }, 'wbs_assign: missing room, item_id, or assignee');
     return;
   }
+  // Validate bot is present in the target room (issue #156)
+  const fleet = loadFleet();
+  const botName = assignee.toLowerCase();
+  const botEntry = fleet[botName];
+  if (!botEntry) {
+    logger.warn({ room, assignee }, 'wbs_assign: bot not found in fleet');
+    await safeSend(ctx, parseChatJid(data), `❌ Cannot assign to "${assignee}" — bot not found in fleet.`);
+    return;
+  }
+  const botRoom = ROLE_ROOMS[botEntry.role?.toLowerCase() ?? '']?.room ?? '';
+  if (botRoom && botRoom !== room.toLowerCase()) {
+    logger.warn({ room, assignee, botRoom }, 'wbs_assign: bot is not assigned to target room');
+    await safeSend(ctx, parseChatJid(data), `❌ Cannot assign to "${assignee}" — bot is in ${botRoom}, not ${room}.`);
+    return;
+  }
+  if (botEntry.status !== 'onduty' && botEntry.status !== 'quarters') {
+    logger.warn({ room, assignee, status: botEntry.status }, 'wbs_assign: bot is not active');
+    await safeSend(ctx, parseChatJid(data), `❌ Cannot assign to "${assignee}" — bot status is ${botEntry.status}.`);
+    return;
+  }
   const dataDir = path.join(root, '_runtime', 'data');
   const wbs = readWbs(dataDir, room);
-  const ok = assignItem(wbs, itemId, assignee.toLowerCase());
+  const ok = assignItem(wbs, itemId, botName);
   if (ok) {
     writeWbs(dataDir, room, wbs);
     logger.info({ room, itemId, assignee }, 'WBS item assigned');
