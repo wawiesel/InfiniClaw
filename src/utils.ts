@@ -20,6 +20,11 @@ export function envInt(name: string, defaultVal: number): number {
   return Number.isFinite(n) ? n : defaultVal;
 }
 
+/** Alias for envInt — parse a millisecond duration env var. */
+export function envMs(name: string, defaultVal: number): number {
+  return envInt(name, defaultVal);
+}
+
 /** Escape a string for use in a RegExp pattern. */
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

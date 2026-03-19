@@ -656,7 +656,7 @@ function fmtVersion(sha: string, ageMs: number, ud: string, tag?: string | null)
 
 /** Compute ↑N/↓N relation between two refs. */
 function gitRelation(root: string, local: string, upstream: string): string {
-  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: root };
+  const execOpts = gitOpts(root, 5_000);
   const ahead = parseInt(execSync(`git rev-list ${upstream}..${local} --count`, execOpts).trim(), 10) || 0;
   const behind = parseInt(execSync(`git rev-list ${local}..${upstream} --count`, execOpts).trim(), 10) || 0;
   if (ahead > 0 && behind > 0) return `↑${ahead}↓${behind}`;
@@ -667,7 +667,7 @@ function gitRelation(root: string, local: string, upstream: string): string {
 
 /** Commit age in ms from a sha. */
 function commitAge(root: string, sha: string): number {
-  const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: root };
+  const execOpts = gitOpts(root, 5_000);
   const epoch = parseInt(execSync(`git log -1 --format=%ct ${sha}`, execOpts).trim(), 10) * 1000;
   return Date.now() - epoch;
 }
@@ -675,7 +675,7 @@ function commitAge(root: string, sha: string): number {
 /** Version string for a repo: HEAD vs origin/main. */
 function repoVersion(repoDir: string): string {
   try {
-    const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const, cwd: repoDir };
+    const execOpts = gitOpts(repoDir, 5_000);
     const sha = execSync('git rev-parse --short HEAD', execOpts).trim();
     if (!sha) return '';
     const tag = getLatestSemverTag(repoDir);
@@ -718,9 +718,7 @@ let localCommitEpoch = 0; // epoch seconds of HEAD commit the relay is running
 function refreshLocalCommitEpoch(): void {
   try {
     const root = resolveRoot();
-    const epoch = execSync('git log -1 --format=%ct HEAD', {
-      cwd: root, encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
-    }).trim();
+    const epoch = execSync('git log -1 --format=%ct HEAD', gitOpts(root, 5_000)).trim();
     localCommitEpoch = parseInt(epoch, 10) || 0;
   } catch {
     localCommitEpoch = 0;
@@ -1619,7 +1617,7 @@ function installGitHooks(): void {
 /** Returns true if any source files changed in the last N commits. */
 function hasSourceChanges(root: string, commitCount: number): boolean {
   try {
-    const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 10_000, stdio: 'pipe' as const };
+    const execOpts = gitOpts(root, 10_000);
     const changed = execSync(`git diff HEAD~${commitCount}..HEAD --name-only`, execOpts).trim();
     if (!changed) return false;
     return changed.split('\n').some(f =>
@@ -1641,7 +1639,7 @@ const RELAY_FILES = [
 
 function hasRelayChanges(root: string, commitCount: number): boolean {
   try {
-    const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 10_000, stdio: 'pipe' as const };
+    const execOpts = gitOpts(root, 10_000);
     const changed = execSync(`git diff HEAD~${commitCount}..HEAD --name-only`, execOpts).trim();
     if (!changed) return false;
     return changed.split('\n').some(f => RELAY_FILES.includes(f));
@@ -1653,7 +1651,7 @@ function hasRelayChanges(root: string, commitCount: number): boolean {
 /** Compute a fast hash of a directory's file contents for change detection. Cross-platform. */
 function hashDir(dir: string): string {
   try {
-    const files = execSync('find . -type f', { cwd: dir, encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' })
+    const files = execSync('find . -type f', gitOpts(dir, 10_000))
       .trim().split('\n').filter(Boolean).sort();
     const hash = crypto.createHash('sha256');
     for (const file of files) {
@@ -1823,7 +1821,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
                 // Persist fleet state synchronously before relay restart — prevents
                 // status loss when new relay process loads fleet.json from disk.
                 await persistFleetSync();
-                execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
+                execSync('npx pm2 restart infiniclaw-relay', gitOpts(resolveRoot(), 10_000));
               } catch (err) {
                 log(`git sync: relay self-restart failed: ${errStr(err)}`);
               }
@@ -2419,9 +2417,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                 log(`relayTasks: git_push rejected — invalid remote or branch`);
               } else {
                 try {
-                  execFileSync('git', ['push', '--no-verify', remote, ...branches], {
-                    cwd: resolveRoot(), encoding: 'utf-8', timeout: 30_000, stdio: 'pipe',
-                  });
+                  execFileSync('git', ['push', '--no-verify', remote, ...branches], gitOpts(resolveRoot(), 30_000));
                   log(`relayTasks: git pushed ${branches.join(', ')} → ${remote}`);
                 } catch (err) {
                   log(`relayTasks: git_push failed: ${errStr(err)}`);
@@ -3596,7 +3592,7 @@ function registerRelayCommands(): void {
       if (!targetShip && conn.roomId === curtainRoomId && !await electSpeaker()) return;
       const branch = 'main';
       const root = resolveRoot();
-      const execOpts = { cwd: root, encoding: 'utf-8' as const, timeout: 30_000, stdio: 'pipe' as const };
+      const execOpts = gitOpts(root, 30_000);
       const tr = await reply(conn, `📡 push`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
@@ -3782,7 +3778,7 @@ function registerRelayCommands(): void {
         await reply(conn, msg);
         await sleep(1_000);
         try {
-          execSync('npx pm2 restart infiniclaw-relay', { cwd: resolveRoot(), encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
+          execSync('npx pm2 restart infiniclaw-relay', gitOpts(resolveRoot(), 10_000));
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
         errors++;
@@ -4929,9 +4925,7 @@ async function main(): Promise<void> {
       // Check which bots already have running pm2 processes
       const alreadyRunning = new Set<string>();
       try {
-        const pm2List = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', {
-          cwd: root, encoding: 'utf-8', timeout: 5_000, stdio: 'pipe',
-        })) as Array<{ name: string; pm2_env?: { status?: string } }>;
+        const pm2List = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', gitOpts(root, 5_000))) as Array<{ name: string; pm2_env?: { status?: string } }>;
         for (const p of pm2List) {
           if (p.pm2_env?.status === 'online' && p.name.startsWith('infiniclaw-') && p.name !== 'infiniclaw-relay') {
             alreadyRunning.add(p.name.replace('infiniclaw-', ''));
