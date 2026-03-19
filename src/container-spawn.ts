@@ -24,7 +24,7 @@ import {
   normalizeProviderSecrets,
   mapCertPathSecretsToContainer,
 } from './container-secrets.js';
-import { botTag, canReachPodmanApi, recoverPodman, stopContainersByPrefix } from './podman-utils.js';
+import { botTag, canReachPodmanApi, recoverPodman, stopContainer, stopContainersByPrefix } from './podman-utils.js';
 
 import {
   CONTAINER_IMAGE,
@@ -266,13 +266,14 @@ function resolveContainerName(
   if (tag && !safeTag) logger.warn({ containerNameTag: tag }, 'Ignoring invalid containerNameTag');
 
   const nameTag = safeTag ? `-${safeTag}` : '';
-  const containerName = `nanoclaw-${botTag()}-${safeName}${nameTag}-${Date.now()}`;
+  const containerName = `nanoclaw-${botTag()}-${safeName}${nameTag}`;
 
-  if (!safeTag) {
-    const prefix = `nanoclaw-${botTag()}-${safeName}-`;
-    const stopped = stopContainersByPrefix(prefix);
-    for (const name of stopped) logger.info({ name }, 'Killed stale container for same bot/group before spawn');
-  }
+  // Stop existing container with this exact name before respawning
+  stopContainer(containerName);
+  // Also clean up legacy timestamped containers (nanoclaw-bot-group-<timestamp>)
+  const legacyPrefix = `${containerName}-`;
+  const stopped = stopContainersByPrefix(legacyPrefix);
+  for (const name of stopped) logger.info({ name }, 'Killed legacy timestamped container');
 
   return { containerName, safeContainerNameTag: safeTag };
 }
