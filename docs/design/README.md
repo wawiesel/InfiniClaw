@@ -28,7 +28,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 ## Resilience
 
 - `14-configuration.md` — CLAUDE.md layers (base/persona/room), MCP per-role config, chat activity tracking (per-room objective/progress/error), startup checklist (skills/MCP/todos/machine health/weekly goals by role)
-- `15-safety.md` — Exit-137 (SIGKILL) backoff, memory architecture (container/V8/reservation limits), session rotation (**BUG: SESSION_MAX_BYTES=2MB nukes entire session instead of relying on Claude compaction — WBS 12**), message size truncation, container isolation (slirp4netns), media download streaming safety
+- `15-safety.md` — Exit-137 (SIGKILL) backoff, memory architecture (container/V8/reservation limits), session rotation (**BUG: should truncate older JSONL entries instead of nuking entire session — WBS 12**), message size truncation, container isolation (slirp4netns), media download streaming safety
 - `16-autonomy.md` — Bot capabilities (rebuild, git push, peer verification), self-healing loop, holodeck (IPC tasks, not CLI)
 
 ## Higher Features
