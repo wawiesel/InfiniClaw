@@ -178,6 +178,7 @@ function buildVolumeMounts(
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
+  // Re-syncs when host source has newer files than the per-group copy.
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
@@ -190,8 +191,25 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  if (fs.existsSync(agentRunnerSrc)) {
+    if (!fs.existsSync(groupAgentRunnerDir)) {
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    } else {
+      // Compare newest mtime in host source vs per-group copy
+      const newestMtime = (dir: string): number => {
+        let max = 0;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) { max = Math.max(max, newestMtime(full)); }
+          else { max = Math.max(max, fs.statSync(full).mtimeMs); }
+        }
+        return max;
+      };
+      if (newestMtime(agentRunnerSrc) > newestMtime(groupAgentRunnerDir)) {
+        logger.info(`Syncing updated agent-runner source to ${group.folder}`);
+        fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+      }
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
