@@ -85,7 +85,7 @@ import { BRANCH_BRAIN_IMAGE, BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, 
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
 import { pushAll, getClient as getS3Client } from './s3-sync.js';
-import { isHealthReportStale, parseHealthReportTs, STALE_HEALTH_THRESHOLD_MS } from './health-staleness.js';
+// health-staleness.ts helpers used by healthWatchdogLoop inline
 
 // ── Config ─────────────────────────────────────────────────────────
 
@@ -1268,26 +1268,7 @@ async function fetchAllHealthReports(): Promise<Array<{ ship: string; data: Reco
   return results;
 }
 
-/**
- * Check each other ship's S3 health report for staleness.
- * If a report is older than STALE_HEALTH_THRESHOLD_MS, post one alert to BTC.
- * Called once per health-loop cycle — one alert per stale ship per cycle.
- */
-async function checkCrossShipHealthStaleness(): Promise<void> {
-  const reports = await fetchAllHealthReports();
-  const myShip = thisShipName();
-  const now = Date.now();
-  for (const { ship, data } of reports) {
-    if (ship === myShip) continue; // we just uploaded ours
-    if (isHealthReportStale(data, STALE_HEALTH_THRESHOLD_MS, now)) {
-      const ts = parseHealthReportTs(data);
-      const ageMin = Math.round((now - ts) / 60_000);
-      await postToBTC(
-        `⚠️ Health watchdog: ${ship} S3 health report is ${ageMin}min stale — last seen ${new Date(ts).toISOString()}`,
-      );
-    }
-  }
-}
+// Cross-ship health staleness alerts are handled by healthWatchdogLoop() (fire-once with recovery).
 
 async function fetchAllMetricsSnapshots(): Promise<MetricsSnapshot[]> {
   const s3 = getS3Client();
@@ -2760,7 +2741,7 @@ async function healthLoop(): Promise<void> {
     try { runSessionCleanup(); } catch { /* non-critical */ }
     try { removeStaleProcesses(); } catch { /* non-critical */ }
     try { await publishFleetReport(); } catch { /* non-critical */ }
-    try { await checkCrossShipHealthStaleness(); } catch { /* non-critical */ }
+    // Cross-ship health staleness is handled by healthWatchdogLoop (fire-once alerts)
     await sleep(HEALTH_INTERVAL);
   }
 }

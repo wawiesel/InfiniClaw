@@ -172,7 +172,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 
 - **S3 shutdown flush** (`relay.ts`): `shutdown()` handler now calls `await pushAll(resolveRoot())` on SIGTERM/SIGINT to back up fleet state to S3 on every graceful stop.
 
-- **Health watchdog** (`relay.ts`): `healthWatchdogLoop()` runs every `HEALTH_WATCHDOG_INTERVAL_MS` (default 5 min). The elected speaker checks all ships' S3 health report timestamps; if any report is >30 min stale, posts a warning to BTC via `postToBTC()`. Clears the alert when the report recovers. Uses `stalenessAlerted` set to fire each alert only once per staleness episode.
+- **Health watchdog** (`relay.ts`): `healthWatchdogLoop()` runs every `HEALTH_WATCHDOG_INTERVAL_MS` (default 5 min). The elected speaker checks all ships' S3 health report timestamps; if any report is >30 min stale, posts a warning to BTC via `postToBTC()`. Clears the alert when the report recovers. Uses `stalenessAlerted` set to fire each alert only once per staleness episode. This is the sole cross-ship health staleness mechanism — the health loop itself no longer checks staleness.
 
 - **Room registration cleanup** (`service.ts`): `clearRoomRegistrations(instanceBase)` deletes all rows from `registered_groups` in the bot's SQLite store before seeding new rooms. Called in both `deployBot()` and `restartBotForRoom()`. Prevents stale room registrations from previous deployments (e.g. a bot `!wake`d in quarters still monitoring engineering from a prior `!report`).
 
