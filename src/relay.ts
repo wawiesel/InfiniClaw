@@ -1704,23 +1704,27 @@ function gitSync(force = false): { ok: boolean; output: string; newCommits: numb
 /** Periodic git sync loop — pull --rebase, notify engineer on failure. */
 async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
   await sleep(30_000); // initial delay
+  let lastBuildFailed = false;
   while (true) {
     try {
       const result = gitSync();
       if (!result.ok) {
         log(`git sync FAILED: ${result.output}`);
         await reportFailure('code sync', result.output, conns);
-      } else if (result.newCommits > 0) {
+      } else if (result.newCommits > 0 || lastBuildFailed) {
         await reportRecovery('code sync', conns);
-        log(`git sync: pulled ${result.newCommits} new commit(s)`);
-        if (!hasSourceChanges(resolveRoot(), result.newCommits)) {
+        if (result.newCommits > 0) log(`git sync: pulled ${result.newCommits} new commit(s)`);
+        else log('git sync: retrying failed build');
+        if (result.newCommits > 0 && !hasSourceChanges(resolveRoot(), result.newCommits) && !lastBuildFailed) {
           log('git sync: doc-only changes, skipping rebuild and restart');
         } else {
           const buildResult = rebuildInfiniClaw();
           log(`git sync: ${buildResult}`);
           if (buildResult.includes('FAILED')) {
+            lastBuildFailed = true;
             await reportFailure('code build', buildResult, conns);
           } else {
+            lastBuildFailed = false;
             await reportRecovery('code build', conns);
             const root = resolveRoot();
 
