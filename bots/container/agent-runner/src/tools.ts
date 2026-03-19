@@ -183,13 +183,6 @@ Note: bot restart is required for changes to take effect.`,
       model: z.string().optional().describe('Optional model override for the selected mode'),
     },
     async (args) => {
-      if (!isMain) {
-        return {
-          content: [{ type: 'text' as const, text: 'Only MAIN can change brain mode.' }],
-          isError: true,
-        };
-      }
-
       const data = {
         type: 'set_brain_mode',
         bot: args.bot,
