@@ -10,10 +10,9 @@ export const CAPTAIN_USER_ID = process.env.CAPTAIN_USER_ID || '';
 export const OPERATOR_USER_ID = process.env.OPERATOR_USER_ID || '';
 export const MAIN_GROUP_FOLDER = process.env.MAIN_GROUP_FOLDER || 'main';
 // Max time the main brain may run per turn before being killed (0 = disabled).
-// Enforces the dispatch model: main brain triages, Branch Brain works.
-export const MAIN_BRAIN_TURN_TIMEOUT_MS = envInt('MAIN_BRAIN_TURN_TIMEOUT_MS', 90_000);
-// Max inline tool calls before a dispatch warning is injected into the running container.
-export const MAIN_BRAIN_TOOL_LIMIT = envInt('MAIN_BRAIN_TOOL_LIMIT', 3);
+export const MAIN_BRAIN_TURN_TIMEOUT_MS = envInt('MAIN_BRAIN_TURN_TIMEOUT_MS', 0);
+// Max inline tool calls before a dispatch warning is injected into the running container (0 = disabled).
+export const MAIN_BRAIN_TOOL_LIMIT = envInt('MAIN_BRAIN_TOOL_LIMIT', 0);
 export const HEAP_LIMIT_MB = envInt('HEAP_LIMIT_MB', 0);
 export const RESUME_DELAY_SECONDS = envInt('RESUME_DELAY_SECONDS', 0);
 export const MEMORY_CHECK_INTERVAL = envInt('MEMORY_CHECK_INTERVAL', 120_000);

@@ -947,16 +947,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     isMainGroup ? buildMainMissionContext(chatJid) : undefined;
   const prevKilled = turnKilledByTimeout[chatJid];
   if (prevKilled) delete turnKilledByTimeout[chatJid];
-  const triageInstruction = prevKilled
-    ? '⚠️ DISPATCH REQUIRED: Your previous turn was killed — it ran too long without calling `branch_to_thread`. This turn: acknowledge the task and call `branch_to_thread` immediately. No inline tool calls.'
-    : `Use \`branch_to_thread\` for any task requiring more than ${MAIN_BRAIN_TOOL_LIMIT} tool calls. Main brain must stay responsive.`;
   const activeThread = activeReplyThreadIds[chatJid];
   const threadNote = activeThread
     ? `The incoming message is in Matrix thread \`${activeThread}\`. Your response will be sent there automatically. Use this ID with \`set_thread\` if you need to send intermediate messages in-thread.`
     : undefined;
   const parts: string[] = [];
   if (missionContext) parts.push(missionContext);
-  if (isMainGroup) parts.push(triageInstruction);
+  // Dispatch guard removed — bots work inline until branch brain reliability improves.
   if (threadNote) parts.push(threadNote);
   if (threadContext) parts.push(threadContext);
   parts.push(basePrompt);
