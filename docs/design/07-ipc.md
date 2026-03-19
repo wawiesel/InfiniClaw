@@ -57,6 +57,7 @@ Commands written by the container to `tasks/*.json`. Statuses: ✅ implemented, 
 | `pause_task` | Pause a scheduled task | 🗑 nanoclaw-specific |
 | `resume_task` | Resume a scheduled task | 🗑 nanoclaw-specific |
 | `cancel_task` | Cancel a scheduled task | 🗑 nanoclaw-specific |
+| `podman_exec` | Run allowlisted podman commands on host | ✅ |
 | `restart_wksm` | Restart the WKS proxy service | 🗑 nanoclaw-specific service name |
 
 Relay-task types written to `_runtime/relay-tasks/*.json` (processed by relay, not ipc-watcher):
@@ -95,6 +96,30 @@ IPC commands have per-command cooldowns to prevent bots from spamming expensive 
 | `rebuild_image` | 5m |
 | `git_push` | 60s |
 | `git_pull` | 60s |
+
+## restart_self (refresh_bot) Spec
+
+The `restart_self` MCP tool (IPC type `refresh_bot`) lets a bot restart itself while on duty. It must behave identically to `!wake` for already-running bots: new Claude process, new MCP tools, new brain config, old context preserved. Target: under 1 minute.
+
+**Sequence:**
+
+1. Bot calls `restart_self` → writes `refresh_bot` task to IPC
+2. Host validates deploy (`tsc --noEmit`)
+3. Host deploys instance (`deployBot`: rsync + npm ci + build)
+4. Host rebuilds container image (`rebuildImage`: `bots/build.sh {bot}`)
+5. Host posts status line to main room
+6. Host exits with `process.exit(0)` — PM2 auto-restarts the process
+7. New process starts, spawns container with rebuilt image
+
+**Critical:** The `CONTAINER_IMAGE` env var in `bots/{bot}/env` must match the image built by `build.sh` (`nanoclaw-{bot}:latest`). A mismatch causes the container to use a stale image, silently missing new tools.
+
+## podman_exec Spec
+
+The `podman_exec` MCP tool (IPC type `podman_exec`) lets bots run podman commands on the host from inside their container.
+
+**Allowed subcommands:** `ps`, `images`, `logs`, `inspect`, `run`, `stop`, `rm`, `build`, `exec`, `pull`, `start`.
+
+**Restrictions:** Main group only. 120s timeout. Output truncated to 2000 chars.
 
 ## Verification
 
