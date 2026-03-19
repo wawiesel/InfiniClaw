@@ -1024,6 +1024,33 @@ Item fields for upsert:
     },
   );
 
+  // ── Podman exec ───────────────────────────────────────────────────
+
+  server.tool(
+    'podman_exec',
+    `Run a podman command on the host machine. Main group only.
+
+Allowed subcommands: ps, images, logs, inspect, run, stop, rm, build, exec, pull, start.
+Arguments are passed as an array (e.g. ["ps", "--filter", "name=nanoclaw"]).
+Output is returned as text (truncated to 2000 chars).`,
+    {
+      args: z.array(z.string()).describe('Podman command arguments, e.g. ["ps", "--format", "{{.Names}}"]'),
+    },
+    async (toolArgs) => {
+      if (!isMain) {
+        return { content: [{ type: 'text' as const, text: 'podman_exec requires main group.' }], isError: true };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'podman_exec',
+        args: toolArgs.args,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Queued: podman ${toolArgs.args.join(' ')}` }] };
+    },
+  );
+
   // ── Delegate tools ──────────────────────────────────────────────────
 
   registerDelegateTools(server, {

@@ -48,7 +48,7 @@ Host machine (macOS / Linux)
 ├── ship-config.ts      → Fleet/ship config, shared constants. `ROLE_ROOMS` is the single source of truth for role→duty room→icon (navigator/engineer/architect/normie). `ShipEntry` includes type/typeEmoji for ship classification. `shipTag()` returns emoji+pip+name (🦁🟢 Herc) with auto-derived or caller-supplied status pip. `findShipByHostname()` resolves hostname→ship entry. `isQuartersOnlyRole(role)` returns true when the role's `rw` list in fleet.json is absent or empty — used by `!report` to prevent normie-style bots from joining duty rooms (engineering/bridge/astrometrics). `loadFleetAsync()` reads disk fleet.json (static) then overlays runtime fields (status, triggerType, ondutyAt, activeBrainModel) from S3 `fleet-state/*.json`. `writeFleetAsync()` writes disk first (synchronous cache for `loadFleet()`), then uploads runtime fields to S3. Uses lazy `import()` for s3-sync to break circular dependency.
 ├── allow-list.ts       → Validate mounts against host-side allowlist (~/.config/infiniclaw/allow-list.json)
 ├── ipc-watcher.ts      → Poll IPC output dir for container commands
-├── ipc-commands.ts     → Handle refresh_bot, stop_bot, send_reaction, rebuild_image, git_push, etc.
+├── ipc-commands.ts     → Handle refresh_bot, stop_bot, send_reaction, rebuild_image, git_push, podman_exec, etc.
 ├── brain-management.ts → Runtime model switching, mainSender() uses capitalizeName for provider display
 ├── chat-activity.ts    → Track activity per room for idle detection
 ├── message-filtering.ts→ Dedup, echo prevention, ignore rules (📞 pill, @ callout, system accounts)

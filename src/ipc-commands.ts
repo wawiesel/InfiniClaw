@@ -1150,6 +1150,40 @@ async function handleWbsWrite(data: CommandData, _ctx: InfiniClawIpcContext): Pr
   logger.warn({ data }, 'wbs_write: unknown op "%s"', op);
 }
 
+// ── Podman exec ──────────────────────────────────────────────────────
+
+const ALLOWED_PODMAN_COMMANDS = new Set([
+  'ps', 'images', 'logs', 'inspect', 'run', 'stop', 'rm', 'build', 'exec', 'pull', 'start',
+]);
+
+async function handlePodmanExec(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'podman_exec')) return;
+  const chatJid = parseChatJid(data);
+  const args: string[] = Array.isArray(data.args) ? data.args : [];
+  if (args.length === 0) {
+    if (chatJid) await ctx.sendMessage(chatJid, '⛔ podman_exec: no arguments provided');
+    return;
+  }
+  const subcommand = args[0];
+  if (!ALLOWED_PODMAN_COMMANDS.has(subcommand)) {
+    if (chatJid) await ctx.sendMessage(chatJid, `⛔ podman_exec: "${subcommand}" not in allowed commands: ${[...ALLOWED_PODMAN_COMMANDS].join(', ')}`);
+    return;
+  }
+  logger.info({ args }, 'podman_exec via IPC');
+  try {
+    const result = execFileSync('podman', args, {
+      encoding: 'utf-8',
+      timeout: 120_000,
+      cwd: resolveRoot(),
+      stdio: 'pipe',
+    });
+    if (chatJid) await ctx.sendMessage(chatJid, result.length > 2000 ? result.slice(0, 2000) + '\n…(truncated)' : result || '(no output)');
+  } catch (err) {
+    logger.error({ err, args }, 'podman_exec failed');
+    if (chatJid) await ctx.sendMessage(chatJid, `⛔ podman_exec failed: ${errStr(err).slice(0, 500)}`);
+  }
+}
+
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_brain_mode: handleSetBrainMode,
   refresh_bot: handleRefreshBot,
@@ -1178,6 +1212,8 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   wbs_assign: handleWbsAssign,
   wbs_complete: handleWbsComplete,
   wbs_write: handleWbsWrite,
+
+  podman_exec: handlePodmanExec,
 };
 
 export async function handleInfiniClawCommand(
