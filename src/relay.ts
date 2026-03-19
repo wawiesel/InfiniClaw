@@ -1806,7 +1806,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
                 // Persist fleet state synchronously before relay restart — prevents
                 // status loss when new relay process loads fleet.json from disk.
                 await persistFleetSync();
-                execSync('npx pm2 restart infiniclaw-relay', gitOpts(resolveRoot(), 10_000));
+                execSync(`npx pm2 restart ${process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw-relay'}`, gitOpts(resolveRoot(), 10_000));
               } catch (err) {
                 log(`git sync: relay self-restart failed: ${errStr(err)}`);
               }
@@ -3767,7 +3767,7 @@ function registerRelayCommands(): void {
         await reply(conn, msg);
         await sleep(1_000);
         try {
-          execSync('npx pm2 restart infiniclaw-relay', gitOpts(resolveRoot(), 10_000));
+          execSync(`npx pm2 restart ${process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw-relay'}`, gitOpts(resolveRoot(), 10_000));
         } catch { /* pm2 restart kills us */ }
       } catch (err) {
         errors++;
@@ -4916,8 +4916,10 @@ async function main(): Promise<void> {
       try {
         const pm2List = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', gitOpts(root, 5_000))) as Array<{ name: string; pm2_env?: { status?: string } }>;
         for (const p of pm2List) {
-          if (p.pm2_env?.status === 'online' && p.name.startsWith('infiniclaw-') && p.name !== 'infiniclaw-relay') {
-            alreadyRunning.add(p.name.replace('infiniclaw-', ''));
+          const pfx = process.env['INFINICLAW_PM2_PREFIX'] || 'infiniclaw';
+          const relayName = process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw-relay';
+          if (p.pm2_env?.status === 'online' && p.name.startsWith(`${pfx}-`) && p.name !== relayName) {
+            alreadyRunning.add(p.name.replace(`${pfx}-`, ''));
           }
         }
       } catch { /* pm2 not available or no processes */ }

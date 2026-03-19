@@ -396,7 +396,7 @@ export function loadIntercomConfig(): IntercomConfig | null {
   if (cachedIntercomConfig) return cachedIntercomConfig;
   try {
     const secretsPath = loadShipConfig().secretsPath;
-    const configPath = path.join(secretsPath, 'operator', 'intercom.json');
+    const configPath = path.join(secretsPath, 'operator', process.env['INFINICLAW_INTERCOM'] || 'intercom.json');
     if (!fs.existsSync(configPath)) return null;
     cachedIntercomConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     return cachedIntercomConfig;

@@ -44,7 +44,7 @@ export interface ShipConfig {
 }
 
 const SECRETS_PATH = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets');
-const FLEET_PATH = path.join(SECRETS_PATH, 'bots', 'fleet.json');
+const FLEET_PATH = path.join(SECRETS_PATH, 'bots', process.env['INFINICLAW_FLEET'] || 'fleet.json');
 const SHIPS_PATH = path.join(SECRETS_PATH, 'operator', 'ships.json');
 /** Bot names must start with alphanumeric, then alphanumeric/dot/dash/underscore. */
 export const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;

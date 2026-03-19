@@ -587,7 +587,7 @@ async function handleRestartRelay(data: CommandData, ctx: InfiniClawIpcContext):
   try {
     const root = resolveRoot();
     if (chatJid) await ctx.sendMessage(chatJid, '🔄 Restarting relay...');
-    execSync('npx pm2 restart infiniclaw-relay', { cwd: root, encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
+    execSync(`npx pm2 restart ${process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw-relay'}`, { cwd: root, encoding: 'utf-8', timeout: 10_000, stdio: 'pipe' });
     logger.info('restart_relay succeeded');
     if (chatJid) await ctx.sendMessage(chatJid, '✅ Relay restarted');
   } catch (err) {

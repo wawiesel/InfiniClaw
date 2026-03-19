@@ -329,7 +329,7 @@ export function deployBot(root: string, bot: string): void {
       let dutyRoomJid = '';
       const secretsPath = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets');
       try {
-        const intercom = JSON.parse(fs.readFileSync(path.join(secretsPath, 'operator', 'intercom.json'), 'utf-8'));
+        const intercom = JSON.parse(fs.readFileSync(path.join(secretsPath, 'operator', process.env['INFINICLAW_INTERCOM'] || 'intercom.json'), 'utf-8'));
         const roomConfig = intercom.rooms?.[dutyRoom.room];
         if (roomConfig?.roomId) {
           dutyRoomJid = `matrix:${roomConfig.roomId}`;
@@ -462,8 +462,9 @@ export function rebuildImageIfChanged(root: string, bot: string): void {
 
 // ── pm2 helpers ─────────────────────────────────────────────────────
 
+const PM2_PREFIX = process.env['INFINICLAW_PM2_PREFIX'] || 'infiniclaw';
 function pm2Name(bot: string): string {
-  return `infiniclaw-${bot}`;
+  return `${PM2_PREFIX}-${bot}`;
 }
 
 function pm2Stop(name: string): void {
@@ -623,12 +624,12 @@ function pm2StartBot(bot: string, nodeBin: string, instance: string, logs: strin
 
 export function removeStaleProcesses(): void {
   const validNames = new Set(getActiveBots().map(pm2Name));
-  validNames.add('infiniclaw-relay');
+  validNames.add(RELAY_PM2_NAME);
   try {
     const out = execFileSync(PM2_BIN, ['jlist'], { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' });
     const list = JSON.parse(out) as Array<{ name: string }>;
     for (const proc of list) {
-      if (proc.name.startsWith('infiniclaw-') && !validNames.has(proc.name) && !proc.name.includes('-holodeck')) {
+      if (proc.name.startsWith(`${PM2_PREFIX}-`) && !validNames.has(proc.name) && !proc.name.includes('-holodeck')) {
         pm2Stop(proc.name);
         console.log(`Removed stale process: ${proc.name}`);
       }
@@ -720,7 +721,7 @@ export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: s
       let dutyRoomJid = '';
       try {
         const secretsPath = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets');
-        const intercom = JSON.parse(fs.readFileSync(path.join(secretsPath, 'operator', 'intercom.json'), 'utf-8'));
+        const intercom = JSON.parse(fs.readFileSync(path.join(secretsPath, 'operator', process.env['INFINICLAW_INTERCOM'] || 'intercom.json'), 'utf-8'));
         const roomConfig = intercom.rooms?.[dutyRoom.room];
         if (roomConfig?.roomId) {
           dutyRoomJid = `matrix:${roomConfig.roomId}`;
@@ -731,7 +732,7 @@ export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: s
         const envSecretsPath = process.env['SECRETS_PATH'] || process.env['INFINICLAW_SECRETS'];
         if (envSecretsPath) {
           try {
-            const intercom = JSON.parse(fs.readFileSync(path.join(envSecretsPath, 'operator', 'intercom.json'), 'utf-8'));
+            const intercom = JSON.parse(fs.readFileSync(path.join(envSecretsPath, 'operator', process.env['INFINICLAW_INTERCOM'] || 'intercom.json'), 'utf-8'));
             const roomConfig = intercom.rooms?.[dutyRoom.room];
             if (roomConfig?.roomId) {
               dutyRoomJid = `matrix:${roomConfig.roomId}`;
@@ -766,7 +767,7 @@ export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: s
 
 // ── Relay ────────────────────────────────────────────────────────────
 
-const RELAY_PM2_NAME = 'infiniclaw-relay';
+const RELAY_PM2_NAME = process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw-relay';
 
 /**
  * Install: build project, start relay via pm2, set up pm2 startup.
