@@ -3314,9 +3314,13 @@ async function handleLifecycleCommand(
         fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME, ondutyAt: Date.now() });
         persistFleet();
         clearShipConfigCache();
-        // Restart bot so NanoClaw monitors the duty room (lightweight — no rebuild).
-        // Pass dutyRoomId so the seed uses the exact room rather than an intercom.json
-        // lookup that may not be populated (#193).
+        // Full redeploy so bot gets latest code (rsync + npm ci + build + stamp).
+        // Previously only re-seeded rooms (restartBotForRoom) which left bots on
+        // stale versions when !report interrupted a duty cycle retrospective.
+        stopBot(bot);
+        killStaleContainers(bot);
+        deployBot(root, bot);
+        // Re-seed with exact dutyRoomId to avoid intercom.json lookup issues (#193)
         restartBotForRoom(root, bot, dutyRoomId);
         writeCrewStatus(root, bot);
         injectWbsTasks(root, bot);
