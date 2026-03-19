@@ -506,7 +506,7 @@ function rebuildInfiniClaw(): string {
     execSync('npm install --ignore-scripts', { ...execOpts, timeout: 120_000 });
     // Rebuild native modules for the running Node version — prebuilt binaries from
     // npm install may be compiled for a different Node ABI (e.g. Node 22 vs 24).
-    execSync('npm rebuild better-sqlite3', { ...execOpts, timeout: 60_000 });
+    execSync('npm rebuild better-sqlite3', { ...execOpts, timeout: 120_000 });
     execSync('npm run build -w nanoclaw', { ...execOpts, timeout: 120_000 });
     execSync('npx tsc', { ...execOpts, timeout: 180_000 });
     try { installGitHooks(); } catch { /* best effort */ }

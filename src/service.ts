@@ -294,7 +294,7 @@ export function deployBot(root: string, bot: string): void {
     execSync('npm ci', { cwd: instance, stdio: 'inherit', timeout: 600_000 });
     // Rebuild native modules for the running Node version — npm ci downloads
     // prebuilt binaries that may target a different Node ABI (e.g. Node 22 vs 24).
-    execSync('npm rebuild better-sqlite3', { cwd: instance, stdio: 'inherit', timeout: 60_000 });
+    execSync('npm rebuild better-sqlite3', { cwd: instance, stdio: 'inherit', timeout: 120_000 });
   }
 
   // Build TypeScript
@@ -923,7 +923,7 @@ export function holodeckCreate(bot: string, branch: string): void {
   if (!fs.existsSync(path.join(instance, 'node_modules'))) {
     console.log(`${hdBot}: installing dependencies...`);
     execSync('npm ci', { cwd: instance, stdio: 'inherit' });
-    execSync('npm rebuild better-sqlite3', { cwd: instance, stdio: 'inherit', timeout: 60_000 });
+    execSync('npm rebuild better-sqlite3', { cwd: instance, stdio: 'inherit', timeout: 120_000 });
   }
 
   // 4. Build
