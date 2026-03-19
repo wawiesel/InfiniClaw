@@ -31,3 +31,4 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 - `formatMessages(messages, timezone)` requires timezone arg since v1.2.12
 - `better-sqlite3` native module is compiled for host arch — doesn't work inside containers
 - IPC dirs: Tasks = `/workspace/ipc/tasks/` (host→container), Messages = separate path for bot→host sends
+- Container error logs write prompt summary (length + session ID) only — full prompt requires `LOG_LEVEL=debug`

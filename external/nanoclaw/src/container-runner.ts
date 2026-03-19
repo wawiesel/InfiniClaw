@@ -504,9 +504,20 @@ export async function runContainerAgent(
 
       if (isVerbose || isError) {
         logLines.push(
-          `=== Input ===`,
-          JSON.stringify(input, null, 2),
+          `=== Input Summary ===`,
+          `Prompt length: ${input.prompt.length} chars`,
+          `Session ID: ${input.sessionId || 'new'}`,
           ``,
+        );
+        // Full prompt only at verbose log levels — not on every non-zero exit
+        if (isVerbose) {
+          logLines.push(
+            `=== Input ===`,
+            JSON.stringify(input, null, 2),
+            ``,
+          );
+        }
+        logLines.push(
           `=== Container Args ===`,
           containerArgs.join(' '),
           ``,
