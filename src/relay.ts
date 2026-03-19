@@ -39,7 +39,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
+import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
 import {
@@ -1749,7 +1749,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             let threadRoot: string | undefined;
             // Reload fleet from disk so status checks reflect transitions that happened
             // while git sync was running (e.g. a bot going to sleep mid-cycle, #85).
-            try { liveFleet = loadFleet(); } catch { /* best effort — fall back to cached */ }
+            try { liveFleet = loadFleetFromDisk(); } catch { /* best effort — fall back to cached */ }
             for (const bot of getActiveBots()) {
               if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status)) continue;
               // Do NOT restart bots on duty — code changes apply during Dream phase after retrospective.
@@ -2540,8 +2540,8 @@ function secretsGitSync(): { ok: boolean; newCommits: number; output: string } {
           execSync('git add bots/fleet.json', opts);
           execSync('git rebase --continue', { ...opts, env: { ...process.env, GIT_EDITOR: 'true' } });
           log('secrets sync: resolved fleet.json conflict (accepted upstream)');
-          // Reload upstream fleet into memory
-          try { liveFleet = loadFleet(); } catch { /* best effort */ }
+          // Reload upstream fleet into memory (disk-fresh after rebase)
+          try { liveFleet = loadFleetFromDisk(); } catch { /* best effort */ }
           return { ok: true, output: 'rebased (fleet.json conflict resolved)', newCommits };
         }
       } catch { /* couldn't resolve — fall through */ }
@@ -2573,7 +2573,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
         // Reload static config from disk (transport assignments come via git).
         // Only merge structural/static fields — don't overwrite runtime state (status, triggerType, etc.)
         try {
-          const diskFleet = loadFleet();
+          const diskFleet = loadFleetFromDisk();
           for (const [bot, entry] of Object.entries(diskFleet)) {
             if (!liveFleet[bot]) { liveFleet[bot] = entry; continue; }
             // Transport pickup: bot assigned to us but inactive (phase 1 by another ship)
