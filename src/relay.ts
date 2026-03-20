@@ -2166,14 +2166,14 @@ async function spawnBranchBrain(
     // Build claude args: fresh session in container (fork-session loads the entire
     // conversation transcript into V8 memory before producing output — for long-running
     // bots this exceeds the 10min BB timeout and wastes gigabytes of RAM).
-    // Use --input-format stream-json so stdin stays open for context injection.
-    // --print is REQUIRED for --input-format and --output-format to take effect.
+    // NOTE: --input-format stream-json is NOT used — it causes claude CLI to produce zero
+    // output (confirmed in 2.1.76-2.1.80). Prompt is passed as plain text via stdin.
+    // --print is REQUIRED for --output-format to take effect.
     const claudeArgs: string[] = [
       '--print',
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
-      '--input-format', 'stream-json',
     ];
     child = spawn('podman', [
       'run', '--rm', '-i',
@@ -2190,14 +2190,14 @@ async function spawnBranchBrain(
     log(`branchBrain: spawning in container image=${BRANCH_BRAIN_IMAGE} fork=${!!mainSessionId} session=${sessionId}`);
   } else {
     // Host path: fork from main brain session if available, else cold-start.
-    // Use --input-format stream-json so stdin stays open for context injection.
-    // --print is REQUIRED for --input-format and --output-format to take effect.
+    // NOTE: --input-format stream-json is NOT used — it causes claude CLI to produce zero
+    // output (confirmed in 2.1.76-2.1.80). Prompt is passed as plain text via stdin.
+    // --print is REQUIRED for --output-format to take effect.
     const claudeArgs: string[] = [
       '--print',
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
-      '--input-format', 'stream-json',
       '--add-dir', resolveRoot(),
     ];
     if (mainSessionId) {
@@ -2210,15 +2210,17 @@ async function spawnBranchBrain(
     });
   }
 
-  // Write the prompt to stdin as a stream-json user message. stdin stays open
-  // so context injection (main timeline fan-out) can send follow-up messages.
+  // Write the prompt to stdin as plain text and close it.
+  // NOTE: context injection (fanOutToBranchBrains) is disabled because --input-format
+  // stream-json is broken in claude CLI 2.1.76-2.1.80 (zero output).
   setTimeout(() => {
-    const promptMsg = JSON.stringify({ type: 'user_message', content: fullPrompt });
-    child.stdin?.write(promptMsg + '\n');
-    log(`branchBrain: prompt written to stdin (kept open for context injection)`);
+    child.stdin?.write(fullPrompt);
+    child.stdin?.end();
+    log(`branchBrain: prompt written to stdin (closed)`);
   }, 3000);
 
-  // Register this process — stdin stays open for context injection via fanOutToBranchBrains.
+  // Register this process — stdin is closed after prompt write, so context injection
+  // via fanOutToBranchBrains is a no-op (stdin.destroyed will be true).
   activeBranchBrainProcs.set(replyThreadId, { title: announcedTitle, stdin: child.stdin });
 
   // Time-limited: after BRANCH_BRAIN_TIMEOUT_MS, send interrupt then SIGKILL
@@ -2420,6 +2422,14 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
               const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
               const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
               const title = typeof data['title'] === 'string' ? data['title'] : undefined;
+              // Cross-fleet isolation: only process BB tasks for bots in THIS relay's fleet.
+              // If the bot isn't ours, put the file back so the correct relay can pick it up.
+              const fleet = loadFleet();
+              if (bot && !fleet[bot.toLowerCase()]) {
+                log(`branchBrain: skipped — ${bot} is not in fleet`);
+                try { fs.renameSync(processingPath, filePath); } catch { /* race — another relay got it */ }
+                continue;
+              }
               if (objective) {
                 const botKey = bot ?? '__relay__';
                 const count = activeBranchBrainCount.get(botKey) ?? 0;
