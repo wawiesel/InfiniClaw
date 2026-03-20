@@ -4735,7 +4735,15 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 // Thread closure: completed BB threads are dead. Reply via loudspeaker.
                 const tasks = readBranchTasks();
                 const task = tasks[relates.event_id];
-                if (task?.completed && event.sender !== conn.userId) {
+                // Skip messages from relay-owned accounts to prevent infinite closure spam loop (#228).
+                // The loudspeaker posts the closure reply, which itself is a thread reply —
+                // without this check, the relay detects its own reply and posts another, forever.
+                const lsCfg = loadLoudspeakerConfig();
+                const lsUserPrefix = lsCfg?.username ? `@${lsCfg.username}:` : null;
+                const isRelaySender = event.sender === conn.userId
+                  || event.sender === operatorUserId
+                  || (lsUserPrefix && event.sender.startsWith(lsUserPrefix));
+                if (task?.completed && !isRelaySender) {
                   log(`dialtone: closed BB thread reply from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
                   void threadReply(conn, relates.event_id, '📢 This thread is closed. The branch has merged — start a new branch if you need follow-up work.');
                 }
