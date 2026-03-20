@@ -2141,29 +2141,30 @@ async function spawnBranchBrain(
       `${notesDir}:/relay-notes:rw`,
       `${infraRoot}:/workspace/extra/InfiniClaw:rw`,
     ];
-    // --user runs the container as the host UID so mounted files are read/writable.
-    // Set HOME so claude CLI finds its config in the expected location.
-    const bbHome = '/home/bb';
-    envArgs.push('--env', `HOME=${bbHome}`);
-    // Mount host .claude dir so --fork-session can inherit the main brain's context.
-    const hostClaudeDir = path.join(os.homedir(), '.claude');
+    // Mirror host HOME and cwd so --resume finds the session in the right project path.
+    // --userns=keep-id maps host UID into the container so mounted files are writable.
+    const hostHome = os.homedir();
+    envArgs.push('--env', `HOME=${hostHome}`);
+    const hostClaudeDir = path.join(hostHome, '.claude');
     if (fs.existsSync(hostClaudeDir)) {
-      volumeArgs.push(`${hostClaudeDir}:${bbHome}/.claude:rw`);
+      volumeArgs.push(`${hostClaudeDir}:${hostClaudeDir}:rw`);
     }
-    // Mount .claude.json for OAuth credentials.
-    const hostClaudeJson = path.join(os.homedir(), '.claude.json');
+    const hostClaudeJson = path.join(hostHome, '.claude.json');
     if (fs.existsSync(hostClaudeJson)) {
-      volumeArgs.push(`${hostClaudeJson}:${bbHome}/.claude.json:ro`);
+      volumeArgs.push(`${hostClaudeJson}:${hostClaudeJson}:ro`);
     }
+    // Mount main brain's cwd so the project path hash matches for --resume.
+    const mainCwd = process.cwd();
+    volumeArgs.push(`${mainCwd}:${mainCwd}:ro`);
     const hostCaCert = process.env['NODE_EXTRA_CA_CERTS'];
     if (hostCaCert && fs.existsSync(hostCaCert)) {
       const containerCaPath = '/etc/ssl/certs/corporate-ca.pem';
       volumeArgs.push(`${hostCaCert}:${containerCaPath}:ro`);
       envArgs.push('--env', `NODE_EXTRA_CA_CERTS=${containerCaPath}`);
     }
-    // Fork from main brain session if available — gives the BB full project context
-    // (CLAUDE.md, conversation history, memory). --userns=keep-id + .claude dir mount
-    // make this work inside the container.
+    // Fork from main brain session if available — gives the BB full project context.
+    // Requires: HOME, cwd, and .claude dir matching the main brain's paths so
+    // --resume finds the session under the correct project-specific path.
     // NOTE: --input-format stream-json is NOT used — it causes claude CLI to produce zero
     // output (confirmed in 2.1.76-2.1.80). Prompt is passed as plain text via stdin.
     // --print is REQUIRED for --output-format to take effect.
@@ -2182,7 +2183,8 @@ async function spawnBranchBrain(
       '--network', 'host',
       '--memory', '4g',
       '--pids-limit', '256',
-      '--user', `${process.getuid!()}:${process.getgid!()}`,
+      '--userns', 'keep-id',
+      '--workdir', mainCwd,
       ...volumeArgs.map(v => ['--volume', v]).flat(),
       ...envArgs,
       BRANCH_BRAIN_IMAGE,
