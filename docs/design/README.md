@@ -40,6 +40,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `21-fleets.md` — Fleet instances, systems, and coordination. Relay as single gateway (all communication and status changes flow through relay), S3 as coordination plane (atomic PUTs replace git-based fleet.json), nearest-relay routing (no speaker election — first relay claims x-command via 📡 reaction lock), fleet instances (IC00 production/main, IC01 staging/develop), branch model (feature→develop→main with `!promote`), Systems space (per-system Matrix rooms for operator addressing and relay heartbeats), bot transport between fleets for compatibility testing: Productivity (messages/day, token throughput, score, task completion), Reliability (fleet availability ✅, uptime %, response latency, crashes, OOM, RSS), Autonomy (interventions, autonomy score, MTBI), Infrastructure (relay restarts, sync failures, fleet RSS). Marks ✅ tracked vs 🔲 planned. Token throughput, response latency, MTBI, fleet availability now ✅ implemented. Messages/day still 🔲 planned. All rolling 1d/7d — no cumulative totals.
 
 - `22-signals.md` — Signals protocol: unified `{{command args}}` double-brace syntax for bot-to-relay directives (callouts, routing), default echo-back routing, S3-backed audit trail with `{{1 2}}` clickable references, migration from `<m>` tags and `set_thread`
+- `23-providers.md` — Future provider generalization: capability-first provider model (main/branch/lobe as roles, not brands), explicit session IDs always, fork defined semantically (native fork or copy-and-resume), no-branch mode for providers without branch capability, isolated provider state, migration phases
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
 
@@ -50,5 +51,4 @@ Engineers cannot modify these files (enforced by pre-commit hook). Architecture 
 See `docs/solutions/matrix.md` for Element Desktop math rendering setup.
 
 Historical planning files (`_old/IMPLEMENTATION_ROADMAP.md`) have been removed. Design history lives in git log.
-
 
