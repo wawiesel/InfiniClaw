@@ -2049,7 +2049,11 @@ async function spawnBranchBrain(
     log(`branchBrain: announce failed: ${errStr(err)}`);
   }
   // Use the announcement event as the thread root; fall back to the triggering thread_id.
-  const replyThreadId = announcementEventId ?? thread_id;
+  const replyThreadId = announcementEventId || thread_id;
+  if (!replyThreadId) {
+    log(`branchBrain: aborted — no thread root (announcement failed and no thread_id provided)`);
+    return;
+  }
 
   // Helper: send thread replies as the bot when possible, fall back to loudspeaker.
   const bbThreadReply = (text: string): Promise<string | undefined> => {
@@ -2407,30 +2411,33 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                 }
               }
             } else if (data['type'] === 'branch_brain') {
-              const thread_id = typeof data['thread_id'] === 'string' ? data['thread_id'] : '';
+              const thread_id = typeof data['thread_id'] === 'string' && data['thread_id'] ? data['thread_id'] : '';
               const objective = typeof data['objective'] === 'string' ? data['objective'] : '';
               const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
               const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
-              if (thread_id && objective) {
+              const title = typeof data['title'] === 'string' ? data['title'] : undefined;
+              if (objective) {
                 const botKey = bot ?? '__relay__';
                 const count = activeBranchBrainCount.get(botKey) ?? 0;
                 if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
                   log(`relayTasks: branch_brain rejected — ${botKey} already at limit (${MAX_BRANCH_BRAINS_PER_BOT})`);
-                  const roomId = chat_jid.replace(/^matrix:/, '');
-                  const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
-                  if (conn?.accessToken && thread_id) {
-                    void threadReply(conn, thread_id, `⚠️ Branch Brain rejected: already at concurrent limit (${MAX_BRANCH_BRAINS_PER_BOT}). Wait for a Branch Brain to finish.`).catch((err) => log(`relayTasks: rejection notify failed: ${errStr(err)}`));
+                  if (thread_id) {
+                    const roomId = chat_jid.replace(/^matrix:/, '');
+                    const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
+                    if (conn?.accessToken) {
+                      void threadReply(conn, thread_id, `⚠️ Branch Brain rejected: already at concurrent limit (${MAX_BRANCH_BRAINS_PER_BOT}). Wait for a Branch Brain to finish.`).catch((err) => log(`relayTasks: rejection notify failed: ${errStr(err)}`));
+                    }
                   }
                 } else {
                   activeBranchBrainCount.set(botKey, count + 1);
-                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot }, conns).finally(() => {
+                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot, title }, conns).finally(() => {
                     const n = activeBranchBrainCount.get(botKey) ?? 1;
                     if (n <= 1) activeBranchBrainCount.delete(botKey);
                     else activeBranchBrainCount.set(botKey, n - 1);
                   });
                 }
               } else {
-                log(`relayTasks: branch_brain missing required fields (thread_id or objective)`);
+                log(`relayTasks: branch_brain missing required field: objective`);
               }
             } else if (data['type'] === 'wbs_complete') {
               // Bot signals that it completed a WBS item: { type, bot, item_id }
