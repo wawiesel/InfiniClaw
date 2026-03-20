@@ -2142,7 +2142,8 @@ async function spawnBranchBrain(
       `${infraRoot}:/workspace/extra/InfiniClaw:rw`,
     ];
     // Mirror host HOME and cwd so --resume finds the session in the right project path.
-    // --userns=keep-id maps host UID into the container so mounted files are writable.
+    // --user UID:GID runs as host user so mounted files are writable (works with both
+    // podman and docker; --userns=keep-id is podman-only and fails via the docker shim).
     const hostHome = os.homedir();
     envArgs.push('--env', `HOME=${hostHome}`);
     const hostClaudeDir = path.join(hostHome, '.claude');
@@ -2183,7 +2184,7 @@ async function spawnBranchBrain(
       '--network', 'host',
       '--memory', '4g',
       '--pids-limit', '256',
-      '--userns', 'keep-id',
+      '--user', `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,
       '--workdir', mainCwd,
       ...volumeArgs.map(v => ['--volume', v]).flat(),
       ...envArgs,
