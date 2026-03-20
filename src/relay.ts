@@ -4617,7 +4617,9 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           }
 
           // Mention-wake: mention of a sleeping bot in any room wakes it.
+          // Only process mentions from rooms this relay manages (cross-fleet isolation).
           // Matches: <m>Name</m> in body, @Name in body, or mention pill in formatted_body.
+          if (knownRoomIds.has(rid)) {
           const formattedBody = event.content.formatted_body as string || '';
           for (const [bot, entry] of Object.entries(liveFleet)) {
             if (entry.status !== 'sleep' || entry.ship !== HOSTNAME) continue;
@@ -4640,6 +4642,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
               }
             }
           }
+          } // knownRoomIds guard for mention-wake
 
           // !/?  commands — only from rooms this relay manages (cross-fleet isolation)
           if ((body.startsWith('!') || body.startsWith('?')) && knownRoomIds.has(rid) && isAuthorized(event.sender, captainUserId, userId) && markProcessed(event.event_id)) {
