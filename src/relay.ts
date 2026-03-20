@@ -68,6 +68,7 @@ import {
   getActiveBots,
   bootstrapBot,
   deployBot,
+  startBot,
   stopBot,
   restartBotForRoom,
   ensurePodmanReady,
@@ -3267,10 +3268,10 @@ async function handleLifecycleCommand(
         }
         stopBot(bot);
         killStaleContainers(bot);
+        deployBot(root, bot);
         await setBotDisplayStatus(root, bot, 'starting');
         await step('🚀 starting');
-        killStaleContainers(bot);
-        bootstrapBot(root, bot);
+        startBot(root, bot);
         writeCrewStatus(root, bot);
         injectWbsTasks(root, bot);
         await setBotDisplayStatus(root, bot, 'waiting');

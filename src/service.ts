@@ -665,6 +665,15 @@ export function bootstrapBot(root: string, bot: string): void {
   pm2StartBot(bot, process.execPath, instance, logs, root);
 }
 
+/** Start a bot via pm2. Assumes deployBot() has already been called. */
+export function startBot(root: string, bot: string): void {
+  assertValidBotName(bot);
+  const instance = instanceDir(root, bot);
+  const logs = logDir(root);
+  fs.mkdirSync(logs, { recursive: true });
+  pm2StartBot(bot, process.execPath, instance, logs, root);
+}
+
 /** Stop a bot via pm2. Does not deploy or restart. */
 export function stopBot(bot: string): void {
   assertValidBotName(bot);
