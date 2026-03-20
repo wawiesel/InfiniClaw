@@ -551,7 +551,7 @@ function resolveOperatorConfig(): { userId: string; accessToken: string } {
 
 function loadLoudspeakerConfig(): { homeserver: string; username: string; password: string; accessToken: string } | null {
   try {
-    const lsFile = path.join(secretsRepoPath(), 'operator', 'loudspeaker-matrix.json');
+    const lsFile = path.join(secretsRepoPath(), 'operator', process.env['INFINICLAW_LOUDSPEAKER'] || 'loudspeaker-matrix.json');
     const config = JSON.parse(fs.readFileSync(lsFile, 'utf-8'));
     return {
       homeserver: config.homeserver || '',
