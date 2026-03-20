@@ -31,4 +31,4 @@ Integration and unit tests for InfiniClaw source modules that don't live next to
 Run with: `npx vitest run --root .`
 | `branch-brain-creds.test.ts` | mapBrainEnv: BRAIN_OAUTH_TOKEN→CLAUDE_CODE_OAUTH_TOKEN, BRAIN_API_KEY→ANTHROPIC_API_KEY, BRAIN_MODEL→ANTHROPIC_MODEL, passthrough fields, CLAUDECODE deletion, null botEnv. |
 | `branch-brain-interactive.test.ts` | formatContextInjectionMessage: valid stream-json user_message output, title injection, message injection, trailing newline, non-applicable note. |
-| `interactive-bb.test.ts` | formatContextInjectionMessage: stream-json spec wording, trailing newline, empty message, special chars. buildReactivationObjective: original/follow-up/title inclusion, multi-line objectives, thread title header. |
+| `interactive-bb.test.ts` | formatContextInjectionMessage: stream-json spec wording, trailing newline, empty message, special chars. |

@@ -1922,18 +1922,6 @@ export function formatContextInjectionMessage(title: string, msg: string): strin
   return JSON.stringify({ type: 'user_message', content: text }) + '\n';
 }
 
-/**
- * Build the reactivation objective for a thread-reactivated Branch Brain.
- * Pure function — exported for testability.
- */
-export function buildReactivationObjective(original: string, followUp: string, title: string): string {
-  return [
-    `Original objective: ${original}`,
-    '',
-    `Follow-up from Captain in thread "${title}":`,
-    followUp,
-  ].join('\n');
-}
 
 /** Write a context injection message to all active branch brain stdin pipes. */
 function fanOutToBranchBrains(msg: string): void {
@@ -2007,10 +1995,10 @@ function readBotSessionId(bot: string): string | null {
  * Streams assistant output into a visible Matrix thread in the triggering room.
  */
 async function spawnBranchBrain(
-  task: { thread_id: string; objective: string; chat_jid: string; bot?: string },
+  task: { thread_id: string; objective: string; chat_jid: string; bot?: string; title?: string },
   conns: RoomConn[],
 ): Promise<void> {
-  const { thread_id, objective, chat_jid, bot: rawBot } = task;
+  const { thread_id, objective, chat_jid, bot: rawBot, title: taskTitle } = task;
   // Normalize bot name to lowercase — ASSISTANT_NAME is capitalized but env dirs and fleet keys are lowercase.
   const bot = rawBot?.toLowerCase();
   log(`branchBrain: spawning for thread=${thread_id.slice(0, 20)}`);
@@ -2035,7 +2023,10 @@ async function spawnBranchBrain(
   // Capture the returned event ID so Branch Brain replies thread under this
   // announcement (not under the triggering message).
   // Send as the bot's own Matrix account so it looks like the bot is threading out work.
-  const announcedTitle = objective.split('\n')[0].trim();
+  // Use explicit title from task payload if provided; fall back to first line of objective.
+  const announcedTitle = taskTitle || objective.split('\n')[0].trim();
+  // Spec: announcement is 🌿 <title> — <objective> on main timeline.
+  const announcementText = `🌿 ${announcedTitle} — ${objective.split('\n')[0].trim()}`;
   let announcementEventId: string | undefined;
   let botSendToken: string | undefined;
   let botSendHomeserver: string | undefined;
@@ -2050,9 +2041,9 @@ async function spawnBranchBrain(
   }
   try {
     if (botSendToken && botSendHomeserver) {
-      announcementEventId = await relaySend(botSendHomeserver, botSendToken, conn.roomId, `🌿 ${announcedTitle}`);
+      announcementEventId = await relaySend(botSendHomeserver, botSendToken, conn.roomId, announcementText);
     } else {
-      announcementEventId = await reply(conn, `🌿 ${announcedTitle}`, undefined, { skipMirror: true });
+      announcementEventId = await reply(conn, announcementText, undefined, { skipMirror: true });
     }
   } catch (err) {
     log(`branchBrain: announce failed: ${errStr(err)}`);

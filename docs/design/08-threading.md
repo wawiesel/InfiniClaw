@@ -27,22 +27,20 @@ Branch brains are spawned directly by the bot — the relay does not announce or
 ### Signature
 
 ```
-branch_to_thread(title, purpose, duration, room_id)
+branch_to_thread(title, objective)
 ```
 
 | Param | Description |
 |---|---|
 | `title` | Short keyword label — used for the 🌿 post and 🪾 merge marker |
-| `purpose` | Full objective passed to the branch brain |
-| `duration` | Expected run time (e.g. `"5m"`, `"30m"`) — used for timeout planning |
-| `room_id` | Target room where the thread will appear |
+| `objective` | Full objective passed to the branch brain |
 
-The tool posts the `🌿 title — purpose` thread header automatically. Model is fixed (not a parameter) for prompt caching reasons.
+The tool posts the `🌿 title — objective` thread header automatically. Model is fixed (not a parameter) for prompt caching reasons. Room is implicit (the bot's current room). Timeout is fixed per-env (`BRANCH_BRAIN_TIMEOUT_MS`).
 
 ### How Branching Works
 
-1. Bot calls `branch_to_thread(title, purpose, duration, room_id)`
-2. Tool posts `🌿 <title> — <purpose>` on the target room's main timeline
+1. Bot calls `branch_to_thread(title, objective)`
+2. Tool posts `🌿 <title> — <objective>` on the target room's main timeline
 3. Branch is spawned, forks the bot's session (`--continue --fork-session`) to inherit full context
 4. Branch streams output into the Matrix thread as it arrives
 5. Captain can converse with the branch normally while it runs
@@ -65,10 +63,10 @@ Messages sent in the thread are added to the branch's conversation naturally, ex
 ### Merge and Thread Closure
 
 When the branch finishes:
-1. Branch posts `🪾 <keyword-link-to-thread>` + full result description as the merge marker
+1. Branch posts `🪾 <keyword> — <full result description>` as the merge marker in the thread
 2. Branch injects its final summary into main brain history — so the main brain has the result in context even though it came from the branch
 3. Thread is now **closed** — no further posting allowed. Any new message in that thread receives a loudspeaker reply: "this thread is closed"
-4. Main timeline summary posted: `🪾 <keyword> — ✅ done` (or `⛔ failed`)
+4. Main timeline summary posted: `🪾 <keyword> — ✅ merged` (or `⛔ failed`)
 
 ### Concurrency Limit
 
@@ -149,11 +147,11 @@ Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour
 
 One call — the tool handles the thread title post automatically:
 
-1. Call `branch_to_thread(title, purpose, duration, room_id)`
+1. Call `branch_to_thread(title, objective)`
 2. Say "Branch dispatched." and STOP — do not dispatch more in the same turn
 3. Cannot be called from inside a thread
 
-The tool posts `🌿 <title> — <purpose>` on the main timeline and uses that event as the thread root. No manual `get_last_event_id` or title posting needed.
+The tool posts `🌿 <title> — <objective>` on the main timeline and uses that event as the thread root. No manual `get_last_event_id` or title posting needed.
 
 ## Signals Integration
 

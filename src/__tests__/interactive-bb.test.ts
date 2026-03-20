@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatContextInjectionMessage, buildReactivationObjective } from '../relay.js';
+import { formatContextInjectionMessage } from '../relay.js';
 
 describe('formatContextInjectionMessage', () => {
   it('returns valid stream-json user_message with spec wording', () => {
@@ -35,37 +35,5 @@ describe('formatContextInjectionMessage', () => {
     const result = formatContextInjectionMessage('Fix: auth & token < > issue', 'context msg');
     const parsed = JSON.parse(result.trim());
     expect(parsed.content).toContain('You are branch brain Fix: auth & token < > issue.');
-  });
-});
-
-describe('buildReactivationObjective', () => {
-  it('includes original objective', () => {
-    const result = buildReactivationObjective('Investigate the auth bug', 'Did you find the root cause?', 'Investigate the auth bug');
-    expect(result).toContain('Original objective: Investigate the auth bug');
-  });
-
-  it('includes the follow-up message', () => {
-    const result = buildReactivationObjective('Fix DB schema', 'Also update the migration file.', 'Fix DB schema');
-    expect(result).toContain('Also update the migration file.');
-  });
-
-  it('includes the thread title in follow-up header', () => {
-    const result = buildReactivationObjective('Original task', 'New question', 'My Thread Title');
-    expect(result).toContain('Follow-up from Captain in thread "My Thread Title":');
-  });
-
-  it('returns a multi-line string with all parts', () => {
-    const result = buildReactivationObjective('obj', 'followup', 'title');
-    const lines = result.split('\n');
-    expect(lines.some(l => l.startsWith('Original objective:'))).toBe(true);
-    expect(lines.some(l => l.startsWith('Follow-up from Captain in thread'))).toBe(true);
-    expect(lines[lines.length - 1]).toBe('followup');
-  });
-
-  it('handles multi-line original objectives', () => {
-    const original = 'Step 1: do this\nStep 2: do that\nStep 3: profit';
-    const result = buildReactivationObjective(original, 'Any updates?', 'Step 1: do this');
-    expect(result).toContain(original);
-    expect(result).toContain('Any updates?');
   });
 });
