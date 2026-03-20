@@ -2141,17 +2141,19 @@ async function spawnBranchBrain(
       `${notesDir}:/relay-notes:rw`,
       `${infraRoot}:/workspace/extra/InfiniClaw:rw`,
     ];
+    // --user runs the container as the host UID so mounted files are read/writable.
+    // Set HOME so claude CLI finds its config in the expected location.
+    const bbHome = '/home/bb';
+    envArgs.push('--env', `HOME=${bbHome}`);
     // Mount host .claude dir so --fork-session can inherit the main brain's context.
-    // --userns=keep-id maps the host UID into the container, solving the previous
-    // UID mismatch (host node=1000 vs container claude=1001) that broke this mount.
     const hostClaudeDir = path.join(os.homedir(), '.claude');
     if (fs.existsSync(hostClaudeDir)) {
-      volumeArgs.push(`${hostClaudeDir}:/home/node/.claude:rw`);
+      volumeArgs.push(`${hostClaudeDir}:${bbHome}/.claude:rw`);
     }
-    // Also mount .claude.json for OAuth credentials.
+    // Mount .claude.json for OAuth credentials.
     const hostClaudeJson = path.join(os.homedir(), '.claude.json');
     if (fs.existsSync(hostClaudeJson)) {
-      volumeArgs.push(`${hostClaudeJson}:/home/node/.claude.json:ro`);
+      volumeArgs.push(`${hostClaudeJson}:${bbHome}/.claude.json:ro`);
     }
     const hostCaCert = process.env['NODE_EXTRA_CA_CERTS'];
     if (hostCaCert && fs.existsSync(hostCaCert)) {
@@ -2180,7 +2182,7 @@ async function spawnBranchBrain(
       '--network', 'host',
       '--memory', '4g',
       '--pids-limit', '256',
-      '--userns=keep-id',
+      '--user', `${process.getuid!()}:${process.getgid!()}`,
       ...volumeArgs.map(v => ['--volume', v]).flat(),
       ...envArgs,
       BRANCH_BRAIN_IMAGE,
