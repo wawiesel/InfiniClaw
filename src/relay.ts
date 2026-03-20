@@ -4477,6 +4477,14 @@ async function curtainLoop(captainUserId: string): Promise<void> {
     }
   }
 
+  // Build set of room IDs this relay instance manages — for cross-fleet isolation.
+  // Only process commands from: BTC, intercom rooms, and quarters rooms of bots in this fleet.
+  const knownRoomIds = new Set<string>([roomId]); // BTC
+  for (const rid of Object.keys(roomIdToName)) knownRoomIds.add(rid); // intercom rooms
+  for (const entry of Object.values(liveFleet)) {
+    if (entry.quartersRoom) knownRoomIds.add(entry.quartersRoom); // quarters rooms
+  }
+
   const { homeserver, accessToken, userId } = opConfig;
   if (!accessToken || !userId) {
     log('curtain: missing accessToken or userId in operator-matrix.json — skipping');
@@ -4580,8 +4588,8 @@ async function curtainLoop(captainUserId: string): Promise<void> {
             }
           }
 
-          // !/?  commands — process from any room the operator can see (quarters, BehindTheCurtain, etc.)
-          if ((body.startsWith('!') || body.startsWith('?')) && isAuthorized(event.sender, captainUserId, userId) && markProcessed(event.event_id)) {
+          // !/?  commands — only from rooms this relay manages (cross-fleet isolation)
+          if ((body.startsWith('!') || body.startsWith('?')) && knownRoomIds.has(rid) && isAuthorized(event.sender, captainUserId, userId) && markProcessed(event.event_id)) {
             const cmdConn: RoomConn = {
               name: rid === roomId ? 'BehindTheCurtain' : (roomIdToName[rid] ?? `operator:${rid}`),
               roomId: rid, homeserver,
