@@ -2174,12 +2174,14 @@ async function spawnBranchBrain(
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
+      '--add-dir', '/workspace/extra/InfiniClaw',
     ];
     child = spawn('podman', [
       'run', '--rm', '-i',
       '--network', 'host',
       '--memory', '4g',
       '--pids-limit', '256',
+      '--userns=keep-id',
       ...volumeArgs.map(v => ['--volume', v]).flat(),
       ...envArgs,
       BRANCH_BRAIN_IMAGE,
