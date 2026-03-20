@@ -1988,6 +1988,29 @@ function readBotSessionId(bot: string): string | null {
 }
 
 /**
+ * Find the host-side .claude dir that contains a bot's session JSONL.
+ * Searches _runtime/instances/<bot>/data/sessions/<group>/.claude/ for the session file.
+ * Returns the .claude dir path on the host, or null if not found.
+ */
+function findBotClaudeDir(bot: string, sessionId: string): string | null {
+  const sessionsBase = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'sessions');
+  try {
+    for (const group of fs.readdirSync(sessionsBase)) {
+      const claudeDir = path.join(sessionsBase, group, '.claude');
+      // Search all project subdirs for the session JSONL
+      const projectsDir = path.join(claudeDir, 'projects');
+      if (!fs.existsSync(projectsDir)) continue;
+      for (const proj of fs.readdirSync(projectsDir)) {
+        if (fs.existsSync(path.join(projectsDir, proj, `${sessionId}.jsonl`))) {
+          return claudeDir;
+        }
+      }
+    }
+  } catch { /* not found */ }
+  return null;
+}
+
+/**
  * Spawn a Branch Brain as a host-side claude process.
  * Branch Brain forks the main brain's session (--resume <sessionId> --fork-session) to inherit
  * full conversation context. The session ID is written to current-session-id by main.ts after
@@ -2141,31 +2164,34 @@ async function spawnBranchBrain(
       `${notesDir}:/relay-notes:rw`,
       `${infraRoot}:/workspace/extra/InfiniClaw:rw`,
     ];
-    // Mirror host HOME and cwd so --resume finds the session in the right project path.
-    // --user UID:GID runs as host user so mounted files are writable (works with both
-    // podman and docker; --userns=keep-id is podman-only and fails via the docker shim).
-    const hostHome = os.homedir();
-    envArgs.push('--env', `HOME=${hostHome}`);
-    const hostClaudeDir = path.join(hostHome, '.claude');
-    if (fs.existsSync(hostClaudeDir)) {
-      volumeArgs.push(`${hostClaudeDir}:${hostClaudeDir}:rw`);
+    // Mount the bot's .claude dir (which contains the session JSONL) into the BB
+    // container at /home/node/.claude — matching the main brain's HOME layout.
+    // Set cwd to /workspace/persona/temp so the project path hash matches.
+    const bbHome = '/home/node';
+    envArgs.push('--env', `HOME=${bbHome}`);
+    if (mainSessionId && bot) {
+      const botClaudeDir = findBotClaudeDir(bot, mainSessionId);
+      if (botClaudeDir) {
+        volumeArgs.push(`${botClaudeDir}:${bbHome}/.claude:rw`);
+        log(`branchBrain: mounting bot .claude dir: ${botClaudeDir}`);
+      } else {
+        log(`branchBrain: could not find .claude dir for session ${mainSessionId.slice(0, 8)}`);
+      }
     }
-    const hostClaudeJson = path.join(hostHome, '.claude.json');
+    // Mount .claude.json for OAuth credentials (host-level file).
+    const hostClaudeJson = path.join(os.homedir(), '.claude.json');
     if (fs.existsSync(hostClaudeJson)) {
-      volumeArgs.push(`${hostClaudeJson}:${hostClaudeJson}:ro`);
+      volumeArgs.push(`${hostClaudeJson}:${bbHome}/.claude.json:ro`);
     }
-    // Mount main brain's cwd so the project path hash matches for --resume.
-    const mainCwd = process.cwd();
-    volumeArgs.push(`${mainCwd}:${mainCwd}:ro`);
     const hostCaCert = process.env['NODE_EXTRA_CA_CERTS'];
     if (hostCaCert && fs.existsSync(hostCaCert)) {
       const containerCaPath = '/etc/ssl/certs/corporate-ca.pem';
       volumeArgs.push(`${hostCaCert}:${containerCaPath}:ro`);
       envArgs.push('--env', `NODE_EXTRA_CA_CERTS=${containerCaPath}`);
     }
-    // Fork from main brain session if available — gives the BB full project context.
-    // Requires: HOME, cwd, and .claude dir matching the main brain's paths so
-    // --resume finds the session under the correct project-specific path.
+    // Fork from main brain session — gives the BB full project context.
+    // The bot's .claude dir is mounted at /home/node/.claude and cwd is /workspace/persona/temp,
+    // matching the main brain's layout so --resume finds the session under the correct project path.
     // NOTE: --input-format stream-json is NOT used — it causes claude CLI to produce zero
     // output (confirmed in 2.1.76-2.1.80). Prompt is passed as plain text via stdin.
     // --print is REQUIRED for --output-format to take effect.
@@ -2185,7 +2211,8 @@ async function spawnBranchBrain(
       '--memory', '4g',
       '--pids-limit', '256',
       '--user', `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,
-      '--workdir', mainCwd,
+      '--workdir', '/workspace/persona/temp',
+      '--tmpfs', '/workspace/persona/temp',
       ...volumeArgs.map(v => ['--volume', v]).flat(),
       ...envArgs,
       BRANCH_BRAIN_IMAGE,
