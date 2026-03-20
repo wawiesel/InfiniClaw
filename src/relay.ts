@@ -2167,7 +2167,9 @@ async function spawnBranchBrain(
     // conversation transcript into V8 memory before producing output — for long-running
     // bots this exceeds the 10min BB timeout and wastes gigabytes of RAM).
     // Use --input-format stream-json so stdin stays open for context injection.
+    // --print is REQUIRED for --input-format and --output-format to take effect.
     const claudeArgs: string[] = [
+      '--print',
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
@@ -2189,7 +2191,9 @@ async function spawnBranchBrain(
   } else {
     // Host path: fork from main brain session if available, else cold-start.
     // Use --input-format stream-json so stdin stays open for context injection.
+    // --print is REQUIRED for --input-format and --output-format to take effect.
     const claudeArgs: string[] = [
+      '--print',
       '--verbose',
       '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
