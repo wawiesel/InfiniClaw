@@ -10,7 +10,7 @@ import { parseEnvLine } from './env-utils.js';
 import { logger } from 'nanoclaw/logger.js';
 import { loadSkillsToSession } from './skill-sync.js';
 import { mountsForBot } from './allow-list.js';
-import { loadShipConfig } from './ship-config.js';
+import { loadFleet, loadShipConfig } from './ship-config.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import type { VolumeMount } from './run-container.js';
 
@@ -27,7 +27,7 @@ export interface InfiniClawMountOptions {
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/;
 const SAFE_GROUP_FOLDER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
-/** Build a directory of all bots: name → main room JID. */
+/** Build a directory of bots in this fleet: name → main room JID. */
 export function buildBotDirectory(): Record<string, string> {
   let profilesDir: string;
   try {
@@ -36,9 +36,12 @@ export function buildBotDirectory(): Record<string, string> {
     return {};
   }
   if (!fs.existsSync(profilesDir)) return {};
+  // Only include bots that are in this relay's fleet config
+  const fleetBots = new Set(Object.keys(loadFleet()));
   const directory: Record<string, string> = {};
   try {
     for (const bot of fs.readdirSync(profilesDir)) {
+      if (!fleetBots.has(bot)) continue;
       const envFile = path.join(profilesDir, bot, 'env');
       if (!fs.existsSync(envFile)) continue;
       const lines = fs.readFileSync(envFile, 'utf-8').split('\n');
