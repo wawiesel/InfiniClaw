@@ -820,6 +820,12 @@ const ROOM_EMOJI: Record<string, string> = {
 };
 const FLEET_LOCATION = '🌌';
 const QUARTERS_EMOJI = '🏠';
+/** Fleet suffix derived from INFINICLAW_FLEET env var: "00" for fleet.json, "01" for fleet01.json, etc. */
+const FLEET_SUFFIX = (() => {
+  const f = process.env['INFINICLAW_FLEET'] || 'fleet.json';
+  const m = f.match(/fleet(\d+)\.json$/);
+  return m ? m[1].padStart(2, '0') : '00';
+})();
 
 /** Ensure all ship spaces, fleet rooms, and quarters rooms have correct emoji-prefixed names. */
 async function ensureRoomNames(): Promise<void> {
@@ -865,7 +871,7 @@ async function ensureRoomNames(): Promise<void> {
     for (const [name, room] of Object.entries(intercom.rooms)) {
       const roomEmoji = ROOM_EMOJI[name];
       if (roomEmoji) {
-        await setName(room.roomId, `${FLEET_LOCATION}${roomEmoji} ${capitalizeName(name)}`);
+        await setName(room.roomId, `${roomEmoji} ${capitalizeName(name)}${FLEET_SUFFIX}`);
       }
     }
   }
