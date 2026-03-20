@@ -1851,6 +1851,7 @@ interface BranchTaskEntry {
   objective: string;
   chat_jid: string;
   bot?: string;
+  title?: string;       // Short label from branch_to_thread (e.g. "BB-fork-v5")
   createdAt: number;
   sessionId?: string;   // BB session ID stored for context recovery on relay restart
   completed?: boolean;  // true when BB has finished; kept for TTL-based thread reactivation
@@ -2097,7 +2098,7 @@ async function spawnBranchBrain(
   const sessionId = crypto.randomUUID();
 
   // Register task in branch-tasks.json for !todo deep-link annotation and thread reactivation
-  writeBranchTask(replyThreadId, { objective, chat_jid, bot, createdAt: Date.now(), sessionId });
+  writeBranchTask(replyThreadId, { objective, chat_jid, bot, title: announcedTitle, createdAt: Date.now(), sessionId });
 
   // Load bot credentials so claude can authenticate on the host.
   // Raw env file uses BRAIN_* names; map to CLAUDE_CODE_* / ANTHROPIC_* as needed.
@@ -4788,7 +4789,8 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                   || (lsUserPrefix && event.sender.startsWith(lsUserPrefix));
                 if (task?.completed && !isRelaySender) {
                   log(`dialtone: closed BB thread reply from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
-                  void threadReply(conn, relates.event_id, '📢 This thread is closed. The branch has merged — start a new branch if you need follow-up work.');
+                  const label = task.title ? ` (${task.title})` : '';
+                  void threadReply(conn, relates.event_id, `📢 Thread closed${label} [${relates.event_id}] — branch merged. Start a new branch for follow-up.`);
                 }
               } else if (!isThreadReply) {
                 // Main-timeline message from ANY sender — fan out to all active branch brains.
