@@ -2141,31 +2141,27 @@ async function spawnBranchBrain(
       `${notesDir}:/relay-notes:rw`,
       `${infraRoot}:/workspace/extra/InfiniClaw:rw`,
     ];
-    // Removed: .claude session dir mount was causing UID mismatch (host UID 1000 vs container UID 1001)
-    // which made /home/claude/.claude unwritable, breaking all Bash tool calls in BB containers.
-    // Copy host's ~/.claude.json to a world-readable location for BB containers.
-    // Claude Code needs the oauthAccount data to authenticate. The host file is mode 600
-    // (owner-only), but the container runs as user `claude` (UID 1001) which can't read it.
-    const claudeJsonDir = path.join(infraRoot, '_runtime', 'data', 'bb-config');
-    const claudeJsonPath = path.join(claudeJsonDir, '.claude.json');
-    const hostClaudeJson = path.join(os.homedir(), '.claude.json');
-    fs.mkdirSync(claudeJsonDir, { recursive: true });
-    if (fs.existsSync(hostClaudeJson)) {
-      fs.copyFileSync(hostClaudeJson, claudeJsonPath);
-    } else if (!fs.existsSync(claudeJsonPath)) {
-      fs.writeFileSync(claudeJsonPath, JSON.stringify({ firstStartTime: new Date().toISOString() }));
+    // Mount host .claude dir so --fork-session can inherit the main brain's context.
+    // --userns=keep-id maps the host UID into the container, solving the previous
+    // UID mismatch (host node=1000 vs container claude=1001) that broke this mount.
+    const hostClaudeDir = path.join(os.homedir(), '.claude');
+    if (fs.existsSync(hostClaudeDir)) {
+      volumeArgs.push(`${hostClaudeDir}:/home/node/.claude:rw`);
     }
-    fs.chmodSync(claudeJsonPath, 0o644);
-    volumeArgs.push(`${claudeJsonPath}:/home/claude/.claude.json:ro`);
+    // Also mount .claude.json for OAuth credentials.
+    const hostClaudeJson = path.join(os.homedir(), '.claude.json');
+    if (fs.existsSync(hostClaudeJson)) {
+      volumeArgs.push(`${hostClaudeJson}:/home/node/.claude.json:ro`);
+    }
     const hostCaCert = process.env['NODE_EXTRA_CA_CERTS'];
     if (hostCaCert && fs.existsSync(hostCaCert)) {
       const containerCaPath = '/etc/ssl/certs/corporate-ca.pem';
       volumeArgs.push(`${hostCaCert}:${containerCaPath}:ro`);
       envArgs.push('--env', `NODE_EXTRA_CA_CERTS=${containerCaPath}`);
     }
-    // Build claude args: fresh session in container (fork-session loads the entire
-    // conversation transcript into V8 memory before producing output — for long-running
-    // bots this exceeds the 10min BB timeout and wastes gigabytes of RAM).
+    // Fork from main brain session if available — gives the BB full project context
+    // (CLAUDE.md, conversation history, memory). --userns=keep-id + .claude dir mount
+    // make this work inside the container.
     // NOTE: --input-format stream-json is NOT used — it causes claude CLI to produce zero
     // output (confirmed in 2.1.76-2.1.80). Prompt is passed as plain text via stdin.
     // --print is REQUIRED for --output-format to take effect.
@@ -2176,6 +2172,9 @@ async function spawnBranchBrain(
       '--output-format', 'stream-json',
       '--add-dir', '/workspace/extra/InfiniClaw',
     ];
+    if (mainSessionId) {
+      claudeArgs.push('--resume', mainSessionId, '--fork-session');
+    }
     child = spawn('podman', [
       'run', '--rm', '-i',
       '--network', 'host',
