@@ -270,9 +270,24 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
-        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
-          runTask(currentTask, deps),
-        );
+        // For group-context tasks, inject the prompt into the running container
+        // as a message instead of queuing a new container spawn (which would
+        // block behind the active main brain container indefinitely).
+        if (
+          currentTask.context_mode === 'group' &&
+          deps.queue.sendMessage(currentTask.chat_jid, currentTask.prompt)
+        ) {
+          logger.info(
+            { taskId: currentTask.id, group: currentTask.group_folder },
+            'Injected group-context task as message into running container',
+          );
+          const nextRun = computeNextRun(currentTask);
+          updateTaskAfterRun(currentTask.id, nextRun, 'injected into running container');
+        } else {
+          deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
+            runTask(currentTask, deps),
+          );
+        }
       }
     } catch (err) {
       logger.error({ err }, 'Error in scheduler loop');
