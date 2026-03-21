@@ -12,7 +12,8 @@ RUN useradd -m -s /bin/bash claude
 
 # Pre-create session-env with correct ownership — npm install above creates
 # /home/claude/.claude as root, causing EACCES in the agent SDK's Bash sandbox.
-RUN mkdir -p /home/claude/.claude/session-env && \
+RUN mkdir -p /home/claude/.claude && \
+    touch /home/claude/.claude/session-env && \
     chown -R claude:claude /home/claude/.claude
 
 USER claude
