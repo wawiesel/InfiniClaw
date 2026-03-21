@@ -66,6 +66,7 @@ const ALLOWED_ENV_VARS = [
   'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE',
   'CURL_CA_BUNDLE', 'GIT_SSL_CAINFO', 'NODE_TLS_REJECT_UNAUTHORIZED',
   'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL',
+  'MATRIX_HOMESERVER', 'MATRIX_ACCESS_TOKEN',
 ];
 
 // ── Secret collection ───────────────────────────────────────────────
@@ -310,6 +311,27 @@ export async function runContainerAgent(
   remapInfiniClawRoot(mappedSecrets, mounts);
 
   writeBotDirectoryToIpc(group.folder);
+
+  // Matrix login — inject access token so in-container get_message can call the Matrix API
+  const matrixHs = process.env.MATRIX_HOMESERVER;
+  const matrixUser = process.env.MATRIX_USERNAME;
+  const matrixPass = process.env.MATRIX_PASSWORD;
+  if (matrixHs && matrixUser && matrixPass && !mappedSecrets['MATRIX_ACCESS_TOKEN']) {
+    try {
+      const loginRes = await fetch(`${matrixHs}/_matrix/client/v3/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'm.login.password', identifier: { type: 'm.id.user', user: matrixUser }, password: matrixPass }),
+      });
+      const loginData = await loginRes.json() as { access_token?: string };
+      if (loginData.access_token) {
+        mappedSecrets['MATRIX_ACCESS_TOKEN'] = loginData.access_token;
+        mappedSecrets['MATRIX_HOMESERVER'] = matrixHs;
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Matrix login for container failed — get_message will be unavailable');
+    }
+  }
 
   // Assemble effective input
   const { containerName, safeContainerNameTag } = resolveContainerName(group, input.containerNameTag);

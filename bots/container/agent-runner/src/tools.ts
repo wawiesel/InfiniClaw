@@ -360,34 +360,32 @@ Use this after making code changes that require a process restart.`,
 
   server.tool(
     'get_message',
-    'Retrieve content for a Matrix message by its event ID. Use this to look up the full text of a message that was reacted to.',
+    'Retrieve content for a Matrix message by its event ID. Use this to look up the full text of a message that was reacted to, or to read any message in your duty room.',
     {
       id: z.string().describe('The Matrix event ID of the message (e.g. $abc123)'),
     },
     async (args) => {
-      const dbPath = process.env.NANOCLAW_DB_PATH;
-      if (!dbPath || !fs.existsSync(dbPath)) {
-        return { content: [{ type: 'text' as const, text: 'Message store not available.' }], isError: true };
+      const homeserver = process.env.MATRIX_HOMESERVER;
+      const accessToken = process.env.MATRIX_ACCESS_TOKEN;
+      if (!homeserver || !accessToken) {
+        return { content: [{ type: 'text' as const, text: 'Matrix credentials not available — MATRIX_HOMESERVER or MATRIX_ACCESS_TOKEN not set.' }], isError: true };
       }
+      const roomId = chatJid.replace(/^matrix:/, '');
       try {
-        const { execFileSync } = await import('child_process');
-        const script = `
-          const Database = require('better-sqlite3');
-          const db = new Database(${JSON.stringify(dbPath)}, { readonly: true });
-          const row = db.prepare('SELECT id, chat_jid, sender, sender_name, content, timestamp FROM messages WHERE id = ?').get(${JSON.stringify(args.id)});
-          db.close();
-          console.log(JSON.stringify(row || null));
-        `;
-        // Use execFileSync (no shell) to avoid $ in Matrix event IDs being interpolated
-        const result = execFileSync('node', ['-e', script], { encoding: 'utf-8', timeout: 5000 }).trim();
-        const row = JSON.parse(result);
-        if (!row) {
-          return { content: [{ type: 'text' as const, text: `Message not found: ${args.id}` }] };
+        const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(args.id)}`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!res.ok) {
+          const body = await res.text();
+          return { content: [{ type: 'text' as const, text: `Matrix API error (${res.status}): ${body}` }], isError: true };
         }
+        const event = await res.json() as { sender?: string; origin_server_ts?: number; content?: { body?: string; msgtype?: string; formatted_body?: string } };
+        const sender = event.sender ?? 'unknown';
+        const ts = event.origin_server_ts ? new Date(event.origin_server_ts).toISOString() : 'unknown';
+        const content = event.content?.body ?? event.content?.formatted_body ?? JSON.stringify(event.content);
         return {
           content: [{
             type: 'text' as const,
-            text: `From: ${row.sender_name} (${row.sender})\nTime: ${row.timestamp}\nContent: ${row.content}`,
+            text: `From: ${sender}\nTime: ${ts}\nContent: ${content}`,
           }],
         };
       } catch (err) {
