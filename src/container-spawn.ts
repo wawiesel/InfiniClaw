@@ -12,7 +12,6 @@ import path from 'path';
 
 import { parseEnvFile, parseEnvLine } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
-import { BRANCH_BRAIN_IMAGE } from './infini-config.js';
 import { loadShipConfig } from './ship-config.js';
 import { envInt } from './utils.js';
 import {
@@ -229,7 +228,7 @@ function buildContainerArgs(
     }
   }
 
-  args.push(imageOverride ?? CONTAINER_IMAGE);
+  args.push(CONTAINER_IMAGE);
   return args;
 }
 
@@ -358,7 +357,7 @@ export async function runContainerAgent(
   // Build container args
   const personaConfig = getPersonaContainerConfig();
   const portPublish = safeContainerNameTag ? [] : personaConfig.portPublish;
-  const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaConfig.memoryMb, imageOverride);
+  const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaConfig.memoryMb);
   const configTimeout = input.timeoutOverrideMs || group.containerConfig?.timeout || CONTAINER_TIMEOUT;
 
   logger.debug({
@@ -473,7 +472,7 @@ export async function runBranchBrainAgent(
   }
 
   try {
-    return await runContainerAgent(group, containerInput, onProcess, onOutput, BRANCH_BRAIN_IMAGE);
+    return await runContainerAgent(group, containerInput, onProcess, onOutput);
   } finally {
     // Restore original process.env
     for (const [key, original] of Object.entries(savedEnv)) {

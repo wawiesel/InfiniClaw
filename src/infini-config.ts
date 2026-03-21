@@ -20,8 +20,6 @@ export const MEMORY_CHECK_INTERVAL = envInt('MEMORY_CHECK_INTERVAL', 120_000);
 export const DUTY_CYCLE_MS = envInt('DUTY_CYCLE_MS', 4 * 60 * 60_000); // 4 hours
 // How long to wait for a bot to complete its retrospective before forcing sleep.
 export const RETROSPECTIVE_TIMEOUT_MS = envInt('RETROSPECTIVE_TIMEOUT_MS', 30 * 60_000); // 30 min
-// Podman image for isolated branch brain containers. Set to empty string to disable containerization.
-export const BRANCH_BRAIN_IMAGE = process.env.BRANCH_BRAIN_IMAGE ?? 'localhost/infiniclaw-branch-brain:latest';
 // Max wall-clock time for a branch brain session (ms). After timeout, relay sends interrupt; BB gets finalize grace to wrap up.
 export const BRANCH_BRAIN_TIMEOUT_MS = envInt('BRANCH_BRAIN_TIMEOUT_MS', 600_000); // 10 minutes
 // Grace period after interrupt before the relay hard-kills the Branch Brain.
