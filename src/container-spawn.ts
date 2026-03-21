@@ -10,9 +10,10 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { parseEnvLine } from './env-utils.js';
+import { parseEnvFile, parseEnvLine } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
 import { BRANCH_BRAIN_IMAGE } from './infini-config.js';
+import { loadShipConfig } from './ship-config.js';
 import { envInt } from './utils.js';
 import {
   buildBotDirectory,
@@ -415,6 +416,10 @@ export interface BranchBrainInput {
  * Spawn a branch brain through the same container pipeline as main brains.
  * Single place for all brain spawning — main and BB share disallowed tools,
  * mounts, secrets, and container config.
+ *
+ * BBs are spawned from the relay process, which doesn't have bot-specific
+ * env vars (CLAUDE_CODE_OAUTH_TOKEN, MATRIX_*, etc.). We load them from
+ * the parent bot's env file temporarily.
  */
 export async function runBranchBrainAgent(
   input: BranchBrainInput,
@@ -440,5 +445,43 @@ export async function runBranchBrainAgent(
     timeoutOverrideMs: input.timeoutMs,
   };
 
-  return runContainerAgent(group, containerInput, onProcess, onOutput, BRANCH_BRAIN_IMAGE);
+  // Load parent bot's env so BB inherits LLM + Matrix credentials.
+  // The relay process doesn't have these — they're only in the bot's PM2 env.
+  const config = loadShipConfig();
+  const botEnvFile = path.join(config.secretsPath, 'bots', input.bot, 'env');
+  const botEnv = parseEnvFile(botEnvFile);
+
+  // Apply the same BRAIN_* → CLAUDE/ANTHROPIC mappings as service.ts
+  if (botEnv.BRAIN_OAUTH_TOKEN) botEnv.CLAUDE_CODE_OAUTH_TOKEN = botEnv.BRAIN_OAUTH_TOKEN;
+  if (botEnv.BRAIN_API_KEY) botEnv.ANTHROPIC_API_KEY = botEnv.BRAIN_API_KEY;
+  if (botEnv.BRAIN_CA_CERT_FILE) botEnv.NODE_EXTRA_CA_CERTS = botEnv.BRAIN_CA_CERT_FILE;
+
+  // Temporarily inject bot env vars into process.env for collectContainerSecrets
+  const savedEnv: Record<string, string | undefined> = {};
+  for (const key of ALLOWED_ENV_VARS) {
+    if (botEnv[key]) {
+      savedEnv[key] = process.env[key];
+      process.env[key] = botEnv[key];
+    }
+  }
+  // Also inject MATRIX_USERNAME/PASSWORD for the Matrix login block in runContainerAgent
+  for (const key of ['MATRIX_HOMESERVER', 'MATRIX_USERNAME', 'MATRIX_PASSWORD'] as const) {
+    if (botEnv[key]) {
+      savedEnv[key] = process.env[key];
+      process.env[key] = botEnv[key];
+    }
+  }
+
+  try {
+    return await runContainerAgent(group, containerInput, onProcess, onOutput, BRANCH_BRAIN_IMAGE);
+  } finally {
+    // Restore original process.env
+    for (const [key, original] of Object.entries(savedEnv)) {
+      if (original === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = original;
+      }
+    }
+  }
 }
