@@ -228,14 +228,14 @@ function tmuxCapture(): string {
   return execFileSync('tmux', ['capture-pane', '-t', OPERATOR_PANE, '-p'], { encoding: 'utf-8' });
 }
 
-/** Post a message to BehindTheCurtain as the operator Matrix account. */
-async function postToBTC(text: string): Promise<void> {
+/** Post a message to BehindTheCurtain as the operator Matrix account. Returns the event_id if sent. */
+async function postToBTC(text: string, threadRootId?: string): Promise<string | undefined> {
   const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
   const opConf = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
   const roomId = opConf.rooms?.['BehindTheCurtain'];
-  if (!roomId || !opConf.accessToken) return;
+  if (!roomId || !opConf.accessToken) return undefined;
   const tagged = `[${replyTag()}] ${text}`;
-  await matrixSend({ homeserver: opConf.homeserver, token: opConf.accessToken, roomId, text: tagged, log });
+  return matrixSend({ homeserver: opConf.homeserver, token: opConf.accessToken, roomId, text: tagged, threadRootId, log });
 }
 
 /**
@@ -4807,6 +4807,8 @@ async function main(): Promise<void> {
 
   // Bootstrap bots — only start bots that aren't already running.
   // When the relay restarts (code update), bot pm2 processes survive — don't disrupt them.
+  const btcThread = await postToBTC(`⚡ Relay starting on ${HOSTNAME}`);
+  const btcLog = async (msg: string) => { if (btcThread) await postToBTC(msg, btcThread).catch(() => {}); };
   if (isShipCommissioned()) {
     try {
       ensurePodmanReady();
@@ -4827,6 +4829,7 @@ async function main(): Promise<void> {
 
       if (alreadyRunning.size > 0) {
         log(`bootstrap: ${alreadyRunning.size} bot(s) already running — preserving: ${[...alreadyRunning].join(', ')}`);
+        await btcLog(`preserving ${alreadyRunning.size} running: ${[...alreadyRunning].join(', ')}`);
       }
 
       // Check ROOM_STATE stamps for preserved bots — restart if stale (Tali bug fix)
@@ -4846,6 +4849,7 @@ async function main(): Promise<void> {
         if (entry.ship !== HOSTNAME) continue;
         if (!(RUNNING_STATUSES as readonly string[]).includes(entry.status)) continue;
         if (alreadyRunning.has(bot)) continue; // Don't restart already-running bots
+        await btcLog(`bootstrapping ${bot}...`);
         try {
           stopBot(bot);
           killStaleContainers(bot);
@@ -4859,12 +4863,16 @@ async function main(): Promise<void> {
         }
       }
       if (started.length > 0 || failed.length > 0) { fleetDirty = true; persistFleet(); }
+      const summary = `bootstrap done: ${started.length} started, ${failed.length} failed, ${alreadyRunning.size} preserved`;
       log(`bootstrap: ${started.length} started, ${failed.length} failed, ${alreadyRunning.size} preserved`);
+      await btcLog(failed.length > 0 ? `⚠️ ${summary}` : `✅ ${summary}`);
     } catch (err) {
       log(`bootstrap failed: ${errStr(err)}`);
+      await btcLog(`❌ bootstrap failed: ${errStr(err)}`);
     }
   } else {
     log('ship is decommissioned — skipping bot startup');
+    await btcLog('ship is decommissioned — skipping bot startup');
   }
 
   // Ensure all rooms/spaces have correct emoji-prefixed names
