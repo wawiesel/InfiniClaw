@@ -301,7 +301,7 @@ Navigation tools access the bot's current room (quarters or duty room). Matrix h
 
 | Tool | Purpose | Status |
 |------|---------|--------|
-| `branch_to_thread` | Dispatch work to a Branch Brain in a new thread — main brain must not do heavy work inline | ✅ |
+| `{{branch}}` signal | Dispatch work to a Branch Brain in a new thread — bot outputs `{{branch title="X" objective="Y"}}` inline, relay spawns BB | ✅ |
 | `delegate_to_lobe` | Spawn a sub-process worker (codex/gemini/claude/ollama); posts to quarters thread | ✅ infrastructure, 🔲 end-to-end not production-ready |
 | `git_push` | Push commits to remote via relay (requires host git credentials) | ✅ |
 

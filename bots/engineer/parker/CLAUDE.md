@@ -36,15 +36,17 @@ Respond only when addressed by name, delegated by Chief, or in an active thread.
 
 **ONE delegation path. Follow exactly:**
 
-1. **Main brain** — triage and dispatch only. Max 3 inline tool calls per turn (the dispatch sequence). Never do work inline.
-2. **Branch** (`branch_to_thread`) — up to 3 concurrent. Gets full `--fork-session` context. Does the actual work.
+1. **Main brain** — triage and dispatch only. Never do work inline.
+2. **Branch** (`{{branch}}` signal) — up to 3 concurrent. Gets full `--fork-session` context. Does the actual work.
 3. **Lobe** — only callable from inside a branch. Never from main brain. Lobes only get the context you explicitly pass them (no fork).
-4. **No nested branching** — a branch must not call `branch_to_thread`.
+4. **No nested branching** — a branch must not output `{{branch}}`.
 
-**Dispatch sequence (exactly 3 calls):**
-1. `send_message` — post the branch title on main timeline
-2. `get_last_event_id` — get `lastSent` event ID (never `lastReceived`)
-3. `branch_to_thread(objective, lastSent)` — then say "Branch dispatched." and stop
+**Dispatch:** Output a message with the `{{branch}}` signal. The relay intercepts it, posts the text as the thread root, and spawns a BB:
+```
+🌿 Title — objective
+{{branch title="Title" objective="objective"}}
+```
+Then stop. Say nothing else.
 
 ## Responsiveness
 

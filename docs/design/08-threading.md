@@ -7,11 +7,11 @@ InfiniClaw uses a "Branch and Merge" model. The main brain stays responsive on t
 ```
 Main Brain (persistent, in container)
   ├── Simple request → reply on main timeline
-  ├── Complex request → branch_to_thread(objective)
-  │     → Bot posts 🌿 thread title on main timeline
-  │     → Bot spawns branch (forks session, streams output into thread)
+  ├── Complex request → output {{branch title="X" objective="Y"}}
+  │     → Relay posts text as 🌿 thread root, spawns BB
+  │     → BB forks session, streams output into thread
   │     → Main timeline messages injected into branch while running
-  │     → On finish: branch posts 🪾 merge marker, injects summary into main history
+  │     → On finish: BB outputs {{merge}}, relay posts 🪾 merge marker
   └── Heavy/async work → invoke lobe MCP tool
         → Lobe works in a quarters thread (any provider)
         → On completion: summary posted to quarters main timeline
@@ -20,31 +20,24 @@ Main Brain (persistent, in container)
 
 ## Branch Brains
 
-Branch brains are spawned directly by the bot — the relay does not announce or spawn them. They are interactive `claude` processes (stdin open) that stream output into a Matrix thread in the bot's current room.
+Branch brains are spawned by the relay when it detects a `{{branch}}` signal in the bot's output. They are interactive `claude` processes (stdin open) that stream output into a Matrix thread in the bot's current room.
 
 **Constraint:** A branch brain can be spawned anywhere a bot is active **except inside a thread**. Branching from within a thread is not allowed (no nested threads).
 
-### Signature
-
-```
-branch_to_thread(title, objective)
-```
-
-| Param | Description |
-|---|---|
-| `title` | Short keyword label — used for the 🌿 post and 🪾 merge marker |
-| `objective` | Full objective passed to the branch brain |
-
-The tool posts the `🌿 title — objective` thread header automatically. Model is fixed (not a parameter) for prompt caching reasons. Room is implicit (the bot's current room). Timeout is fixed per-env (`BRANCH_BRAIN_TIMEOUT_MS`).
-
 ### How Branching Works
 
-1. Bot calls `branch_to_thread(title, objective)`
-2. Tool posts `🌿 <title> — <objective>` on the target room's main timeline
-3. Branch is spawned, forks the bot's session (`--continue --fork-session`) to inherit full context
+1. Bot outputs a message containing the `{{branch}}` signal:
+   ```
+   🌿 Fix display bug — Investigate alignment in fleet output
+   {{branch title="Fix display bug" objective="Investigate alignment in fleet output"}}
+   ```
+2. Relay strips the signal, posts the remaining text as the 🌿 thread root
+3. Relay spawns a BB, forks the bot's session (`--continue --fork-session`) to inherit full context
 4. Branch streams output into the Matrix thread as it arrives
 5. Captain can converse with the branch normally while it runs
-6. Bot says "Branch dispatched." and stops inline work
+6. Bot stops inline work immediately after outputting the signal
+
+Model is fixed (not a parameter) for prompt caching reasons. Room is implicit (the bot's current room). Timeout is fixed per-env (`BRANCH_BRAIN_TIMEOUT_MS`).
 
 **Ralph loop:** After every turn, the branch's purpose is re-injected into the branch context. This ensures the branch never loses track of its objective, regardless of how much other context accumulates during a long-running session.
 

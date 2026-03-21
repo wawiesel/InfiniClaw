@@ -326,9 +326,9 @@ Each step updates the bot's display name pip to match the current stage. `!wake`
 ```
 User message → Matrix → host message loop → SQLite → trigger check
   → [TRIGGERED] IPC inject if container active; else container spawns → main brain processes conversation
-    → [IF COMPLEX] main brain calls branch_to_thread(objective)
-      → Host creates thread: "🧵 Branch: <title>"
-      → Host spawns branch brain (podman container; host `claude --print` fallback when BRANCH_BRAIN_IMAGE unset)
+    → [IF COMPLEX] main brain outputs {{branch title="X" objective="Y"}}
+      → Relay strips signal, posts text as 🌿 thread root
+      → Relay spawns branch brain (podman container; host `claude --print` fallback when BRANCH_BRAIN_IMAGE unset)
       → Branch brain works, posts progress into thread
       → Main brain continues listening — never blocked
     → [IF SIMPLE] main brain replies directly

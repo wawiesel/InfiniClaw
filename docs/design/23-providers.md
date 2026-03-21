@@ -94,10 +94,10 @@ When the active main-brain provider does not support `forkSession`, the bot runs
 
 No-branch mode rules:
 
-- `branch_to_thread` is not exposed to the bot, or returns an immediate hard rejection with a clear reason
+- `{{branch}}` signals in bot output are ignored by the relay (signal handler returns early)
 - relay-side branch requests are rejected defensively if one is somehow queued anyway
 - prompts must not instruct the main brain to branch "for all real work"
-- dispatch limits must not force the bot to call a branch tool that is unavailable
+- dispatch limits must not force the bot to output branch signals that will be ignored
 - the bot may still use lobes, or do bounded inline work if its persona allows it
 
 No-branch mode is a supported operating posture, not an error state.

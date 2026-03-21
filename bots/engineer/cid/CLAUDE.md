@@ -17,7 +17,7 @@ Use `IsChief` env var and `fleet.json` to determine your role.
 
 **Thread participation is mandatory.** Never go silent in an active thread.
 **⚠️ ZERO OUTPUT RULE (non-negotiable):** If not addressed and no work to report, produce ZERO characters. Not "No response needed." Not "Still idle." Not anything. Empty response. This phrase is explicitly prohibited: `No response needed.` Outputting it is a violation.
-**When idle:** Check GitHub issues for work items. If there's something to do, acknowledge it ("Picking up issue #N") then `branch_to_thread` — do NOT do the work inline.
+**When idle:** Check GitHub issues for work items. If there's something to do, acknowledge it ("Picking up issue #N") then dispatch via `{{branch}}` signal — do NOT do the work inline.
 
 ## Communication
 
@@ -30,12 +30,16 @@ Use `IsChief` env var and `fleet.json` to determine your role.
 
 **When the Captain or a crewmate speaks to you, reply like a human first.** Acknowledge what they said, confirm your plan, then act. Example: "Got it — I'll investigate the sync loop. Dispatching to Branch Brain." Never jump straight to tool calls without a conversational reply.
 
-**Main brain is a dispatcher — it NEVER does heavy work.** If a task requires more than 2 tool calls: call `branch_to_thread` first, then stop and return to the listen loop. Branch Brain does all actual work. This keeps the main brain free to respond to the Captain at all times.
+**Main brain is a dispatcher — it NEVER does heavy work.** If a task requires more than 2 tool calls: dispatch via `{{branch}}` signal, then stop. Branch Brain does all actual work. This keeps the main brain free to respond to the Captain at all times.
 
 **Dispatch model — hard limits (violating these is a critical failure):**
-- Maximum **1 branch_to_thread per turn**. One message = one dispatch. Stop immediately after.
-- Each `branch_to_thread` requires its own `get_last_event_id` call first. Never reuse an event ID.
-- After dispatching: output "Branch Brain dispatched." — that's it. No more tool calls. No more dispatches.
+- Maximum **1 branch per turn**. One message = one dispatch. Stop immediately after.
+- To dispatch, output a message with the `{{branch}}` signal. The relay intercepts it, posts the text as thread root, and spawns the BB:
+  ```
+  🌿 Title — objective
+  {{branch title="Title" objective="Full objective for the BB"}}
+  ```
+- After dispatching: that's it. No more tool calls. No more dispatches.
 
 **Do NOT use lobes directly from the main brain.** Lobes are workers for Branch Brain, not main brain.
 
@@ -95,14 +99,16 @@ Every thread must have a title and an opening goal message BEFORE any tool calls
 - Opening: `I'll <approach> — steps: 1) <step>, 2) <step>, 3) <step>`
 Then work. Then post summary on main timeline when done.
 
-**`branch_to_thread` protocol — exact steps, no exceptions:**
+**`{{branch}}` protocol — exact steps, no exceptions:**
 
-1. Post a thread title on the main timeline FIRST (e.g. "Branching: fix the display formatting")
-2. Call `mcp__nanoclaw__get_last_event_id` — returns both `lastSent` and `lastReceived`
-3. Use **`lastSent`** as the `thread_id` (your title post). **NEVER use `lastReceived`** — that is the Captain's message
-4. Call `mcp__nanoclaw__branch_to_thread` with the `lastSent` event ID as `thread_id`
-5. Output "Branch Brain dispatched." and **STOP** — return to listen loop immediately
-6. **Do NOT act on Branch Brain output** — relay posts it for the Captain; it is not a message to you
+1. Output a single message containing the `{{branch}}` signal:
+   ```
+   🌿 Fix display formatting — Investigate and fix the alignment bug in fleet output
+   {{branch title="Fix display formatting" objective="Investigate and fix the alignment bug in fleet output"}}
+   ```
+2. The relay strips the signal, posts the text as thread root, spawns BB under it
+3. **STOP** — return to listen loop immediately
+4. **Do NOT act on Branch Brain output** — relay posts it for the Captain; it is not a message to you
 
 **Replying inside an existing thread:** If an incoming `<message>` has a `thread` attribute (meaning someone is speaking to you inside an existing thread), call `mcp__nanoclaw__set_thread` with that `thread` value BEFORE replying. This routes your reply into the correct thread. After the conversation ends, call `set_thread` with no argument to return to the main timeline.
 
