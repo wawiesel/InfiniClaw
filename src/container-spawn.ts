@@ -12,6 +12,7 @@ import path from 'path';
 
 import { parseEnvFile, parseEnvLine } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
+import { BRANCH_BRAIN_IMAGE } from './infini-config.js';
 import { loadShipConfig } from './ship-config.js';
 import { envInt } from './utils.js';
 import {
@@ -230,7 +231,7 @@ function buildContainerArgs(
 
   // Read at call time so temporary process.env overrides (e.g. from
   // runBranchBrainAgent injecting the parent bot's env) take effect.
-  args.push(process.env.CONTAINER_IMAGE || CONTAINER_IMAGE);
+  args.push(imageOverride ?? process.env.CONTAINER_IMAGE ?? CONTAINER_IMAGE);
   return args;
 }
 
@@ -359,7 +360,7 @@ export async function runContainerAgent(
   // Build container args
   const personaConfig = getPersonaContainerConfig();
   const portPublish = safeContainerNameTag ? [] : personaConfig.portPublish;
-  const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaConfig.memoryMb);
+  const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaConfig.memoryMb, imageOverride);
   const configTimeout = input.timeoutOverrideMs || group.containerConfig?.timeout || CONTAINER_TIMEOUT;
 
   logger.debug({
@@ -474,7 +475,7 @@ export async function runBranchBrainAgent(
   }
 
   try {
-    return await runContainerAgent(group, containerInput, onProcess, onOutput);
+    return await runContainerAgent(group, containerInput, onProcess, onOutput, BRANCH_BRAIN_IMAGE);
   } finally {
     // Restore original process.env
     for (const [key, original] of Object.entries(savedEnv)) {
