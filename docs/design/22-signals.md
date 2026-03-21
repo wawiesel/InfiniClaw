@@ -34,6 +34,31 @@ Notify a specific bot. Replaces `<m>Tali</m>`.
 
 Route the message to a specific room and/or thread.
 
+### Branch
+
+```
+{{branch title="Stability audit" objective="Check logs for crash patterns and race conditions"}}
+```
+
+Spawn a Branch Brain. The relay strips the signal, posts the remaining message text as the `🌿` thread header, and spawns a BB under that thread. Room is implicit — the BB posts to whichever room the message was sent from.
+
+### Merge
+
+```
+{{merge summary="Fixed 3 race conditions, opened PR #237"}}
+```
+
+Finalize a Branch Brain. Posted by the BB as its last output. The relay uses the summary for the `🪾` merge marker and loudspeaker merge notice. If omitted, the relay uses the BB's last posted text.
+
+## Escaping
+
+Signals inside backtick code spans are **not processed**:
+
+```
+`{{branch title="example"}}` — this is escaped, relay ignores it
+{{branch title="example"}}   — this is live, relay processes it
+```
+
 ## Default Routing
 
 No signal needed for default behavior:

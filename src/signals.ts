@@ -34,9 +34,20 @@ export interface SignalResult {
   callouts: string[];        // Bot names from {{m Name}} signals
 }
 
+export interface BranchRequest {
+  title: string;
+  objective: string;
+}
+
+export interface MergeRequest {
+  summary?: string;
+}
+
 // ── Signal extraction ──────────────────────────────────────────────────
 
 const SIGNAL_RE = /\{\{([^}]+)\}\}/g;
+/** Matches backtick-wrapped code spans that may contain {{ }} — these are escaped. */
+const CODE_SPAN_RE = /`[^`]*\{\{[^`]*`/g;
 
 /** Parse a single signal string like `m Tali` or `send room="engineering" thread="$abc"` */
 function parseSignal(raw: string, inner: string): Signal {
@@ -70,13 +81,24 @@ function parseSignal(raw: string, inner: string): Signal {
   return { raw: `{{${inner}}}`, command, args, positional };
 }
 
-/** Extract all signals from text, return parsed signals and cleaned text */
+/** Extract all signals from text, return parsed signals and cleaned text.
+ *  Signals inside backtick code spans are escaped and left untouched. */
 export function extractSignals(text: string): { signals: Signal[]; cleanText: string } {
+  // Protect backtick-escaped signals by replacing them with placeholders
+  const escaped: string[] = [];
+  const safeText = text.replace(CODE_SPAN_RE, (match) => {
+    escaped.push(match);
+    return `\x00ESC${escaped.length - 1}\x00`;
+  });
+
   const signals: Signal[] = [];
-  const cleanText = text.replace(SIGNAL_RE, (match, inner) => {
+  let cleanText = safeText.replace(SIGNAL_RE, (match, inner) => {
     signals.push(parseSignal(match, inner));
     return '';
   }).trim();
+
+  // Restore escaped code spans
+  cleanText = cleanText.replace(/\x00ESC(\d+)\x00/g, (_, idx) => escaped[Number(idx)]);
 
   return { signals, cleanText };
 }
@@ -97,10 +119,14 @@ export function processSignals(signals: Signal[], ctx: SignalContext): {
   processed: ProcessedSignal[];
   routeOverride?: { room?: string; thread?: string };
   callouts: string[];
+  branchRequest?: BranchRequest;
+  mergeRequest?: MergeRequest;
 } {
   const processed: ProcessedSignal[] = [];
   let routeOverride: { room?: string; thread?: string } | undefined;
   const callouts: string[] = [];
+  let branchRequest: BranchRequest | undefined;
+  let mergeRequest: MergeRequest | undefined;
 
   for (const sig of signals) {
     switch (sig.command) {
@@ -122,7 +148,6 @@ export function processSignals(signals: Signal[], ctx: SignalContext): {
         if (!room && !thread) {
           processed.push({ ...sig, status: 'error', error: 'send requires room and/or thread' });
         } else {
-          // Validate room if specified
           if (room) {
             const resolvedRoom = ctx.roomLookup(room);
             if (!resolvedRoom) {
@@ -138,12 +163,30 @@ export function processSignals(signals: Signal[], ctx: SignalContext): {
         }
         break;
       }
+      case 'branch': {
+        // Branch: {{branch title="X" objective="Y"}}
+        const title = sig.args.title || sig.positional;
+        const objective = sig.args.objective;
+        if (!title || !objective) {
+          processed.push({ ...sig, status: 'error', error: 'branch requires title and objective' });
+        } else {
+          branchRequest = { title, objective };
+          processed.push({ ...sig, status: 'ok' });
+        }
+        break;
+      }
+      case 'merge': {
+        // Merge: {{merge summary="result"}}
+        mergeRequest = { summary: sig.args.summary || sig.positional };
+        processed.push({ ...sig, status: 'ok' });
+        break;
+      }
       default:
         processed.push({ ...sig, status: 'error', error: `Unknown signal command: ${sig.command}` });
     }
   }
 
-  return { processed, routeOverride, callouts };
+  return { processed, routeOverride, callouts, branchRequest, mergeRequest };
 }
 
 // ── Audit trail ────────────────────────────────────────────────────────

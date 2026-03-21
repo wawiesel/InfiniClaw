@@ -837,7 +837,7 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
       return undefined;
     };
 
-    const { processed, routeOverride, callouts } = processSignals(signals, {
+    const { processed, routeOverride, callouts, branchRequest } = processSignals(signals, {
       botName,
       roomName,
       roomId: ctx.chatJid,
@@ -848,6 +848,30 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
     // Apply route overrides
     if (routeOverride?.room) sendJid = routeOverride.room;
     if (routeOverride?.thread) sendThread = routeOverride.thread;
+
+    // {{branch}} signal: write IPC relay-task so the host relay spawns the BB.
+    // The cleaned message text becomes the 🌿 thread header (posted below).
+    // The relay picks up the task file and uses the posted event as thread root.
+    if (branchRequest) {
+      const relayTasksDir = path.join(process.cwd(), '_runtime', 'relay-tasks');
+      try {
+        fs.mkdirSync(relayTasksDir, { recursive: true });
+        const taskId = `branch-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const taskFile = path.join(relayTasksDir, `${taskId}.json`);
+        const tempPath = `${taskFile}.tmp`;
+        fs.writeFileSync(tempPath, JSON.stringify({
+          type: 'branch_brain',
+          title: branchRequest.title,
+          objective: branchRequest.objective,
+          bot: ASSISTANT_NAME,
+          chat_jid: ctx.chatJid,
+          timestamp: new Date().toISOString(),
+        }, null, 2));
+        fs.renameSync(tempPath, taskFile);
+      } catch (err) {
+        logger.error({ err }, 'signals: failed to write branch relay-task');
+      }
+    }
 
     // Convert callouts to <m> tags for existing pillify pipeline
     for (const name of callouts) {

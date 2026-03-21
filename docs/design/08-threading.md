@@ -150,23 +150,31 @@ loudspeaker00: 📢 Thread closed (BB-demo-captain) [$MDvDGuYiX3kVrO5mx-SCjTTPmS
 
 Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour TTL. The registry is pruned on every read.
 
-## MCP Tools — Exactly Two
+## Signals — Branch and Merge
 
-Branch brains expose exactly 2 MCP tools. Everything else is automatic.
+Branch lifecycle uses two signals (see [22-signals](22-signals.md)). No MCP tools needed.
 
-### 1. `branch_to_thread(title, objective)` — START
+### `{{branch}}` — START
 
-Spawns a branch brain. The tool posts `🌿 <title> — <objective>` on the main timeline and uses that event as the thread root. Bot says nothing — no commentary, no "branch dispatched", silence.
+Bot outputs a message containing `{{branch title="X" objective="Y"}}`. The relay:
+1. Strips the signal
+2. Posts the remaining text as the `🌿` thread header
+3. Spawns a BB under that thread
 
-Cannot be called from inside a thread.
+Room is implicit — the BB posts to whichever room the message was sent from. Cannot be called from inside a thread.
 
-### 2. `end_branch(thread_id)` — END
+### `{{merge}}` — END
 
-Explicitly closes a branch brain. Triggers merge sequence (merge marker in thread, loudspeaker announces on main timeline). **Not yet implemented** — currently branches end automatically on process exit.
+BB outputs a message containing `{{merge summary="result"}}`. The relay:
+1. Strips the signal, posts remaining text in-thread
+2. Uses the summary for the `🪾` merge marker
+3. Posts loudspeaker merge notice on main timeline
+
+If the BB exits without sending `{{merge}}`, the relay auto-generates the merge marker from the BB's last output.
 
 ### What the bot does
 
-Nothing. The bot calls START, then silence. When the merge notice arrives from loudspeaker, the bot processes it naturally. No commentary between start and end.
+Outputs the `{{branch}}` signal, then silence. When the merge notice arrives from loudspeaker, the bot processes it naturally. No commentary between start and end.
 
 ### What loudspeaker does
 

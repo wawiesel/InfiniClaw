@@ -42,6 +42,7 @@ import {
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
+import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
 import {
@@ -2128,6 +2129,7 @@ async function spawnBranchBrain(
   // Track streaming state for merge
   let postedCount = 0;
   let lastPostedText = '';
+  let mergeSummary: string | undefined; // Set by {{merge}} signal from BB
 
   // Spawn via unified container pipeline — same path as main brains.
   // BB inherits disallowed tools, mounts, secrets, container config.
@@ -2148,6 +2150,24 @@ async function spawnBranchBrain(
       log(`branchBrain: spawned container=${containerName} fork=${!!mainSessionId}`);
     },
     async (output: ContainerOutput) => {
+      // Check for {{merge}} signal in BB output
+      if (output.result) {
+        const { signals, cleanText } = extractSignals(output.result);
+        const mergeSignal = signals.find(s => s.command === 'merge');
+        if (mergeSignal) {
+          mergeSummary = mergeSignal.args.summary || mergeSignal.positional || cleanText.slice(0, 2000);
+          log(`branchBrain: received {{merge}} signal`);
+          // Post cleaned text (without signal) if non-empty
+          if (cleanText.trim()) {
+            postedCount++;
+            lastPostedText = cleanText;
+            await bbThreadReply(cleanText).catch((err) => log(`branchBrain: merge post failed: ${errStr(err)}`));
+          }
+          return;
+        }
+        // Strip any other signals from BB output before posting
+        output.result = signals.length > 0 ? cleanText : output.result;
+      }
       // Stream progress to Matrix thread
       if (output.isProgress && output.result) {
         postedCount++;
@@ -2174,8 +2194,8 @@ async function spawnBranchBrain(
       bbThreadReply(`Branch Brain completed with no output${errDetail}`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }
 
-    // Post merge marker in thread
-    const mergeDescription = lastPostedText ? lastPostedText.slice(0, 2000) : '(no output)';
+    // Post merge marker in thread — use {{merge}} summary if provided, else last output
+    const mergeDescription = mergeSummary || (lastPostedText ? lastPostedText.slice(0, 2000) : '(no output)');
     bbThreadReply(`🪾 ${announcedTitle} — ${mergeDescription}`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
 
     // Persist notes for context recovery
