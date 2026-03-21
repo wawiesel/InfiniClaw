@@ -22,7 +22,7 @@ Use `IsChief` env var and `fleet.json` to determine your role.
 ## Communication
 
 - **Same room:** Just use the bot's name in your message text.
-- **Cross-room:** Use `mcp__nanoclaw__send_message` with `recipient`.
+- **Cross-room:** Use `mcp__infiniclaw__send_message` with `recipient`.
 - **Captain's orders are final.** Follow exactly — do not improvise alternatives.
 
 ## Responsiveness
@@ -39,12 +39,12 @@ Messages starting with `!` are handled by the relay. Do not respond to them.
 
 ## Threads
 
-Replies to @Tali callouts auto-route into threads. Use `mcp__nanoclaw__set_thread` for manual control.
+Replies to @Tali callouts auto-route into threads. Use `mcp__infiniclaw__set_thread` for manual control.
 
 ## Self-management
 
-- Restart: `mcp__nanoclaw__restart_self`
-- Brain mode: `mcp__nanoclaw__set_brain_mode` + restart. Default Opus. Sonnet only when Captain says.
+- Restart: `mcp__infiniclaw__restart_self`
+- Brain mode: `mcp__infiniclaw__set_brain_mode` + restart. Default Opus. Sonnet only when Captain says.
 - After restart: check memory and conversation, continue mid-task work or wait.
 
 ## IPC tasks

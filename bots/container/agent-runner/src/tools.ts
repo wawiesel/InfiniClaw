@@ -8,7 +8,6 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import {
-  loadBotDirectory,
   guessMimeTypeFromFilename,
 } from './bot-messaging.js';
 
@@ -34,69 +33,6 @@ function errMsg(err: unknown): string {
 
 export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
   const { server, writeIpcFile, messagesDir, tasksDir, ipcDir, chatJid, groupFolder, isMain } = ctx;
-
-  // ── Crew roster ────────────────────────────────────────────────────
-
-  server.tool(
-    'crew_roster',
-    'Show the crew roster: who is present, their rank, role, and who is the commanding officer of each room.',
-    {},
-    async () => {
-      const statusPath = '/workspace/project/data/crew-status.json';
-      try {
-        const data = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
-        const lines: string[] = [];
-        const you = data.thisBot;
-        for (const member of data.crew) {
-          const badge = member.isCommandingOfficer ? ' ⭐ CO' : '';
-          const presence = member.present ? '✅' : '❌';
-          const self = member.name.toLowerCase() === (process.env.NANOCLAW_ASSISTANT_NAME || '').toLowerCase() ? ' (you)' : '';
-          lines.push(`${presence} **${member.name}**${self} — ${member.title || member.role} (rank ${member.rank}, ${member.room})${badge}`);
-        }
-        return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
-      } catch {
-        return { content: [{ type: 'text' as const, text: 'Crew roster unavailable.' }] };
-      }
-    },
-  );
-
-  // ── Bot directory & messaging ───────────────────────────────────────
-
-  server.tool(
-    'list_recipients',
-    'List available message recipients (other bots you can send messages to).',
-    {},
-    async () => {
-      const dir = loadBotDirectory(ipcDir);
-      const selfName = process.env.NANOCLAW_ASSISTANT_NAME || '';
-      const recipients = Object.keys(dir).filter((name) => name !== selfName);
-      if (recipients.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'No other bots available.' }] };
-      }
-      const lines = recipients.map((name) => `- ${name}`);
-      return { content: [{ type: 'text' as const, text: `Available recipients:\n${lines.join('\n')}` }] };
-    },
-  );
-
-  server.tool(
-    'set_thread',
-    'Set a persistent work thread for all future replies in this group. Pass thread_id to route replies into a Matrix thread, or omit it to clear and reply on the main timeline.',
-    {
-      thread_id: z.string().optional().describe('Matrix thread root event ID (MSC3440). Omit or pass empty string to clear.'),
-    },
-    async (args) => {
-      const data: Record<string, string | undefined> = {
-        type: 'set_thread',
-        chatJid,
-        threadId: args.thread_id || undefined,
-        groupFolder,
-        timestamp: new Date().toISOString(),
-      };
-      writeIpcFile(tasksDir, data);
-      const action = args.thread_id ? `set to ${args.thread_id}` : 'cleared';
-      return { content: [{ type: 'text' as const, text: `Work thread ${action}.` }] };
-    },
-  );
 
   // ── Reactions ───────────────────────────────────────────────────────
 
@@ -241,56 +177,6 @@ Use this after making code changes that require a process restart.`,
       return {
         content: [{ type: 'text' as const, text: `Refresh requested for ${args.bot}. The host daemon will handle the refresh.` }],
       };
-    },
-  );
-
-  server.tool(
-    'restart_wksm',
-    'Restart the WKSM (WKS MCP Server) SSE proxy on the host. Use when wksm is down or returning errors.',
-    {},
-    async () => {
-      if (!isMain) {
-        return {
-          content: [{ type: 'text' as const, text: 'Only MAIN can restart wksm.' }],
-          isError: true,
-        };
-      }
-      writeIpcFile(tasksDir, {
-        type: 'restart_wksm',
-        chatJid,
-        groupFolder,
-        timestamp: new Date().toISOString(),
-      });
-      return {
-        content: [{ type: 'text' as const, text: 'WKSM restart requested. The host daemon will kill the old process and start a new one on port 8765.' }],
-      };
-    },
-  );
-
-  server.tool(
-    'check_health',
-    'Check the host system health and status. Returns bot status, active containers, group activity, and queue state. The host writes this snapshot every 30 seconds.',
-    {},
-    async () => {
-      const statusPath = path.join(ipcDir, 'status.json');
-      if (!fs.existsSync(statusPath)) {
-        return {
-          content: [{ type: 'text' as const, text: 'No status snapshot available yet. The host writes status.json every 30s.' }],
-        };
-      }
-
-      try {
-        const raw = fs.readFileSync(statusPath, 'utf-8');
-        const status = JSON.parse(raw);
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(status, null, 2) }],
-        };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: `Failed to read status: ${errMsg(err)}` }],
-          isError: true,
-        };
-      }
     },
   );
 

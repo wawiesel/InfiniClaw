@@ -1,11 +1,8 @@
 [
   "full-monty-python",
-  "directive-writing",
-  "fleet-inspection",
-  "github-development",
+  "gitea-development",
   "ic01-testing",
-  "infiniclaw-maintenance",
-  "memory-keeping",
   "tmux-cli",
+  "wbs-management",
   "web-recon"
 ]

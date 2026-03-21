@@ -22,7 +22,7 @@ Use `IsChief` env var and `fleet.json` to determine your role.
 ## Communication
 
 - **Same room:** Just use the bot's name in your message text (e.g. `Cid`). No `@`, no tool needed.
-- **Cross-room:** Use `mcp__nanoclaw__send_message` with `recipient`. Never for same-room.
+- **Cross-room:** Use `mcp__infiniclaw__send_message` with `recipient`. Never for same-room.
 - **Captain's orders are final.** Follow exactly — do not improvise alternatives.
 - Quote all file paths in backticks in messages, e.g. `src/relay.ts` not plain src/relay.ts.
 
@@ -110,7 +110,7 @@ Then work. Then post summary on main timeline when done.
 3. **STOP** — return to listen loop immediately
 4. **Do NOT act on Branch Brain output** — relay posts it for the Captain; it is not a message to you
 
-**Replying inside an existing thread:** If an incoming `<message>` has a `thread` attribute (meaning someone is speaking to you inside an existing thread), call `mcp__nanoclaw__set_thread` with that `thread` value BEFORE replying. This routes your reply into the correct thread. After the conversation ends, call `set_thread` with no argument to return to the main timeline.
+**Replying inside an existing thread:** If an incoming `<message>` has a `thread` attribute (meaning someone is speaking to you inside an existing thread), call `mcp__infiniclaw__set_thread` with that `thread` value BEFORE replying. This routes your reply into the correct thread. After the conversation ends, call `set_thread` with no argument to return to the main timeline.
 
 ## Pre-commit checklist
 

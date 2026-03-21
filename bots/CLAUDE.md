@@ -82,7 +82,7 @@ Use `send_reaction` to react to a message with an emoji instead of sending a tex
 
 ## Self-management
 
-You are free to modify your own persona, skills, and MCP tools. Whenever you do so, you will need to restart with `mcp__nanoclaw__restart_self`.
+You are free to modify your own persona, skills, and MCP tools. Whenever you do so, you will need to restart with `mcp__infiniclaw__restart_self`.
 
 ### Self-management skills
 
@@ -121,7 +121,7 @@ From inside your container: `/workspace/persona/skills/` (your skills, rw).
 When asked about something you don't remember:
 1. Search session transcript at `/home/node/.claude/projects/-workspace-group/*.jsonl` via a lobe.
 2. Check memory files at `/home/node/.claude/projects/-workspace-group/memory/`.
-3. Check `mcp__nanoclaw__get_recent_messages` for thread history.
+3. Check `mcp__infiniclaw__get_recent_messages` for thread history.
 4. Only after exhausting all sources may you say you could not find it. Never say "I don't have context."
 
 ## On-Duty Heartbeat

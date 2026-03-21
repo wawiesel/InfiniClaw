@@ -35,7 +35,7 @@ Engineering is the Captain's window into fleet progress. **Always post a summary
 - Bot rebuilt or restarted
 - Any multi-step task finished
 
-Keep summaries short: one line with the key result (e.g. `PR #52 merged — BUG-26 starvation fix in group-queue`). If you did the work in a thread, post the summary on the main timeline when you exit the thread. If working from quarters, use `mcp__nanoclaw__send_message` with `recipient: "engineering"` to cross-post.
+Keep summaries short: one line with the key result (e.g. `PR #52 merged — BUG-26 starvation fix in group-queue`). If you did the work in a thread, post the summary on the main timeline when you exit the thread. If working from quarters, use `mcp__infiniclaw__send_message` with `recipient: "engineering"` to cross-post.
 
 ## Source code
 

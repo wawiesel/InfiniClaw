@@ -11,7 +11,6 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
-import { resolveRecipientJid } from './bot-messaging.js';
 import { registerInfiniClawTools } from './tools.js';
 
 const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
@@ -38,57 +37,9 @@ function writeIpcFile(dir: string, data: object): string {
 }
 
 const server = new McpServer({
-  name: 'nanoclaw',
+  name: 'infiniclaw',
   version: '1.0.0',
 });
-
-server.tool(
-  'send_message',
-  `Send a message. Without recipient: sends to your room. With recipient: sends cross-room via intercom relay to the recipient's room.
-
-Use list_recipients to see available bots. Cross-room messages appear as "YourName: message" in the target room via the intercom account.`,
-  {
-    text: z.string().describe('The message text to send'),
-    recipient: z.string().optional().describe('Name of another bot to message cross-room (e.g. "Cid"). Use list_recipients to see available bots.'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
-  },
-  async (args) => {
-    let targetJid = chatJid;
-    let crossRoom = false;
-
-    if (args.recipient) {
-      const resolved = resolveRecipientJid(args.recipient, IPC_DIR);
-      if (!resolved) {
-        return {
-          content: [{ type: 'text' as const, text: `Unknown recipient "${args.recipient}". Use list_recipients to see available bots.` }],
-          isError: true,
-        };
-      }
-      if (resolved !== chatJid) {
-        targetJid = resolved;
-        crossRoom = true;
-      }
-    }
-
-    const data: Record<string, string | boolean | undefined> = {
-      type: 'message',
-      chatJid: targetJid,
-      text: args.text,
-      sender: args.sender || undefined,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    if (crossRoom) {
-      data.crossRoom = true;
-      data.senderName = process.env.NANOCLAW_ASSISTANT_NAME || 'Unknown';
-    }
-
-    writeIpcFile(MESSAGES_DIR, data);
-
-    return { content: [{ type: 'text' as const, text: crossRoom ? `Cross-room message sent to ${args.recipient}.` : 'Message sent.' }] };
-  },
-);
 
 server.tool(
   'schedule_task',
@@ -269,42 +220,6 @@ server.tool(
     writeIpcFile(TASKS_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
-  },
-);
-
-server.tool(
-  'register_group',
-  `Register a new chat/group so the agent can respond to messages there. Main group only.
-
-Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
-  {
-    jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")'),
-    name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")'),
-    trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
-  },
-  async (args) => {
-    if (!isMain) {
-      return {
-        content: [{ type: 'text' as const, text: 'Only the main group can register new groups.' }],
-        isError: true,
-      };
-    }
-
-    const data = {
-      type: 'register_group',
-      jid: args.jid,
-      name: args.name,
-      folder: args.folder,
-      trigger: args.trigger,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
-    };
   },
 );
 

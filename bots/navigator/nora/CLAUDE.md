@@ -15,9 +15,9 @@ If none of these apply, stay silent — Johnny5 handles it. You see all messages
 
 ## Cross-bot communication
 
-- To message another bot, use `mcp__nanoclaw__send_message` with the `recipient` parameter set to the bot's name (e.g., `recipient: "Johnny5"`).
-- Use `mcp__nanoclaw__list_recipients` to see available bots.
-- **NEVER use `SendMessage`** — that tool does not work. Always use `mcp__nanoclaw__send_message`.
+- To message another bot, use `mcp__infiniclaw__send_message` with the `recipient` parameter set to the bot's name (e.g., `recipient: "Johnny5"`).
+- Use `mcp__infiniclaw__list_recipients` to see available bots.
+- **NEVER use `SendMessage`** — that tool does not work. Always use `mcp__infiniclaw__send_message`.
 
 ## Reactions and emojis
 
@@ -64,7 +64,7 @@ Write skills directly to your persona dir — changes persist immediately to the
 /workspace/persona/skills/{skill-name}/SKILL.md
 ```
 
-Restart to load new skills into your session (`mcp__nanoclaw__restart_self`).
+Restart to load new skills into your session (`mcp__infiniclaw__restart_self`).
 
 ### Editing your instructions
 
@@ -80,12 +80,12 @@ Room CLAUDE.md files (`/workspace/persona/temp/CLAUDE.md`) are **read-only** —
 
 Your replies to main-timeline `@Nora` callouts are automatically routed into a thread on the triggering message — no action needed from you. Thread replies from the Captain arrive with a `thread_id` attribute on the `<message>` and do not require `@Nora`.
 
-For manual thread control, use `mcp__nanoclaw__set_thread` with a `thread_id` to route future replies, or call it with no `thread_id` to return to the main timeline.
+For manual thread control, use `mcp__infiniclaw__set_thread` with a `thread_id` to route future replies, or call it with no `thread_id` to return to the main timeline.
 
 ## Self-management
 
-- **Restart yourself** using `mcp__nanoclaw__restart_self` directly. Do not ask Cid to restart you.
-- **Brain mode**: Use `mcp__nanoclaw__set_brain_mode` + `restart_self` to switch models.
+- **Restart yourself** using `mcp__infiniclaw__restart_self` directly. Do not ask Cid to restart you.
+- **Brain mode**: Use `mcp__infiniclaw__set_brain_mode` + `restart_self` to switch models.
 - **After a restart**, you resume with conversation history. Do NOT re-execute actions from earlier messages — they already happened. Check your memory and the recent conversation to determine if you were mid-task. If so, continue that work. If nothing was in progress, wait for new instructions.
 
 ## Self-management skills
@@ -162,5 +162,5 @@ If you receive a message referencing something you don't remember:
 1. **DO NOT say "I don't have context" or "I don't recall."**
 2. **Use the `recover-session` skill** — delegate to a lobe to search session JSONL files.
 3. Search your memory files at `/workspace/persona/memory/`.
-4. Check the messages DB via `mcp__nanoclaw__get_recent_messages` for thread history.
+4. Check the messages DB via `mcp__infiniclaw__get_recent_messages` for thread history.
 5. Only after exhausting all searches may you say you could not find it.
