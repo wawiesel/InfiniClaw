@@ -66,7 +66,7 @@ When the branch finishes:
 1. Branch posts `🪾 <keyword> — <full result description>` as the merge marker in the thread
 2. Branch injects its final summary into main brain history — so the main brain has the result in context even though it came from the branch
 3. Thread is now **closed** — no further posting allowed. Any new message in that thread receives a loudspeaker reply with title and thread ID (see Thread Closure below)
-4. Main timeline summary posted: `🪾 <keyword> — ✅ merged` (or `⛔ failed`)
+4. Loudspeaker posts `🪾 <keyword> — ✅ merged` (or `⛔ failed`) on the main timeline — posted via loudspeaker, not the bot, so the main brain receives it as an external message and can process the result
 
 ### Concurrency Limit
 
@@ -130,7 +130,7 @@ Lobes always post to quarters regardless of which room the bot is currently in. 
 
 When a branch brain completes:
 1. **Merge marker in thread** — BB posts `🪾 <keyword> — <full result description>` at the end of the thread. This closes the thread.
-2. **Main timeline summary** — `🪾 <keyword> — ✅ merged` (or `⛔ failed`) posted on main timeline so the Captain sees the result without watching the thread.
+2. **Main timeline summary** — Loudspeaker posts `🪾 <keyword> — ✅ merged` (or `⛔ failed`) on the main timeline. Must come from loudspeaker (not the bot) so the main brain receives it as an external message.
 3. **Assimilation** — the branch injects its final summary into main brain history via IPC, so the main brain has the result in context even though it came from the branch.
 4. **No restart needed** — the main brain assimilates results naturally. A restart is never necessary.
 5. **Termination** — branch brain fork exits, thread remains in Matrix history permanently.
