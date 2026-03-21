@@ -12,6 +12,7 @@ import path from 'path';
 
 import { parseEnvLine } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
+import { BRANCH_BRAIN_IMAGE } from './infini-config.js';
 import { envInt } from './utils.js';
 import {
   buildBotDirectory,
@@ -194,6 +195,7 @@ function buildContainerArgs(
   containerName: string,
   portPublish: string[] = [],
   memoryMb?: number,
+  imageOverride?: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--network', 'host', '--name', containerName, '--pull=never'];
 
@@ -226,7 +228,7 @@ function buildContainerArgs(
     }
   }
 
-  args.push(CONTAINER_IMAGE);
+  args.push(imageOverride ?? CONTAINER_IMAGE);
   return args;
 }
 
@@ -301,6 +303,7 @@ export async function runContainerAgent(
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  imageOverride?: string,
 ): Promise<ContainerOutput> {
   assertValidGroupFolder(group.folder);
 
@@ -354,7 +357,7 @@ export async function runContainerAgent(
   // Build container args
   const personaConfig = getPersonaContainerConfig();
   const portPublish = safeContainerNameTag ? [] : personaConfig.portPublish;
-  const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaConfig.memoryMb);
+  const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaConfig.memoryMb, imageOverride);
   const configTimeout = input.timeoutOverrideMs || group.containerConfig?.timeout || CONTAINER_TIMEOUT;
 
   logger.debug({
@@ -437,5 +440,5 @@ export async function runBranchBrainAgent(
     timeoutOverrideMs: input.timeoutMs,
   };
 
-  return runContainerAgent(group, containerInput, onProcess, onOutput);
+  return runContainerAgent(group, containerInput, onProcess, onOutput, BRANCH_BRAIN_IMAGE);
 }
