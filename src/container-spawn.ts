@@ -228,7 +228,9 @@ function buildContainerArgs(
     }
   }
 
-  args.push(CONTAINER_IMAGE);
+  // Read at call time so temporary process.env overrides (e.g. from
+  // runBranchBrainAgent injecting the parent bot's env) take effect.
+  args.push(process.env.CONTAINER_IMAGE || CONTAINER_IMAGE);
   return args;
 }
 
