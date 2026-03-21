@@ -178,7 +178,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 
 - **Health watchdog** (`relay.ts`): `healthWatchdogLoop()` runs every `HEALTH_WATCHDOG_INTERVAL_MS` (default 5 min). The elected speaker checks all ships' S3 health report timestamps; if any report is >30 min stale, posts a warning to BTC via `postToBTC()`. Clears the alert when the report recovers. Uses `stalenessAlerted` set to fire each alert only once per staleness episode. This is the sole cross-ship health staleness mechanism — the health loop itself no longer checks staleness.
 
-- **Room registration cleanup** (`service.ts`): `clearRoomRegistrations(instanceBase)` deletes all rows from `registered_groups` in the bot's SQLite store before seeding new rooms. Called in both `deployBot()` and `restartBotForRoom()`. Prevents stale room registrations from previous deployments (e.g. a bot `!wake`d in quarters still monitoring engineering from a prior `!report`).
+- **Room registration cleanup** (`service.ts`): `clearRoomRegistrations(instanceBase)` deletes all rows from `registered_groups` in the bot's SQLite store AND removes stale `groups/` and `data/ipc/` subdirectories before seeding new rooms. Called in both `deployBot()` and `restartBotForRoom()`. Prevents stale room registrations and IPC folders from previous room assignments.
 
 - **`!sleep` quarters guard** (`relay.ts`): `!sleep` now requires the bot to be in `quarters` status. If the bot is onduty, returns `⚠️ Name must be in quarters to sleep — use !dismiss first`. Prevents sleeping bots that are actively in duty rooms.
 

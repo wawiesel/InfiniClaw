@@ -96,13 +96,25 @@ function profileEnvPath(_root: string, bot: string): string {
   return path.join(config.secretsPath, 'bots', bot, 'env');
 }
 
-/** Clear all room registrations so room transitions are atomic. */
+/** Clear all room registrations and stale group/IPC folders so room transitions are atomic. */
 function clearRoomRegistrations(instanceBase: string): void {
   const storeDir = path.join(instanceBase, 'store');
   fs.mkdirSync(storeDir, { recursive: true });
   const db = new Database(path.join(storeDir, 'messages.db'));
   try { db.exec(`DELETE FROM registered_groups`); } catch { /* table may not exist yet */ }
   finally { db.close(); }
+  // Clean stale group and IPC folders from previous room assignments
+  for (const subdir of ['groups', path.join('data', 'ipc')]) {
+    const dir = path.join(instanceBase, subdir);
+    try {
+      for (const entry of fs.readdirSync(dir)) {
+        const full = path.join(dir, entry);
+        if (fs.statSync(full).isDirectory()) {
+          fs.rmSync(full, { recursive: true, force: true });
+        }
+      }
+    } catch { /* dir may not exist */ }
+  }
 }
 
 /** Seed the registered_groups table with a room. */
