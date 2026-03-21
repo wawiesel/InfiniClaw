@@ -36,6 +36,7 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
+  forkSession?: boolean;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;

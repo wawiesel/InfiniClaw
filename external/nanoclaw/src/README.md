@@ -12,7 +12,7 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 | `router.ts` | `formatMessages` (XML → bot prompt), `findChannel` |
 | `db.ts` | SQLite message/chat/group/session store (`deleteSession` clears stale sessions) |
 | `group-queue.ts` | Per-group container queue — serializes agent runs, IPC piping, fair slot scheduling |
-| `container-runner.ts` | Spawns podman containers for agent runs; syncs agent-runner source to per-group dirs when host files are newer; `ContainerOutput.isSessionError` signals stale session recovery |
+| `container-runner.ts` | Spawns podman containers for agent runs; syncs agent-runner source to per-group dirs when host files are newer; `ContainerInput.forkSession` enables branch brain mode (single run, session fork); `ContainerOutput.isSessionError` signals stale session recovery |
 | `container-runtime.ts` | Container runtime detection; defaults to `podman`, overridable via `CONTAINER_RUNTIME_BIN` env var |
 | `credential-proxy.ts` | Credential proxy for secure secret injection |
 | `ipc.ts` | IPC watcher — task/message/context dirs |

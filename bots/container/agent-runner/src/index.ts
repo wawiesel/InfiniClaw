@@ -28,6 +28,7 @@ import { getRequestedMainModel } from './model-selection.js';
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
+  forkSession?: boolean;
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
@@ -267,6 +268,7 @@ function runClaude(
   sessionId: string | undefined,
   model: string | undefined,
   disallowedTools: string[] | undefined,
+  forkSession: boolean | undefined,
   env: Record<string, string | undefined>,
   emitProgress: (text: string) => void,
 ): Promise<ClaudeRunResult> {
@@ -277,7 +279,10 @@ function runClaude(
       '--dangerously-skip-permissions',
     ];
     if (model) args.push('--model', model);
-    if (sessionId) args.push('--resume', sessionId);
+    if (sessionId) {
+      args.push('--resume', sessionId);
+      if (forkSession) args.push('--fork-session');
+    }
     if (disallowedTools?.length) args.push('--disallowed-tools', disallowedTools.join(','));
 
     log(`Spawning claude: ${args.join(' ')}`);
@@ -353,13 +358,18 @@ function runClaude(
             if (block.type === 'tool_use') {
               currentToolName = block.name;
               currentToolInput = block.input;
+              // In BB mode, emit tool activity so thread shows what BB is doing
+              if (forkSession) emitProgress(`🔧 ${block.name}`);
             } else if (block.type === 'text' && typeof block.text === 'string') {
               assistantText += block.text;
             }
           }
-          // Emit assistant text alongside tool calls as a thread-title hint (not displayed)
           const trimmed = assistantText.trim();
-          if (trimmed && event.message.content.some((b: { type: string }) => b.type === 'tool_use')) {
+          if (forkSession && trimmed) {
+            // BB mode: emit full assistant text as progress for thread posting
+            emitProgress(trimmed);
+          } else if (trimmed && event.message.content.some((b: { type: string }) => b.type === 'tool_use')) {
+            // Main brain: emit as thread-title hint (not displayed)
             emitProgress('\x00TITLE:' + trimmed.slice(0, 200));
           }
           return;
@@ -654,7 +664,7 @@ async function main(): Promise<void> {
 
       let runResult = await runClaude(
         prompt, sessionId, model,
-        containerInput.disallowedTools, env, emitProgress,
+        containerInput.disallowedTools, containerInput.forkSession, env, emitProgress,
       );
 
       // If claude failed with a session ID (stale session), retry without resume
@@ -664,7 +674,7 @@ async function main(): Promise<void> {
         writeOutput({ status: 'success', result: null, newSessionId: undefined, isSessionError: true });
         runResult = await runClaude(
           prompt, sessionId, model,
-          containerInput.disallowedTools, env, emitProgress,
+          containerInput.disallowedTools, false, env, emitProgress,
         );
       }
 
@@ -686,6 +696,12 @@ async function main(): Promise<void> {
       // Close sentinel consumed during run — exit immediately
       if (runResult.closedDuringRun) {
         log('Close sentinel consumed during run, exiting');
+        break;
+      }
+
+      // BB mode (forkSession): single run, no message loop
+      if (containerInput.forkSession) {
+        log('Branch brain mode — single run complete, exiting');
         break;
       }
 
