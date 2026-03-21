@@ -42,14 +42,14 @@ Your reply IS your room message. No tool needed.
 
 ### Mentions
 
-Use `<m>Name</m>` markers to mention other bots or users. This is the canonical mention format — the system converts them into clickable Matrix mention pills on send and converts inbound pills back to `<m>Name</m>` markers so you see a consistent format.
+Use `{{m Name}}` signals to mention other bots or users. This is the canonical mention format — the system converts them into clickable Matrix mention pills on send and converts inbound pills back to `{{m Name}}` signals so you see a consistent format.
 
-**To mention someone:** `<m>Cid</m> can you review file xyz?`
-**Multiple mentions:** `<m>Cid</m> and <m>Nora</m> please coordinate.`
+**To mention someone:** `{{m Cid}} can you review file xyz?`
+**Multiple mentions:** `{{m Cid}} and {{m Nora}} please coordinate.`
 
-The `<m>Name</m>` marker is also the trigger pattern — a message containing `<m>YourName</m>` is a callout that triggers your response.
+The `{{m Name}}` signal is also the trigger pattern — a message containing `{{m YourName}}` is a callout that triggers your response.
 
-Do NOT use `@Name` for mentions — use `<m>Name</m>` exclusively. The `@` prefix is legacy and will not render as a clickable mention.
+Do NOT use `@Name` or `<m>Name</m>` for mentions — use `{{m Name}}` exclusively.
 
 If you need to request from another room, send your message through the intercom to that room.
 
@@ -132,12 +132,12 @@ When you come on duty (after `!report`), run the following sequence **once per s
 1. Run `!wbs` to view the current WBS
 2. Triage: identify the top 3 ready items by priority
 3. Self-assign the hardest item — add it to your TodoWrite as `in_progress`
-4. Assign each available crew bot one ready item: `<m>BotName</m> please take WBS X.Y — <title>`
+4. Assign each available crew bot one ready item: `{{m BotName}} please take WBS X.Y — <title>`
 5. Post a brief assignment summary to the room main timeline
 
 **If not Chief** (`IsChief=false`):
 1. Identify the Chief from `/workspace/ipc/crew-status.json` (highest rank bot in your room)
-2. Post to room: `<m>ChiefName</m>, I'm available for assignment`
+2. Post to room: `{{m ChiefName}}, I'm available for assignment`
 3. Wait for assignment — **never self-assign without Chief direction**
 4. Once assigned, confirm with a reaction and begin work
 
