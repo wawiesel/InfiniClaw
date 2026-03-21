@@ -713,8 +713,7 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
   const isToolCall = text.includes('<details>');
   if (isToolCall) {
     // Track whether this is a dispatch call
-    if (text.includes('branch_to_thread')) turnDispatchCalled[ctx.chatJid] = true;
-    // Enforce dispatch limit on main brain
+    // Enforce dispatch limit on main brain ({{branch}} signal sets turnDispatchCalled above)
     const isMainBrain = registeredGroups[ctx.chatJid]?.folder === MAIN_GROUP_FOLDER;
     if (isMainBrain && !turnDispatchCalled[ctx.chatJid]) {
       turnToolCallCount[ctx.chatJid] = (turnToolCallCount[ctx.chatJid] ?? 0) + 1;
@@ -722,7 +721,7 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
         const group = registeredGroups[ctx.chatJid];
         if (group) {
           writeMessageToActiveContainerIpc(ctx.chatJid, group,
-            `⚠️ DISPATCH LIMIT: You have made ${turnToolCallCount[ctx.chatJid]} inline tool calls without calling branch_to_thread. Call branch_to_thread NOW and stop. Main brain must not do heavy work inline.`);
+            `⚠️ DISPATCH LIMIT: You have made ${turnToolCallCount[ctx.chatJid]} inline tool calls without using {{branch}}. Output a {{branch}} signal NOW and stop. Main brain must not do heavy work inline.`);
         }
       }
     }
@@ -796,10 +795,70 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
           }
         }
       } else {
+        // ── Signals in progress text (22-signals.md) ──────────────────
+        // Progress text from persistent main brain streams as isProgress=true.
+        // Check for signals (especially {{branch}}) before posting.
+        const { signals: progSignals, cleanText: progClean } = extractSignals(text);
+        let progressSendText = progClean || text;
+        if (progSignals.length > 0) {
+          const group = registeredGroups[ctx.chatJid];
+          const botName = group?.name ?? 'unknown';
+          const roomName = group?.name ?? ctx.chatJid;
+          const roomLookup = (name: string): string | undefined => {
+            for (const [jid, g] of Object.entries(registeredGroups)) {
+              if (g.name.toLowerCase() === name.toLowerCase()) return jid;
+            }
+            return undefined;
+          };
+          const { processed, routeOverride, callouts, branchRequest } = processSignals(progSignals, {
+            botName, roomName, roomId: ctx.chatJid,
+            threadId: activeReplyThreadIds[ctx.chatJid],
+            roomLookup,
+          });
+
+          // {{branch}} signal: write IPC relay-task
+          if (branchRequest) {
+            turnDispatchCalled[ctx.chatJid] = true;
+            const relayTasksDir = path.join(process.cwd(), '_runtime', 'relay-tasks');
+            try {
+              fs.mkdirSync(relayTasksDir, { recursive: true });
+              const taskId = `branch-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+              const taskFile = path.join(relayTasksDir, `${taskId}.json`);
+              const tempPath = `${taskFile}.tmp`;
+              fs.writeFileSync(tempPath, JSON.stringify({
+                type: 'branch_brain',
+                title: branchRequest.title,
+                objective: branchRequest.objective,
+                bot: ASSISTANT_NAME,
+                chat_jid: ctx.chatJid,
+                timestamp: new Date().toISOString(),
+              }, null, 2));
+              fs.renameSync(tempPath, taskFile);
+              logger.info({ title: branchRequest.title, bot: ASSISTANT_NAME }, 'signals: {{branch}} relay-task written from progress');
+            } catch (err) {
+              logger.error({ err }, 'signals: failed to write branch relay-task from progress');
+            }
+          }
+
+          // Callouts
+          for (const name of callouts) {
+            progressSendText = `<m>${name}</m> ${progressSendText}`;
+          }
+
+          // Route override
+          if (routeOverride?.room || routeOverride?.thread) {
+            // Route overrides in progress are unusual but handle them
+            logger.info({ routeOverride }, 'signals: route override in progress text');
+          }
+
+          // Audit (fire-and-forget)
+          void auditSignals(processed, botName, roomName).catch(() => {});
+        }
+
         // Capture this as potential tool call thread anchor title
-        const stripped = text.replace(/<[^>]+>/g, '').trim().slice(0, 80);
+        const stripped = progressSendText.replace(/<[^>]+>/g, '').trim().slice(0, 80);
         if (stripped) lastProgressText[ctx.chatJid] = stripped;
-        const formatted = `<small><em>${esc(text)}</em></small>`;
+        const formatted = `<small><em>${esc(progressSendText)}</em></small>`;
         // Route discussion into the tool call thread if one is open; otherwise to reply thread
         const textThread = progressToolCallThreadIds[ctx.chatJid] ?? activeReplyThreadIds[ctx.chatJid];
         threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
