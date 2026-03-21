@@ -84,6 +84,9 @@ function parseSignal(raw: string, inner: string): Signal {
 /** Extract all signals from text, return parsed signals and cleaned text.
  *  Signals inside backtick code spans are escaped and left untouched. */
 export function extractSignals(text: string): { signals: Signal[]; cleanText: string } {
+  // Fast path: most messages contain no signals at all
+  if (!text.includes('{{')) return { signals: [], cleanText: text };
+
   // Protect backtick-escaped signals by replacing them with placeholders
   const escaped: string[] = [];
   const safeText = text.replace(CODE_SPAN_RE, (match) => {

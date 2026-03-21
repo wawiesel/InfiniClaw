@@ -702,6 +702,45 @@ function formatToolLabel(raw: string): string {
   return raw.replace(/^mcp__\w+?__/, '').replace(/_/g, ' ');
 }
 
+// ── Shared signal helpers ──────────────────────────────────────────────
+
+function groupMeta(chatJid: string): { botName: string; roomName: string; roomId: string } {
+  const g = registeredGroups[chatJid];
+  return { botName: g?.name ?? 'unknown', roomName: g?.name ?? chatJid, roomId: chatJid };
+}
+
+function lookupRoom(name: string): string | undefined {
+  const lower = name.toLowerCase();
+  for (const [jid, g] of Object.entries(registeredGroups)) {
+    if (g.name?.toLowerCase() === lower) return jid;
+  }
+  return undefined;
+}
+
+const relayTasksDir = path.join(process.cwd(), '_runtime', 'relay-tasks');
+let relayTasksDirReady = false;
+
+function writeBranchRelayTask(req: { title: string; objective: string }, chatJid: string): void {
+  try {
+    if (!relayTasksDirReady) { fs.mkdirSync(relayTasksDir, { recursive: true }); relayTasksDirReady = true; }
+    const taskId = `branch-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const taskFile = path.join(relayTasksDir, `${taskId}.json`);
+    const tempPath = `${taskFile}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify({
+      type: 'branch_brain',
+      title: req.title,
+      objective: req.objective,
+      bot: ASSISTANT_NAME,
+      chat_jid: chatJid,
+      timestamp: new Date().toISOString(),
+    }, null, 2));
+    fs.renameSync(tempPath, taskFile);
+    logger.info({ title: req.title, bot: ASSISTANT_NAME }, 'signals: branch relay-task written');
+  } catch (err) {
+    logger.error({ err }, 'signals: failed to write branch relay-task');
+  }
+}
+
 async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Promise<void> {
   // Handle TITLE-only progress events emitted by agent-runner (bot's text alongside tool calls)
   if (text.startsWith('\x00TITLE:')) {
@@ -799,60 +838,22 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
         // Progress text from persistent main brain streams as isProgress=true.
         // Check for signals (especially {{branch}}) before posting.
         const { signals: progSignals, cleanText: progClean } = extractSignals(text);
-        let progressSendText = progClean || text;
+        let progressSendText = progClean;
         if (progSignals.length > 0) {
-          const group = registeredGroups[ctx.chatJid];
-          const botName = group?.name ?? 'unknown';
-          const roomName = group?.name ?? ctx.chatJid;
-          const roomLookup = (name: string): string | undefined => {
-            for (const [jid, g] of Object.entries(registeredGroups)) {
-              if (g.name.toLowerCase() === name.toLowerCase()) return jid;
-            }
-            return undefined;
-          };
-          const { processed, routeOverride, callouts, branchRequest } = processSignals(progSignals, {
-            botName, roomName, roomId: ctx.chatJid,
+          const { callouts, branchRequest } = processSignals(progSignals, {
+            ...groupMeta(ctx.chatJid),
             threadId: activeReplyThreadIds[ctx.chatJid],
-            roomLookup,
+            roomLookup: lookupRoom,
           });
 
-          // {{branch}} signal: write IPC relay-task
           if (branchRequest) {
             turnDispatchCalled[ctx.chatJid] = true;
-            const relayTasksDir = path.join(process.cwd(), '_runtime', 'relay-tasks');
-            try {
-              fs.mkdirSync(relayTasksDir, { recursive: true });
-              const taskId = `branch-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-              const taskFile = path.join(relayTasksDir, `${taskId}.json`);
-              const tempPath = `${taskFile}.tmp`;
-              fs.writeFileSync(tempPath, JSON.stringify({
-                type: 'branch_brain',
-                title: branchRequest.title,
-                objective: branchRequest.objective,
-                bot: ASSISTANT_NAME,
-                chat_jid: ctx.chatJid,
-                timestamp: new Date().toISOString(),
-              }, null, 2));
-              fs.renameSync(tempPath, taskFile);
-              logger.info({ title: branchRequest.title, bot: ASSISTANT_NAME }, 'signals: {{branch}} relay-task written from progress');
-            } catch (err) {
-              logger.error({ err }, 'signals: failed to write branch relay-task from progress');
-            }
+            writeBranchRelayTask(branchRequest, ctx.chatJid);
           }
 
-          // Callouts
           for (const name of callouts) {
             progressSendText = `<m>${name}</m> ${progressSendText}`;
           }
-
-          // Route override
-          if (routeOverride?.room || routeOverride?.thread) {
-            // Route overrides in progress are unusual but handle them
-            logger.info({ routeOverride }, 'signals: route override in progress text');
-          }
-
-          // Audit (fire-and-forget)
-          void auditSignals(processed, botName, roomName).catch(() => {});
         }
 
         // Capture this as potential tool call thread anchor title
@@ -880,64 +881,27 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   // ── Signals protocol (22-signals.md) ─────────────────────────────────
   const { signals, cleanText } = extractSignals(text);
   const group = registeredGroups[ctx.chatJid];
-  const botName = group?.name ?? 'unknown';
-  const roomName = group?.name ?? ctx.chatJid;
+  const { botName, roomName } = groupMeta(ctx.chatJid);
   let sendText = cleanText;
   let sendJid = ctx.chatJid;
   let sendThread = activeReplyThreadIds[ctx.chatJid];
 
   if (signals.length > 0) {
-    // Build room lookup from registered groups
-    const roomLookup = (name: string): string | undefined => {
-      const lower = name.toLowerCase();
-      for (const [jid, g] of Object.entries(registeredGroups)) {
-        if (g.name?.toLowerCase() === lower) return jid;
-      }
-      return undefined;
-    };
-
     const { processed, routeOverride, callouts, branchRequest } = processSignals(signals, {
-      botName,
-      roomName,
-      roomId: ctx.chatJid,
+      botName, roomName, roomId: ctx.chatJid,
       threadId: activeReplyThreadIds[ctx.chatJid],
-      roomLookup,
+      roomLookup: lookupRoom,
     });
 
-    // Apply route overrides
     if (routeOverride?.room) sendJid = routeOverride.room;
     if (routeOverride?.thread) sendThread = routeOverride.thread;
 
-    // {{branch}} signal: write IPC relay-task so the host relay spawns the BB.
-    // The cleaned message text becomes the 🌿 thread header (posted below).
-    // The relay picks up the task file and uses the posted event as thread root.
-    if (branchRequest) {
-      const relayTasksDir = path.join(process.cwd(), '_runtime', 'relay-tasks');
-      try {
-        fs.mkdirSync(relayTasksDir, { recursive: true });
-        const taskId = `branch-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const taskFile = path.join(relayTasksDir, `${taskId}.json`);
-        const tempPath = `${taskFile}.tmp`;
-        fs.writeFileSync(tempPath, JSON.stringify({
-          type: 'branch_brain',
-          title: branchRequest.title,
-          objective: branchRequest.objective,
-          bot: ASSISTANT_NAME,
-          chat_jid: ctx.chatJid,
-          timestamp: new Date().toISOString(),
-        }, null, 2));
-        fs.renameSync(tempPath, taskFile);
-      } catch (err) {
-        logger.error({ err }, 'signals: failed to write branch relay-task');
-      }
-    }
+    if (branchRequest) writeBranchRelayTask(branchRequest, ctx.chatJid);
 
-    // Convert callouts to <m> tags for existing pillify pipeline
     for (const name of callouts) {
       sendText = `<m>${name}</m> ${sendText}`;
     }
 
-    // Audit trail: upload to S3 and get suffix
     const { suffix } = await auditSignals(processed, botName, roomName);
     if (suffix) sendText = `${sendText}\n\n${suffix}`;
 
