@@ -22,14 +22,11 @@ export interface S3Config {
 }
 
 export type BotStatus = 'onduty' | 'quarters' | 'sleep' | 'transit' | 'retrospective' | 'dream' | 'ready';
-export type TriggerType = 'always' | 'callout' | 'never';
-
 export interface BotEntry {
   role: string;
   rank: number;
   ship: string | null;
   status: BotStatus;
-  triggerType?: TriggerType;
   title?: string;
   quartersRoom?: string;
   activeBrainModel?: string;
@@ -51,15 +48,6 @@ export const SAFE_BOT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** Statuses that mean the bot should be running on its assigned ship. */
 export const RUNNING_STATUSES: readonly BotStatus[] = ['onduty', 'quarters', 'retrospective', 'ready'] as const;
-
-/** Default triggerType for a given status (used when triggerType is not explicitly set). */
-export function defaultTriggerType(status: BotStatus): TriggerType {
-  if (status === 'onduty') return 'callout';
-  if (status === 'quarters') return 'always';
-  if (status === 'retrospective') return 'always';
-  if (status === 'ready') return 'always';
-  return 'never';
-}
 
 /** Normalize legacy status names to current values. */
 function migrateStatus(s: string): string {

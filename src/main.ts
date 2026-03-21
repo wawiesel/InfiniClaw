@@ -182,33 +182,47 @@ const roomCO: Record<string, string | undefined> = {};
 let matrixRef: MatrixChannel | null = null;
 // Trigger type — read from fleet.json, re-read periodically.
 // 'always' = respond to every message (quarters), 'callout' = need @mention (duty), 'never' = stopped.
-let triggerType: 'always' | 'callout' | 'never' = 'callout';
-let triggerTypeLastRead = 0;
-const TRIGGER_TYPE_TTL = 5_000; // re-read fleet.json at most every 5s
-// Cached quarters room ID — bot always responds here regardless of triggerType (design: 09-roles-and-rooms.md).
+// Cached quarters room ID — bot always responds here.
 let myQuartersRoom: string | undefined;
+let cachedTrigger: 'always' | 'callout' | 'never' = 'callout';
+let triggerLastRead = 0;
+const TRIGGER_TTL = 5_000;
 
-function refreshTriggerType(): 'always' | 'callout' | 'never' {
+/** Derive trigger type from status + chief position. No stored state — always computed. */
+function deriveTrigger(): 'always' | 'callout' | 'never' {
   const now = Date.now();
-  if (now - triggerTypeLastRead < TRIGGER_TYPE_TTL) return triggerType;
-  triggerTypeLastRead = now;
+  if (now - triggerLastRead < TRIGGER_TTL) return cachedTrigger;
+  triggerLastRead = now;
   try {
+    const root = resolveRoot();
+    const crewPath = path.join(root, '_runtime', 'instances', ASSISTANT_NAME.toLowerCase(), 'data', 'crew-status.json');
+    const crew = JSON.parse(fs.readFileSync(crewPath, 'utf-8'));
+    const me = crew.crew?.find((c: { name: string }) => c.name.toLowerCase() === ASSISTANT_NAME.toLowerCase());
+    if (me) {
+      myQuartersRoom = undefined; // refresh from fleet below
+      if (me.room === 'Quarters') {
+        cachedTrigger = 'always';
+      } else if (me.isChief) {
+        cachedTrigger = 'always';
+      } else if (me.present) {
+        cachedTrigger = 'callout';
+      } else {
+        cachedTrigger = 'never';
+      }
+    }
+    // Also refresh quartersRoom from fleet
     const fleet = loadFleet();
     const myEntry = Object.entries(fleet).find(([id]) => {
-      try { return loadProfileEnv(resolveRoot(), id)?.ASSISTANT_NAME === ASSISTANT_NAME; } catch { return false; }
+      try { return loadProfileEnv(root, id)?.ASSISTANT_NAME === ASSISTANT_NAME; } catch { return false; }
     });
-    if (myEntry) {
-      const entry = myEntry[1];
-      triggerType = entry.triggerType || (entry.status === 'quarters' ? 'always' : entry.status === 'onduty' ? 'callout' : 'never');
-      myQuartersRoom = entry.quartersRoom;
-    }
+    if (myEntry) myQuartersRoom = myEntry[1].quartersRoom;
   } catch { /* keep current value */ }
-  return triggerType;
+  return cachedTrigger;
 }
 
 /** True if chatJid is this bot's own quarters room — always respond there. */
 function isOwnQuarters(chatJid: string): boolean {
-  if (!myQuartersRoom) refreshTriggerType(); // ensure cached
+  if (!myQuartersRoom) deriveTrigger(); // ensure cached
   if (!myQuartersRoom) return false;
   return chatJid === `matrix:${myQuartersRoom}` || chatJid === myQuartersRoom;
 }
@@ -346,7 +360,7 @@ function sendTriggerAck(chatJid: string, messages: NewMessage[]): void {
   }
 
   if (!ch.sendReaction) return;
-  const alwaysTriggered = refreshTriggerType() === 'always' || isOwnQuarters(chatJid);
+  const alwaysTriggered = deriveTrigger() === 'always' || isOwnQuarters(chatJid);
   for (const m of messages) {
     if (!m.id) continue;
     if (/^(resume|out|system|op)-/.test(m.id)) continue;
@@ -1015,8 +1029,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
   const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
-  // triggerType=always: every message triggers. triggerType=callout: need explicit trigger.
-  const alwaysTriggered = refreshTriggerType() === 'always' || isOwnQuarters(chatJid);
+  // Trigger: quarters or chief → always respond. On duty non-chief → callout only.
+  const alwaysTriggered = deriveTrigger() === 'always' || isOwnQuarters(chatJid);
   if (!alwaysTriggered && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
     saveState();
@@ -1351,7 +1365,7 @@ async function handleGroupMessagesInLoop(
   );
   const isCOTrigger = isCOMainTimelineTrigger(chatJid, actionableMessages);
 
-  const alwaysTriggered = refreshTriggerType() === 'always' || isOwnQuarters(chatJid);
+  const alwaysTriggered = deriveTrigger() === 'always' || isOwnQuarters(chatJid);
   if (!alwaysTriggered && !hasTrigger && !hasParticipatingThread && !isCOTrigger) {
     lastAgentTimestamp[chatJid] = groupMessages[groupMessages.length - 1].timestamp;
     saveState();
@@ -1735,17 +1749,15 @@ async function main(): Promise<void> {
     for (const [jid, group] of Object.entries(registeredGroups)) {
       roomNameToJid[group.name.toLowerCase()] = jid;
     }
-    // Set initial triggerType from fleet.json
+    // Initialize trigger + quarters from fleet.json
     const myBotId = Object.keys(fleet).find(id => {
       const env = (() => { try { return loadProfileEnv(root, id); } catch { return null; } })();
       return env?.ASSISTANT_NAME === ASSISTANT_NAME;
     });
     if (myBotId && fleet[myBotId]) {
-      const entry = fleet[myBotId];
-      triggerType = entry.triggerType || (entry.status === 'quarters' ? 'always' : entry.status === 'onduty' ? 'callout' : 'never');
-      myQuartersRoom = entry.quartersRoom;
-      triggerTypeLastRead = Date.now();
+      myQuartersRoom = fleet[myBotId].quartersRoom;
     }
+    deriveTrigger(); // initial derivation from crew-status.json
     // Build roster from active bots in fleet.json
     for (const [botId, entry] of Object.entries(fleet)) {
       if (entry.status !== 'onduty') continue;

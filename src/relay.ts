@@ -280,7 +280,7 @@ async function syncGiteaChiefPermissions(): Promise<void> {
 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
-type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; triggerType?: 'always' | 'callout' | 'never'; title?: string; quartersRoom?: string; activeBrainModel?: string; ondutyAt?: number };
+type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; title?: string; quartersRoom?: string; activeBrainModel?: string; ondutyAt?: number };
 let liveFleet: Record<string, FleetEntry> = {};
 /** Cached BehindTheCurtain room ID — set once on startup from operator-matrix.json. */
 let curtainRoomId: string | null = null;
@@ -2528,7 +2528,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
         await reportRecovery('secrets sync', conns);
         log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
         // Reload static config from disk (transport assignments come via git).
-        // Only merge structural/static fields — don't overwrite runtime state (status, triggerType, etc.)
+        // Only merge structural/static fields — don't overwrite runtime state (status, etc.)
         try {
           const diskFleet = loadFleetFromDisk();
           for (const [bot, entry] of Object.entries(diskFleet)) {
@@ -2552,7 +2552,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
           for (const [bot, entry] of Object.entries(liveFleet)) {
             if (entry.ship === HOSTNAME && entry.status === 'transit') {
               log(`transport: materializing ${bot}`);
-              fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
+              fleetUpdate(bot, { status: 'quarters' });
               fleetDirty = true;
               persistFleet();
               clearShipConfigCache();
@@ -2831,7 +2831,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
               killStaleContainers(bot);
               await setBotDisplayStatus(root, bot, 'sleep');
               reabsorbWbsItems(root, bot);
-              fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
+              fleetUpdate(bot, { status: 'sleep' });
               persistFleet();
               publishFleetReport().catch(() => {});
               continue;
@@ -2921,7 +2921,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
       if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
     } catch { /* non-fatal */ }
     // status=retrospective: container keeps running, bot reflects in quarters
-    fleetUpdate(bot, { status: 'retrospective', triggerType: 'always', ondutyAt: undefined });
+    fleetUpdate(bot, { status: 'retrospective', ondutyAt: undefined });
     persistFleet();
     clearShipConfigCache();
     reabsorbWbsItems(root, bot);
@@ -2968,7 +2968,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     await setBotDisplayStatus(root, bot, 'sleep');
     reabsorbWbsItems(root, bot);
     // status=dream: container stopped, deferred git changes can now apply
-    fleetUpdate(bot, { status: 'dream', triggerType: 'never' });
+    fleetUpdate(bot, { status: 'dream' });
     persistFleet();
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} asleep — Dream phase`);
@@ -2987,7 +2987,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     stopBot(bot);
     killStaleContainers(bot);
     // status=ready: like quarters but signals the bot just completed a duty cycle
-    fleetUpdate(bot, { status: 'ready', triggerType: 'always' });
+    fleetUpdate(bot, { status: 'ready' });
     persistFleet();
     clearShipConfigCache();
     bootstrapBot(root, bot);
@@ -3151,7 +3151,7 @@ async function handleLifecycleCommand(
         } catch (roomErr) {
           log(`${name}: room leave failed (non-fatal): ${errStr(roomErr)}`);
         }
-        fleetUpdate(bot, { status: 'quarters', triggerType: 'always', ondutyAt: undefined });
+        fleetUpdate(bot, { status: 'quarters', ondutyAt: undefined });
         persistFleet();
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
@@ -3183,7 +3183,7 @@ async function handleLifecycleCommand(
           }
         } catch { /* non-fatal */ }
         reabsorbWbsItems(root, bot);
-        fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
+        fleetUpdate(bot, { status: 'sleep' });
         persistFleet();
         await tr(`✅ ${name} asleep`);
         publishFleetReport().catch(() => {});
@@ -3212,7 +3212,7 @@ async function handleLifecycleCommand(
         await setBotDisplayStatus(root, bot, 'building');
         await step('🔄 building');
         if (!isRestart) {
-          fleetUpdate(bot, { status: 'quarters', triggerType: 'always' });
+          fleetUpdate(bot, { status: 'quarters' });
           persistFleet();
           clearShipConfigCache();
         }
@@ -3272,7 +3272,7 @@ async function handleLifecycleCommand(
           await tr(`⛔ ${name} report failed — ${errStr(roomErr)}`);
           continue;
         }
-        fleetUpdate(bot, { status: 'onduty', triggerType: 'callout', ship: HOSTNAME, ondutyAt: Date.now() });
+        fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME, ondutyAt: Date.now() });
         persistFleet();
         clearShipConfigCache();
         // Full redeploy so bot gets latest code (rsync + npm ci + build + stamp).
@@ -3565,7 +3565,7 @@ function registerRelayCommands(): void {
         for (const bot of getActiveBots()) {
           stopBot(bot);
           killStaleContainers(bot);
-          fleetUpdate(bot, { status: 'sleep', triggerType: 'never' });
+          fleetUpdate(bot, { status: 'sleep' });
         }
         me[1].commissioned = false;
         writeShips(ships);
@@ -3762,7 +3762,7 @@ function registerRelayCommands(): void {
         stopBot(bot);
         killStaleContainers(bot);
         removeBotMounts(bot);
-        fleetUpdate(bot, { status: 'transit', triggerType: 'never', ship: targetShip });
+        fleetUpdate(bot, { status: 'transit', ship: targetShip });
         fleetDirty = true;
         persistFleet();
         await send(`✅ ${botDisplayName} dematerialized — awaiting materialization on ${targetName}`);
