@@ -318,7 +318,7 @@ export async function runContainerAgent(
     ...input,
     groupFolder: group.folder,
     ...(safeContainerNameTag ? { containerNameTag: safeContainerNameTag } : {}),
-    disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
+    disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'CronCreate', 'CronDelete', 'CronList', 'NotebookEdit', 'TodoWrite'],
     ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
     ...(mcpServers ? { mcpServers } : {}),
   };
