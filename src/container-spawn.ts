@@ -54,6 +54,12 @@ const CONTAINER_HEAP_LIMIT_MB = envInt('CONTAINER_HEAP_LIMIT_MB', 0);
 const SAFE_CONTAINER_NAME_TAG = /^[a-zA-Z0-9_.-]{1,32}$/;
 const SAFE_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** Tools disabled for all bots — shared between main brain and branch brain. */
+const DISALLOWED_TOOLS = [
+  'SendMessage', 'TeamCreate', 'TeamDelete', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
+  'CronCreate', 'CronDelete', 'CronList', 'NotebookEdit', 'TodoWrite',
+];
+
 const ALLOWED_ENV_VARS = [
   'ASSISTANT_NAME', 'ASSISTANT_ROLE', 'IsChief',
   'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
@@ -340,7 +346,7 @@ export async function runContainerAgent(
     ...input,
     groupFolder: group.folder,
     ...(safeContainerNameTag ? { containerNameTag: safeContainerNameTag } : {}),
-    disallowedTools: ['SendMessage', 'TeamCreate', 'TeamDelete', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'CronCreate', 'CronDelete', 'CronList', 'NotebookEdit', 'TodoWrite'],
+    disallowedTools: DISALLOWED_TOOLS,
     ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
     ...(mcpServers ? { mcpServers } : {}),
   };
@@ -388,4 +394,48 @@ export async function runContainerAgent(
     maxErrorStderrChars: 0,
     firstOutputDeadlineMs: 300_000,
   });
+}
+
+// ── Branch Brain spawn ───────────────────────────────────────────────
+
+export interface BranchBrainInput {
+  prompt: string;
+  bot: string;
+  groupFolder: string;
+  chatJid: string;
+  sessionId?: string;
+  containerNameTag: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Spawn a branch brain through the same container pipeline as main brains.
+ * Single place for all brain spawning — main and BB share disallowed tools,
+ * mounts, secrets, and container config.
+ */
+export async function runBranchBrainAgent(
+  input: BranchBrainInput,
+  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<ContainerOutput> {
+  // Construct a minimal RegisteredGroup — BB doesn't come from the group registry.
+  const group: RegisteredGroup = {
+    name: `bb-${input.containerNameTag}`,
+    folder: input.groupFolder,
+    trigger: '',
+    added_at: new Date().toISOString(),
+  };
+
+  const containerInput: ContainerInput = {
+    prompt: input.prompt,
+    sessionId: input.sessionId,
+    forkSession: !!input.sessionId,
+    groupFolder: input.groupFolder,
+    chatJid: input.chatJid,
+    isMain: false,
+    containerNameTag: input.containerNameTag,
+    timeoutOverrideMs: input.timeoutMs,
+  };
+
+  return runContainerAgent(group, containerInput, onProcess, onOutput);
 }

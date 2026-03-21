@@ -32,6 +32,7 @@ declare module 'nanoclaw/container-runner.js' {
     timeoutOverrideMs?: number;
     secrets?: Record<string, string>;
     mcpServers?: Record<string, unknown>;
+    forkSession?: boolean;
   }
 
   interface ContainerOutput {
