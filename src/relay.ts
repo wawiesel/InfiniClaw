@@ -2039,9 +2039,13 @@ async function spawnBranchBrain(
     return;
   }
 
-  // Find the connection for this room (strip matrix: prefix if present)
+  // Find the connection for this room (strip matrix: prefix if present).
+  // Fall back to the bot's duty room — NEVER to engineering, which causes cross-room leaks.
   const roomId = chat_jid.replace(/^matrix:/, '');
-  const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
+  const dutyRoom = bot ? botDutyRoom(bot) : '';
+  const conn = conns.find(c => c.roomId === roomId)
+    || (dutyRoom ? conns.find(c => c.name === dutyRoom) : undefined)
+    || findEngConn(conns);
   if (!conn?.accessToken) {
     log(`branchBrain: no active connection for chat_jid=${chat_jid}`);
     return;
@@ -2271,7 +2275,10 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                   log(`relayTasks: branch_brain rejected — ${botKey} already at limit (${MAX_BRANCH_BRAINS_PER_BOT})`);
                   if (thread_id) {
                     const roomId = chat_jid.replace(/^matrix:/, '');
-                    const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
+                    const rejDutyRoom = bot ? botDutyRoom(bot) : '';
+                    const conn = conns.find(c => c.roomId === roomId)
+                      || (rejDutyRoom ? conns.find(c => c.name === rejDutyRoom) : undefined)
+                      || findEngConn(conns);
                     if (conn?.accessToken) {
                       void threadReply(conn, thread_id, `⚠️ Branch Brain rejected: already at concurrent limit (${MAX_BRANCH_BRAINS_PER_BOT}). Wait for a Branch Brain to finish.`).catch((err) => log(`relayTasks: rejection notify failed: ${errStr(err)}`));
                     }
