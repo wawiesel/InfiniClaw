@@ -804,6 +804,9 @@ async function relaySend(homeserver: string, token: string, roomId: string, text
   return matrixSend({ homeserver, token, roomId, text, threadRootId, log });
 }
 
+/** Thread IDs for which a "📢 Thread closed" notice has already been posted — prevents duplicate closures. */
+const threadClosurePosted = new Set<string>();
+
 /** React to a message with 📡 to signal relay received it. Fire-and-forget, deduped per event. */
 const ackedEventIds = new Set<string>();
 function relayAck(homeserver: string, token: string, roomId: string, eventId: string): void {
@@ -4588,7 +4591,12 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 const isRelaySender = event.sender === conn.userId
                   || event.sender === operatorUserId
                   || (lsUserPrefix && event.sender.startsWith(lsUserPrefix));
-                if (task?.completed && !isRelaySender) {
+                if (task?.completed && !isRelaySender && !threadClosurePosted.has(relates.event_id)) {
+                  threadClosurePosted.add(relates.event_id);
+                  if (threadClosurePosted.size > PROCESSED_MAX) {
+                    const first = threadClosurePosted.values().next().value;
+                    if (first) threadClosurePosted.delete(first);
+                  }
                   log(`dialtone: closed BB thread reply from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
                   const label = task.title ? ` (${task.title})` : '';
                   void threadReply(conn, relates.event_id, `📢 Thread closed${label} [${relates.event_id}] — branch merged. Start a new branch for follow-up.`);
