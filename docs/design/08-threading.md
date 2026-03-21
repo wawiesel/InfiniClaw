@@ -65,7 +65,7 @@ Messages sent in the thread are added to the branch's conversation naturally, ex
 When the branch finishes:
 1. Branch posts `🪾 <keyword> — <full result description>` as the merge marker in the thread
 2. Branch injects its final summary into main brain history — so the main brain has the result in context even though it came from the branch
-3. Thread is now **closed** — no further posting allowed. Any new message in that thread receives a loudspeaker reply: "this thread is closed"
+3. Thread is now **closed** — no further posting allowed. Any new message in that thread receives a loudspeaker reply with title and thread ID (see Thread Closure below)
 4. Main timeline summary posted: `🪾 <keyword> — ✅ merged` (or `⛔ failed`)
 
 ### Concurrency Limit
@@ -139,7 +139,16 @@ When a branch brain completes:
 
 After a branch merges, the thread is **dead**. No further productive posting is allowed.
 
-When anyone sends a message in a completed BB thread, the relay responds via loudspeaker: "This thread is closed. The branch has merged — start a new branch if you need follow-up work."
+When anyone sends a message in a completed BB thread, the relay responds via loudspeaker:
+
+```
+📢 Thread closed (<title>) [<thread_event_id>] — branch merged. Start a new branch for follow-up.
+```
+
+Example as seen on Engineering00:
+```
+loudspeaker00: 📢 Thread closed (BB-demo-captain) [$MDvDGuYiX3kVrO5mx-SCjTTPmSwk35f1i6JjiWE-TPQ] — branch merged. Start a new branch for follow-up.
+```
 
 Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour TTL. The registry is pruned on every read.
 
@@ -175,7 +184,7 @@ Thread routing for non-branch messages uses the Signals protocol (see [22-signal
    *Check:* `🪾 <keyword> — <result>` in thread; `🪾 <keyword> — ✅ merged` on main timeline.
 
 6. **Thread closure** — Reply in a completed thread.
-   *Check:* Loudspeaker responds "this thread is closed".
+   *Check:* Loudspeaker responds `📢 Thread closed (<title>) [<thread_event_id>] — branch merged.`
 
 7. **Concurrency limit** — Trigger more than `MAX_BRANCH_BRAINS_PER_BOT` branches.
    *Check:* Excess rejected with warning.
