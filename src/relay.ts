@@ -2408,10 +2408,19 @@ async function spawnBranchBrain(
       const timer = setTimeout(() => {
         branchBrainRestartTimers.delete(bot);
         const status = brainSucceeded ? '✅ merged' : '⛔ failed';
-        // Post via loudspeaker (conn = intercom), NOT as the bot — main brain
-        // filters its own messages, so the merge notice must come from an external sender.
-        if (conn.accessToken) {
-          relaySend(conn.homeserver, conn.accessToken, conn.roomId, `🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
+        // Post via loudspeaker — main brain filters its own messages,
+        // so the merge notice must come from loudspeaker (external sender).
+        const ls = loadLoudspeakerConfig();
+        if (ls) {
+          getLoudspeakerToken(ls.homeserver, ls.username, ls.password).then(token => {
+            if (token) {
+              relaySend(ls.homeserver, token, conn.roomId, `🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
+            } else if (conn.accessToken) {
+              relaySend(conn.homeserver, conn.accessToken, conn.roomId, `🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post (fallback): ${errStr(err)}`));
+            }
+          });
+        } else if (conn.accessToken) {
+          relaySend(conn.homeserver, conn.accessToken, conn.roomId, `🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post (no ls): ${errStr(err)}`));
         }
         log(`branchBrain: ${bot} BB completed (${status})`);
       }, BRANCH_BRAIN_RESTART_DELAY);
