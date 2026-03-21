@@ -360,9 +360,11 @@ Use this after making code changes that require a process restart.`,
 
   server.tool(
     'get_message',
-    'Retrieve content for a Matrix message by its event ID. Use this to look up the full text of a message that was reacted to, or to read any message in your duty room.',
+    'Retrieve Matrix messages. Pass `id` to fetch a single event by ID. Omit `id` to fetch recent messages from the duty room (last `minutes` minutes, up to `limit` results).',
     {
-      id: z.string().describe('The Matrix event ID of the message (e.g. $abc123)'),
+      id: z.string().optional().describe('Matrix event ID (e.g. $abc123) — fetches that single message'),
+      minutes: z.number().optional().describe('Time window in minutes for recent messages (default 30). Ignored when id is provided.'),
+      limit: z.number().optional().describe('Max messages to return in time-range mode (default 50). Ignored when id is provided.'),
     },
     async (args) => {
       const homeserver = process.env.MATRIX_HOMESERVER;
@@ -372,24 +374,51 @@ Use this after making code changes that require a process restart.`,
       }
       const roomId = chatJid.replace(/^matrix:/, '');
       try {
-        const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(args.id)}`;
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-        if (!res.ok) {
-          const body = await res.text();
-          return { content: [{ type: 'text' as const, text: `Matrix API error (${res.status}): ${body}` }], isError: true };
+        if (args.id) {
+          // Single-event lookup
+          const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(args.id)}`;
+          const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+          if (!res.ok) {
+            const body = await res.text();
+            return { content: [{ type: 'text' as const, text: `Matrix API error (${res.status}): ${body}` }], isError: true };
+          }
+          const event = await res.json() as { sender?: string; origin_server_ts?: number; content?: { body?: string; msgtype?: string; formatted_body?: string } };
+          const sender = event.sender ?? 'unknown';
+          const ts = event.origin_server_ts ? new Date(event.origin_server_ts).toISOString() : 'unknown';
+          const content = event.content?.body ?? event.content?.formatted_body ?? JSON.stringify(event.content);
+          return {
+            content: [{ type: 'text' as const, text: `From: ${sender}\nTime: ${ts}\nContent: ${content}` }],
+          };
+        } else {
+          // Time-range lookup: fetch backwards from now, filter by age
+          const minutes = args.minutes ?? 30;
+          const limit = args.limit ?? 50;
+          const cutoff = Date.now() - minutes * 60 * 1000;
+          const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=${limit}`;
+          const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+          if (!res.ok) {
+            const body = await res.text();
+            return { content: [{ type: 'text' as const, text: `Matrix API error (${res.status}): ${body}` }], isError: true };
+          }
+          type MsgEvent = { type?: string; sender?: string; origin_server_ts?: number; content?: { body?: string; msgtype?: string } };
+          const data = await res.json() as { chunk?: MsgEvent[] };
+          const events = (data.chunk ?? [])
+            .filter((e) => e.type === 'm.room.message' && e.content?.msgtype === 'm.text' && (e.origin_server_ts ?? 0) >= cutoff)
+            .reverse(); // oldest first
+          if (events.length === 0) {
+            return { content: [{ type: 'text' as const, text: `No messages in the last ${minutes} minute(s).` }] };
+          }
+          const lines = events.map((e) => {
+            const ts = e.origin_server_ts ? new Date(e.origin_server_ts) : new Date();
+            const hhmm = ts.toISOString().slice(11, 16);
+            const senderLocal = (e.sender ?? 'unknown').replace(/^@([^:]+):.+$/, '$1');
+            const body = e.content?.body ?? '';
+            return `[${hhmm}] ${senderLocal}: ${body}`;
+          });
+          return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
         }
-        const event = await res.json() as { sender?: string; origin_server_ts?: number; content?: { body?: string; msgtype?: string; formatted_body?: string } };
-        const sender = event.sender ?? 'unknown';
-        const ts = event.origin_server_ts ? new Date(event.origin_server_ts).toISOString() : 'unknown';
-        const content = event.content?.body ?? event.content?.formatted_body ?? JSON.stringify(event.content);
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `From: ${sender}\nTime: ${ts}\nContent: ${content}`,
-          }],
-        };
       } catch (err) {
-        return { content: [{ type: 'text' as const, text: `Failed to retrieve message: ${errMsg(err)}` }], isError: true };
+        return { content: [{ type: 'text' as const, text: `Failed to retrieve message(s): ${errMsg(err)}` }], isError: true };
       }
     },
   );
