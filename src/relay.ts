@@ -2408,8 +2408,10 @@ async function spawnBranchBrain(
       const timer = setTimeout(() => {
         branchBrainRestartTimers.delete(bot);
         const status = brainSucceeded ? '✅ merged' : '⛔ failed';
-        if (conn.accessToken) {
-          relaySend(conn.homeserver, conn.accessToken, conn.roomId, `[${replyTag()}] 🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
+        const mergeToken = botSendToken || conn.accessToken;
+        const mergeHs = botSendHomeserver || conn.homeserver;
+        if (mergeToken) {
+          relaySend(mergeHs, mergeToken, conn.roomId, `[${replyTag()}] 🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
         }
         log(`branchBrain: ${bot} BB completed (${status})`);
       }, BRANCH_BRAIN_RESTART_DELAY);
