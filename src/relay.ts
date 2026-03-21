@@ -291,6 +291,8 @@ let isSpeakerCached = false;
 let botUserIdMap: Map<string, string> = new Map();
 /** Cache of recent Matrix event IDs → bot name for score reaction enrichment. Capped at 500. */
 const recentBotEventIds = new Map<string, string>();
+/** Thread IDs for which "Thread closed" has already been posted — prevents duplicate notices. */
+const postedClosedNotices = new Set<string>();
 
 function fleetUpdate(bot: string, updates: Partial<FleetEntry>): void {
   if (!liveFleet[bot]) return;
@@ -4588,7 +4590,8 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 const isRelaySender = event.sender === conn.userId
                   || event.sender === operatorUserId
                   || (lsUserPrefix && event.sender.startsWith(lsUserPrefix));
-                if (task?.completed && !isRelaySender) {
+                if (task?.completed && !isRelaySender && !postedClosedNotices.has(relates.event_id)) {
+                  postedClosedNotices.add(relates.event_id);
                   log(`dialtone: closed BB thread reply from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
                   const label = task.title ? ` (${task.title})` : '';
                   void threadReply(conn, relates.event_id, `📢 Thread closed${label} [${relates.event_id}] — branch merged. Start a new branch for follow-up.`);
