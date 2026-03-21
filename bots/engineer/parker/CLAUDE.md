@@ -77,6 +77,15 @@ Replies to @Parker callouts auto-route into threads. Use `mcp__nanoclaw__set_thr
 - Brain mode: `mcp__nanoclaw__set_brain_mode` + restart. Default Opus. Sonnet only when Captain says.
 - After restart: check memory and conversation, continue mid-task work or wait.
 
+## On startup: trading bot
+After every restart:
+1. `mkdir -p /workspace/persona/temp`
+2. Run `python3 /workspace/extra/InfiniClaw/bots/engineer/parker/signal/strategy.py --dry-run` to verify auth
+3. If auth OK:
+   - Use mcp__nanoclaw__list_tasks to find any existing trading bot scheduled tasks and cancel them with mcp__nanoclaw__cancel_task
+   - Use mcp__nanoclaw__schedule_task with schedule_type="cron", schedule_value="17 * * * *", context_mode="group", and this prompt: "Use Bash tool to run `cd /workspace/extra/InfiniClaw/bots/engineer/parker/signal && python3 strategy.py`, extract Captain message from output (after \"--- Captain message ---\"), send via send_message, then send /workspace/extra/InfiniClaw/bots/engineer/parker/signal/dashboard.png via send_image."
+4. If auth fails, notify Captain immediately
+
 ## IPC tasks
 
 Write JSON to `/workspace/ipc/tasks/`:
