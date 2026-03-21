@@ -64,9 +64,8 @@ Messages sent in the thread are added to the branch's conversation naturally, ex
 
 When the branch finishes:
 1. Branch posts `🪾 <keyword> — <full result description>` as the merge marker in the thread
-2. Branch injects its final summary into main brain history — so the main brain has the result in context even though it came from the branch
-3. Thread is now **closed** — no further posting allowed. Any new message in that thread receives a loudspeaker reply with title and thread ID (see Thread Closure below)
-4. Loudspeaker posts `🪾 <keyword> — ✅ merged` (or `⛔ failed`) on the main timeline — posted via loudspeaker, not the bot, so the main brain receives it as an external message and can process the result
+2. Thread is now **closed** — no further posting allowed. Any new message in that thread receives a loudspeaker reply with title and thread ID (see Thread Closure below)
+3. Loudspeaker posts `🪾 <keyword> — ✅ merged` (or `⛔ failed`) plus the BB's final summary on the main timeline — this is the **only** path for BB results to reach the main brain. Must come from loudspeaker (not the bot) so the main brain receives it as an external message
 
 ### Concurrency Limit
 
@@ -130,10 +129,9 @@ Lobes always post to quarters regardless of which room the bot is currently in. 
 
 When a branch brain completes:
 1. **Merge marker in thread** — BB posts `🪾 <keyword> — <full result description>` at the end of the thread. This closes the thread.
-2. **Main timeline summary** — Loudspeaker posts `🪾 <keyword> — ✅ merged` (or `⛔ failed`) on the main timeline. Must come from loudspeaker (not the bot) so the main brain receives it as an external message.
-3. **Assimilation** — the branch injects its final summary into main brain history via IPC, so the main brain has the result in context even though it came from the branch.
-4. **No restart needed** — the main brain assimilates results naturally. A restart is never necessary.
-5. **Termination** — branch brain fork exits, thread remains in Matrix history permanently.
+2. **Main timeline merge notice** — Loudspeaker posts `🪾 <keyword> — ✅ merged` (or `⛔ failed`) followed by the BB's final summary on the main timeline. This is the **only** path for BB results to reach the main brain. Must come from loudspeaker (not the bot) so the main brain receives it as an external message.
+3. **No IPC back-channel** — the main brain learns BB results exclusively through the loudspeaker merge message. No hidden injection.
+4. **Termination** — branch brain fork exits, thread remains in Matrix history permanently.
 
 ## Thread Closure
 
@@ -152,15 +150,29 @@ loudspeaker00: 📢 Thread closed (BB-demo-captain) [$MDvDGuYiX3kVrO5mx-SCjTTPmS
 
 Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour TTL. The registry is pruned on every read.
 
-## Correct branch_to_thread Protocol
+## MCP Tools — Exactly Two
 
-One call — the tool handles the thread title post automatically:
+Branch brains expose exactly 2 MCP tools. Everything else is automatic.
 
-1. Call `branch_to_thread(title, objective)`
-2. Say "Branch dispatched." and STOP — do not dispatch more in the same turn
-3. Cannot be called from inside a thread
+### 1. `branch_to_thread(title, objective)` — START
 
-The tool posts `🌿 <title> — <objective>` on the main timeline and uses that event as the thread root. No manual `get_last_event_id` or title posting needed.
+Spawns a branch brain. The tool posts `🌿 <title> — <objective>` on the main timeline and uses that event as the thread root. Bot says nothing — no commentary, no "branch dispatched", silence.
+
+Cannot be called from inside a thread.
+
+### 2. `end_branch(thread_id)` — END
+
+Explicitly closes a branch brain. Triggers merge sequence (merge marker in thread, loudspeaker announces on main timeline). **Not yet implemented** — currently branches end automatically on process exit.
+
+### What the bot does
+
+Nothing. The bot calls START, then silence. When the merge notice arrives from loudspeaker, the bot processes it naturally. No commentary between start and end.
+
+### What loudspeaker does
+
+1. Announces the branch is done: `🪾 <keyword> — ✅ merged` (or `⛔ failed`)
+2. Announces the final summary of the BB activity
+3. That is all.
 
 ## Signals Integration
 

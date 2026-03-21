@@ -2366,29 +2366,7 @@ async function spawnBranchBrain(
     const mergeDescription = lastPostedText ? lastPostedText.slice(0, 2000) : '(no output)';
     bbThreadReply(`🪾 ${announcedTitle} — ${mergeDescription}`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
 
-    // Inject merge content into the main brain via IPC so it processes the BB findings.
-    // The main brain sees this as a high-priority message on its next turn.
-    if (bot && lastPostedText) {
-      try {
-        const fleet = loadFleet();
-        const botEntry = fleet[bot];
-        const role = botEntry?.role?.toLowerCase() ?? '';
-        const roleRoom = ROLE_ROOMS[role];
-        // Determine the IPC folder for the bot's active room
-        const roomFolder = roleRoom?.room ?? 'main';
-        const ipcInputDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'ipc', roomFolder, 'input');
-        fs.mkdirSync(ipcInputDir, { recursive: true });
-        const mergeMsg = `🔀 Branch Brain "${announcedTitle}" completed. Last output:\n\n${lastPostedText.slice(0, 4000)}`;
-        const filename = `message-${Date.now()}.json`;
-        const filepath = path.join(ipcInputDir, filename);
-        const tempPath = `${filepath}.tmp`;
-        fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text: mergeMsg }));
-        fs.renameSync(tempPath, filepath);
-        log(`branchBrain: injected merge into ${bot} IPC (${roomFolder})`);
-      } catch (err) { log(`branchBrain: IPC merge injection failed: ${errStr(err)}`); }
-    }
-
-    // Also persist notes to bot data dir for context recovery across restarts.
+    // Persist notes to bot data dir for context recovery across restarts.
     if (bot) {
       try {
         const botDataDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data');
@@ -2408,19 +2386,23 @@ async function spawnBranchBrain(
       const timer = setTimeout(() => {
         branchBrainRestartTimers.delete(bot);
         const status = brainSucceeded ? '✅ merged' : '⛔ failed';
-        // Post via loudspeaker — main brain filters its own messages,
-        // so the merge notice must come from loudspeaker (external sender).
+        // Loudspeaker posts merge notice WITH the BB's final summary.
+        // This is the ONLY path for BB results to reach the main brain —
+        // no IPC back-channel. Main brain filters its own messages, so
+        // the merge notice must come from loudspeaker (external sender).
+        const summary = lastPostedText ? `\n\n${lastPostedText.slice(0, 4000)}` : '';
+        const mergeText = `🪾 ${announcedTitle} — ${status}${summary}`;
         const ls = loadLoudspeakerConfig();
         if (ls) {
           getLoudspeakerToken(ls.homeserver, ls.username, ls.password).then(token => {
             if (token) {
-              relaySend(ls.homeserver, token, conn.roomId, `🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
+              relaySend(ls.homeserver, token, conn.roomId, mergeText).catch((err) => log(`branchBrain: summary post failed: ${errStr(err)}`));
             } else if (conn.accessToken) {
-              relaySend(conn.homeserver, conn.accessToken, conn.roomId, `🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post (fallback): ${errStr(err)}`));
+              relaySend(conn.homeserver, conn.accessToken, conn.roomId, mergeText).catch((err) => log(`branchBrain: summary post (fallback): ${errStr(err)}`));
             }
           });
         } else if (conn.accessToken) {
-          relaySend(conn.homeserver, conn.accessToken, conn.roomId, `🪾 ${announcedTitle} — ${status}`).catch((err) => log(`branchBrain: summary post (no ls): ${errStr(err)}`));
+          relaySend(conn.homeserver, conn.accessToken, conn.roomId, mergeText).catch((err) => log(`branchBrain: summary post (no ls): ${errStr(err)}`));
         }
         log(`branchBrain: ${bot} BB completed (${status})`);
       }, BRANCH_BRAIN_RESTART_DELAY);
