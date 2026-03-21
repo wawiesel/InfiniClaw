@@ -107,7 +107,7 @@ function isTransientServerError(err: unknown): boolean {
 }
 
 // Configurable intervals (env vars in milliseconds, or use defaults)
-const GITHUB_REPO_URL = 'https://github.com/wawiesel/InfiniClaw';
+const REPO_URL = 'https://gitea.a-gis.org/wawiesel/infiniclaw';
 const GIT_SYNC_INTERVAL = envInt('GIT_SYNC_INTERVAL', 3 * 60_000);          // default 3 min
 const SECRETS_SYNC_INTERVAL = envInt('SECRETS_SYNC_INTERVAL', 30_000);       // default 30s
 const HEALTH_INTERVAL = envInt('HEALTH_INTERVAL', 30 * 60_000);              // default 30 min
@@ -194,13 +194,88 @@ async function reportRecovery(system: string, conns: RoomConn[]): Promise<void> 
   await reply(conn, recoveryMsg);
 }
 
-/** Load GitHub bot token from secrets for PR reviews (returns empty string if unavailable). */
-function loadGitHubBotToken(): string {
+/** Load Gitea bot token for a specific bot from its env file. */
+function loadGiteaBotToken(bot: string): string {
   try {
-    const p = path.join(os.homedir(), '.config', 'infiniclaw', 'secrets', 'operator', 'github-bot.json');
-    const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
-    return typeof data?.token === 'string' ? data.token : '';
+    const envPath = path.join(secretsRepoPath(), 'bots', bot, 'env');
+    const content = fs.readFileSync(envPath, 'utf-8');
+    const match = content.match(/^GITEA_TOKEN=(.+)$/m);
+    return match?.[1]?.trim() ?? '';
   } catch { return ''; }
+}
+
+/** Load Gitea admin config (url, api_token) from operator/gitea.json. */
+function loadGiteaConfig(): { url: string; token: string } | null {
+  try {
+    const p = path.join(secretsRepoPath(), 'operator', 'gitea.json');
+    const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    if (data.url && data.api_token) return { url: data.url, token: data.api_token };
+    return null;
+  } catch { return null; }
+}
+
+// ── Gitea Chief Engineer permissions ─────────────────────────────────
+
+let currentChiefEngineer: string | null = null;
+
+/** Elect the Chief Engineer: lowest-rank onduty engineer on this ship. */
+function electChiefEngineer(): string | null {
+  let best: { bot: string; rank: number } | null = null;
+  for (const [bot, entry] of Object.entries(liveFleet)) {
+    if (entry.ship !== HOSTNAME) continue;
+    if (entry.role !== 'engineer') continue;
+    if (entry.status !== 'onduty') continue;
+    if (!best || entry.rank < best.rank) best = { bot, rank: entry.rank };
+  }
+  return best?.bot ?? null;
+}
+
+/** Sync Gitea write permissions when the Chief Engineer changes. */
+async function syncGiteaChiefPermissions(): Promise<void> {
+  const newChief = electChiefEngineer();
+  if (newChief === currentChiefEngineer) return;
+
+  const gitea = loadGiteaConfig();
+  if (!gitea) { log('gitea: no config — skipping chief permission sync'); return; }
+
+  const repo = 'wawiesel/infiniclaw';
+  const headers = { Authorization: `token ${gitea.token}`, 'Content-Type': 'application/json' };
+
+  // Revoke old chief
+  if (currentChiefEngineer) {
+    try {
+      // Remove from branch protection whitelists
+      await fetch(`${gitea.url}/api/v1/repos/${repo}/branch_protections/main`, {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ push_whitelist_usernames: ['wawiesel'], merge_whitelist_usernames: ['wawiesel'] }),
+      });
+      // Downgrade to read
+      await fetch(`${gitea.url}/api/v1/repos/${repo}/collaborators/${currentChiefEngineer}`, {
+        method: 'PUT', headers,
+        body: JSON.stringify({ permission: 'read' }),
+      });
+      log(`gitea: revoked write from ${currentChiefEngineer}`);
+    } catch (err) { log(`gitea: failed to revoke ${currentChiefEngineer}: ${errStr(err)}`); }
+  }
+
+  // Grant new chief
+  if (newChief) {
+    try {
+      // Upgrade to write collaborator
+      await fetch(`${gitea.url}/api/v1/repos/${repo}/collaborators/${newChief}`, {
+        method: 'PUT', headers,
+        body: JSON.stringify({ permission: 'write' }),
+      });
+      // Add to branch protection whitelists
+      await fetch(`${gitea.url}/api/v1/repos/${repo}/branch_protections/main`, {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ push_whitelist_usernames: ['wawiesel', newChief], merge_whitelist_usernames: ['wawiesel', newChief] }),
+      });
+      log(`gitea: granted write to ${newChief}`);
+    } catch (err) { log(`gitea: failed to grant ${newChief}: ${errStr(err)}`); }
+  }
+
+  currentChiefEngineer = newChief;
 }
 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
@@ -309,6 +384,8 @@ function persistFleet(): void {
   });
   fleetDirty = false;
   log('fleet: persisted (S3 + disk)');
+  // Sync Gitea chief engineer permissions on any fleet state change
+  syncGiteaChiefPermissions().catch((err) => log(`gitea: chief sync failed: ${errStr(err)}`));
 }
 
 /** Blocking persist: S3 + disk — use before process exit. */
@@ -655,7 +732,7 @@ function saveSyncToken(key: string, token: string): void {
 
 /** Format version string: ` · 📦 v1.4.0 [sha](github) (age) ↑N|↓N` */
 function fmtVersion(sha: string, ageMs: number, ud: string, tag?: string | null): string {
-  const url = `${GITHUB_REPO_URL}/commit/${sha}`;
+  const url = `${REPO_URL}/commit/${sha}`;
   const tagPrefix = tag ? `${tag} ` : '';
   return ` · 📦 ${tagPrefix}[${sha}](${url}) (${formatDuration(ageMs)}) ${ud}`;
 }
