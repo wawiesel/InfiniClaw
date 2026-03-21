@@ -307,6 +307,7 @@ export async function runContainerAgent(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
   imageOverride?: string,
+  secretsOverride?: Record<string, string>,
 ): Promise<ContainerOutput> {
   assertValidGroupFolder(group.folder);
 
@@ -316,18 +317,22 @@ export async function runContainerAgent(
   fs.mkdirSync(path.join(GROUPS_DIR, group.folder), { recursive: true });
   process.env.NANOCLAW_DB_PATH = path.join(STORE_DIR, 'messages.db');
 
-  // Collect and normalize secrets, build mounts, remap paths
-  const secrets = normalizeProviderSecrets(collectContainerSecrets(process.cwd()));
+  // Collect and normalize secrets, build mounts, remap paths.
+  // When secretsOverride is provided (e.g. from runBranchBrainAgent), use it
+  // directly to avoid process.env mutation and the resulting race condition.
+  const secrets = normalizeProviderSecrets(secretsOverride ?? collectContainerSecrets(process.cwd()));
   const mounts = buildVolumeMounts(group, input.isMain, secrets);
   const mappedSecrets = mapCertPathSecretsToContainer(secrets, mounts);
   remapInfiniClawRoot(mappedSecrets, mounts);
 
   writeBotDirectoryToIpc(group.folder);
 
-  // Matrix login — inject access token so in-container get_message can call the Matrix API
-  const matrixHs = process.env.MATRIX_HOMESERVER;
-  const matrixUser = process.env.MATRIX_USERNAME;
-  const matrixPass = process.env.MATRIX_PASSWORD;
+  // Matrix login — inject access token so in-container get_message can call the Matrix API.
+  // When secretsOverride is provided it may carry MATRIX_USERNAME/PASSWORD (not in ALLOWED_ENV_VARS
+  // so not exposed to the container, but needed here to acquire an access token).
+  const matrixHs = secretsOverride?.MATRIX_HOMESERVER ?? process.env.MATRIX_HOMESERVER;
+  const matrixUser = secretsOverride?.MATRIX_USERNAME ?? process.env.MATRIX_USERNAME;
+  const matrixPass = secretsOverride?.MATRIX_PASSWORD ?? process.env.MATRIX_PASSWORD;
   if (matrixHs && matrixUser && matrixPass && !mappedSecrets['MATRIX_ACCESS_TOKEN']) {
     try {
       const loginRes = await fetch(`${matrixHs}/_matrix/client/v3/login`, {
@@ -458,32 +463,14 @@ export async function runBranchBrainAgent(
   if (botEnv.BRAIN_API_KEY) botEnv.ANTHROPIC_API_KEY = botEnv.BRAIN_API_KEY;
   if (botEnv.BRAIN_CA_CERT_FILE) botEnv.NODE_EXTRA_CA_CERTS = botEnv.BRAIN_CA_CERT_FILE;
 
-  // Temporarily inject bot env vars into process.env for collectContainerSecrets
-  const savedEnv: Record<string, string | undefined> = {};
-  for (const key of ALLOWED_ENV_VARS) {
-    if (botEnv[key]) {
-      savedEnv[key] = process.env[key];
-      process.env[key] = botEnv[key];
-    }
-  }
-  // Also inject MATRIX_USERNAME/PASSWORD for the Matrix login block in runContainerAgent
-  for (const key of ['MATRIX_HOMESERVER', 'MATRIX_USERNAME', 'MATRIX_PASSWORD'] as const) {
-    if (botEnv[key]) {
-      savedEnv[key] = process.env[key];
-      process.env[key] = botEnv[key];
-    }
+  // Build secrets without mutating process.env to avoid a race condition when
+  // two BBs spawn concurrently. Start from the relay's base secrets, then
+  // overlay the bot-specific credentials so each BB gets its own isolated copy.
+  const baseSecrets = collectContainerSecrets(process.cwd());
+  const mergedSecrets: Record<string, string> = { ...baseSecrets };
+  for (const key of [...ALLOWED_ENV_VARS, 'MATRIX_USERNAME', 'MATRIX_PASSWORD']) {
+    if (botEnv[key]) mergedSecrets[key] = botEnv[key];
   }
 
-  try {
-    return await runContainerAgent(group, containerInput, onProcess, onOutput, BRANCH_BRAIN_IMAGE);
-  } finally {
-    // Restore original process.env
-    for (const [key, original] of Object.entries(savedEnv)) {
-      if (original === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = original;
-      }
-    }
-  }
+  return runContainerAgent(group, containerInput, onProcess, onOutput, BRANCH_BRAIN_IMAGE, mergedSecrets);
 }
