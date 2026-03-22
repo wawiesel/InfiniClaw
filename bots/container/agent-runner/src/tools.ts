@@ -944,6 +944,35 @@ Item fields for upsert:
         lines.push('Token usage: no session data found.');
       }
 
+      // Fleet metrics from relay-published S3 snapshot (if available)
+      const metricsSnapshotPath = path.join(ipcDir, 'metrics-snapshot.json');
+      try {
+        const snapshotRaw = fs.readFileSync(metricsSnapshotPath, 'utf-8');
+        const snapshot = JSON.parse(snapshotRaw) as {
+          ts?: number;
+          fleet?: { availability?: number; autonomyScore?: { day1?: number; day7?: number } };
+          operator?: { interventions?: { day1?: number; day7?: number }; mtbi?: number | null };
+          shipMetrics?: { relayUptimeSeconds?: number; relayRestarts?: { day1?: number; day7?: number } };
+        };
+        lines.push('');
+        lines.push('**Fleet metrics (relay snapshot)**');
+        if (snapshot.ts) {
+          const ageMin = Math.round((Date.now() - snapshot.ts) / 60_000);
+          lines.push(`Snapshot age: ${ageMin}m`);
+        }
+        if (snapshot.fleet) {
+          lines.push(`Availability: ${snapshot.fleet.availability ?? '?'}%`);
+          lines.push(`Autonomy: ${snapshot.fleet.autonomyScore?.day1 ?? '?'}% (1d) / ${snapshot.fleet.autonomyScore?.day7 ?? '?'}% (7d)`);
+        }
+        if (snapshot.operator) {
+          lines.push(`Interventions: ${snapshot.operator.interventions?.day1 ?? '?'}/day (1d)`);
+          if (snapshot.operator.mtbi != null) lines.push(`MTBI: ${snapshot.operator.mtbi}h`);
+        }
+        if (snapshot.shipMetrics) {
+          lines.push(`Relay restarts: ${snapshot.shipMetrics.relayRestarts?.day1 ?? '?'}/day (1d)`);
+        }
+      } catch { /* snapshot not yet available from relay */ }
+
       return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
     },
   );
