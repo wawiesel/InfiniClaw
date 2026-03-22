@@ -161,7 +161,7 @@ const workThreadIds: Record<string, string> = {};
 const activeReplyThreadIds: Record<string, string | undefined> = {};
 const activeReplyThreadSetAt: Record<string, number> = {};
 const BRANCH_THREAD_TTL_MS = parseInt(process.env.BRANCH_THREAD_TTL_MS || '1200000', 10); // default 20min
-// Per-turn thread for tool call <details> blocks when on main timeline
+// Per-turn thread for tool call S3 breadcrumbs when on main timeline
 const progressToolCallThreadIds: Record<string, string | undefined> = {};
 const threadMapLastSeen: Record<string, number> = {};
 // Last non-tool-call progress text per chat — used as tool call thread anchor title
@@ -731,13 +731,13 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
         threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
         const activeThread = activeReplyThreadIds[ctx.chatJid];
         if (activeThread) {
-          // Already in a thread — send <details> collapsible in-thread (desktop renders it; mobile shows inline but off main timeline)
+          // Already in a thread — send breadcrumb in-thread
           void ch.sendMessage(ctx.chatJid, toolCallHtml, activeThread).then(() => {
-                      }).catch((err) => {
+          }).catch((err) => {
             logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send tool call progress to thread');
           });
         } else {
-          // Main timeline — route tool calls to a dedicated per-turn thread
+          // Main timeline — route tool calls to a dedicated per-turn thread (never inline)
           const sendToToolThread = (threadId: string) => {
             void ch.sendMessage(ctx.chatJid, toolCallHtml, threadId).then(() => {
             }).catch((err) => {
@@ -748,10 +748,8 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
           if (progressToolCallThreadIds[ctx.chatJid]) {
             sendToToolThread(progressToolCallThreadIds[ctx.chatJid]!);
           } else if (ch.sendMessageReturningId) {
-            // Open a new thread with an anchor message, then post tool call into it
             const _toolTitleMatch = text.match(/🔧\s*([^<]{1,60})/);
             const _toolCallLabel = _toolTitleMatch ? formatToolLabel(_toolTitleMatch[1].trim()) : 'Tool call';
-            // Prefer the last text the bot wrote, then currentObjective, then raw tool name
             const _toolAnchor = lastProgressText[ctx.chatJid]
               || getChatActivity(ctx.chatJid)?.currentObjective?.slice(0, 80)
               || _toolCallLabel;
@@ -763,17 +761,13 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
                 progressToolCallThreadIds[ctx.chatJid] = anchorId;
                 threadMapLastSeen[`p:${ctx.chatJid}`] = Date.now();
                 sendToToolThread(anchorId);
-              } else {
-                // Fallback: send inline if we couldn't get an anchor ID
-                void ch.sendMessage(ctx.chatJid, toolCallHtml).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Fallback tool call send failed'); });
               }
+              // No fallback — if anchor creation fails, tool call is silently dropped
             }).catch((err) => {
               logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to open tool call thread anchor');
             });
-          } else {
-            // Channel doesn't support returning IDs — send inline as fallback
-            void ch.sendMessage(ctx.chatJid, toolCallHtml).catch((err) => { logger.warn({ chatJid: ctx.chatJid, err }, 'Inline tool call send failed'); });
           }
+          // No fallback — channels without sendMessageReturningId silently skip tool call display
         }
       } else {
         // ── Signals in progress text (22-signals.md) ──────────────────

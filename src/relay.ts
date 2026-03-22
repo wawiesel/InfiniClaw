@@ -2307,7 +2307,7 @@ async function spawnBranchBrain(
         // Convert <details> tool call blocks to compact S3-linked breadcrumbs
         let postText = output.result;
         if (isToolCallBlock(postText)) {
-          try { postText = await toolCallBreadcrumb(postText, bot ?? 'bb', groupFolder); } catch { /* post raw on failure */ }
+          try { postText = await toolCallBreadcrumb(postText, bot ?? 'bb', groupFolder); } catch { return; /* silently drop if breadcrumb fails — never post raw details */ }
         }
         lastPostedText = postText;
         await bbThreadReply(postText).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
