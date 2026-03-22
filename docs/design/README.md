@@ -44,6 +44,7 @@ Architecture and design specifications for InfiniClaw. Documents are ordered by 
 - `24-test-fleet.md` — Test fleet (IC01): parallel fleet for PR/feature testing, same system/homeserver/S3/repo isolated by configuration, IC01 relay process, fleet.json/intercom isolation, bot creation rules (IC00 bots can create IC01 bots)
 - `25-branch-deploy.md` — Branch deploy: `!wake <bot> --branch <name>` for live canary testing from a feature branch without merging to main, reuses Holodeck worktree code path
 - `26-zero-downtime.md` — Zero-downtime relay restart: S3-coordinated blue-green handoff (start new relay, warm up, swap via S3 lock, drain old) and router/worker architecture split (persistent thin router + restartable code worker with IPC buffering)
+- `27-alignment.md` — Alignment system: pre-deployment verification gate using holodeck sandbox (automated boot, inject, assert, pass/fail), IPC `alignment_run` command, `!wake --align` integration
 
 Engineers cannot modify these files (enforced by pre-commit hook). Architecture changes go through the Architect role.
 

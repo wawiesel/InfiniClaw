@@ -38,6 +38,7 @@ import {
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { capitalizeName, statusMessage } from './formatting.js';
 import { readWbs, writeWbs, assignItem, completeItem } from './wbs.js';
+import { runAlignment, formatReport } from './alignment.js';
 import { giteaCreateIssueForWbs, giteaCloseIssue } from './gitea-wbs.js';
 
 // ── Chief check ─────────────────────────────────────────────────────────
@@ -1203,6 +1204,26 @@ async function handlePodmanExec(data: CommandData, ctx: InfiniClawIpcContext): P
   }
 }
 
+async function handleAlignmentRun(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (requireMain(ctx, 'alignment_run')) return;
+  const bot = parseBot(data);
+  const branch = typeof data.branch === 'string' ? data.branch.trim() : 'main';
+  const chatJid = parseChatJid(data);
+  if (!chatJid) return;
+  if (!branch) {
+    await safeSend(ctx, chatJid, '⛔ alignment_run: missing branch');
+    return;
+  }
+  await safeSend(ctx, chatJid, `🔬 Running alignment for **${bot}** on branch \`${branch}\`...`);
+  try {
+    const report = await runAlignment(bot, branch);
+    await safeSend(ctx, chatJid, formatReport(report));
+  } catch (err) {
+    logger.error({ bot, branch, err }, 'Alignment run failed');
+    await safeSend(ctx, chatJid, `⛔ alignment_run failed: ${errStr(err)}`);
+  }
+}
+
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_brain_mode: handleSetBrainMode,
   refresh_bot: handleRefreshBot,
@@ -1232,6 +1253,7 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   wbs_write: handleWbsWrite,
 
   podman_exec: handlePodmanExec,
+  alignment_run: handleAlignmentRun,
 };
 
 export async function handleInfiniClawCommand(

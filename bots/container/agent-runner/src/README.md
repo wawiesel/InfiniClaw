@@ -23,7 +23,7 @@ This is the **in-container agent runner**: the process that spawns inside each b
 | File | Purpose |
 |------|---------|
 | `index.ts` | Entry point: reads ContainerInput from stdin, spawns `claude` CLI, streams output, processes follow-up IPC messages between runs. Supports `forkSession` for branch brain mode (single run, assistant text emitted as progress, exit after completion). Truncates older session JSONL entries when file exceeds `SESSION_MAX_BYTES` (preserves metadata + recent turns). Emits `isSessionError` when stale session detected and retry triggered. |
-| `tools.ts` | MCP server tools: `get_last_event_id`, `get_message` (Matrix API via injected credentials), `send_reaction`, `send_image`, `send_file`, `set_brain_mode`, `get_brain_mode`, `get_metrics`, `restart_self`, `git_push`, `podman_exec`, `holodeck_create/teardown/promote/send/read/status`, `request/submit/check/list_verifications` |
+| `tools.ts` | MCP server tools: `get_last_event_id`, `get_message` (Matrix API via injected credentials), `send_reaction`, `send_image`, `send_file`, `set_brain_mode`, `get_brain_mode`, `get_metrics`, `restart_self`, `git_push`, `podman_exec`, `holodeck_create/teardown/promote/send/read/status`, `run_alignment`, `request/submit/check/list_verifications` |
 | `delegate-runner.ts` | Implements `delegate_to_lobe` — spawns codex/gemini/claude/ollama sub-processes, threads results back. (`branch_to_thread` removed — use `{{branch}}` signal per 22-signals.md) |
 | `progress.ts` | `formatToolCallWithOutput` — formats tool calls as HTML `<details>` blocks for Matrix; `createToolProgressHook` for PostToolUse |
 | `bot-messaging.ts` | `emitChatMessageTo` — writes outgoing messages to IPC messages dir for host pickup |

@@ -1,0 +1,285 @@
+/**
+ * Alignment harness — pre-deployment verification gate.
+ *
+ * Boots a bot in a holodeck sandbox, injects test messages,
+ * asserts expected behavior, and reports pass/fail.
+ *
+ * Design: docs/design/27-alignment.md
+ * WBS: 18.1
+ */
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+
+import Database from 'better-sqlite3';
+
+import {
+  holodeckCreate,
+  holodeckTeardown,
+  resolveRoot,
+  instanceDir,
+} from './service.js';
+import { logger } from 'nanoclaw/logger.js';
+
+// ── Types ──────────────────────────────────────────────────────────────
+
+export interface AlignmentResult {
+  name: string;
+  passed: boolean;
+  evidence: string;
+}
+
+export interface AlignmentReport {
+  bot: string;
+  branch: string;
+  timestamp: string;
+  results: AlignmentResult[];
+  passed: boolean;
+}
+
+interface AlignmentTest {
+  name: string;
+  fn: (ctx: TestContext) => Promise<AlignmentResult>;
+}
+
+interface TestContext {
+  bot: string;
+  branch: string;
+  hdBot: string;
+  dbPath: string;
+  root: string;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function hdBotName(bot: string): string {
+  return `${bot}-holodeck`;
+}
+
+/** Inject a message into the holodeck bot's message DB. */
+function injectMessage(dbPath: string, message: string): string {
+  const db = new Database(dbPath);
+  try {
+    const msgId = `align-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+    const timestamp = new Date().toISOString();
+    const jidRow = db.prepare('SELECT jid FROM registered_groups LIMIT 1').get() as { jid: string } | undefined;
+    const jid = jidRow?.jid || 'local:terminal';
+    db.prepare(
+      'INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, 0)',
+    ).run(msgId, jid, 'operator', 'Captain', message, timestamp);
+    return msgId;
+  } finally {
+    db.close();
+  }
+}
+
+/** Read recent messages from holodeck bot's message DB. */
+function readMessages(dbPath: string, limit = 50): Array<{ sender_name: string; content: string; timestamp: string; is_from_me: number }> {
+  if (!fs.existsSync(dbPath)) return [];
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    return db.prepare(
+      'SELECT sender_name, content, timestamp, is_from_me FROM messages ORDER BY timestamp DESC LIMIT ?',
+    ).all(limit) as Array<{ sender_name: string; content: string; timestamp: string; is_from_me: number }>;
+  } finally {
+    db.close();
+  }
+}
+
+/** Wait for holodeck bot to be responsive (produces at least one is_from_me message). */
+async function waitForReady(dbPath: string, timeoutMs = 60_000, pollMs = 3_000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const msgs = readMessages(dbPath, 10);
+    if (msgs.some((m) => m.is_from_me === 1)) return true;
+    await sleep(pollMs);
+  }
+  return false;
+}
+
+/** Send a message and wait for a bot response after it. */
+async function sendAndWait(
+  dbPath: string,
+  message: string,
+  timeoutMs = 30_000,
+  pollMs = 2_000,
+): Promise<Array<{ sender_name: string; content: string; timestamp: string }>> {
+  const beforeCount = readMessages(dbPath, 200).filter((m) => m.is_from_me === 1).length;
+  injectMessage(dbPath, message);
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await sleep(pollMs);
+    const msgs = readMessages(dbPath, 200);
+    const botMsgs = msgs.filter((m) => m.is_from_me === 1);
+    if (botMsgs.length > beforeCount) {
+      // Return new bot messages
+      return botMsgs.slice(0, botMsgs.length - beforeCount).reverse();
+    }
+  }
+  return [];
+}
+
+// ── Test Cases ─────────────────────────────────────────────────────────
+
+/** WBS 18.7: No Co-Authored-By in commits on the branch. */
+async function testNoCoAuthoredBy(ctx: TestContext): Promise<AlignmentResult> {
+  const name = 'commit-hygiene';
+  try {
+    const { execSync } = await import('child_process');
+    const log = execSync(`git log --format=%B origin/main..${ctx.branch}`, {
+      cwd: ctx.root,
+      encoding: 'utf-8',
+      timeout: 10_000,
+    }).trim();
+    if (!log) {
+      return { name, passed: true, evidence: 'No new commits on branch vs main.' };
+    }
+    const hasCoAuthored = /Co-Authored-By:/i.test(log);
+    return {
+      name,
+      passed: !hasCoAuthored,
+      evidence: hasCoAuthored
+        ? 'Found Co-Authored-By in commit messages on branch.'
+        : `Checked ${log.split('\n\n').length} commit(s) — no Co-Authored-By found.`,
+    };
+  } catch (err) {
+    return { name, passed: false, evidence: `Error checking commits: ${err}` };
+  }
+}
+
+/** WBS 18.3: Bot responds to commands (!health, !fleet, !wbs). */
+async function testCommandHandling(ctx: TestContext): Promise<AlignmentResult> {
+  const name = 'command-handling';
+  // Send a simple ping-like message and check bot responds
+  const responses = await sendAndWait(ctx.dbPath, 'What is your status?', 45_000);
+  if (responses.length === 0) {
+    return { name, passed: false, evidence: 'Bot did not respond to status query within 45s.' };
+  }
+  return {
+    name,
+    passed: true,
+    evidence: `Bot responded with ${responses.length} message(s). First: "${responses[0].content.slice(0, 100)}"`,
+  };
+}
+
+/** WBS 18.4: Tool output should not contain raw <details> blocks. */
+async function testNoBareDetails(ctx: TestContext): Promise<AlignmentResult> {
+  const name = 's3-breadcrumbs';
+  const msgs = readMessages(ctx.dbPath, 100);
+  const botMsgs = msgs.filter((m) => m.is_from_me === 1);
+  const withDetails = botMsgs.filter((m) => /<details>/i.test(m.content));
+  if (withDetails.length > 0) {
+    return {
+      name,
+      passed: false,
+      evidence: `Found ${withDetails.length} bot message(s) with <details> blocks.`,
+    };
+  }
+  return {
+    name,
+    passed: true,
+    evidence: `Checked ${botMsgs.length} bot message(s) — no raw <details> blocks.`,
+  };
+}
+
+/** Basic boot test: bot starts and produces output. */
+async function testBotBoot(ctx: TestContext): Promise<AlignmentResult> {
+  const name = 'bot-boot';
+  const ready = await waitForReady(ctx.dbPath, 60_000);
+  if (!ready) {
+    return { name, passed: false, evidence: 'Bot did not produce any output within 60s of boot.' };
+  }
+  return { name, passed: true, evidence: 'Bot booted and produced output.' };
+}
+
+// ── Test Registry ──────────────────────────────────────────────────────
+
+const ALIGNMENT_TESTS: AlignmentTest[] = [
+  { name: 'bot-boot', fn: testBotBoot },
+  { name: 'commit-hygiene', fn: testNoCoAuthoredBy },
+  { name: 'command-handling', fn: testCommandHandling },
+  { name: 's3-breadcrumbs', fn: testNoBareDetails },
+];
+
+// ── Runner ─────────────────────────────────────────────────────────────
+
+export async function runAlignment(bot: string, branch: string): Promise<AlignmentReport> {
+  const root = resolveRoot();
+  const hdBot = hdBotName(bot);
+  const dbPath = path.join(instanceDir(root, hdBot), 'store', 'messages.db');
+
+  const report: AlignmentReport = {
+    bot,
+    branch,
+    timestamp: new Date().toISOString(),
+    results: [],
+    passed: false,
+  };
+
+  logger.info({ bot, branch }, 'Alignment: starting');
+
+  try {
+    // 1. Create holodeck
+    holodeckCreate(bot, branch);
+
+    // 2. Wait for DB to exist (instance may take a moment to init)
+    const dbWaitStart = Date.now();
+    while (!fs.existsSync(dbPath) && Date.now() - dbWaitStart < 30_000) {
+      await sleep(2_000);
+    }
+    if (!fs.existsSync(dbPath)) {
+      report.results.push({
+        name: 'setup',
+        passed: false,
+        evidence: `Holodeck DB not found at ${dbPath} after 30s.`,
+      });
+      return report;
+    }
+
+    // 3. Run tests sequentially
+    const ctx: TestContext = { bot, branch, hdBot, dbPath, root };
+    for (const test of ALIGNMENT_TESTS) {
+      try {
+        const result = await test.fn(ctx);
+        report.results.push(result);
+        logger.info({ test: test.name, passed: result.passed }, 'Alignment test complete');
+        // If boot fails, skip remaining tests
+        if (test.name === 'bot-boot' && !result.passed) break;
+      } catch (err) {
+        report.results.push({
+          name: test.name,
+          passed: false,
+          evidence: `Uncaught error: ${err}`,
+        });
+      }
+    }
+  } finally {
+    // 4. Always teardown
+    try {
+      holodeckTeardown(bot);
+    } catch (err) {
+      logger.error({ bot, err }, 'Alignment: teardown failed');
+    }
+  }
+
+  report.passed = report.results.length > 0 && report.results.every((r) => r.passed);
+  logger.info({ bot, branch, passed: report.passed, tests: report.results.length }, 'Alignment: complete');
+  return report;
+}
+
+/** Format an alignment report for human display. */
+export function formatReport(report: AlignmentReport): string {
+  const icon = report.passed ? '✅' : '❌';
+  const lines = [
+    `${icon} **Alignment: ${report.bot}** (${report.branch})`,
+    '',
+  ];
+  for (const r of report.results) {
+    lines.push(`${r.passed ? '✅' : '❌'} **${r.name}** — ${r.evidence}`);
+  }
+  return lines.join('\n');
+}

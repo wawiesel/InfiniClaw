@@ -448,6 +448,31 @@ Use holodeck_send to inject test messages and holodeck_read to check responses.`
     },
   );
 
+  // ── Alignment ──────────────────────────────────────────────────────
+
+  server.tool(
+    'run_alignment',
+    'Run the alignment harness — boots a bot in a holodeck sandbox, runs automated tests, and reports pass/fail. Use before deploying to verify the branch meets quality gates.',
+    {
+      bot: z.string().describe('Persona name of the bot to test'),
+      branch: z.string().default('main').describe('Git branch to test against (default: main)'),
+    },
+    async (args) => {
+      if (!isMain) {
+        return { content: [{ type: 'text' as const, text: 'Only MAIN can run alignment.' }], isError: true };
+      }
+      writeIpcFile(tasksDir, {
+        type: 'alignment_run',
+        bot: args.bot,
+        branch: args.branch,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Alignment run queued for ${args.bot} (branch: ${args.branch}). This may take a few minutes.` }] };
+    },
+  );
+
   // ── Git operations ─────────────────────────────────────────────────
 
   server.tool(
