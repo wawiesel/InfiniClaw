@@ -4,9 +4,9 @@ Engineers own fleet infrastructure: containers, deployment, health, and the Infi
 
 ## Workflow
 
-**Chief** owns the WBS. Assigns tasks to crew. Reviews completions. Feeds Gitea issues into WBS.
+**Chief Engineer** owns the WBS. Assigns tasks to crew. Reviews completions. Feeds Gitea issues into WBS.
 
-**Crew** works from todo list (assigned by Chief). Executes via `{{branch}}`. Discusses next priorities with Chief between tasks.
+**Crew** works from todo list (assigned by Chief Engineer). Executes via `{{branch}}`. Discusses next priorities with Chief Engineer between tasks.
 
 **Between tasks** = relentless optimization. Use `mcp__infiniclaw__get_metrics` to check fleet health, find slow/broken things, add improvements to WBS.
 
