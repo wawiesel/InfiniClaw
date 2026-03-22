@@ -2914,19 +2914,19 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
           if (crewAssignments.length > 0) {
             const assignList = crewAssignments.join('; ');
             nudge = chiefTitle
-              ? `<m>${name}</m>, you are the chief. Crew assignments dispatched: ${assignList}. Your task: "${chiefTitle}".`
-              : `<m>${name}</m>, you are the chief. Crew assignments dispatched: ${assignList}. Check the WBS for any remaining unassigned items.`;
+              ? `{{mention ${name}}}, you are the chief. Crew assignments dispatched: ${assignList}. Your task: "${chiefTitle}".`
+              : `{{mention ${name}}}, you are the chief. Crew assignments dispatched: ${assignList}. Check the WBS for any remaining unassigned items.`;
           } else {
             nudge = chiefTitle
-              ? `<m>${name}</m>, you are the chief. Work on your next task: "${chiefTitle}".`
-              : `<m>${name}</m>, you are the chief. Review the WBS for unassigned ready items and assign work to available crew.`;
+              ? `{{mention ${name}}}, you are the chief. Work on your next task: "${chiefTitle}".`
+              : `{{mention ${name}}}, you are the chief. Review the WBS for unassigned ready items and assign work to available crew.`;
           }
           log(`heartbeat: nudged chief ${name} in ${roomName}${chiefTitle ? ` (WBS: "${chiefTitle}")` : ''}${crewAssignments.length > 0 ? ` (assigned ${crewAssignments.length} crew item(s))` : ''}`);
         } else {
           // Non-chief path (WBS 7.0): if idle with no WBS item, ask the chief for work.
           const assignedTitle = await autoAssignWbsItem(root, bot);
           if (assignedTitle) {
-            nudge = `<m>${name}</m>, work on your next task: "${assignedTitle}".`;
+            nudge = `{{mention ${name}}}, work on your next task: "${assignedTitle}".`;
           } else if (chiefBot) {
             const chiefEnv = loadProfileEnv(root, chiefBot);
             const chiefName = chiefEnv?.ASSISTANT_NAME || capitalizeName(chiefBot);
@@ -2990,7 +2990,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
   // Step 2: Send retrospective questions to quarters room
   if (quartersConn?.accessToken) {
     const questions = [
-      `<m>${name}</m>, your duty cycle is complete. Please reflect:`,
+      `{{mention ${name}}}, your duty cycle is complete. Please reflect:`,
       '1. What went well since your last duty cycle?',
       '2. What didn\'t go well? Any blockers or mistakes?',
       '3. How could you do better next time?',
@@ -4589,7 +4589,8 @@ async function curtainLoop(captainUserId: string): Promise<void> {
             const name = capitalizeName(bot);
             const escaped = escapeRegex(name);
             const mentioned =
-              new RegExp(`<m>${escaped}</m>`, 'i').test(body) ||
+              new RegExp(`\\{\\{mention\\s+${escaped}\\}\\}`, 'i').test(body) ||
+              new RegExp(`<m>${escaped}</m>`, 'i').test(body) || // TODO: remove legacy <m>
               new RegExp(`@${escaped}\\b`, 'i').test(body) ||
               new RegExp(`matrix\\.to/#/@${bot}[^"]*">${escaped}`, 'i').test(formattedBody);
             if (mentioned) {

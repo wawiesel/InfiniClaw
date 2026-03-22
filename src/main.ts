@@ -781,7 +781,7 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
           }
 
           for (const name of callouts) {
-            progressSendText = `<m>${name}</m> ${progressSendText}`;
+            progressSendText = `{{mention ${name}}} ${progressSendText}`;
           }
         }
 
@@ -915,7 +915,7 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
     }
 
     for (const name of callouts) {
-      sendText = `<m>${name}</m> ${sendText}`;
+      sendText = `{{mention ${name}}} ${sendText}`;
     }
 
     const { suffix } = await auditSignals(processed, botName, roomName);
