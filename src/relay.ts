@@ -22,6 +22,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { collectHealthData, sessionCleanup } from './health-check.js';
+import { isToolCallBlock, toolCallBreadcrumb } from './tool-call-breadcrumb.js';
 import { runBranchBrainAgent } from './container-spawn.js';
 import type { ContainerOutput } from './container-spawn.js';
 import { upsertEnvLine } from './env-utils.js';
@@ -2247,8 +2248,13 @@ async function spawnBranchBrain(
       // Stream progress to Matrix thread
       if (output.isProgress && output.result) {
         postedCount++;
-        lastPostedText = output.result;
-        await bbThreadReply(output.result).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
+        // Convert <details> tool call blocks to compact S3-linked breadcrumbs
+        let postText = output.result;
+        if (isToolCallBlock(postText)) {
+          try { postText = await toolCallBreadcrumb(postText, bot ?? 'bb', groupFolder); } catch { /* post raw on failure */ }
+        }
+        lastPostedText = postText;
+        await bbThreadReply(postText).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
       } else if (!output.isProgress && output.result && postedCount === 0) {
         // Final result, nothing streamed yet
         postedCount++;
