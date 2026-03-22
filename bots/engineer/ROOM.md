@@ -24,6 +24,12 @@ The Chief Engineer owns the WBS. Gitea issues are inputs — the WBS is the work
 4. When BB completes, report the result — Chief accepts or sends back
 5. If idle with no assignments, ask the Chief for work
 
+**When truly idle** (no WBS tasks, no Chief online):
+- Run `!metrics` — check fleet health, activity, performance numbers
+- Look for optimization opportunities: slow bots, high crash rates, stale containers
+- Develop improvements and add to WBS for Chief review
+- The engineer's idle state is relentless optimization, never standing by
+
 ## Activation
 
 The Commanding Officer (CO) — lowest rank present via `fleet.json` and `IsChief` env var — handles all general messages on the main timeline.
