@@ -325,6 +325,16 @@ export async function runContainerAgent(
   const mappedSecrets = mapCertPathSecretsToContainer(secrets, mounts);
   remapInfiniClawRoot(mappedSecrets, mounts);
 
+  // Rewrite env file with remapped paths (INFINICLAW_ROOT host→container).
+  // buildVolumeMounts wrote the env file before remapping — update it now.
+  const envDir = path.join(DATA_DIR, 'env');
+  const remappedLines = Object.entries(mappedSecrets)
+    .filter(([key, value]) => ALLOWED_ENV_VARS.includes(key) && value.trim().length > 0)
+    .map(([key, value]) => `${key}=${quoteEnvValue(value)}`);
+  if (remappedLines.length > 0) {
+    fs.writeFileSync(path.join(envDir, 'env'), remappedLines.join('\n') + '\n');
+  }
+
   writeBotDirectoryToIpc(group.folder);
 
   // Matrix login — inject access token so in-container get_message can call the Matrix API.
