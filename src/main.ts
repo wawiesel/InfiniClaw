@@ -946,6 +946,16 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   }
   // ── End Signals ──────────────────────────────────────────────────────
 
+  // Convert <details> tool call blocks to S3 breadcrumbs (same as progress path)
+  if (sendText.includes('<details>') && isToolCallBlock(sendText)) {
+    try {
+      sendText = await sharedToolCallBreadcrumb(sendText, ASSISTANT_NAME, group?.name ?? ctx.chatJid);
+    } catch {
+      // Silently drop raw details — never post them to the timeline
+      return;
+    }
+  }
+
   const ch = findChannel(channels, sendJid);
   if (ch) {
     if (ch.setTyping) await ch.setTyping(sendJid, true);

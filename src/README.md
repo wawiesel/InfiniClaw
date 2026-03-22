@@ -10,7 +10,7 @@ Architecture and behavior are specified in `docs/design/` — this README docume
 | [02-matrix](../docs/design/02-matrix.md) | `channels/matrix.ts`, `matrix-api.ts`, `intercom-relay.ts` |
 | [03-container](../docs/design/03-container.md) | `container-spawn.ts`, `container-mounts.ts`, `container-secrets.ts`, `run-container.ts` |
 | [04-ship](../docs/design/04-ship.md) | `ship-config.ts`, `relay.ts`, `s3-sync.ts`, `git-utils.ts` |
-| [05-bot](../docs/design/05-bot.md) | `main.ts`, `infini-config.ts`, `message-filtering.ts` |
+| [05-bot](../docs/design/05-bot.md) | `main.ts` (S3 breadcrumbs in both progress and result paths via `tool-call-breadcrumb.ts`), `infini-config.ts`, `message-filtering.ts` |
 | [06-brain](../docs/design/06-brain.md) | `brain-management.ts`, `container-spawn.ts` |
 | [07-ipc](../docs/design/07-ipc.md) | `ipc-watcher.ts`, `ipc-commands.ts` |
 | [08-threading](../docs/design/08-threading.md) | `relay.ts` (branch brains: bot-driven spawn via `runBranchBrainAgent`, unknown-bot guard only — no duty-status gate, timeout, thread closure on merge with relay-sender exclusion to prevent spam loops, loudspeaker posts merge notice preferring {{merge}} summary on main timeline, Ralph loop re-injects objective after each BB turn, merge_request IPC written on all BB exits for delegate thread cleanup, cross-machine command feedback via speaker-gated reply, BB prompt is just the objective (inherits persona via --fork-session), env file rewritten after INFINICLAW_ROOT remap); `main.ts` (nested branch guard — `{{branch}}` blocked inside threads); `ipc-watcher.ts` (`clearDelegateThread` on merge_request). Lobes not yet implemented. |
