@@ -257,7 +257,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn({ sourceGroup, data }, 'Invalid merge_request payload');
                 } else {
                   deps.onMergeRequest({ sourceGroup, threadId, bot, summary });
-                  logger.info({ sourceGroup, threadId, bot }, 'IPC merge_request handled');
+                  clearDelegateThread(sourceGroup);
+                  logger.info({ sourceGroup, threadId, bot }, 'IPC merge_request handled — delegate thread cleared');
                 }
                 fs.unlinkSync(processingPath);
                 continue;

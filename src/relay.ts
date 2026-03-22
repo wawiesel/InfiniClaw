@@ -2266,6 +2266,19 @@ async function spawnBranchBrain(
         lastPostedText = output.result;
         await bbThreadReply(output.result).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
       }
+      // Re-inject objective after each completed BB turn to prevent drift.
+      if (!output.isProgress) {
+        const proc = activeBranchBrainProcs.get(replyThreadId);
+        if (proc?.stdin && !proc.stdin.destroyed) {
+          const reminder = JSON.stringify({ type: 'user_message', content: `[System] Stay focused on your branch objective: ${objective}` }) + '\n';
+          try {
+            proc.stdin.write(reminder);
+            log(`branchBrain: objective re-injected into thread=${replyThreadId.slice(0, 20)}`);
+          } catch (err) {
+            log(`branchBrain: objective re-injection failed: ${errStr(err)}`);
+          }
+        }
+      }
     },
   );
 
@@ -2294,6 +2307,16 @@ async function spawnBranchBrain(
         content += lastPostedText || '(no output)';
         fs.writeFileSync(path.join(botDataDir, `bb-pending-${replyThreadId.slice(0, 12)}.md`), content);
       } catch (err) { log(`branchBrain: failed to write pending delivery: ${errStr(err)}`); }
+
+      // Write merge_request IPC task so ipc-watcher clears delegateThreadIds even if
+      // the BB exited without sending {{merge}} (timeout, crash, or clean exit).
+      try {
+        const ipcTasksDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'ipc', groupFolder, 'tasks');
+        fs.mkdirSync(ipcTasksDir, { recursive: true });
+        const taskFile = path.join(ipcTasksDir, `merge_request-${Date.now()}.json`);
+        fs.writeFileSync(taskFile, JSON.stringify({ type: 'merge_request', thread_id: replyThreadId, bot, summary: mergeSummary }));
+        log(`branchBrain: wrote merge_request IPC task for ${bot} thread=${replyThreadId.slice(0, 20)}`);
+      } catch (err) { log(`branchBrain: failed to write merge_request IPC task: ${errStr(err)}`); }
     }
 
     // Loudspeaker merge notice on main timeline — ONLY path for BB results to reach main brain.
@@ -2328,6 +2351,17 @@ async function spawnBranchBrain(
     if (bot) recordBranchBrainResult(bot, false);
     log(`branchBrain: spawn error: ${errStr(err)}`);
     bbThreadReply(`⚠️ Branch Brain failed: ${errStr(err)}`).catch(() => {});
+
+    // Write merge_request IPC task so ipc-watcher clears delegateThreadIds on crash/error.
+    if (bot) {
+      try {
+        const ipcTasksDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'ipc', groupFolder, 'tasks');
+        fs.mkdirSync(ipcTasksDir, { recursive: true });
+        const taskFile = path.join(ipcTasksDir, `merge_request-${Date.now()}.json`);
+        fs.writeFileSync(taskFile, JSON.stringify({ type: 'merge_request', thread_id: replyThreadId, bot }));
+        log(`branchBrain: wrote merge_request IPC task (catch) for ${bot} thread=${replyThreadId.slice(0, 20)}`);
+      } catch (writeErr) { log(`branchBrain: failed to write merge_request IPC task (catch): ${errStr(writeErr)}`); }
+    }
   });
 }
 

@@ -861,8 +861,12 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
           });
 
           if (branchRequest) {
-            turnDispatchCalled[ctx.chatJid] = true;
-            writeBranchRelayTask(branchRequest, ctx.chatJid);
+            if (activeReplyThreadIds[ctx.chatJid]) {
+              logger.warn({ chatJid: ctx.chatJid }, 'branchRequest skipped: nested branching from inside a thread is not allowed');
+            } else {
+              turnDispatchCalled[ctx.chatJid] = true;
+              writeBranchRelayTask(branchRequest, ctx.chatJid);
+            }
           }
 
           for (const name of callouts) {
@@ -910,7 +914,13 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
     if (routeOverride?.room) sendJid = routeOverride.room;
     if (routeOverride?.thread) sendThread = routeOverride.thread;
 
-    if (branchRequest) writeBranchRelayTask(branchRequest, ctx.chatJid);
+    if (branchRequest) {
+      if (activeReplyThreadIds[ctx.chatJid]) {
+        logger.warn({ chatJid: ctx.chatJid }, 'branchRequest skipped: nested branching from inside a thread is not allowed');
+      } else {
+        writeBranchRelayTask(branchRequest, ctx.chatJid);
+      }
+    }
 
     for (const name of callouts) {
       sendText = `<m>${name}</m> ${sendText}`;
