@@ -1,10 +1,11 @@
 /**
- * Tests for WBS 13: S3 as single source of truth for fleet config.
- * Covers S3 key derivation, ships cache, and fleet config helpers.
+ * Tests for WBS 13 + WBS 10.2: S3 as single source of truth for fleet config;
+ * multi-fleet S3 key derivation for fleet-report keys.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   fleetConfigKey,
+  fleetId,
   SHIPS_S3_KEY,
   clearShipConfigCache,
   isValidBotName,
@@ -81,6 +82,64 @@ describe('fleet-config S3 keys are safe', () => {
   it('fleet config keys do not contain double slashes', () => {
     expect(fleetConfigKey().includes('//')).toBe(false);
     expect(SHIPS_S3_KEY.includes('//')).toBe(false);
+  });
+});
+
+// ── fleetId export (WBS 10.2) ─────────────────────────────────────────────────
+
+describe('fleetId', () => {
+  it('returns infiniclaw00 when no env var set', () => {
+    expect(fleetId()).toBe('infiniclaw00');
+  });
+
+  it('returns infiniclaw00 for fleet.json env var', () => {
+    process.env['INFINICLAW_FLEET'] = 'fleet.json';
+    expect(fleetId()).toBe('infiniclaw00');
+  });
+
+  it('returns infiniclaw01 for fleet01.json env var', () => {
+    process.env['INFINICLAW_FLEET'] = 'fleet01.json';
+    expect(fleetId()).toBe('infiniclaw01');
+  });
+
+  it('returns infiniclaw02 for fleet02.json env var', () => {
+    process.env['INFINICLAW_FLEET'] = 'fleet02.json';
+    expect(fleetId()).toBe('infiniclaw02');
+  });
+});
+
+// ── Fleet-report S3 key format (WBS 10.2) ────────────────────────────────────
+
+describe('fleet-report S3 key format', () => {
+  const SAFE_S3_KEY = /^[A-Za-z0-9][A-Za-z0-9_./-]{0,1023}$/;
+
+  it('fleet-report key includes fleet namespace', () => {
+    const fleet = 'infiniclaw00';
+    const ship = 'Herc';
+    const key = `fleet-report/${fleet}/${ship}.json`;
+    expect(key).toBe('fleet-report/infiniclaw00/Herc.json');
+  });
+
+  it('fleet-report IC01 key includes ic01 namespace', () => {
+    const fleet = 'infiniclaw01';
+    const ship = 'Staging1';
+    const key = `fleet-report/${fleet}/${ship}.json`;
+    expect(key).toBe('fleet-report/infiniclaw01/Staging1.json');
+  });
+
+  it('fleet-report key is S3-safe', () => {
+    const key = `fleet-report/${fleetId()}/Herc.json`;
+    expect(SAFE_S3_KEY.test(key)).toBe(true);
+  });
+
+  it('fleet-report key does not start with slash', () => {
+    const key = `fleet-report/${fleetId()}/Herc.json`;
+    expect(key.startsWith('/')).toBe(false);
+  });
+
+  it('fleet-report key does not contain double slashes', () => {
+    const key = `fleet-report/${fleetId()}/Herc.json`;
+    expect(key.includes('//')).toBe(false);
   });
 });
 

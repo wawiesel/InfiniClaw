@@ -42,7 +42,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
+import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId } from './ship-config.js';
 import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
@@ -848,8 +848,9 @@ function botVersion(root: string, bot: string): string {
 // ── Speaker election via S3 commit timestamps ────────────────────
 
 const RELAY_S3_PREFIX = 'relay';
-const FLEET_S3_PREFIX = 'fleet-report';
-const FLEET_ASSEMBLED_S3_KEY = 'fleet-assembled/latest.json';
+/** S3 prefix for fleet reports, namespaced by fleet so IC00 and IC01 don't collide. */
+function fleetReportPrefix(fleet: string): string { return `fleet-report/${fleet}`; }
+const FLEET_ASSEMBLED_S3_KEY = `fleet-assembled/${fleetId()}/latest.json`;
 const METRICS_ASSEMBLED_S3_KEY = 'metrics-assembled/latest.json';
 let localCommitEpoch = 0; // epoch seconds of HEAD commit the relay is running
 
@@ -1341,7 +1342,7 @@ async function publishFleetReport(): Promise<FleetReport> {
     try {
       await s3.client.send(new PutObjectCommand({
         Bucket: s3.bucket,
-        Key: `${FLEET_S3_PREFIX}/${thisShipName()}.json`,
+        Key: `${fleetReportPrefix(fleetId())}/${thisShipName()}.json`,
         Body: Buffer.from(JSON.stringify(report)),
         ContentType: 'application/json',
       }));
@@ -3584,6 +3585,34 @@ async function handleMetricsHealth(cmd: string, conn: RoomConn): Promise<void> {
   }
 }
 
+// ── Fleet display helpers ─────────────────────────────────────────
+
+const FLEET_DISPLAY: Record<string, { emoji: string; name: string }> = {
+  infiniclaw00: { emoji: '🌌', name: 'InfiniClaw00' },
+  infiniclaw01: { emoji: '🧪', name: 'InfiniClaw01' },
+};
+
+/** Human-readable fleet label with emoji, e.g. "🌌InfiniClaw00". */
+function fleetDisplayName(fleet: string): string {
+  const d = FLEET_DISPLAY[fleet];
+  return d ? `${d.emoji}${d.name}` : fleet;
+}
+
+/**
+ * Parse a fleet selector arg from !fleet [arg] into a canonical fleet ID or 'all'.
+ * Accepts: '', 'ic00', 'ic01', 'infiniclaw00', 'infiniclaw01', 'all'.
+ * Falls back to the current relay's fleet for unrecognized args.
+ */
+function parseFleetSelector(arg: string): string {
+  const normalized = arg.trim().toLowerCase();
+  if (!normalized) return fleetId();
+  if (normalized === 'all') return 'all';
+  const icMatch = normalized.match(/^ic(\d+)$/);
+  if (icMatch) return `infiniclaw${icMatch[1].padStart(2, '0')}`;
+  if (/^infiniclaw\d+$/.test(normalized)) return normalized;
+  return fleetId();
+}
+
 // ── Register command handlers with the registry ──────────────────
 
 function registerRelayCommands(): void {
@@ -3902,6 +3931,11 @@ function registerRelayCommands(): void {
 
     fleet: async (cmd, conn) => {
       try {
+        // Parse fleet selector: !fleet, !fleet ic00, !fleet ic01, !fleet all
+        const arg = cmd.slice('!fleet'.length).trim();
+        const targetFleet = parseFleetSelector(arg);
+        const currentFleet = fleetId();
+
         // Every relay publishes its own report to S3, then the lowest-rank available relay
         // assembles and responds. FLEET_ASSEMBLED_S3_KEY is used as a coordination lock so
         // only one relay posts the assembled view even when the elected speaker is down.
@@ -3925,11 +3959,12 @@ function registerRelayCommands(): void {
           } catch { /* no claim yet — proceed as fallback assembler */ }
         }
 
-        // Fleet health grade computed after assembling all reports
-        let threadRoot: string | undefined;
-
-        const ships = safeLoadShips();
-        const allShipNames = Object.keys(ships);
+        const allShips = safeLoadShips();
+        // Filter ships by fleet selector (ships without fleet field are treated as infiniclaw00)
+        const visibleShips = targetFleet === 'all'
+          ? allShips
+          : Object.fromEntries(Object.entries(allShips).filter(([, s]) => (s.fleet ?? 'infiniclaw00') === targetFleet));
+        const visibleShipNames = Object.keys(visibleShips);
 
         // Write assembly claim to S3 so other relays know someone is assembling
         if (s3) {
@@ -3941,20 +3976,25 @@ function registerRelayCommands(): void {
           })).catch(() => {});
         }
 
-        // Poll S3 for fresh reports (up to 5s), then read stale as fallback
-        const freshReports: Record<string, FleetReport> = { [thisShipName()]: report };
+        // Poll S3 for fresh reports from relevant ships.
+        // Each ship's report lives under its fleet's S3 prefix (fleet-report/{fleet}/{ship}.json).
+        const freshReports: Record<string, FleetReport> = {};
+        if (targetFleet === currentFleet || targetFleet === 'all') {
+          freshReports[thisShipName()] = report; // include this relay's own fresh report
+        }
         const staleReports: Record<string, FleetReport> = {};
-        if (s3 && allShipNames.length > 1) {
+        if (s3 && visibleShipNames.length > Object.keys(freshReports).length) {
           const deadline = Date.now() + 5_000;
           while (Date.now() < deadline) {
-            const missing = allShipNames.filter(s => !freshReports[s]);
+            const missing = visibleShipNames.filter(s => !freshReports[s]);
             if (missing.length === 0) break;
             await sleep(500);
             for (const shipName of missing) {
+              const shipFleet = allShips[shipName]?.fleet ?? 'infiniclaw00';
               try {
                 const resp = await s3.client.send(new GetObjectCommand({
                   Bucket: s3.bucket,
-                  Key: `${FLEET_S3_PREFIX}/${shipName}.json`,
+                  Key: `${fleetReportPrefix(shipFleet)}/${shipName}.json`,
                 }));
                 const chunks: Uint8Array[] = [];
                 for await (const chunk of resp.Body as AsyncIterable<Uint8Array>) chunks.push(chunk);
@@ -3972,9 +4012,14 @@ function registerRelayCommands(): void {
         // Merge: fresh reports win, then stale, then liveFleet fallback
         const allReports: Record<string, FleetReport> = { ...staleReports, ...freshReports };
 
-        // Assemble output
+        // Assemble output — only bots on visible ships
+        const hostnameToShip: Record<string, string> = {};
+        for (const [sName, sEntry] of Object.entries(allShips)) hostnameToShip[sEntry.hostname] = sName;
+        const visibleShipSet = new Set(visibleShipNames);
         const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; semver?: string; localStatus: string; grade?: string; activity?: string; tokPerDay?: number }> = {};
         for (const [botId, entry] of Object.entries(liveFleet)) {
+          const sName = (entry.ship && hostnameToShip[entry.ship]) || entry.ship || '';
+          if (targetFleet !== 'all' && sName && !visibleShipSet.has(sName)) continue;
           allBots[botId] = { ...entry, name: capitalizeName(botId), gitVersion: '', localStatus: entry.status };
         }
         for (const [, shipReport] of Object.entries(allReports)) {
@@ -3991,28 +4036,32 @@ function registerRelayCommands(): void {
           }
         }
 
-        // Group by ship (resolve hostname → ship name)
-        const hostnameToName: Record<string, string> = {};
-        for (const [sName, sEntry] of Object.entries(ships)) hostnameToName[sEntry.hostname] = sName;
+        // Group by ship
         const byShip: Record<string, Array<[string, typeof allBots[string]]>> = {};
         for (const [botId, entry] of Object.entries(allBots)) {
-          const s = (entry.ship && hostnameToName[entry.ship]) || entry.ship || 'drydock';
+          const s = (entry.ship && hostnameToShip[entry.ship]) || entry.ship || 'drydock';
           (byShip[s] ??= []).push([botId, entry]);
         }
-        for (const s of Object.keys(ships)) { byShip[s] ??= []; }
+        for (const s of visibleShipNames) { byShip[s] ??= []; }
 
-        // Compute aggregate fleet health grade
+        // Compute aggregate health and throughput for header
         const botGrades = Object.values(allBots)
           .filter(b => b.localStatus !== 'sleep' && b.localStatus !== 'transit' && b.grade)
           .map(b => b.grade as HealthGrade);
         const fleetGrade = botGrades.length > 0 ? computeFleetHealthGrade(botGrades) : 'A' as HealthGrade;
         const fleetTokPerDay = Object.values(allBots).reduce((sum, b) => sum + (b.tokPerDay ?? 0), 0);
-        threadRoot = await reply(conn, `🌌InfiniClaw00·${gradeEmoji(fleetGrade)}${fleetGrade}${activityEmoji(fleetTokPerDay)}`);
+        // Dynamic header: fleet name or "All Fleets"
+        const headerLabel = targetFleet === 'all' ? '🌌🧪 All Fleets' : fleetDisplayName(targetFleet);
+        const threadRoot = await reply(conn, `${headerLabel}·${gradeEmoji(fleetGrade)}${fleetGrade}${activityEmoji(fleetTokPerDay)}`);
 
+        // Sort ships: group by fleet (alphabetical), then by rank within fleet; drydock last
         const shipOrder = Object.keys(byShip).sort((a, b) => {
           if (a === 'drydock') return 1;
           if (b === 'drydock') return -1;
-          return (ships[a]?.rank ?? 99) - (ships[b]?.rank ?? 99);
+          const fleetA = allShips[a]?.fleet ?? 'infiniclaw00';
+          const fleetB = allShips[b]?.fleet ?? 'infiniclaw00';
+          if (fleetA !== fleetB) return fleetA.localeCompare(fleetB);
+          return (allShips[a]?.rank ?? 99) - (allShips[b]?.rank ?? 99);
         });
 
         // Global max name length for consistent alignment across all ships
@@ -4021,9 +4070,17 @@ function registerRelayCommands(): void {
         );
 
         const lines: string[] = [];
+        let lastFleet = '';
         for (const shipName of shipOrder) {
-          const sConfig = ships[shipName];
-          const shipReport = allReports[shipName];
+          const sConfig = allShips[shipName];
+          const shipFleet = sConfig?.fleet ?? 'infiniclaw00';
+
+          // For !fleet all: insert fleet section header when fleet changes
+          if (targetFleet === 'all' && shipFleet !== lastFleet && shipName !== 'drydock') {
+            if (lines.length > 0) lines.push('');
+            lines.push(`**${fleetDisplayName(shipFleet)}**`);
+            lastFleet = shipFleet;
+          }
 
           const bots = byShip[shipName].sort((a, b) => a[1].rank - b[1].rank);
 
@@ -4033,7 +4090,7 @@ function registerRelayCommands(): void {
             const rank = sConfig?.rank ?? 99;
             const commissioned = sConfig?.commissioned !== false;
             const isThisShipSpeaker = commissioned && isSpeakerCached && sConfig?.rank != null &&
-              Object.values(ships).filter(s => s.commissioned).every(s => (s.rank ?? 99) >= (sConfig?.rank ?? 99));
+              Object.values(visibleShips).filter(s => s.commissioned).every(s => (s.rank ?? 99) >= (sConfig?.rank ?? 99));
             // Aggregate ship health (worst grade) and throughput (sum)
             const gradeOrder = ['A', 'B', 'C', 'F'];
             let worstGrade = 'A';
@@ -4092,23 +4149,23 @@ function registerRelayCommands(): void {
 
         // Add blank lines between ship groups for readability
         const spaced = lines.reduce<string[]>((acc, line, i) => {
-          // Insert blank line before ship headers (lines that don't start with tree chars), skip first
-          if (i > 0 && !line.startsWith('├') && !line.startsWith('└') && !line.startsWith('  ⚠')) acc.push('');
+          // Insert blank line before ship/fleet headers (lines that don't start with tree chars or warnings), skip first
+          if (i > 0 && !line.startsWith('├') && !line.startsWith('└') && !line.startsWith('  ⚠') && !line.startsWith('**')) acc.push('');
           acc.push(line);
           return acc;
         }, []);
 
         // Concise summary footer
         const allBotEntries = Object.values(allBots);
-        const awake = allBotEntries.filter(b => b.localStatus !== 'sleep' && b.localStatus !== 'dream' && b.localStatus !== 'transit');
         const ondutyCount = allBotEntries.filter(b => b.localStatus === 'onduty').length;
         const sleepCount = allBotEntries.filter(b => b.localStatus === 'sleep' || b.localStatus === 'dream').length;
         const warnCount = allBotEntries.filter(b => b.localStatus === 'warn').length;
         const totalTok = allBotEntries.reduce((sum, b) => sum + (b.tokPerDay ?? 0), 0);
+        const summaryLabel = targetFleet === 'all' ? 'All Fleets' : fleetDisplayName(targetFleet);
         const parts = [`${allBotEntries.length} bots`, `${ondutyCount} onduty`, `${sleepCount} asleep`];
         if (warnCount > 0) parts.push(`⚠️${warnCount} warn`);
         parts.push(`${fmtTok(totalTok)} tok/d`);
-        spaced.push('', `**Fleet** · ${parts.join(' · ')}`);
+        spaced.push('', `**${summaryLabel}** · ${parts.join(' · ')}`);
 
         if (threadRoot) await threadReply(conn, threadRoot, spaced.join('\n'));
       } catch (err) {
