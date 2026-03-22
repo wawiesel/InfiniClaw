@@ -17,6 +17,7 @@ import { uploadContent } from './s3-sync.js';
 import { resolveRoot } from './service.js';
 import {
   loadShipConfig,
+  loadFleet,
   thisShipName,
   safeLoadShips,
   type BotEntry,
@@ -706,12 +707,5 @@ function getPm2Info(): Pm2Process[] {
 }
 
 function loadFleetBots(): Record<string, BotEntry> {
-  try {
-    const config = loadShipConfig();
-    const fleetPath = path.join(config.secretsPath, 'bots', 'fleet.json');
-    const raw = JSON.parse(fs.readFileSync(fleetPath, 'utf-8'));
-    return (raw.bots ?? {}) as Record<string, BotEntry>;
-  } catch {
-    return {};
-  }
+  try { return loadFleet(); } catch { return {}; }
 }
