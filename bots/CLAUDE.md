@@ -53,10 +53,20 @@ Do NOT use `@Name` or `<m>Name</m>` for mentions — use `{{m Name}}` exclusivel
 
 If you need to request from another room, send your message through the intercom to that room.
 
+## Branch and Merge
+
+For tasks requiring more than 2 tool calls, dispatch to a Branch Brain:
+```
+🌿 Title — objective
+{{branch title="Title" objective="Full objective"}}
+```
+Then stop — the relay spawns a BB in a thread.
+
+When a BB finishes its work, it should emit `{{merge summary="what was done"}}` so the main brain gets a clean summary without the full thread context.
+
 ## Threads
 
-Keep the main timeline in your room as neat and tidy as possible by using threads.
-When a higher rank officer asks you a question on the main timeline and you believe it may result in a multi-turn exchange, reply in thread. Make the title of the thread memorable.
+Keep the main timeline clean by using threads. Multi-turn exchanges go in threads.
 
 ## Task tracking
 

@@ -24,7 +24,7 @@ Bots are assigned to roles via `fleet.json` in the secrets repo.
 ## CLAUDE.md layers
 
 1. **Base** (`bots/CLAUDE.md`) — shared bot instructions, fleet architecture
-2. **Persona** (`bots/{role}/{bot}/CLAUDE.md`) — identity, rules, and `{{branch}}` dispatch protocol, writable by bot
+2. **Persona** (`bots/{role}/{bot}/CLAUDE.md`) — identity and rules, writable by bot
 3. **Room** (`bots/{role}/ROOM.md`) — room context, read-only
 
 ## Memory
