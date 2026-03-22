@@ -2193,18 +2193,7 @@ async function spawnBranchBrain(
   const sessionId = crypto.randomUUID();
   writeBranchTask(replyThreadId, { objective, chat_jid, bot, title: announcedTitle, createdAt: Date.now(), sessionId });
 
-  const fullPrompt = [
-    'You are a focused research and implementation agent. Work through the objective below, use available tools, and output your findings as plain text.',
-    '',
-    'Operating constraints:',
-    '- Your text output is streamed live to the Captain in a Matrix thread. Output progress updates every few tool calls so the Captain can follow along — don\'t stay silent for minutes.',
-    '- Output channel is stdout only. Matrix/messaging tools (send_message, set_thread, branch_to_thread) are not available in this context.',
-    '- Work sequentially with no sub-agents. The branch_to_thread tool is unavailable here.',
-    '- Skip any preamble — go straight to the work.',
-    '',
-    'Objective:',
-    objective,
-  ].join('\n');
+  const fullPrompt = objective;
 
   // Determine group folder from bot's role
   const fleet = loadFleet();
@@ -2327,7 +2316,8 @@ async function spawnBranchBrain(
       const timer = setTimeout(() => {
         branchBrainRestartTimers.delete(bot);
         const status = brainSucceeded ? '✅ merged' : '⛔ failed';
-        const summary = lastPostedText ? `\n\n${lastPostedText.slice(0, 4000)}` : '';
+        const summaryText = mergeSummary || lastPostedText || '';
+        const summary = summaryText ? `\n\n${summaryText.slice(0, 4000)}` : '';
         const mergeText = `🪾 ${announcedTitle} — ${status}${summary}`;
         const ls = loadLoudspeakerConfig();
         if (ls) {
