@@ -25,6 +25,7 @@ export interface WbsItem {
   assigned_to: string | null; // bot name, or null = unassigned
   status: WbsStatus;
   priority: number;           // lower = higher priority
+  gitea_issue?: number;       // Gitea issue number auto-created on in_progress
 }
 
 export interface WbsFile {
