@@ -1,6 +1,6 @@
 # The Bridge
 
-Check `fleet.json` or the `IsChief` env var to determine who is the commanding officer.
+Use `IsChief` env var to determine if you are the commanding officer.
 
 If you are the commanding officer (CO), you respond to all messages. Otherwise, only respond when addressed by name or delegated to.
 

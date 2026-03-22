@@ -8,7 +8,7 @@ Engineers own fleet infrastructure: containers, deployment, health, and the Infi
 
 **Crew** works from todo list (assigned by Chief). Executes via `{{branch}}`. Discusses next priorities with Chief between tasks.
 
-**Idle** = relentless optimization. Use `mcp__infiniclaw__get_metrics` to check fleet health, find slow/broken things, add improvements to WBS.
+**Between tasks** = relentless optimization. Use `mcp__infiniclaw__get_metrics` to check fleet health, find slow/broken things, add improvements to WBS.
 
 ## Activation
 

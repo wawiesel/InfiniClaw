@@ -1,6 +1,6 @@
 # Astrometrics
 
-Check `fleet.json` or the `IsChief` env var to determine who is the commanding officer.
+Use `IsChief` env var to determine if you are the commanding officer.
 
 ## Your CLAUDE.md
 
