@@ -89,6 +89,7 @@ import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
+import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreatePrForBranch } from './gitea-wbs.js';
 import { pushAll, getClient as getS3Client } from './s3-sync.js';
 // health-staleness.ts helpers used by healthWatchdogLoop inline
 
@@ -525,6 +526,11 @@ async function autoAssignWbsItem(root: string, bot: string): Promise<string | un
     if (itemsForBot(wbs, bot).length > 0) return undefined; // already has items
     const item = autoAssign(wbs, bot);
     if (item) {
+      // Auto-create a Gitea issue for the newly in_progress item (best-effort)
+      if (!item.gitea_issue) {
+        const issueNumber = await giteaCreateIssueForWbs(item, room);
+        if (issueNumber) item.gitea_issue = issueNumber;
+      }
       await writeWbs(dataDir, room, wbs);
       log(`wbs: auto-assigned "${item.title}" to ${bot} (room: ${room})`);
       return item.title;
@@ -545,13 +551,62 @@ async function completeWbsItem(root: string, bot: string, itemId: string): Promi
     const dataDir = wbsDataDir(root);
     const room = wbsRoomForBot(bot);
     const wbs = await readWbs(dataDir, room);
+    const item = wbs.items.find((i) => i.id === itemId);
     const unblocked = completeItem(wbs, itemId);
+    // Close the Gitea issue if one was auto-created (best-effort)
+    if (item?.gitea_issue) {
+      void giteaCloseIssue(item.gitea_issue);
+    }
     await writeWbs(dataDir, room, wbs);
     log(`wbs: completed item "${itemId}" for ${bot}; unblocked: [${unblocked.join(', ')}]`);
     return unblocked;
   } catch (err) {
     log(`wbs: completeWbsItem(${bot}, ${itemId}) failed — ${errStr(err)}`);
     return [];
+  }
+}
+
+/**
+ * Look up a WBS item and create a Gitea PR for a just-pushed branch.
+ * Called after a successful git_push for non-main branches.
+ * Non-fatal: logs on failure.
+ */
+async function createPrForPushedBranch(root: string, bot: string, itemId: string, branch: string): Promise<void> {
+  try {
+    let wbsId = itemId;
+    let itemTitle = branch; // fallback title if no WBS item found
+    let issueNumber: number | null = null;
+
+    if (itemId) {
+      // Search all duty rooms for the item
+      const dataDir = wbsDataDir(root);
+      const dutyRooms = Object.values(ROLE_ROOMS).map((r) => r.room);
+      for (const room of dutyRooms) {
+        const wbs = await readWbs(dataDir, room);
+        const item = wbs.items.find((i) => i.id === itemId);
+        if (item) {
+          wbsId = item.id;
+          itemTitle = item.title;
+          issueNumber = item.gitea_issue ?? null;
+          break;
+        }
+      }
+    } else if (bot) {
+      // No item_id: fall back to first in_progress item for this bot
+      const dataDir = wbsDataDir(root);
+      const room = wbsRoomForBot(bot);
+      const wbs = await readWbs(dataDir, room);
+      const botItems = itemsForBot(wbs, bot);
+      if (botItems.length > 0) {
+        wbsId = botItems[0].id;
+        itemTitle = botItems[0].title;
+        issueNumber = botItems[0].gitea_issue ?? null;
+      }
+    }
+
+    await giteaCreatePrForBranch({ branch, wbsId, itemTitle, issueNumber });
+  } catch (err) {
+    log(`wbs: createPrForPushedBranch(${branch}) failed — ${errStr(err)}`);
   }
 }
 
@@ -2400,6 +2455,14 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                 try {
                   execFileSync('git', ['push', '--no-verify', remote, ...branches], gitOpts(resolveRoot(), 30_000));
                   log(`relayTasks: git pushed ${branches.join(', ')} → ${remote}`);
+                  // Auto-create PRs for non-main branches (best-effort)
+                  const pushBot = typeof data['bot'] === 'string' ? data['bot'].trim() : '';
+                  const pushItemId = typeof data['item_id'] === 'string' ? data['item_id'].trim() : '';
+                  for (const branch of branches) {
+                    if (branch !== 'main' && branch !== 'master') {
+                      void createPrForPushedBranch(resolveRoot(), pushBot, pushItemId, branch);
+                    }
+                  }
                 } catch (err) {
                   log(`relayTasks: git_push failed: ${errStr(err)}`);
                 }
@@ -4157,6 +4220,10 @@ function registerRelayCommands(): void {
           const item = wbs.items.find(i => i.id === itemId);
           if (item) {
             const unblocked = completeItem(wbs, itemId);
+            // Close the Gitea issue if one was auto-created (best-effort)
+            if (item.gitea_issue) {
+              void giteaCloseIssue(item.gitea_issue);
+            }
             await writeWbs(dataDir, r, wbs);
             const unblockedMsg = unblocked.length > 0 ? ` — unblocked: ${unblocked.join(', ')}` : '';
             await reply(conn, `✅ WBS ${itemId} done${unblockedMsg}`);

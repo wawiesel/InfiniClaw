@@ -38,6 +38,7 @@ import {
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { capitalizeName, statusMessage } from './formatting.js';
 import { readWbs, writeWbs, assignItem, completeItem } from './wbs.js';
+import { giteaCreateIssueForWbs, giteaCloseIssue } from './gitea-wbs.js';
 
 // ── Chief check ─────────────────────────────────────────────────────────
 
@@ -586,10 +587,13 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
   }
   // git push requires host credentials — write to relay-tasks/ for the relay to execute on host.
   const tasksDir = path.join(resolveRoot(), '_runtime', 'relay-tasks');
+  const itemId = typeof data.item_id === 'string' ? data.item_id.trim() : undefined;
   try {
     fs.mkdirSync(tasksDir, { recursive: true });
     const taskFile = path.join(tasksDir, `git-push-${Date.now()}.json`);
-    fs.writeFileSync(taskFile, JSON.stringify({ type: 'git_push', remote, branches }));
+    const taskPayload: Record<string, unknown> = { type: 'git_push', remote, branches, bot: ASSISTANT_NAME };
+    if (itemId) taskPayload['item_id'] = itemId;
+    fs.writeFileSync(taskFile, JSON.stringify(taskPayload));
     logger.info({ remote, branches, taskFile }, 'git_push queued for host relay');
     await safeSend(ctx, chatJid, `📤 git push ${branches.join(', ')} → ${remote} queued (relay executes on host)`);
   } catch (err) {
@@ -1065,6 +1069,12 @@ async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Pr
   const wbs = await readWbs(dataDir, room);
   const ok = assignItem(wbs, itemId, botName);
   if (ok) {
+    // Auto-create a Gitea issue for the newly in_progress item (best-effort, non-blocking)
+    const item = wbs.items.find((i) => i.id === itemId);
+    if (item && !item.gitea_issue) {
+      const issueNumber = await giteaCreateIssueForWbs(item, room);
+      if (issueNumber) item.gitea_issue = issueNumber;
+    }
     await writeWbs(dataDir, room, wbs);
     logger.info({ room, itemId, assignee }, 'WBS item assigned');
   } else {
@@ -1086,7 +1096,12 @@ async function handleWbsComplete(data: CommandData, ctx: InfiniClawIpcContext): 
   }
   const dataDir = path.join(root, '_runtime', 'data');
   const wbs = await readWbs(dataDir, room);
+  const item = wbs.items.find((i) => i.id === itemId);
   const unblocked = completeItem(wbs, itemId);
+  // Close the Gitea issue if one was auto-created (best-effort, non-blocking)
+  if (item?.gitea_issue) {
+    void giteaCloseIssue(item.gitea_issue);
+  }
   await writeWbs(dataDir, room, wbs);
   logger.info({ room, itemId, unblocked }, 'WBS item completed, unblocked: %o', unblocked);
 }
