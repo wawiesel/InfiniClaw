@@ -10,53 +10,54 @@ Matrix renders messages as HTML, stripping unknown tags like `<send>`. Double-br
 
 ## Syntax
 
+All signals use positional arguments — one way to do each thing:
+
 ```
-{{command key="value"}}
+{{command content}}
 ```
 
 ## Signal Types
 
-### Callout
+### Mention
 
 ```
-{{m Tali}}
+{{mention Tali}}
 ```
 
-Notify a specific bot. Replaces `<m>Tali</m>`.
+Mention a bot — creates a clickable Matrix pill and triggers the bot.
 
-### Route
+### Send
 
 ```
-{{send room="engineering"}}
-{{send thread="$eventId"}}
-{{send room="engineering" thread="$eventId"}}
+{{send engineering}}
+{{send engineering $threadId}}
 ```
 
-Route the message to a specific room and/or thread.
+Route the message to a different room (and optionally a thread).
 
 ### Branch
 
 ```
-{{branch title="Stability audit" objective="Check logs for crash patterns and race conditions"}}
+{{branch Fix crash — Investigate the OOM crash in relay.ts and fix the root cause}}
 ```
 
-Spawn a Branch Brain. The relay strips the signal, posts the remaining message text as the `🌿` thread header, and spawns a BB under that thread. Room is implicit — the BB posts to whichever room the message was sent from.
+Dispatch a Branch Brain. Title and objective separated by ` — `. The relay posts the text as a `🌿` thread header and spawns a BB.
 
 ### Merge
 
 ```
-{{merge summary="Fixed 3 race conditions, opened PR #237"}}
+{{merge Fixed 3 race conditions, opened PR #237}}
 ```
 
-Finalize a Branch Brain. Posted by the BB as its last output. The relay uses the summary for the `🪾` merge marker and loudspeaker merge notice. If omitted, the relay uses the BB's last posted text.
+BB handoff. The relay uses this summary for the `🪾` merge marker and loudspeaker notice. Informative summaries give the main brain full context.
 
 ## Escaping
 
 Signals inside backtick code spans are **not processed**:
 
 ```
-`{{branch title="example"}}` — this is escaped, relay ignores it
-{{branch title="example"}}   — this is live, relay processes it
+`{{branch example}}` — escaped, relay ignores
+{{branch example}}   — live, relay processes
 ```
 
 ## Default Routing
