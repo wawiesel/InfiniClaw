@@ -3,7 +3,7 @@
  * Extended commands delegated from the base ipc.ts processTaskIpc switch.
  */
 import crypto from 'crypto';
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -534,49 +534,6 @@ async function handleSendReaction(data: CommandData, ctx: InfiniClawIpcContext):
   }
   await ctx.sendReaction(chatJid, eventId, emoji);
   logger.info({ chatJid, eventId, emoji, sourceGroup: ctx.sourceGroup }, 'Reaction sent via IPC');
-}
-
-async function handleRestartWksm(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'restart_wksm')) return;
-  const chatJid = parseChatJid(data);
-  logger.info('restart_wksm requested via IPC');
-  try {
-    const home = process.env.HOME || os.homedir();
-    const wksc = `${home}/2025-WKS/main/venv/bin/wksc`;
-
-    if (chatJid) await ctx.sendMessage(chatJid, '🔄 Restarting wksm...');
-
-    const killOut = execSync(`/usr/sbin/lsof -ti:8765 | xargs kill -9 2>&1 || echo "no process on 8765"`, {
-      shell: '/bin/bash',
-      encoding: 'utf-8',
-      timeout: 10000,
-    }).trim();
-    if (chatJid) await ctx.sendMessage(chatJid, `kill: ${killOut}`);
-
-    await new Promise(r => setTimeout(r, 2000));
-
-    // wksc mcp proxy start is a blocking server process — must use spawn with detached
-    const child = spawn(wksc, ['mcp', 'proxy', 'start'], {
-      detached: true,
-      stdio: 'ignore',
-      shell: false,
-    });
-    child.unref();
-    logger.info({ pid: child.pid }, 'wksm proxy spawned');
-
-    // Wait for it to come up then verify
-    await new Promise(r => setTimeout(r, 3000));
-
-    const health = execSync('curl -s --max-time 3 http://localhost:8765/health 2>&1 || echo "not ready"', {
-      shell: '/bin/bash',
-      encoding: 'utf-8',
-      timeout: 8000,
-    }).trim();
-    if (chatJid) await ctx.sendMessage(chatJid, `✅ wksm started (pid ${child.pid}), health: ${health}`);
-  } catch (err) {
-    logger.error({ err }, 'restart_wksm failed');
-    if (chatJid) await ctx.sendMessage(chatJid, `⛔ restart_wksm failed: ${errStr(err)}`);
-  }
 }
 
 
@@ -1213,7 +1170,6 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_thread: handleSetThread,
   send_reaction: handleSendReaction,
   send_to_room: handleSendToRoom,
-  restart_wksm: handleRestartWksm,
   restart_relay: handleRestartRelay,
   request_verification: handleRequestVerification,
   submit_verification: handleSubmitVerification,
