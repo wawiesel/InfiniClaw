@@ -24,6 +24,8 @@ export interface ToolRegistrationContext {
   chatJid: string;
   groupFolder: string;
   isMain: boolean;
+  /** Override the Claude session JSONL directory (default: /home/node/.claude/projects). Used in tests. */
+  sessionDir?: string;
 }
 
 /** Extract a human-readable message from an unknown error value. */
@@ -32,7 +34,7 @@ function errMsg(err: unknown): string {
 }
 
 export function registerInfiniClawTools(ctx: ToolRegistrationContext): void {
-  const { server, writeIpcFile, messagesDir, tasksDir, ipcDir, chatJid, groupFolder, isMain } = ctx;
+  const { server, writeIpcFile, messagesDir, tasksDir, ipcDir, chatJid, groupFolder, isMain, sessionDir: sessionDirOverride } = ctx;
 
   // ── Reactions ───────────────────────────────────────────────────────
 
@@ -847,6 +849,7 @@ Item fields for upsert:
           name: string;
           active?: boolean;
           hasProcess?: boolean;
+          containerName?: string;
           currentObjective?: string;
           lastProgress?: string;
           lastProgressAt?: number;
@@ -855,6 +858,7 @@ Item fields for upsert:
           pendingMessages?: boolean;
           pendingTasks?: number;
         }>;
+        verifications?: { pending: number; verified: number; failed: number; total: number };
       } = null;
 
       try {
@@ -887,12 +891,18 @@ Item fields for upsert:
             lines.push(`  last error${ago}: ${err}`);
           }
         }
+
+        if (statusData.verifications) {
+          const v = statusData.verifications;
+          lines.push('');
+          lines.push(`Verifications: ${v.pending} pending · ${v.verified} verified · ${v.failed} failed (${v.total} total)`);
+        }
       } else {
         lines.push('Status snapshot unavailable (written every 30s).');
       }
 
       // Token usage from JSONL session files (mounted at /home/node/.claude/projects)
-      const sessionDir = '/home/node/.claude/projects';
+      const sessionDir = sessionDirOverride ?? '/home/node/.claude/projects';
       const cutoff1d = Date.now() - 86_400_000;
       let totalTokens1d = 0;
       let hasTokenData = false;
