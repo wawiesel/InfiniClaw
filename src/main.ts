@@ -123,6 +123,7 @@ import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
 import { capitalizeName, unifiedBotDisplay } from './formatting.js';
 import { loadFleet, findShipByHostname, ROLE_ROOMS } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
+import { truncateJsonl } from './session-utils.js';
 
 // ── Display name helper ────────────────────────────────────────────────
 /** Build unified short display name. badge is used to derive health grade.
@@ -1627,24 +1628,33 @@ async function injectResumeMessage(): Promise<void> {
 
 // ── Session cleanup ─────────────────────────────────────────────────────
 
-/** Delete stale JSONL files in a directory: keep the newest, delete older ones over sizeThreshold. */
+/**
+ * Compact older JSONL files in a directory: keep the newest as-is, truncate
+ * older ones exceeding sizeThreshold to half the threshold (preserving recent
+ * context rather than deleting the session entirely).
+ * Returns the number of files compacted.
+ */
 function pruneJsonlDir(dir: string, sizeThreshold: number): number {
   if (!fs.existsSync(dir)) return 0;
   const files = fs.readdirSync(dir)
     .filter(f => f.endsWith('.jsonl'))
     .map(f => ({ name: f, mtime: fs.statSync(path.join(dir, f)).mtimeMs, size: fs.statSync(path.join(dir, f)).size }))
     .sort((a, b) => b.mtime - a.mtime);
-  let pruned = 0;
+  let compacted = 0;
   for (const f of files.slice(1)) {
     if (f.size > sizeThreshold) {
-      fs.unlinkSync(path.join(dir, f.name));
-      pruned++;
+      const filePath = path.join(dir, f.name);
+      const targetBytes = Math.max(Math.floor(sizeThreshold / 2), 10_000);
+      try {
+        const removed = truncateJsonl(filePath, targetBytes);
+        if (removed > 0) compacted++;
+      } catch { /* truncation failed — leave file intact */ }
     }
   }
-  return pruned;
+  return compacted;
 }
 
-/** Delete stale Claude session JSONL files across all project dirs (>200KB, not the most recent). */
+/** Compact stale Claude session JSONL files across all project dirs (>200KB, not the most recent). */
 function pruneOldSessions(): void {
   try {
     const claudeProjects = path.join(os.homedir(), '.claude', 'projects');
@@ -1653,12 +1663,12 @@ function pruneOldSessions(): void {
     for (const proj of fs.readdirSync(claudeProjects)) {
       const projDir = path.join(claudeProjects, proj);
       if (!fs.statSync(projDir).isDirectory()) continue;
-      // Top-level JSONL files
+      // Top-level JSONL files — truncate older large sessions, preserve recent context
       pruned += pruneJsonlDir(projDir, 200_000);
       // archive subdir (contains moved-away old sessions)
       pruned += pruneJsonlDir(path.join(projDir, 'archive'), 0);
     }
-    if (pruned > 0) logger.info({ pruned }, 'Pruned old session JSONL files');
+    if (pruned > 0) logger.info({ pruned }, 'Compacted old session JSONL files');
   } catch (err) {
     logger.warn({ err }, 'pruneOldSessions failed');
   }
