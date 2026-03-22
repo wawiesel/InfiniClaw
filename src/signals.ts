@@ -137,8 +137,9 @@ export function processSignals(signals: Signal[], ctx: SignalContext): {
 
   for (const sig of signals) {
     switch (sig.command) {
+      case 'mention':
       case 'm': {
-        // Callout: {{m BotName}}
+        // {{mention Name}} — creates mention pill + triggers bot
         const name = sig.positional?.trim();
         if (!name) {
           processed.push({ ...sig, status: 'error', error: 'Missing bot name' });

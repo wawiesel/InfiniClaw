@@ -155,8 +155,8 @@ export function restoreMentionPrefixes(body: string, formattedBody: string): str
     // intentional mention, so consume the optional @ prefix. Case-insensitive
     // because body may have lowercase while pill display name is capitalized.
     const escaped = escapeRegex(name);
-    const re = new RegExp(`(?:@)?(?<!<m>)\\b${escaped}\\b(?!</m>)`, 'gi');
-    result = result.replace(re, `<m>${name}</m>`);
+    const re = new RegExp(`(?:@)?(?<!\\{\\{mention )\\b${escaped}\\b`, 'gi');
+    result = result.replace(re, `{{mention ${name}}}`);
   }
   return result;
 }
@@ -183,16 +183,16 @@ export function convertRawMentions(
     const baseName = words[0];
     if (!baseName) continue;
     const escaped = escapeRegex(baseName);
-    // Match @Name with word boundary, but not if already inside <m> markers
+    // Match @Name with word boundary, skip if already inside {{mention}}
     baseNames.push({
-      pattern: new RegExp(`(?<!<m>)@${escaped}\\b`, 'gi'),
+      pattern: new RegExp(`(?<!\\{\\{mention )@${escaped}\\b`, 'gi'),
       displayName: baseName,
     });
   }
 
   let result = text;
   for (const { pattern, displayName } of baseNames) {
-    result = result.replace(pattern, `<m>${displayName}</m>`);
+    result = result.replace(pattern, `{{mention ${displayName}}}`);
   }
   return result;
 }
@@ -545,19 +545,17 @@ function isEventAuthError(err: unknown): boolean {
 }
 
 /**
- * Convert <m>Name</m> markers in text/HTML to Matrix mention pills.
- * Bots emit <m>Cid</m> to explicitly mark a mention. This avoids false matches
- * that @-prefix scanning would produce on emails, code, or other @ patterns.
- * The nameCache maps userId → displayName (may include pips); matching uses
- * only the base name (first word), case-insensitive.
+ * Convert {{mention Name}} signals in text/HTML to Matrix mention pills.
+ * Also handles legacy <m>Name</m> markers for backward compatibility.
+ * The nameCache maps userId → displayName; matching uses the base name.
  *
- * Any <m>Name</m> that doesn't match a known user is stripped to just "Name".
+ * Unmatched mentions are stripped to just "Name".
  */
 export function pillifyMentions(
   text: string,
   nameCache: ReadonlyMap<string, string>,
 ): string {
-  if (!text.includes('<m>')) return text;
+  if (!text.includes('{{mention ') && !text.includes('<m>')) return text;
 
   // Build reverse map: lowercase base name → userId
   const nameToUser = new Map<string, { userId: string; displayName: string }>();
@@ -568,13 +566,17 @@ export function pillifyMentions(
     }
   }
 
-  return text.replace(/<m>([^<]+)<\/m>/gi, (_full, name: string) => {
+  const resolve = (_full: string, name: string) => {
     const entry = nameToUser.get(name.trim().toLowerCase());
-    if (!entry) return name; // Strip marker, keep name as plain text
+    if (!entry) return name;
     const safeUserId = escapeHtml(entry.userId);
     const safeName = escapeHtml(entry.displayName);
     return `<a href="https://matrix.to/#/${safeUserId}">${safeName}</a>`;
-  });
+  };
+  // Handle both {{mention Name}} and legacy <m>Name</m>
+  let result = text.replace(/\{\{mention\s+([^}]+)\}\}/gi, resolve);
+  result = result.replace(/<m>([^<]+)<\/m>/gi, resolve); // TODO: remove legacy <m> support once all bots use {{mention}}
+  return result;
 }
 
 export class MatrixChannel implements Channel {
@@ -1098,8 +1100,8 @@ export class MatrixChannel implements Channel {
 
     html = this.pillifyMentions(html);
 
-    // Strip <m>Name</m> markers from plaintext body (pills are in formatted_body)
-    const plainBody = normalizedText.replace(/<m>([^<]+)<\/m>/gi, '$1');
+    // Strip mention markers from plaintext body (pills are in formatted_body)
+    const plainBody = normalizedText.replace(/\{\{mention\s+([^}]+)\}\}/gi, '$1').replace(/<m>([^<]+)<\/m>/gi, '$1');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const msgContent: Record<string, any> = {

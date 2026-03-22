@@ -21,7 +21,7 @@ Integration and unit tests for InfiniClaw source modules that don't live next to
 | `command-registry.test.ts` | Validates `COMMANDS` array registration (supports both `!` and `?` prefixed commands) |
 | `ipc-auth.test.ts` | IPC auth boundary checks (includes sendReaction mock) |
 | `matrix-format.test.ts` | Matrix HTML formatting correctness |
-| `matrix-mentions.test.ts` | Mention pill symmetry: inbound `<m>` wrapping (handles bare `Name` and `@name` from pills, case-insensitive), outbound `<m>` → pill conversion, raw `@Name` → `<m>` conversion (display names use realistic pip-prefix format) |
+| `matrix-mentions.test.ts` | Mention pill symmetry: inbound `{{mention}}` wrapping, outbound `{{mention}}` → pill conversion, raw `@Name` → `{{mention}}` conversion |
 | `operator-commands.test.ts` | `!` command parsing and auth |
 | `routing.test.ts` | Message routing logic |
 | `metrics.test.ts` | Fleet metrics: rollingRate, SCORE_REACTIONS, operator/bot/ship/fleet metrics, autonomy score (x-commands excluded), infra failure tracking, branch brain success, tokenThroughput rolling metric, response latency tracking, MTBI in operator metrics, scope routing, formatting (sleeping bots show 💤 badge regardless of processRunning), health grades (A/B/C/F from crashes/OOM/mem/latency), fleet aggregate grade, activityEmoji (tok/day tiers, imported from formatting.ts), gradeEmoji mapping, score attribution per bot (empty name vs named), latency/throughput in BotMetrics types. Mocks child_process to isolate from real PM2 state. Mocks ship-config to return empty bots so tests run without fleet.json secrets. |

@@ -53,7 +53,7 @@ Host machine (macOS / Linux)
 ├── brain-management.ts → Runtime model switching, mainSender() uses capitalizeName for provider display
 ├── chat-activity.ts    → Track activity per room for idle detection
 ├── message-filtering.ts→ Dedup, echo prevention, ignore rules (📞 pill, @ callout, system accounts)
-├── signals.ts          → Signals protocol: positional `{{command content}}` (m/branch/merge/send), backtick escaping, S3 audit trail
+├── signals.ts          → Signals protocol: positional `{{command content}}` (mention/branch/merge/send), backtick escaping, S3 audit trail
 ├── tool-call-breadcrumb.ts → Shared compact S3-linked tool call formatting (main brain + BB — DRY)
 ├── metrics.ts         → Fleet metrics: autonomy, MTBI, health grades (uses loadFleet() — no local fleet parsing)
 ├── intercom-relay.ts   → Cross-room messaging via per-room intercom Matrix accounts
