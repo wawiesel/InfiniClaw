@@ -2326,10 +2326,22 @@ async function spawnBranchBrain(
  * (e.g. git_push). Written by bots via ipc-commands.ts, executed here on host.
  */
 async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
-  const tasksDir = path.join(resolveRoot(), '_runtime', 'relay-tasks');
+  const root = resolveRoot();
+  // Scan both global relay-tasks AND per-instance relay-tasks directories
+  const getTasksDirs = (): string[] => {
+    const dirs: string[] = [path.join(root, '_runtime', 'relay-tasks')];
+    try {
+      const instancesDir = path.join(root, '_runtime', 'instances');
+      for (const bot of fs.readdirSync(instancesDir)) {
+        const d = path.join(instancesDir, bot, '_runtime', 'relay-tasks');
+        if (fs.existsSync(d)) dirs.push(d);
+      }
+    } catch { /* instances dir may not exist */ }
+    return dirs;
+  };
   while (true) {
     try {
-      if (fs.existsSync(tasksDir)) {
+      for (const tasksDir of getTasksDirs()) {
         const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.json'));
         for (const file of files) {
           const filePath = path.join(tasksDir, file);
