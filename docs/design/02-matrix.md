@@ -268,7 +268,7 @@ All bot MCP tools are provided by the InfiniClaw agent-runner under the `mcp__in
 | `send_reaction` | React to a message with an emoji (call `get_last_event_id` first) | ✅ |
 | `send_image` | Send an image file to the current room | ✅ |
 | `send_file` | Send a file attachment to the current room | ✅ |
-| `set_thread` | Set/clear the active Matrix thread for subsequent messages | ✅ |
+| ~~`set_thread`~~ | ~~Set/clear the active Matrix thread~~ — **removed**: thread routing is automatic | 🗑 |
 
 **Note:** Bots send text by outputting to stdout — the relay routes it to Matrix automatically. There is no `send_message` tool. Cross-room messaging is handled by the `@loudspeaker: <message>` mention pattern (see Special Mentions above), not an MCP tool.
 
@@ -285,8 +285,8 @@ Navigation tools access the bot's current room (quarters or duty room). Matrix h
 
 | Tool | Purpose | Status |
 |------|---------|--------|
-| `crew_roster` | List bots in the fleet with roles, status, and Chief designation | ✅ |
-| `check_health` | Query fleet health snapshot from relay (containers, queue, status) | ✅ |
+| ~~`crew_roster`~~ | ~~List bots in the fleet~~ — **removed**: use `fleet.json` / `!fleet` | 🗑 |
+| ~~`check_health`~~ | ~~Query fleet health snapshot~~ — **removed**: use `!metrics` | 🗑 |
 | `get_metrics` | Read this bot's own metrics: response latency, scores, crashes | 🔲 not yet implemented |
 
 ### Self-Management

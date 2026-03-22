@@ -126,8 +126,8 @@ The `podman_exec` MCP tool (IPC type `podman_exec`) lets bots run podman command
 1. **IPC directory exists** — Container has `/workspace/ipc/{group}/` mounted.
    *Check:* Directory exists and is writable from inside the container.
 
-2. **Message round-trip** — Bot calls `send_message` via MCP tool.
-   *Check:* Message appears in Matrix room. Host log shows IPC command processed.
+2. **Message round-trip** — Bot outputs text to stdout.
+   *Check:* Message appears in Matrix room. Host log shows output processed.
 
 3. **Namespace isolation** — Bot in one room cannot run privileged commands for another room.
    *Check:* Privileged IPC from non-main room is rejected.
