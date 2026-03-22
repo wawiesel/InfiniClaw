@@ -471,11 +471,11 @@ function wbsRoomForBot(bot: string): string {
  * Called after bootstrapBot so the bot can read its task list at startup.
  * Non-fatal: logs on failure.
  */
-function injectWbsTasks(root: string, bot: string): void {
+async function injectWbsTasks(root: string, bot: string): Promise<void> {
   try {
     const dataDir = wbsDataDir(root);
     const room = wbsRoomForBot(bot);
-    const wbs = readWbs(dataDir, room);
+    const wbs = await readWbs(dataDir, room);
     const items = itemsForBot(wbs, bot);
     if (items.length === 0) return; // nothing to inject
     const instanceData = path.join(root, '_runtime', 'instances', bot, 'data');
@@ -495,14 +495,14 @@ function injectWbsTasks(root: string, bot: string): void {
  * Called when a bot goes off duty (sleep, dismiss).
  * Non-fatal: logs on failure.
  */
-function reabsorbWbsItems(root: string, bot: string): void {
+async function reabsorbWbsItems(root: string, bot: string): Promise<void> {
   try {
     const dataDir = wbsDataDir(root);
     const room = wbsRoomForBot(bot);
-    const wbs = readWbs(dataDir, room);
+    const wbs = await readWbs(dataDir, room);
     const count = reabsorbItems(wbs, bot);
     if (count > 0) {
-      writeWbs(dataDir, room, wbs);
+      await writeWbs(dataDir, room, wbs);
       log(`wbs: reabsorbed ${count} item(s) from ${bot} (room: ${room})`);
     }
   } catch (err) {
@@ -516,15 +516,15 @@ function reabsorbWbsItems(root: string, bot: string): void {
  * Returns the assigned item title, or undefined if nothing available.
  * Non-fatal: logs on failure.
  */
-function autoAssignWbsItem(root: string, bot: string): string | undefined {
+async function autoAssignWbsItem(root: string, bot: string): Promise<string | undefined> {
   try {
     const dataDir = wbsDataDir(root);
     const room = wbsRoomForBot(bot);
-    const wbs = readWbs(dataDir, room);
+    const wbs = await readWbs(dataDir, room);
     if (itemsForBot(wbs, bot).length > 0) return undefined; // already has items
     const item = autoAssign(wbs, bot);
     if (item) {
-      writeWbs(dataDir, room, wbs);
+      await writeWbs(dataDir, room, wbs);
       log(`wbs: auto-assigned "${item.title}" to ${bot} (room: ${room})`);
       return item.title;
     }
@@ -539,13 +539,13 @@ function autoAssignWbsItem(root: string, bot: string): string | undefined {
  * Called when a bot signals completion via a wbs_complete relay task.
  * Non-fatal: logs on failure.
  */
-function completeWbsItem(root: string, bot: string, itemId: string): string[] {
+async function completeWbsItem(root: string, bot: string, itemId: string): Promise<string[]> {
   try {
     const dataDir = wbsDataDir(root);
     const room = wbsRoomForBot(bot);
-    const wbs = readWbs(dataDir, room);
+    const wbs = await readWbs(dataDir, room);
     const unblocked = completeItem(wbs, itemId);
-    writeWbs(dataDir, room, wbs);
+    await writeWbs(dataDir, room, wbs);
     log(`wbs: completed item "${itemId}" for ${bot}; unblocked: [${unblocked.join(', ')}]`);
     return unblocked;
   } catch (err) {
@@ -1105,7 +1105,7 @@ function restartRunningBots(root: string): { started: string[]; failed: string[]
       killStaleContainers(bot);
       bootstrapBot(root, bot);
       writeCrewStatus(root, bot);
-      injectWbsTasks(root, bot);
+      void injectWbsTasks(root, bot);
       started.push(bot);
     } catch (err) {
       log(`restartRunningBots: ${bot} failed — ${errStr(err)}`);
@@ -1860,7 +1860,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               try {
                 bootstrapBot(resolveRoot(), bot);
                 writeCrewStatus(resolveRoot(), bot);
-                injectWbsTasks(resolveRoot(), bot);
+                void injectWbsTasks(resolveRoot(), bot);
                 restarted++;
                 log(`git sync: restarted ${bot}`);
                 if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${botName} restarted${botVersion(resolveRoot(), bot)}`);
@@ -2418,7 +2418,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
               const bot = typeof data['bot'] === 'string' ? data['bot'].trim() : '';
               const itemId = typeof data['item_id'] === 'string' ? data['item_id'].trim() : '';
               if (bot && itemId) {
-                completeWbsItem(resolveRoot(), bot, itemId);
+                await completeWbsItem(resolveRoot(), bot, itemId);
               } else {
                 log(`relayTasks: wbs_complete missing required fields (bot, item_id)`);
               }
@@ -2583,7 +2583,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
                 ensurePodmanReady();
                 bootstrapBot(root, bot);
                 writeCrewStatus(root, bot);
-                injectWbsTasks(root, bot);
+                void injectWbsTasks(root, bot);
                 const matEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
                 for (const c of conns) {
                   if (c.accessToken) {
@@ -2852,7 +2852,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
               stopBot(bot);
               killStaleContainers(bot);
               await setBotDisplayStatus(root, bot, 'sleep');
-              reabsorbWbsItems(root, bot);
+              void reabsorbWbsItems(root, bot);
               fleetUpdate(bot, { status: 'sleep' });
               persistFleet();
               publishFleetReport().catch(() => {});
@@ -2870,7 +2870,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
             if (crewBot === bot) continue; // skip self
             if (botRooms[crewBot] !== roomName) continue; // different room
             if (!isBotIdle(root, crewBot)) continue; // not idle
-            const crewTitle = autoAssignWbsItem(root, crewBot);
+            const crewTitle = await autoAssignWbsItem(root, crewBot);
             if (crewTitle) {
               const crewEnv = loadProfileEnv(root, crewBot);
               const crewName = crewEnv?.ASSISTANT_NAME || capitalizeName(crewBot);
@@ -2879,7 +2879,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
             }
           }
           // Self-assign for the chief as well
-          const chiefTitle = autoAssignWbsItem(root, bot);
+          const chiefTitle = await autoAssignWbsItem(root, bot);
           if (crewAssignments.length > 0) {
             const assignList = crewAssignments.join('; ');
             nudge = chiefTitle
@@ -2893,7 +2893,7 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
           log(`heartbeat: nudged chief ${name} in ${roomName}${chiefTitle ? ` (WBS: "${chiefTitle}")` : ''}${crewAssignments.length > 0 ? ` (assigned ${crewAssignments.length} crew item(s))` : ''}`);
         } else {
           // Non-chief path (WBS 7.0): if idle with no WBS item, ask the chief for work.
-          const assignedTitle = autoAssignWbsItem(root, bot);
+          const assignedTitle = await autoAssignWbsItem(root, bot);
           if (assignedTitle) {
             nudge = `<m>${name}</m>, work on your next task: "${assignedTitle}".`;
           } else if (chiefBot) {
@@ -2946,7 +2946,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     fleetUpdate(bot, { status: 'retrospective', ondutyAt: undefined });
     persistFleet();
     clearShipConfigCache();
-    reabsorbWbsItems(root, bot);
+    void reabsorbWbsItems(root, bot);
     restartBotForRoom(root, bot);
     writeCrewStatus(root, bot);
     publishFleetReport().catch(() => {});
@@ -2988,7 +2988,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     stopBot(bot);
     killStaleContainers(bot);
     await setBotDisplayStatus(root, bot, 'sleep');
-    reabsorbWbsItems(root, bot);
+    void reabsorbWbsItems(root, bot);
     // status=dream: container stopped, deferred git changes can now apply
     fleetUpdate(bot, { status: 'dream' });
     persistFleet();
@@ -3014,7 +3014,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     clearShipConfigCache();
     bootstrapBot(root, bot);
     writeCrewStatus(root, bot);
-    injectWbsTasks(root, bot);
+    void injectWbsTasks(root, bot);
     await setBotDisplayStatus(root, bot, 'ready');
     sendLifecycleMsg(bot, 'started', entry.rank).catch(() => {});
     publishFleetReport().catch(() => {});
@@ -3177,7 +3177,7 @@ async function handleLifecycleCommand(
         persistFleet();
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
-        reabsorbWbsItems(root, bot);
+        void reabsorbWbsItems(root, bot);
         restartBotForRoom(root, bot);
         writeCrewStatus(root, bot);
         await tr(`✅ ${name} dismissed`);
@@ -3204,7 +3204,7 @@ async function handleLifecycleCommand(
             if (rid && rid !== qid) await botLeaveRoom(botToken, homeserver, rid);
           }
         } catch { /* non-fatal */ }
-        reabsorbWbsItems(root, bot);
+        void reabsorbWbsItems(root, bot);
         fleetUpdate(bot, { status: 'sleep' });
         persistFleet();
         await tr(`✅ ${name} asleep`);
@@ -3245,7 +3245,7 @@ async function handleLifecycleCommand(
         await step('🚀 starting');
         startBot(root, bot);
         writeCrewStatus(root, bot);
-        injectWbsTasks(root, bot);
+        void injectWbsTasks(root, bot);
         await setBotDisplayStatus(root, bot, 'waiting');
         await step('🟡 waiting for first output');
         const model = env?.BRAIN_MODEL || '?';
@@ -3306,7 +3306,7 @@ async function handleLifecycleCommand(
         // Re-seed with exact dutyRoomId to avoid intercom.json lookup issues (#193)
         restartBotForRoom(root, bot, dutyRoomId);
         writeCrewStatus(root, bot);
-        injectWbsTasks(root, bot);
+        void injectWbsTasks(root, bot);
         await tr(`✅ ${name} on duty`);
         sendLifecycleMsg(bot, 'started', rank).catch(() => {});
         publishFleetReport().catch(() => {});
@@ -4116,11 +4116,11 @@ function registerRelayCommands(): void {
         // Search all duty rooms for the item
         let found = false;
         for (const r of dutyRooms) {
-          const wbs = readWbs(dataDir, r);
+          const wbs = await readWbs(dataDir, r);
           const item = wbs.items.find(i => i.id === itemId);
           if (item) {
             const unblocked = completeItem(wbs, itemId);
-            writeWbs(dataDir, r, wbs);
+            await writeWbs(dataDir, r, wbs);
             const unblockedMsg = unblocked.length > 0 ? ` — unblocked: ${unblocked.join(', ')}` : '';
             await reply(conn, `✅ WBS ${itemId} done${unblockedMsg}`);
             found = true;
@@ -4148,7 +4148,7 @@ function registerRelayCommands(): void {
 
       if (!await electSpeaker()) return;
       const dataDir = path.join(resolveRoot(), '_runtime', 'data');
-      const wbs = readWbs(dataDir, room);
+      const wbs = await readWbs(dataDir, room);
 
       if (wbs.items.length === 0) {
         await reply(conn, `📋 WBS ${room} — empty`);
@@ -4954,7 +4954,7 @@ async function main(): Promise<void> {
           killStaleContainers(bot);
           bootstrapBot(root, bot);
           writeCrewStatus(root, bot);
-          injectWbsTasks(root, bot);
+          void injectWbsTasks(root, bot);
           started.push(bot);
         } catch (err) {
           log(`bootstrap: ${bot} failed — ${errStr(err)}`);

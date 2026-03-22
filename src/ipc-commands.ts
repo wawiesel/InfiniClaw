@@ -1086,10 +1086,10 @@ async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Pr
     return;
   }
   const dataDir = path.join(root, '_runtime', 'data');
-  const wbs = readWbs(dataDir, room);
+  const wbs = await readWbs(dataDir, room);
   const ok = assignItem(wbs, itemId, botName);
   if (ok) {
-    writeWbs(dataDir, room, wbs);
+    await writeWbs(dataDir, room, wbs);
     logger.info({ room, itemId, assignee }, 'WBS item assigned');
   } else {
     logger.warn({ room, itemId }, 'WBS item not found or already done');
@@ -1105,9 +1105,9 @@ async function handleWbsComplete(data: CommandData, _ctx: InfiniClawIpcContext):
     return;
   }
   const dataDir = path.join(root, '_runtime', 'data');
-  const wbs = readWbs(dataDir, room);
+  const wbs = await readWbs(dataDir, room);
   const unblocked = completeItem(wbs, itemId);
-  writeWbs(dataDir, room, wbs);
+  await writeWbs(dataDir, room, wbs);
   logger.info({ room, itemId, unblocked }, 'WBS item completed, unblocked: %o', unblocked);
 }
 
@@ -1124,12 +1124,12 @@ async function handleWbsWrite(data: CommandData, _ctx: InfiniClawIpcContext): Pr
   }
 
   const dataDir = path.join(root, '_runtime', 'data');
-  const wbs = readWbs(dataDir, room);
+  const wbs = await readWbs(dataDir, room);
 
   if (op === 'delete') {
     const before = wbs.items.length;
     wbs.items = wbs.items.filter((i) => i.id !== itemId);
-    writeWbs(dataDir, room, wbs);
+    await writeWbs(dataDir, room, wbs);
     logger.info({ room, itemId, removed: before - wbs.items.length }, 'WBS item deleted');
     return;
   }
@@ -1163,7 +1163,7 @@ async function handleWbsWrite(data: CommandData, _ctx: InfiniClawIpcContext): Pr
       });
       logger.info({ room, itemId }, 'WBS item created');
     }
-    writeWbs(dataDir, room, wbs);
+    await writeWbs(dataDir, room, wbs);
     return;
   }
 

@@ -1,7 +1,9 @@
 /**
  * Work Breakdown Structure (WBS) — relay-side utilities.
  *
- * Per-room JSON file at _runtime/data/wbs-{room}.json.
+ * Primary storage: S3 at infiniclaw/wbs/wbs-{room}.json.
+ * Local cache: _runtime/data/wbs-{room}.json (for container MCP tool reads).
+ *
  * The relay manages assignment, reabsorption, and dependency unblocking.
  * The Chief bot manages content (triage, prioritisation, rebalancing).
  *
@@ -10,6 +12,8 @@
 
 import fs from 'fs';
 import path from 'path';
+import { downloadJson, uploadJson } from './s3-sync.js';
+import { logger } from 'nanoclaw/logger.js';
 
 export type WbsStatus = 'backlog' | 'ready' | 'in_progress' | 'done';
 
@@ -27,15 +31,37 @@ export interface WbsFile {
   items: WbsItem[];
 }
 
-// ── File I/O ─────────────────────────────────────────────────────────────────
+// ── S3 key + local cache path ────────────────────────────────────────────────
 
-function wbsPath(dataDir: string, room: string): string {
-  const safe = room.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return path.join(dataDir, `wbs-${safe}.json`);
+function safeName(room: string): string {
+  return room.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
-export function readWbs(dataDir: string, room: string): WbsFile {
-  const p = wbsPath(dataDir, room);
+function s3Key(room: string): string {
+  return `infiniclaw/wbs/wbs-${safeName(room)}.json`;
+}
+
+function localPath(dataDir: string, room: string): string {
+  return path.join(dataDir, `wbs-${safeName(room)}.json`);
+}
+
+// ── Read: S3 first, local fallback ───────────────────────────────────────────
+
+export async function readWbs(dataDir: string, room: string): Promise<WbsFile> {
+  // Try S3 first
+  try {
+    const data = await downloadJson<WbsFile>(s3Key(room));
+    if (data && Array.isArray(data.items)) {
+      // Update local cache for container reads
+      writeLocalCache(dataDir, room, data);
+      return data;
+    }
+  } catch (err) {
+    logger.warn({ err, room }, 'WBS: S3 read failed, falling back to local');
+  }
+
+  // Fall back to local file
+  const p = localPath(dataDir, room);
   try {
     const raw = fs.readFileSync(p, 'utf-8');
     const parsed = JSON.parse(raw) as { items?: unknown };
@@ -46,8 +72,22 @@ export function readWbs(dataDir: string, room: string): WbsFile {
   return { items: [] };
 }
 
-export function writeWbs(dataDir: string, room: string, wbs: WbsFile): void {
-  const p = wbsPath(dataDir, room);
+// ── Write: S3 + local cache ──────────────────────────────────────────────────
+
+export async function writeWbs(dataDir: string, room: string, wbs: WbsFile): Promise<void> {
+  // Write to local cache first (sync, always works)
+  writeLocalCache(dataDir, room, wbs);
+
+  // Write to S3 (async, best-effort)
+  try {
+    await uploadJson(s3Key(room), wbs);
+  } catch (err) {
+    logger.error({ err, room }, 'WBS: S3 write failed — local cache is authoritative');
+  }
+}
+
+function writeLocalCache(dataDir: string, room: string, wbs: WbsFile): void {
+  const p = localPath(dataDir, room);
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify(wbs, null, 2) + '\n');
 }
