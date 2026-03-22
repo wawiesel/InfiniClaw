@@ -80,8 +80,9 @@ let s3ShipsCache: Record<string, ShipEntry> | null = null;
 /**
  * Derive fleet identifier from INFINICLAW_FLEET env var.
  * fleet.json → "infiniclaw00", fleet01.json → "infiniclaw01", etc.
+ * Exported so relay.ts can use it for fleet-namespaced S3 keys.
  */
-function fleetId(): string {
+export function fleetId(): string {
   const fleet = process.env['INFINICLAW_FLEET'] || 'fleet.json';
   const m = fleet.match(/^fleet(\d+)\.json$/);
   if (m) return `infiniclaw${m[1].padStart(2, '0')}`;
@@ -297,6 +298,7 @@ export interface ShipEntry {
   user: string | null;
   commissioned: boolean;
   rank: number;
+  fleet?: string;         // fleet instance, e.g. "infiniclaw00", "infiniclaw01" (default: infiniclaw00)
   spaceId?: string;
   loungeId?: string;
   quartersSpaceId?: string;
