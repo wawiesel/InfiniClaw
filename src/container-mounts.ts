@@ -174,7 +174,7 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
 
   // Mount _runtime/data so WBS tools can read fleet-level state
   const runtimeDataDir = path.join(projectRoot, '_runtime', 'data');
-  mountIfExists(mounts, runtimeDataDir, '/workspace/project/_runtime/data', true, projectRoot);
+  mountIfExists(mounts, runtimeDataDir, '/workspace/data', false, projectRoot);
 
   // Share host delegate auth directories
   mountIfExists(mounts, path.join(homeDir, '.codex'), '/home/node/.codex', false, homeDir);

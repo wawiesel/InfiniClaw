@@ -656,7 +656,7 @@ Use this after completing a task that requires cross-bot verification. The assig
 
   // ── WBS ──────────────────────────────────────────────────────────────
 
-  const WBS_DATA_DIR = '/workspace/project/_runtime/data';
+  const WBS_DATA_DIR = '/workspace/data';
 
   type WbsStatus = 'backlog' | 'ready' | 'in_progress' | 'done';
   interface WbsItem {

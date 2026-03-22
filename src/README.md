@@ -54,7 +54,8 @@ Host machine (macOS / Linux)
 ├── chat-activity.ts    → Track activity per room for idle detection
 ├── message-filtering.ts→ Dedup, echo prevention, ignore rules (📞 pill, @ callout, system accounts)
 ├── signals.ts          → Signals: `{{mention}}` `{{branch}}` `{{merge}}` `{{send}}` — errors as `{{⚠️N}}`
-├── ipc-commands.ts     → WBS mutations Chief-only; all <m> callouts → {{mention}} in audit trail
+├── ipc-commands.ts     → WBS mutations Chief-only; callouts use {{mention}}
+├── container-mounts.ts → WBS data at `/workspace/data` (fixes mount shadowing)
 ├── tool-call-breadcrumb.ts → Shared compact S3-linked tool call formatting (main brain + BB — DRY)
 ├── metrics.ts         → Fleet metrics: autonomy, MTBI, health grades (uses loadFleet() — no local fleet parsing)
 ├── room-relay.ts       → Cross-room messaging (TODO: migrate from intercom to operator account)
