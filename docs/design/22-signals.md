@@ -139,3 +139,4 @@ The bot sees this in its room context, learns the signal was bad, and can retry 
 | `set_thread(id)` | `{{send thread="id"}}` |
 | `send_message(text, recipient)` | `{{send room="recipient"}} text` |
 | No audit trail | `{{1 2}}` S3-linked audit |
+| `branch_to_thread` IPC relay-task file | `{{branch title="X" objective="Y"}}` signal |

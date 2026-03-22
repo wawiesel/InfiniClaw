@@ -326,6 +326,50 @@ export function registerDelegateTools(
 
   // branch_to_thread removed — use {{branch title="X" objective="Y"}} signal instead (22-signals.md)
 
+  // ── query_local_llm ───────────────────────────────────────────────────
+
+  server.tool(
+    'query_local_llm',
+    `Query a local Ollama LLM running on the host machine. Use this for tasks that don't need Claude's full reasoning — summarization, formatting, extraction, classification, translation, or simple Q&A. Much faster and free.`,
+    {
+      prompt: z.string().describe('The prompt to send to the local LLM'),
+      model: z.string().default('qwen3:14b').describe('Ollama model name (e.g., "qwen3:14b", "qwen3:30b-thinking", "devstral-small-2:24b")'),
+      system: z.string().optional().describe('Optional system prompt'),
+    },
+    async (args) => {
+      try {
+        const body: Record<string, unknown> = {
+          model: args.model,
+          prompt: args.prompt,
+          stream: false,
+        };
+        if (args.system) body.system = args.system;
+
+        const res = await fetch(`${ollamaHost}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          return {
+            content: [{ type: 'text' as const, text: `Ollama error (${res.status}): ${text}` }],
+            isError: true,
+          };
+        }
+
+        const data = await res.json() as { response: string };
+        return { content: [{ type: 'text' as const, text: data.response }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Failed to reach Ollama at ${ollamaHost}: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
   // ── delegate_to_lobe ──────────────────────────────────────────────────
 
   server.tool(

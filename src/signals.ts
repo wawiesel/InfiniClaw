@@ -32,6 +32,10 @@ export interface SignalResult {
     thread?: string;
   };
   callouts: string[];        // Bot names from {{m Name}} signals
+  branchRequest?: {          // From {{branch title="X" objective="Y"}}
+    title: string;
+    objective: string;
+  };
 }
 
 export interface BranchRequest {
