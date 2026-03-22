@@ -2118,12 +2118,22 @@ async function spawnBranchBrain(
   }
 
   // Find the connection for this room (strip matrix: prefix if present).
-  // Fall back to the bot's duty room — NEVER to engineering, which causes cross-room leaks.
+  // Fall back to the bot's duty room, then operator account for quarters rooms.
   const roomId = chat_jid.replace(/^matrix:/, '');
   const dutyRoom = bot ? botDutyRoom(bot) : '';
-  const conn = conns.find(c => c.roomId === roomId)
+  let conn = conns.find(c => c.roomId === roomId)
     || (dutyRoom ? conns.find(c => c.name === dutyRoom) : undefined)
     || findEngConn(conns);
+  // Fallback: use operator account for rooms not covered by intercom (e.g. quarters)
+  if (!conn?.accessToken) {
+    try {
+      const opFile = path.join(secretsRepoPath(), 'operator', 'operator-matrix.json');
+      const opData = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+      if (opData.accessToken) {
+        conn = { name: `operator:${roomId}`, roomId, homeserver: opData.homeserver, username: '', password: '', accessToken: opData.accessToken, syncToken: '', filterId: null, userId: opData.userId };
+      }
+    } catch { /* operator config not available */ }
+  }
   if (!conn?.accessToken) {
     log(`branchBrain: no active connection for chat_jid=${chat_jid}`);
     return;
