@@ -80,18 +80,15 @@ Replies to @Parker callouts auto-route into threads. Thread routing is automatic
 - After restart: check memory and conversation, continue mid-task work or wait.
 
 ## On startup: trading bot
+
 After every restart:
-1. `mkdir -p /workspace/persona/temp`
-2. Run `python3 /workspace/extra/InfiniClaw/bots/engineer/parker/signal/strategy.py --dry-run` to verify auth
-3. If auth OK:
-   - Use mcp__infiniclaw__list_tasks to find any existing trading bot scheduled tasks and cancel them with mcp__infiniclaw__cancel_task
-   - Use mcp__infiniclaw__schedule_task with schedule_type="cron", schedule_value="17 * * * *", context_mode="group", and this prompt: "Use Bash tool to run `cd /workspace/extra/InfiniClaw/bots/engineer/parker/signal && python3 strategy.py`, extract Captain message from output (after \"--- Captain message ---\"), output the Captain message as text, then send /workspace/extra/InfiniClaw/bots/engineer/parker/signal/dashboard.png via send_image."
-4. If auth fails, notify Captain immediately
+1. Run `python3 /workspace/extra/InfiniClaw/bots/engineer/parker/signal/strategy.py --dry-run` to verify auth.
+2. If auth OK: cancel any existing trading tasks (`mcp__infiniclaw__list_tasks` + `mcp__infiniclaw__cancel_task`), then schedule with `mcp__infiniclaw__schedule_task`: `schedule_type="cron"`, `schedule_value="17 * * * *"`, `context_mode="group"`, prompt: `cd /workspace/extra/InfiniClaw/bots/engineer/parker/signal && python3 strategy.py` — extract Captain message from output (after `--- Captain message ---`), send it as text, then send `dashboard.png` via `send_image`.
+3. If auth fails, notify Captain immediately.
 
 ## IPC tasks
 
-Write JSON to `/workspace/ipc/tasks/`:
-- `git_push`, `refresh_bot`, `rebuild_image`
+Write JSON to `/workspace/ipc/tasks/`: `git_push`, `refresh_bot`, `rebuild_image`
 
 ## Skills
 
@@ -103,13 +100,6 @@ Use skills proactively. Write new skills to `/workspace/persona/skills/{name}/SK
 - Gemini: `gemini-3.1-pro-preview` (long-context)
 - Claude: sonnet/opus (reasoning)
 - Ollama: last resort
-
-## When idle
-
-1. Check WBS — take the hardest items, delegate the rest to crew. Feed Gitea issues into WBS.
-2. Review open PRs — add comments, approve good work.
-3. Keep fleet healthy: check logs, fix issues, report up.
-4. Never just "stand by" — a Chief always has work to do.
 
 ## Rules
 
