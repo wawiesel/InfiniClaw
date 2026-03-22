@@ -58,6 +58,10 @@ export interface BotMetrics {
   branchBrainSuccess: RollingMetric;
   /** (input+output+cache) tokens per day from session JSONL. -1 if no data. */
   tokenThroughput: RollingMetric;
+  /** Messages sent per day (replies posted). -1 if not yet tracked. */
+  messagesPerDay: RollingMetric;
+  /** Task completion rate (resolved / created) as 0–100%. -1 if no data. */
+  taskCompletionRate: RollingMetric;
   /** Current status from fleet.json */
   status: string;
   /** Whether pm2 process is running */
@@ -169,6 +173,15 @@ const infraFailureEvents: { ts: number; system: string }[] = [];
 
 /** Accumulated response latency samples. Fed by relay when a bot replies. */
 const responseLatencyEvents: { ts: number; bot: string; latencyMs: number }[] = [];
+
+/** Accumulated bot message sends. Fed by relay when a bot sends a message. */
+const messageEvents: { ts: number; bot: string }[] = [];
+
+/** Accumulated task lifecycle events. Fed by relay from Claude Code session todos. */
+const taskEvents: { ts: number; bot: string; kind: 'created' | 'resolved' }[] = [];
+
+/** Version deployment events — when a ship started running a new version. */
+const versionDeployEvents: { ts: number; ship: string; version: string }[] = [];
 
 /** Pending message deliveries — tracks when a message was delivered to a bot's room. */
 const pendingDeliveries: Map<string, number> = new Map();
@@ -323,6 +336,61 @@ export function recordInfraFailure(system: string): void {
   while (infraFailureEvents.length > 0 && infraFailureEvents[0].ts < cutoff) infraFailureEvents.shift();
 }
 
+/**
+ * Record a message sent by a bot.
+ * Called from relay when a bot posts a message to a Matrix room.
+ */
+export function recordBotMessage(bot: string, ts?: number): void {
+  messageEvents.push({ ts: ts ?? Date.now(), bot });
+  const cutoff = Date.now() - 8 * 86_400_000;
+  while (messageEvents.length > 0 && messageEvents[0].ts < cutoff) messageEvents.shift();
+}
+
+/** Record a task (todo) created by a bot. Called by relay from Claude Code session data. */
+export function recordTaskCreated(bot: string, ts?: number): void {
+  taskEvents.push({ ts: ts ?? Date.now(), bot, kind: 'created' });
+  const cutoff = Date.now() - 8 * 86_400_000;
+  while (taskEvents.length > 0 && taskEvents[0].ts < cutoff) taskEvents.shift();
+}
+
+/** Record a task (todo) resolved by a bot. Called by relay from Claude Code session data. */
+export function recordTaskResolved(bot: string, ts?: number): void {
+  taskEvents.push({ ts: ts ?? Date.now(), bot, kind: 'resolved' });
+  const cutoff = Date.now() - 8 * 86_400_000;
+  while (taskEvents.length > 0 && taskEvents[0].ts < cutoff) taskEvents.shift();
+}
+
+/**
+ * Record when a ship starts running a new version.
+ * Called by relay on startup after determining the running version.
+ */
+export function recordVersionDeployed(ship: string, version: string, ts?: number): void {
+  versionDeployEvents.push({ ts: ts ?? Date.now(), ship, version });
+  // Keep last 100 deploy events (no pruning by age — version history is valuable)
+  if (versionDeployEvents.length > 100) versionDeployEvents.shift();
+}
+
+/**
+ * Get version adoption latency in milliseconds for a given ship and version.
+ * Returns null if this ship has not yet deployed the version, or if the reference
+ * deploy time is unknown.
+ * The "adoption latency" = time from first fleet deployment of a version to this ship's deployment.
+ */
+export function getVersionAdoptionLatency(ship: string, version: string): number | null {
+  const deploys = versionDeployEvents.filter(e => e.version === version);
+  if (deploys.length === 0) return null;
+  const shipDeploy = deploys.find(e => e.ship === ship);
+  if (!shipDeploy) return null;
+  const firstDeploy = deploys.reduce((min, e) => e.ts < min.ts ? e : min, deploys[0]);
+  if (firstDeploy.ship === ship) return 0; // this ship was first
+  return shipDeploy.ts - firstDeploy.ts;
+}
+
+/** Get all version deploy events (for testing/introspection). */
+export function getVersionDeployEvents(): ReadonlyArray<{ ts: number; ship: string; version: string }> {
+  return versionDeployEvents;
+}
+
 /** Reset all metrics state. For testing only. */
 export function resetMetrics(): void {
   operatorEvents.length = 0;
@@ -330,6 +398,9 @@ export function resetMetrics(): void {
   branchBrainEvents.length = 0;
   infraFailureEvents.length = 0;
   responseLatencyEvents.length = 0;
+  messageEvents.length = 0;
+  taskEvents.length = 0;
+  versionDeployEvents.length = 0;
   pendingDeliveries.clear();
   behindTheCurtainRoomId = null;
   operatorUserId = null;
@@ -374,6 +445,16 @@ function computeOperatorMetrics(): OperatorMetrics {
   };
 }
 
+/** Task completion rate (0–100) for a bot in the given window. -1 if no data. */
+function taskCompletionRateFor(bot: string, windowDays: number): number {
+  const cutoff = Date.now() - windowDays * 86_400_000;
+  const inWindow = taskEvents.filter(e => e.bot === bot && e.ts >= cutoff);
+  const created = inWindow.filter(e => e.kind === 'created').length;
+  if (created === 0) return -1;
+  const resolved = inWindow.filter(e => e.kind === 'resolved').length;
+  return Math.round((Math.min(resolved, created) / created) * 100);
+}
+
 function computeBotMetrics(): BotMetrics[] {
   const config = loadShipConfig();
   const fleet = loadFleetBots();
@@ -389,6 +470,7 @@ function computeBotMetrics(): BotMetrics[] {
     const score7d = rollingPointsRate(botScores, 7);
 
     const latency = botLatencyPercentiles(botId, 1);
+    const botMessages = messageEvents.filter(e => e.bot === botId);
     return {
       name: botId,
       score: { day1: score1d, day7: score7d },
@@ -403,6 +485,11 @@ function computeBotMetrics(): BotMetrics[] {
       tokenThroughput: {
         day1: readTokenThroughput(botId, 1),
         day7: readTokenThroughput(botId, 7),
+      },
+      messagesPerDay: rolling(botMessages),
+      taskCompletionRate: {
+        day1: taskCompletionRateFor(botId, 1),
+        day7: taskCompletionRateFor(botId, 7),
       },
       status: entry?.status ?? 'unknown',
       processRunning: pm2?.status === 'online',
@@ -575,6 +662,95 @@ export async function publishMetrics(): Promise<MetricsSnapshot> {
   return snapshot;
 }
 
+// ── Alerting ─────────────────────────────────────────────────────────
+
+export type AlertSeverity = 'critical' | 'warning';
+
+export interface Alert {
+  severity: AlertSeverity;
+  code: string;
+  message: string;
+  bot?: string;
+}
+
+// Alert thresholds (from design doc)
+const ALERT_THRESHOLDS = {
+  availabilityMin: 90,    // < 90% = critical
+  oomKillsMax: 0,         // any OOM = critical
+  syncFailuresMax1d: 2,   // > 2/day = critical
+  latencyP95MaxS: 120,    // > 2min p95 = warning
+  autonomyScoreMin1d: 50, // < 50 = warning
+  interventionsMax1d: 3,  // > 3/day = warning
+} as const;
+
+/**
+ * Check all alert conditions against a metrics snapshot.
+ * Returns an array of triggered alerts (empty = healthy).
+ * Called by relay and !metrics command to surface active issues.
+ */
+export function checkAlerts(snapshot: MetricsSnapshot): Alert[] {
+  const alerts: Alert[] = [];
+  const { fleet, operator, bots, shipMetrics } = snapshot;
+
+  // 1. Availability < 90%
+  if (fleet.availability < ALERT_THRESHOLDS.availabilityMin) {
+    alerts.push({
+      severity: 'critical',
+      code: 'AVAIL_LOW',
+      message: `Fleet availability ${fleet.availability}% (threshold ${ALERT_THRESHOLDS.availabilityMin}%)`,
+    });
+  }
+
+  // 2. Sync failures > 2/day
+  if (shipMetrics.infraFailures.day1 > ALERT_THRESHOLDS.syncFailuresMax1d) {
+    alerts.push({
+      severity: 'critical',
+      code: 'SYNC_FAILURES',
+      message: `Sync/build failures ${shipMetrics.infraFailures.day1}/day (threshold ${ALERT_THRESHOLDS.syncFailuresMax1d}/day)`,
+    });
+  }
+
+  // 3. Autonomy score < 50 (1d)
+  if (fleet.autonomyScore.day1 < ALERT_THRESHOLDS.autonomyScoreMin1d) {
+    alerts.push({
+      severity: 'warning',
+      code: 'AUTONOMY_LOW',
+      message: `Autonomy score ${fleet.autonomyScore.day1}% (1d) below threshold ${ALERT_THRESHOLDS.autonomyScoreMin1d}%`,
+    });
+  }
+
+  // 4. Interventions > 3/day
+  if (operator.interventions.day1 > ALERT_THRESHOLDS.interventionsMax1d) {
+    alerts.push({
+      severity: 'warning',
+      code: 'INTERVENTIONS_HIGH',
+      message: `Operator interventions ${operator.interventions.day1}/day (threshold ${ALERT_THRESHOLDS.interventionsMax1d}/day)`,
+    });
+  }
+
+  // 5. Per-bot: response latency p95 > 2min
+  for (const bot of bots) {
+    if (bot.responseLatencyP95 != null && bot.responseLatencyP95 > ALERT_THRESHOLDS.latencyP95MaxS) {
+      alerts.push({
+        severity: 'warning',
+        code: 'LATENCY_HIGH',
+        message: `${bot.name} response latency p95 ${bot.responseLatencyP95}s (threshold ${ALERT_THRESHOLDS.latencyP95MaxS}s)`,
+        bot: bot.name,
+      });
+    }
+  }
+
+  return alerts;
+}
+
+/** Format alerts as a human-readable string. Returns empty string if no alerts. */
+export function formatAlerts(alerts: Alert[]): string {
+  if (alerts.length === 0) return '';
+  return alerts
+    .map(a => `${a.severity === 'critical' ? '🔴' : '🟡'} [${a.code}] ${a.message}`)
+    .join('\n');
+}
+
 // ── Formatting ──────────────────────────────────────────────────────
 
 function fmtRolling(m: RollingMetric, unit = '/day'): string {
@@ -600,6 +776,9 @@ export function formatBotMetrics(b: BotMetrics): string {
     const fmt1 = b.branchBrainSuccess.day1 >= 0 ? `${b.branchBrainSuccess.day1}%` : '—';
     const fmt7 = b.branchBrainSuccess.day7 >= 0 ? `${b.branchBrainSuccess.day7}%` : '—';
     line += ` · bb ${fmt1}/${fmt7}`;
+  }
+  if (b.messagesPerDay.day1 > 0 || b.messagesPerDay.day7 > 0) {
+    line += ` · msg ${b.messagesPerDay.day1}/${b.messagesPerDay.day7}/day`;
   }
   return line;
 }
