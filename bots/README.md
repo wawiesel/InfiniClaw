@@ -31,4 +31,4 @@ Bots are assigned to roles via `fleet.json` in the secrets repo.
 
 Bot memory lives in the secrets repo (`~/.config/infiniclaw/secrets/bots/{bot}/memory/`), mounted writable at `/workspace/persona/memory/`.
 
-- **On-duty heartbeat** (`bots/CLAUDE.md`): Chief and non-Chief startup procedures — Chief runs `!wbs`, triages top 3 items, assigns crew; non-Chief reports availability to Chief.
+- **On-duty heartbeat** (`bots/CLAUDE.md`): Chief and non-Chief startup procedures — Chief runs `!wbs`, triages top items, assigns crew; non-Chief works WBS assignments.

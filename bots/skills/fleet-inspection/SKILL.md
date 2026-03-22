@@ -88,7 +88,7 @@ ls $INFINICLAW_ROOT/_runtime/instances/<bot>/data/ipc/main/tasks/
 ```bash
 curl -s --max-time 3 http://host.containers.internal:8765/sse | head -2
 ```
-Should return `event: endpoint`. If not, call `restart_wksm()`.
+Should return `event: endpoint`. If not, call `escalate to operator`.
 
 ### Google Workspace MCP
 Host-side launchd service on port 8767. Log at `~/.config/infiniclaw/logs/workspace-mcp.log`. OAuth creds at `~/.config/infiniclaw/secrets/google/`. Auth errors → escalate to Captain.
@@ -98,7 +98,7 @@ Host-side launchd service on port 8767. Log at `~/.config/infiniclaw/logs/worksp
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
 | `hasMcpServers: false` | Bad JSON in mcp.json | Fix JSON, restart |
-| WKSM not connecting | Proxy down | `restart_wksm()` |
+| WKSM not connecting | Proxy down | `escalate to operator` |
 | Container exits immediately | Auth missing or image outdated | Check env, rebuild |
 | `pendingMessages` stuck | Container hung | Check logs, restart |
 

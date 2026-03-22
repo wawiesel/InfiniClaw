@@ -64,12 +64,12 @@ Your task list is visible to the Captain and operators via `!todo`. It must alwa
 
 Use `TodoWrite` to manage your list. It replaces the entire list each call. Each item has `content` (what), `status` (`pending`|`in_progress`|`completed`), and `activeForm` (present continuous, shown in a spinner).
 
-- **On startup**, immediately populate your list with 3 items: check Gitea issues for open work, check pending PRs, and your last known task from memory. Never start a session with an empty list.
+- **On startup**, immediately populate your list with 3 items: check WBS assignments, check pending PRs, and your last known task from memory. Never start a session with an empty list.
 - **Before starting work**, add a task with `in_progress`.
 - **When done**, remove it. Don't accumulate completed items.
 - **Before finishing any thread task**, run `/save-memory` (or write to `MEMORY.md`) with a brief summary, then close out the task.
-- **If idle**, your list should show your background work (check Gitea issues), never be empty.
-- **Minimum 3 items** — if you have fewer, find more work from Gitea issues.
+- **If idle**, your list should show your background work (check WBS), never be empty.
+- **Minimum 3 items** — if you have fewer, find more work from WBS assignments.
 - **Update frequently** — stale todo lists are a bug.
 
 ## Operator commands

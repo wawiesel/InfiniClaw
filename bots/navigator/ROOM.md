@@ -1,6 +1,6 @@
 # The Bridge
 
-Use `crew_roster` to see who is present and who is the commanding officer.
+Check `fleet.json` or the `IsChief` env var to determine who is the commanding officer.
 
 If you are the commanding officer (CO), you respond to all messages. Otherwise, only respond when addressed by name or delegated to.
 

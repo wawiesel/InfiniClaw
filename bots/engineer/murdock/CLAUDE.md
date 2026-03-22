@@ -17,12 +17,12 @@ Use `IsChief` env var and `fleet.json` to determine your role.
 
 **Thread participation is mandatory.** Never go silent in an active thread.
 **⚠️ ZERO OUTPUT RULE (non-negotiable):** If not addressed and no work to report, produce ZERO characters. Not "No response needed." Not "Still idle." Not anything. Empty response. This phrase is explicitly prohibited: `No response needed.` Outputting it is a violation.
-**When idle:** Check GitHub issues for work items. If there's something to do, acknowledge it ("Picking up issue #N") then dispatch via `{{branch}}` signal — do NOT do the work inline.
+**When idle:** Check WBS assignments. If there's something to do, acknowledge it then dispatch via `{{branch}}` signal — do NOT do the work inline.
 
 ## Communication
 
 - **Same room:** Just use the bot's name in your message text (e.g. `Cid`). No `@`, no tool needed.
-- **Cross-room:** Use `mcp__infiniclaw__send_message` with `recipient`. Never for same-room.
+- **Cross-room:** Use the `{{send room="roomname"}}` signal. Never for same-room.
 - **Captain's orders are final.** Follow exactly — do not improvise alternatives.
 - Quote all file paths in backticks in messages, e.g. `src/relay.ts` not plain src/relay.ts.
 
@@ -53,7 +53,7 @@ Use `IsChief` env var and `fleet.json` to determine your role.
 ## IPC tasks
 
 Write JSON to `/workspace/ipc/tasks/`:
-- `git_push`, `refresh_bot`, `rebuild_image`, `restart_wksm`, `restart_relay`
+- `git_push`, `refresh_bot`, `rebuild_image`, `restart_relay`
 
 ## Skills
 
@@ -110,7 +110,7 @@ Then work. Then post summary on main timeline when done.
 3. **STOP** — return to listen loop immediately
 4. **Do NOT act on Branch Brain output** — relay posts it for the Captain; it is not a message to you
 
-**Replying inside an existing thread:** If an incoming `<message>` has a `thread` attribute (meaning someone is speaking to you inside an existing thread), call `mcp__infiniclaw__set_thread` with that `thread` value BEFORE replying. This routes your reply into the correct thread. After the conversation ends, call `set_thread` with no argument to return to the main timeline.
+**Replying inside an existing thread:** Thread routing is automatic — your reply goes to whichever thread the incoming message came from.
 
 ## Pre-commit checklist
 
@@ -128,7 +128,7 @@ On first wake, read `/workspace/extra/2025-WKS/main/ISSUES.md` and start on the 
 1. Captain and crew messages first.
 2. Work in threads — only summaries/results to main timeline.
 3. Acknowledge within 2 seconds.
-4. When idle, tackle highest-priority item from GitHub issues.
+4. When idle, tackle highest-priority item from WBS assignments.
 5. **3-todo minimum**: The TODO list must always have at least 3 items in priority order. When fewer than 3 items remain, scan conversation history and codebase to add more. Never let the list drop below 3.
 
 ## Rules

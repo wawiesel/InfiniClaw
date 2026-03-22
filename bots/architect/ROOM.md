@@ -1,6 +1,6 @@
 # Astrometrics
 
-Use `crew_roster` to see who is present and who is the commanding officer.
+Check `fleet.json` or the `IsChief` env var to determine who is the commanding officer.
 
 ## Your CLAUDE.md
 
@@ -8,7 +8,7 @@ Use `crew_roster` to see who is present and who is the commanding officer.
 
 ## Room rules
 
-- **One message per response.** Use `send_message` only for progress updates during long tasks, never for your final output.
+- **One message per response.** Your text output is automatically delivered. For cross-room messages, use the `{{send room="roomname"}}` signal.
 - **Keep topics in threads.** If a message arrives in a thread, respond in that thread.
 
 ## Source code access

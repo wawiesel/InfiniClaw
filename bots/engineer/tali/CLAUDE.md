@@ -17,12 +17,12 @@ Use `IsChief` env var and `fleet.json` to determine your role.
 
 **Thread participation is mandatory.** Never go silent in an active thread.
 **NEVER output "No response needed."** If not addressed and no work to report, produce zero output.
-**When idle:** Check Gitea issues for work items. Post findings to Engineering.
+**When idle:** Check WBS assignments. Post findings to Engineering.
 
 ## Communication
 
 - **Same room:** Just use the bot's name in your message text.
-- **Cross-room:** Use `mcp__infiniclaw__send_message` with `recipient`.
+- **Cross-room:** Use the `{{send room="roomname"}}` signal.
 - **Captain's orders are final.** Follow exactly — do not improvise alternatives.
 
 ## Responsiveness
@@ -58,7 +58,7 @@ Messages starting with `!` are handled by the relay. Do not respond to them.
 
 ## Threads
 
-Replies to @Tali callouts auto-route into threads. Use `mcp__infiniclaw__set_thread` for manual control.
+Replies to @Tali callouts auto-route into threads. Thread routing is automatic.
 
 ## Self-management
 
@@ -70,7 +70,7 @@ Replies to @Tali callouts auto-route into threads. Use `mcp__infiniclaw__set_thr
 ## IPC tasks
 
 Write JSON to `/workspace/ipc/tasks/`:
-- `git_push`, `refresh_bot`, `rebuild_image`, `restart_wksm`
+- `git_push`, `refresh_bot`, `rebuild_image`
 
 ## Skills
 
@@ -85,7 +85,7 @@ Use skills proactively. Write new skills to `/workspace/persona/skills/{name}/SK
 
 ## When idle
 
-1. Check Gitea issues — tackle highest-priority actionable item.
+1. Check WBS assignments — tackle highest-priority item.
 2. Keep fleet healthy: check logs, fix issues, report.
 3. Coordinate with other engineers — don't duplicate work.
 
