@@ -159,6 +159,8 @@ const PROGRESS_CHAT_COOLDOWN_MS = 10_000;
 const lastProgressChatAt: Record<string, number> = {};
 const workThreadIds: Record<string, string> = {};
 const activeReplyThreadIds: Record<string, string | undefined> = {};
+const activeReplyThreadSetAt: Record<string, number> = {};
+const BRANCH_THREAD_TTL_MS = parseInt(process.env.BRANCH_THREAD_TTL_MS || '1200000', 10); // default 20min
 // Per-turn thread for tool call <details> blocks when on main timeline
 const progressToolCallThreadIds: Record<string, string | undefined> = {};
 const threadMapLastSeen: Record<string, number> = {};
@@ -352,6 +354,20 @@ let botMatrixUserIds: Set<string> = new Set();
 function isThreadContext(chatJid: string): boolean {
   threadMapLastSeen[`r:${chatJid}`] = Date.now();
   return Boolean(activeReplyThreadIds[chatJid]);
+}
+
+/** Returns true if the active reply thread is fresh (within TTL) — stale threads don't block branching. */
+function isActiveThreadFresh(chatJid: string): boolean {
+  const threadId = activeReplyThreadIds[chatJid];
+  if (!threadId) return false;
+  const setAt = activeReplyThreadSetAt[chatJid] || 0;
+  if (Date.now() - setAt > BRANCH_THREAD_TTL_MS) {
+    logger.info({ chatJid, ttlMs: BRANCH_THREAD_TTL_MS }, 'Stale activeReplyThreadId expired — clearing to unblock branch dispatch');
+    delete activeReplyThreadIds[chatJid];
+    delete activeReplyThreadSetAt[chatJid];
+    return false;
+  }
+  return true;
 }
 
 function sendTriggerAck(chatJid: string, messages: NewMessage[]): void {
@@ -773,8 +789,8 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
           });
 
           if (branchRequest) {
-            if (activeReplyThreadIds[ctx.chatJid]) {
-              logger.warn({ chatJid: ctx.chatJid }, 'branchRequest skipped: nested branching from inside a thread is not allowed');
+            if (isActiveThreadFresh(ctx.chatJid)) {
+              logger.warn({ chatJid: ctx.chatJid }, 'branchRequest skipped: nested branching from inside a fresh thread is not allowed');
             } else {
               turnDispatchCalled[ctx.chatJid] = true;
               writeBranchRelayTask(branchRequest, ctx.chatJid);
@@ -908,8 +924,8 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
     if (routeOverride?.thread) sendThread = routeOverride.thread;
 
     if (branchRequest) {
-      if (activeReplyThreadIds[ctx.chatJid]) {
-        logger.warn({ chatJid: ctx.chatJid }, 'branchRequest skipped: nested branching from inside a thread is not allowed');
+      if (isActiveThreadFresh(ctx.chatJid)) {
+        logger.warn({ chatJid: ctx.chatJid }, 'branchRequest skipped: nested branching from inside a fresh thread is not allowed');
       } else {
         writeBranchRelayTask(branchRequest, ctx.chatJid);
       }
@@ -1058,6 +1074,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   setObjectiveFromMessages(chatJid, contextMessages);
 
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, contextMessages);
+  if (activeReplyThreadIds[chatJid]) activeReplyThreadSetAt[chatJid] = Date.now();
   threadMapLastSeen[`r:${chatJid}`] = Date.now();
   // BUG-16: auto-set work thread when incoming message is in a thread, so bot's
   // send_message MCP calls also route there without requiring an explicit set_thread call.
@@ -1216,6 +1233,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
       appendConversationLog(group.folder, missedMessages, agentResponses, channel?.name);
       delete activeReplyThreadIds[chatJid];
+      delete activeReplyThreadSetAt[chatJid];
       markRunEnded(chatJid);
       if (isMainGroup) lastMainTurnEndedAt = Date.now();
       return true;
@@ -1224,6 +1242,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
     delete activeReplyThreadIds[chatJid];
+    delete activeReplyThreadSetAt[chatJid];
     markRunEnded(chatJid);
     if (isMainGroup) lastMainTurnEndedAt = Date.now();
     return false;
@@ -1233,6 +1252,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     markCompletion(chatJid, lastResponseBody);
   }
   delete activeReplyThreadIds[chatJid];
+  delete activeReplyThreadSetAt[chatJid];
   markRunEnded(chatJid);
   if (isMainGroup) lastMainTurnEndedAt = Date.now();
 
@@ -1404,6 +1424,7 @@ async function handleGroupMessagesInLoop(
   const rawFormatted = formatMessages(messagesToSend, TIMEZONE);
 
   activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
+  if (activeReplyThreadIds[chatJid]) activeReplyThreadSetAt[chatJid] = Date.now();
   // BUG-16: auto-set work thread when piped message is in a thread.
   if (activeReplyThreadIds[chatJid]) {
     workThreadIds[chatJid] = activeReplyThreadIds[chatJid]!;
@@ -1960,6 +1981,7 @@ async function main(): Promise<void> {
       if (!threadMapLastSeen[`r:${jid}`]) threadMapLastSeen[`r:${jid}`] = now;
       if (now - threadMapLastSeen[`r:${jid}`] > STALE_THREAD_TTL) {
         delete activeReplyThreadIds[jid];
+        delete activeReplyThreadSetAt[jid];
         delete threadMapLastSeen[`r:${jid}`];
         pruned++;
       }
