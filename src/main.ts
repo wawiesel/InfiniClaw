@@ -1077,7 +1077,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (prevKilled) delete turnKilledByTimeout[chatJid];
   const activeThread = activeReplyThreadIds[chatJid];
   const threadNote = activeThread
-    ? `The incoming message is in Matrix thread \`${activeThread}\`. Your response will be sent there automatically. Use this ID with \`set_thread\` if you need to send intermediate messages in-thread.`
+    ? `The incoming message is in Matrix thread \`${activeThread}\`. Your response will be sent there automatically.`
     : undefined;
   const parts: string[] = [];
   if (missionContext) parts.push(missionContext);
@@ -1410,7 +1410,7 @@ async function handleGroupMessagesInLoop(
   }
   const pipedActiveThread = activeReplyThreadIds[chatJid];
   const pipedThreadNote = pipedActiveThread
-    ? `The incoming message is in Matrix thread \`${pipedActiveThread}\`. Your response will be sent there automatically. Use this ID with \`set_thread\` if you need to send intermediate messages in-thread.`
+    ? `The incoming message is in Matrix thread \`${pipedActiveThread}\`. Your response will be sent there automatically.`
     : undefined;
   const formattedParts = [pipedThreadNote, threadCtx, rawFormatted].filter(Boolean);
   const formatted = formattedParts.join('\n\n');

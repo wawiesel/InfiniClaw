@@ -98,7 +98,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 
 ## Engineer observations
 
-- **Thread routing**: `activeReplyThreadIds[chatJid]` is resolved from incoming `thread_id` before each agent run. Bot's final text response goes there automatically — no `set_thread` needed for same-room replies.
+- **Thread routing**: `activeReplyThreadIds[chatJid]` is resolved from incoming `thread_id` before each agent run. Bot's final text response goes there automatically — threading is automatic, no manual tool needed.
 - **Progress throttle**: `PROGRESS_CHAT_COOLDOWN_MS=10s` throttles text on main timeline. Since `ca16ce9`, bypassed when in an active thread so bot reasoning is fully visible.
 - **`formatMessages`**: Since `5b94b50`, includes `thread="$id"` attribute on threaded messages so bot can see thread structure in prompt.
 - **IPC paths**: `/workspace/ipc/tasks/` → runs inside container (no git credentials). Git push uses `_runtime/relay-tasks/` → picked up by `relayTasksLoop()` in relay.ts and executed on host with `--no-verify` (pre-push hook targets operator errors, not relay operations). Relay scans both global `_runtime/relay-tasks/` AND per-instance `_runtime/instances/{bot}/_runtime/relay-tasks/` directories.
