@@ -37,8 +37,7 @@ Work from your todo list (assigned by the Chief). Execute via `{{branch}}`.
 
 **Dispatch:** Output a message with the `{{branch}}` signal. The relay intercepts it, posts the text as the thread root, and spawns a BB:
 ```
-🌿 Title — objective
-{{branch title="Title" objective="objective"}}
+{{branch Fix the crash in relay.ts by investigating the OOM pattern}}
 ```
 Then stop. Say nothing else.
 
@@ -72,6 +71,10 @@ Replies to @Parker callouts auto-route into threads. Thread routing is automatic
 - Restart: `mcp__infiniclaw__restart_self`
 - Brain mode: `mcp__infiniclaw__set_brain_mode` + restart. Default Opus. Sonnet only when Captain says.
 - After restart: check memory and conversation, continue mid-task work or wait.
+
+## Working directory
+
+**ALWAYS work in `~/2026-Money_Shaker/`.** Never use `/workspace/persona/temp` — it gets deleted on container restart. Clone repos and run scripts from `~/2026-Money_Shaker/`.
 
 ## On startup: trading bot
 

@@ -42,7 +42,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
+import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
 import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
@@ -3582,7 +3582,7 @@ function registerRelayCommands(): void {
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
         if (!me) { await helpReply(conn, `${thisShipName()} not in ships.json`); return; }
         me[1].operatorRelay = action === 'on';
-        writeShips(ships);
+        await writeShipsAsync(ships);
         secretsGitCommit(['operator/ships.json'], `relay ${action} ${me[0]}`);
         log(`operator relay ${action}`);
         await send(action === 'on' ? '✅ on' : '🔇 off');
@@ -3627,7 +3627,7 @@ function registerRelayCommands(): void {
           fleetUpdate(bot, { status: 'sleep' });
         }
         me[1].commissioned = false;
-        writeShips(ships);
+        await writeShipsAsync(ships);
         secretsGitCommit(['operator/ships.json'], `decommission ${me[0]}`);
         await send(`✅ decommissioned — all bots asleep`);
       } catch (err) {
@@ -3645,7 +3645,7 @@ function registerRelayCommands(): void {
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
         if (!me) { await helpReply(conn, `${thisShipName()} not in ships.json`); return; }
         me[1].commissioned = true;
-        writeShips(ships);
+        await writeShipsAsync(ships);
         secretsGitCommit(['operator/ships.json'], `commission ${me[0]}`);
         ensurePodmanReady();
         const { started } = restartRunningBots(resolveRoot());
@@ -4337,7 +4337,7 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
       await send(`📡 ${target} already ${isPromote ? 'highest' : 'lowest'} rank ship`);
       return;
     }
-    writeShips(ships);
+    await writeShipsAsync(ships);
     secretsGitCommit(['operator/ships.json'], `rerank ships: ${result.target} #${result.targetRank}, ${result.swap} #${result.swapRank}`);
     await send(formatRerankShipMsg(result.target, result.targetRank, result.swap, result.swapRank));
     return;
@@ -4916,6 +4916,14 @@ async function main(): Promise<void> {
 
   // Ensure git hooks are installed
   try { installGitHooks(); } catch (err) { log(`git hooks install failed: ${errStr(err)}`); }
+
+  // Initialize ships from S3 (authoritative) with disk fallback
+  try {
+    await loadShipsAsync();
+    log('ships: loaded from S3 (disk cache updated)');
+  } catch (err) {
+    log(`ships: S3 load failed, using disk: ${errStr(err)}`);
+  }
 
   // Initialize in-memory fleet state: disk (static) + S3 (runtime) via loadFleetAsync
   try {

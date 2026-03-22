@@ -68,6 +68,34 @@ let cached: ShipConfig | null = null;
  */
 let s3FleetCache: Record<string, BotEntry> | null = null;
 
+/**
+ * Module-level cache of S3-loaded ships.
+ * Populated by loadShipsAsync() at startup, updated by writeShipsAsync().
+ * When set, loadShips() returns this instead of disk-only data.
+ */
+let s3ShipsCache: Record<string, ShipEntry> | null = null;
+
+// ── S3 key helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Derive fleet identifier from INFINICLAW_FLEET env var.
+ * fleet.json → "infiniclaw00", fleet01.json → "infiniclaw01", etc.
+ */
+function fleetId(): string {
+  const fleet = process.env['INFINICLAW_FLEET'] || 'fleet.json';
+  const m = fleet.match(/^fleet(\d+)\.json$/);
+  if (m) return `infiniclaw${m[1].padStart(2, '0')}`;
+  return 'infiniclaw00';
+}
+
+/** S3 key for the full fleet config (all bots, S3-authoritative). */
+export function fleetConfigKey(): string {
+  return `fleet-config/${fleetId()}.json`;
+}
+
+/** S3 key for the ships registry (S3-authoritative). */
+export const SHIPS_S3_KEY = 'fleet-config/ships.json';
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -179,48 +207,70 @@ export function writeFleet(fleet: Record<string, BotEntry>): void {
 }
 
 /**
- * Load fleet state: disk fleet.json (static) → overlay ALL fields from S3.
- * S3 is the authoritative source for complete bot state (static + runtime).
- * Bots found in S3 but not on disk are included (S3 is source of truth for remote ships).
+ * Load fleet state: disk fleet.json → fleet-config S3 key (static+runtime) → per-ship keys (runtime).
+ *
+ * Priority (highest wins):
+ *   1. Per-ship fleet-state keys (runtime state, most current per ship)
+ *   2. fleet-config/{fleetId}.json (full fleet, S3-authoritative for all bots)
+ *   3. Disk fleet.json (bootstrap fallback)
+ *
+ * On first run (no S3 fleet-config key), uploads disk fleet.json to S3 for migration.
  * Falls back to disk-only if S3 is unavailable.
- * Populates the module-level s3FleetCache so subsequent loadFleet() calls see S3 data.
+ * Populates s3FleetCache so subsequent loadFleet() calls see S3 data.
  */
 export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
   const fleet = loadFleetFromDisk();
   try {
-    const { listKeys, downloadJson } = await s3Helpers();
+    const { listKeys, downloadJson, uploadJson } = await s3Helpers();
+
+    // 1. Overlay fleet-config key (full fleet, S3-authoritative)
+    const fleetCfg = await downloadJson<{ ts?: number; bots?: Record<string, Partial<BotEntry>> }>(fleetConfigKey());
+    if (fleetCfg?.bots) {
+      for (const [bot, s3Entry] of Object.entries(fleetCfg.bots)) {
+        if (fleet[bot]) {
+          Object.assign(fleet[bot], s3Entry);
+        } else {
+          fleet[bot] = s3Entry as BotEntry;
+        }
+      }
+    } else {
+      // First run: seed S3 from disk (migration)
+      await uploadJson(fleetConfigKey(), { ts: Date.now(), bots: fleet });
+    }
+
+    // 2. Overlay per-ship fleet-state keys (runtime state, more current than fleet-config)
     const keys = await listKeys('fleet-state/');
     for (const key of keys) {
       const shipState = await downloadJson<{ ts?: number; bots?: Record<string, Partial<BotEntry>> }>(key);
       if (!shipState?.bots) continue;
       for (const [bot, s3Entry] of Object.entries(shipState.bots)) {
         if (fleet[bot]) {
-          // Overlay all S3 fields — S3 is authoritative for complete bot state
           Object.assign(fleet[bot], s3Entry);
         } else {
-          // Bot exists on another ship (S3 only) — include it
           fleet[bot] = s3Entry as BotEntry;
         }
       }
     }
   } catch { /* S3 unavailable — disk-only fallback */ }
-  // Cache the S3-merged result so loadFleet() returns it synchronously
   s3FleetCache = fleet;
   return fleet;
 }
 
 /**
- * Write fleet state: disk first (synchronous cache), then S3 upload (async).
+ * Write fleet state: disk first (synchronous cache), then S3 (async).
  * Disk-first ensures loadFleet() always sees the latest state immediately.
  * Updates the S3 fleet cache so all callers see the new state.
- * Uploads complete bot state to S3 (all fields) for bots on this ship.
+ *
+ * Writes two S3 keys:
+ *   - fleet-config/{fleetId}.json — full fleet (all bots), S3-authoritative
+ *   - fleet-state/{ship}.json     — this ship's bots only, for fleet-report protocol
  */
 export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<void> {
   // Disk first — synchronous so disk-only fallback is fresh
   writeFleet(fleet);
   // Update in-memory cache — all loadFleet() callers see the new state immediately
   s3FleetCache = fleet;
-  // S3 second — upload this ship's complete bot state
+  // S3: build this ship's subset for fleet-state key (fleet-report protocol)
   const hostname = os.hostname();
   const shipName = findShipByHostname(hostname)?.[0] ?? hostname;
   const shipBots: Record<string, BotEntry> = {};
@@ -230,6 +280,9 @@ export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<
   }
   try {
     const { uploadJson } = await s3Helpers();
+    // Full fleet config — S3 as authoritative source for all bots
+    await uploadJson(fleetConfigKey(), { ts: Date.now(), bots: fleet });
+    // Per-ship runtime state — for fleet-report polling protocol
     await uploadJson(`fleet-state/${shipName}.json`, { ts: Date.now(), bots: shipBots });
   } catch { /* S3 write failed — disk was already written above */ }
 }
@@ -250,14 +303,66 @@ export interface ShipEntry {
   operatorRelay?: boolean; // whether @ messages are forwarded to this ship's operator tmux
 }
 
-/** Load all ships from operator/ships.json. */
+/**
+ * Load ships: returns S3 cache when available (set by loadShipsAsync at startup),
+ * falls back to disk operator/ships.json.
+ */
 export function loadShips(): Record<string, ShipEntry> {
+  if (s3ShipsCache) return s3ShipsCache;
   return readJson<Record<string, ShipEntry>>(SHIPS_PATH);
 }
 
-/** Write updated ships config back to disk. */
+/**
+ * Load ships from S3 (authoritative) with disk fallback.
+ * S3 key: fleet-config/ships.json — { ts, ships: {...} }.
+ * On first run (no S3 key), uploads disk ships.json to S3 for migration.
+ * Populates s3ShipsCache so subsequent loadShips() calls see S3 data.
+ */
+export async function loadShipsAsync(): Promise<Record<string, ShipEntry>> {
+  let disk: Record<string, ShipEntry>;
+  try {
+    disk = readJson<Record<string, ShipEntry>>(SHIPS_PATH);
+  } catch {
+    disk = {};
+  }
+  try {
+    const { downloadJson, uploadJson } = await s3Helpers();
+    const s3Data = await downloadJson<{ ts?: number; ships?: Record<string, ShipEntry> }>(SHIPS_S3_KEY);
+    if (s3Data?.ships && Object.keys(s3Data.ships).length > 0) {
+      // S3 is authoritative — update disk cache and return S3 data
+      writeJson(SHIPS_PATH, s3Data.ships);
+      s3ShipsCache = s3Data.ships;
+      return s3Data.ships;
+    } else {
+      // First run: seed S3 from disk (migration)
+      await uploadJson(SHIPS_S3_KEY, { ts: Date.now(), ships: disk });
+    }
+  } catch { /* S3 unavailable — disk-only fallback */ }
+  s3ShipsCache = disk;
+  return disk;
+}
+
+/**
+ * Write ships: disk first (sync), then S3 (async).
+ * Updates s3ShipsCache immediately so loadShips() sees the new data.
+ */
+export async function writeShipsAsync(ships: Record<string, ShipEntry>): Promise<void> {
+  writeJson(SHIPS_PATH, ships);
+  s3ShipsCache = ships;
+  try {
+    const { uploadJson } = await s3Helpers();
+    await uploadJson(SHIPS_S3_KEY, { ts: Date.now(), ships });
+  } catch { /* S3 write failed — disk was already written */ }
+}
+
+/**
+ * Write ships to disk only (synchronous).
+ * Updates s3ShipsCache so loadShips() returns the new data immediately.
+ * Prefer writeShipsAsync() when in an async context.
+ */
 export function writeShips(ships: Record<string, ShipEntry>): void {
   writeJson(SHIPS_PATH, ships);
+  s3ShipsCache = ships;
 }
 
 /** Load ships, returning empty object on error. */
@@ -329,4 +434,5 @@ export function isQuartersOnlyRole(role: string): boolean {
 export function clearShipConfigCache(): void {
   cached = null;
   s3FleetCache = null;
+  s3ShipsCache = null;
 }
