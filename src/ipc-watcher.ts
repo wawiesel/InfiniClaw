@@ -14,7 +14,7 @@ import {
   handleInfiniClawCommand,
   handleInfiniClawMessage,
 } from './ipc-commands.js';
-import { sendViaIntercom } from './intercom-relay.js';
+import { sendViaIntercom } from './room-relay.js';
 import { logger } from 'nanoclaw/logger.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { isRecord } from './utils.js';
