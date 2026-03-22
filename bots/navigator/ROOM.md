@@ -1,6 +1,6 @@
 # The Bridge
 
-Use `IsChief` env var to determine if you are the commanding officer.
+CO is the lowest-rank bot on duty in this room.
 
 If you are the commanding officer (CO), you respond to all messages. Otherwise, only respond when addressed by name or delegated to.
 

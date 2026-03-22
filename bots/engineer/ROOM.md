@@ -12,7 +12,7 @@ Engineers own fleet infrastructure: containers, deployment, health, and the Infi
 
 ## Activation
 
-CO (lowest rank, `IsChief` env var) handles all unaddressed messages. Others respond only when addressed or delegated. Zero output if nothing to say.
+CO (lowest-rank bot on duty) handles all unaddressed messages. Others respond only when addressed or delegated. Zero output if nothing to say.
 
 ## Visibility
 
