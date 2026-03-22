@@ -43,4 +43,4 @@ This is the **in-container agent runner**: the process that spawns inside each b
 
 - **WBS MCP tools** (`tools.ts`): `wbs_read` (list items by room/status), `wbs_get_assigned` (tasks for a bot), `wbs_update` (mark status/assignee). Read `_runtime/data/wbs-{room}.json`.
 - **`get_metrics`** (`tools.ts`): Returns the calling bot's own performance data — current status, model, active groups with objectives/errors, and 1-day token usage computed from JSONL session files at `/home/node/.claude/projects`. Uses `ipcDir/status.json` (written by main.ts every 30s) for runtime state.
-- **Removed tools** (2026-03-21): `send_message`, `register_group`, `crew_roster`, `list_recipients`, `set_thread`, `restart_wksm`, `check_health`, `query_local_llm`. MCP server renamed `nanoclaw` → `infiniclaw`.
+- **Removed tools** (2026-03-21): `send_message`, `register_group`, `crew_roster`, `list_recipients`, `set_thread`, `restart_wksm`, `check_health`, `query_local_llm`. MCP server key and env vars renamed `nanoclaw` → `infiniclaw` (tools now `mcp__infiniclaw__*`).

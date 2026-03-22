@@ -495,13 +495,13 @@ function writeMcpConfig(containerInput: ContainerInput, env: Record<string, stri
   for (const key of forwardVars) {
     const val = env[key] || env[`NANOCLAW_${key}`];
     if (val) {
-      const envKey = key === 'ASSISTANT_NAME' ? 'NANOCLAW_ASSISTANT_NAME' : key;
+      const envKey = key === 'ASSISTANT_NAME' ? 'INFINICLAW_ASSISTANT_NAME' : key;
       nanocrawEnv[envKey] = val;
     }
   }
 
   const mcpServers: Record<string, unknown> = {
-    nanoclaw,
+    infiniclaw: nanoclaw,
   };
 
   // Add validated external MCP servers

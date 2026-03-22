@@ -154,7 +154,7 @@ The host daemon will:
 Use this after making code changes that require a process restart.`,
     {
       bot: z.string().default(
-        (process.env.NANOCLAW_ASSISTANT_NAME || 'bot').toLowerCase(),
+        (process.env.INFINICLAW_ASSISTANT_NAME || 'bot').toLowerCase(),
       ).describe('Persona name of the bot to restart (e.g. nora, cid, johnny5)'),
     },
     async (args) => {
@@ -544,7 +544,7 @@ Use this after completing a task that requires cross-bot verification. The assig
         id,
         task_description: args.task_description,
         criteria: args.criteria,
-        requested_by: process.env.NANOCLAW_ASSISTANT_NAME || 'unknown',
+        requested_by: process.env.INFINICLAW_ASSISTANT_NAME || 'unknown',
         assigned_to: args.assigned_to,
         chatJid,
         groupFolder,
@@ -570,7 +570,7 @@ Use this after completing a task that requires cross-bot verification. The assig
         id: args.verification_id,
         passed: args.passed,
         evidence: args.evidence,
-        submitted_by: process.env.NANOCLAW_ASSISTANT_NAME || 'unknown',
+        submitted_by: process.env.INFINICLAW_ASSISTANT_NAME || 'unknown',
         chatJid,
         groupFolder,
         timestamp: new Date().toISOString(),
@@ -720,7 +720,7 @@ Use this after completing a task that requires cross-bot verification. The assig
     },
     async (args) => {
       const room = args.room || inferRoom();
-      const bot = (args.bot || process.env.NANOCLAW_ASSISTANT_NAME || '').toLowerCase();
+      const bot = (args.bot || process.env.INFINICLAW_ASSISTANT_NAME || '').toLowerCase();
       const items = readWbsItems(room);
       if (items === null) {
         return { content: [{ type: 'text' as const, text: `No WBS file found for room: ${room}` }] };
@@ -744,7 +744,7 @@ Use this after completing a task that requires cross-bot verification. The assig
     },
     async (args) => {
       const room = args.room || inferRoom();
-      const assignee = args.assignee || process.env.NANOCLAW_ASSISTANT_NAME || '';
+      const assignee = args.assignee || process.env.INFINICLAW_ASSISTANT_NAME || '';
       writeIpcFile(tasksDir, {
         type: 'wbs_assign',
         item_id: args.item_id,
@@ -831,7 +831,7 @@ Item fields for upsert:
     'Get this bot\'s own performance metrics: current status, model, active groups, last error, and token usage from session history.',
     {},
     async () => {
-      const botName = process.env.NANOCLAW_ASSISTANT_NAME || 'unknown';
+      const botName = process.env.INFINICLAW_ASSISTANT_NAME || 'unknown';
       const lines: string[] = [`**Metrics for ${botName}**`];
 
       // Read status snapshot written by main.ts every 30s
