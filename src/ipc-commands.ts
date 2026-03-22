@@ -1013,6 +1013,10 @@ async function handleSubmitVerification(data: CommandData, ctx: InfiniClawIpcCon
 // ── WBS ──────────────────────────────────────────────────────────────────
 
 async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (process.env.IsChief !== 'true') {
+    await safeSend(ctx, parseChatJid(data), '❌ Only the Chief can assign WBS items.');
+    return;
+  }
   const root = resolveRoot();
   const room = typeof data.room === 'string' ? data.room : '';
   const itemId = typeof data.item_id === 'string' ? data.item_id : '';
@@ -1053,7 +1057,11 @@ async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Pr
   }
 }
 
-async function handleWbsComplete(data: CommandData, _ctx: InfiniClawIpcContext): Promise<void> {
+async function handleWbsComplete(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (process.env.IsChief !== 'true') {
+    await safeSend(ctx, parseChatJid(data), '❌ Only the Chief can complete WBS items.');
+    return;
+  }
   const root = resolveRoot();
   const room = typeof data.room === 'string' ? data.room : '';
   const itemId = typeof data.item_id === 'string' ? data.item_id : '';
@@ -1068,7 +1076,11 @@ async function handleWbsComplete(data: CommandData, _ctx: InfiniClawIpcContext):
   logger.info({ room, itemId, unblocked }, 'WBS item completed, unblocked: %o', unblocked);
 }
 
-async function handleWbsWrite(data: CommandData, _ctx: InfiniClawIpcContext): Promise<void> {
+async function handleWbsWrite(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  if (process.env.IsChief !== 'true') {
+    await safeSend(ctx, parseChatJid(data), '❌ Only the Chief can write WBS items.');
+    return;
+  }
   const root = resolveRoot();
   const room = typeof data.room === 'string' ? data.room : '';
   const op = typeof data.op === 'string' ? data.op : '';

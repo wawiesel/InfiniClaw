@@ -53,7 +53,8 @@ Host machine (macOS / Linux)
 ├── brain-management.ts → Runtime model switching, mainSender() uses capitalizeName for provider display
 ├── chat-activity.ts    → Track activity per room for idle detection
 ├── message-filtering.ts→ Dedup, echo prevention, ignore rules (📞 pill, @ callout, system accounts)
-├── signals.ts          → Signals: `{{mention}}` `{{branch}}` `{{merge}}` `{{send}}` — errors as `{{⚠️N}}`, heartbeat uses {{mention}} in audit trail
+├── signals.ts          → Signals: `{{mention}}` `{{branch}}` `{{merge}}` `{{send}}` — errors as `{{⚠️N}}`
+├── ipc-commands.ts     → WBS mutation tools (write/assign/complete) Chief-only enforced in audit trail
 ├── tool-call-breadcrumb.ts → Shared compact S3-linked tool call formatting (main brain + BB — DRY)
 ├── metrics.ts         → Fleet metrics: autonomy, MTBI, health grades (uses loadFleet() — no local fleet parsing)
 ├── room-relay.ts       → Cross-room messaging (TODO: migrate from intercom to operator account)
