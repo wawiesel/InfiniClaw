@@ -38,10 +38,10 @@ Route the message to a different room (and optionally a thread).
 ### Branch
 
 ```
-{{branch Fix crash — Investigate the OOM crash in relay.ts and fix the root cause}}
+{{branch Investigate the OOM crash in relay.ts and fix the root cause}}
 ```
 
-Dispatch a Branch Brain. Title and objective separated by ` — `. The relay posts the text as a `🌿` thread header and spawns a BB.
+Dispatch a Branch Brain. The relay derives a short title from the first few words, posts a `🌿` thread header, and spawns a BB.
 
 ### Merge
 

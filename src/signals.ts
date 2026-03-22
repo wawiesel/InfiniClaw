@@ -169,12 +169,13 @@ export function processSignals(signals: Signal[], ctx: SignalContext): {
         break;
       }
       case 'branch': {
-        // {{branch Title — Objective}}
-        if (!sig.positional || !sig.positional.includes(' — ')) {
-          processed.push({ ...sig, status: 'error', error: 'branch format: {{branch Title — Objective}}' });
+        // {{branch Objective text}} — title derived from first ~5 words
+        const objective = sig.positional?.trim();
+        if (!objective) {
+          processed.push({ ...sig, status: 'error', error: 'branch needs an objective: {{branch Fix the crash in relay.ts}}' });
         } else {
-          const dash = sig.positional.indexOf(' — ');
-          branchRequest = { title: sig.positional.slice(0, dash).trim(), objective: sig.positional.slice(dash + 3).trim() };
+          const title = objective.split(/\s+/).slice(0, 5).join(' ');
+          branchRequest = { title, objective };
           processed.push({ ...sig, status: 'ok' });
         }
         break;
