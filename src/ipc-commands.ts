@@ -13,7 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from './env-utils.js';
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
-import { loadShipConfig, loadFleet, writeFleet, writeFleetAsync, shipTag, ROLE_ROOMS } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, writeFleetAsync, shipTag, ROLE_ROOMS, RUNNING_STATUSES } from './ship-config.js';
 import { runHealthCheck as healthCheck } from './health.js';
 import { logger } from 'nanoclaw/logger.js';
 import { errStr } from './utils.js';
@@ -38,6 +38,21 @@ import {
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { capitalizeName, statusMessage } from './formatting.js';
 import { readWbs, writeWbs, assignItem, completeItem } from './wbs.js';
+
+// ── Chief check ─────────────────────────────────────────────────────────
+
+/** Determine if a bot is the chief (lowest-ranked running bot) for a room. */
+function isRoomChief(botName: string, room: string): boolean {
+  const fleet = loadFleet();
+  const roleRoom = Object.entries(ROLE_ROOMS).find(([, v]) => v.room === room.toLowerCase());
+  if (!roleRoom) return false;
+  const role = roleRoom[0];
+  // Find all running bots in this role
+  const running = Object.entries(fleet)
+    .filter(([, e]) => e.role?.toLowerCase() === role && (RUNNING_STATUSES as readonly string[]).includes(e.status ?? ''))
+    .sort(([, a], [, b]) => (a.rank ?? 99) - (b.rank ?? 99));
+  return running.length > 0 && running[0][0] === botName.toLowerCase();
+}
 
 // ── Cooldown tracking ───────────────────────────────────────────────────
 
@@ -1013,12 +1028,12 @@ async function handleSubmitVerification(data: CommandData, ctx: InfiniClawIpcCon
 // ── WBS ──────────────────────────────────────────────────────────────────
 
 async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (process.env.IsChief !== 'true') {
+  const room = typeof data.room === 'string' ? data.room : '';
+  if (!isRoomChief(ASSISTANT_NAME, room)) {
     await safeSend(ctx, parseChatJid(data), '❌ Only the Chief can assign WBS items.');
     return;
   }
   const root = resolveRoot();
-  const room = typeof data.room === 'string' ? data.room : '';
   const itemId = typeof data.item_id === 'string' ? data.item_id : '';
   const assignee = typeof data.assignee === 'string' ? data.assignee
     : typeof data.bot === 'string' ? data.bot : '';
@@ -1058,12 +1073,12 @@ async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Pr
 }
 
 async function handleWbsComplete(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (process.env.IsChief !== 'true') {
+  const room = typeof data.room === 'string' ? data.room : '';
+  if (!isRoomChief(ASSISTANT_NAME, room)) {
     await safeSend(ctx, parseChatJid(data), '❌ Only the Chief can complete WBS items.');
     return;
   }
   const root = resolveRoot();
-  const room = typeof data.room === 'string' ? data.room : '';
   const itemId = typeof data.item_id === 'string' ? data.item_id : '';
   if (!room || !itemId) {
     logger.warn({ data }, 'wbs_complete: missing room or item_id');
@@ -1077,12 +1092,12 @@ async function handleWbsComplete(data: CommandData, ctx: InfiniClawIpcContext): 
 }
 
 async function handleWbsWrite(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (process.env.IsChief !== 'true') {
+  const room = typeof data.room === 'string' ? data.room : '';
+  if (!isRoomChief(ASSISTANT_NAME, room)) {
     await safeSend(ctx, parseChatJid(data), '❌ Only the Chief can write WBS items.');
     return;
   }
   const root = resolveRoot();
-  const room = typeof data.room === 'string' ? data.room : '';
   const op = typeof data.op === 'string' ? data.op : '';
   const item = data.item && typeof data.item === 'object' ? data.item as Record<string, unknown> : null;
   const itemId = item && typeof item.id === 'string' ? item.id : '';

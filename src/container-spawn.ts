@@ -131,6 +131,7 @@ function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
   normalizedSecrets: Record<string, string>,
+  ipcBaseDir?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -162,8 +163,8 @@ function buildVolumeMounts(
   fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
   mounts.push({ hostPath: groupSessionsDir, containerPath: '/home/node/.claude', readonly: false });
 
-  // IPC namespace
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
+  // IPC namespace — use override when BB needs to write to the parent bot's IPC dir
+  const groupIpcDir = path.join(ipcBaseDir || DATA_DIR, 'ipc', group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
@@ -308,6 +309,7 @@ export async function runContainerAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
   imageOverride?: string,
   secretsOverride?: Record<string, string>,
+  ipcBaseDir?: string,
 ): Promise<ContainerOutput> {
   assertValidGroupFolder(group.folder);
 
@@ -321,7 +323,7 @@ export async function runContainerAgent(
   // When secretsOverride is provided (e.g. from runBranchBrainAgent), use it
   // directly to avoid process.env mutation and the resulting race condition.
   const secrets = normalizeProviderSecrets(secretsOverride ?? collectContainerSecrets(process.cwd()));
-  const mounts = buildVolumeMounts(group, input.isMain, secrets);
+  const mounts = buildVolumeMounts(group, input.isMain, secrets, ipcBaseDir);
   const mappedSecrets = mapCertPathSecretsToContainer(secrets, mounts);
   remapInfiniClawRoot(mappedSecrets, mounts);
 
@@ -482,5 +484,9 @@ export async function runBranchBrainAgent(
     if (botEnv[key]) mergedSecrets[key] = botEnv[key];
   }
 
-  return runContainerAgent(group, containerInput, onProcess, onOutput, BRANCH_BRAIN_IMAGE, mergedSecrets);
+  // Route BB IPC files to the parent bot's instance data dir so the bot's
+  // IPC watcher (running in the bot's pm2 process) processes them.
+  const botInstanceDataDir = path.join(process.cwd(), '_runtime', 'instances', input.bot, 'data');
+
+  return runContainerAgent(group, containerInput, onProcess, onOutput, BRANCH_BRAIN_IMAGE, mergedSecrets, botInstanceDataDir);
 }
