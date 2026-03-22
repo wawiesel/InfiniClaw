@@ -31,5 +31,5 @@ Bots are assigned to roles via `fleet.json` in the secrets repo.
 
 Bot memory lives in the secrets repo (`~/.config/infiniclaw/secrets/bots/{bot}/memory/`), mounted writable at `/workspace/persona/memory/`.
 
-- **On-duty heartbeat** (`bots/CLAUDE.md`): Chief startup via WBS MCP tools; crew works from assigned todo list.
+- **On-duty heartbeat** (`bots/CLAUDE.md`): Chief (lowest rank, dynamic) uses WBS MCP tools; crew works assigned todo list.
 - **Signals**: All positional, all words — `{{mention Name}}`, `{{branch objective}}`, `{{merge summary}}`, `{{send roomname}}`.

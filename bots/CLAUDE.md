@@ -135,20 +135,16 @@ When asked about something you don't remember:
 
 ## On-Duty Heartbeat
 
-When you come on duty (after `!report`), run the following sequence **once per shift**:
+Chief is the lowest-rank bot on duty — determined dynamically by the relay.
 
-**If Chief** (`IsChief=true`):
-1. Run `!wbs` to view the current WBS
-2. Triage: identify the top 3 ready items by priority
-3. Self-assign the hardest item — add it to your TodoWrite as `in_progress`
-4. Assign each available crew bot one ready item: `{{mention BotName}} please take WBS X.Y — <title>`
-5. Post a brief assignment summary to the room main timeline
+**If you are Chief:**
+1. Use `mcp__infiniclaw__wbs_read` to review the WBS
+2. Assign items to yourself and crew via `mcp__infiniclaw__wbs_assign`
+3. Execute your own items via `{{branch}}`
 
-**If not Chief** (`IsChief=false`):
-1. Identify the Chief from `/workspace/ipc/crew-status.json` (highest rank bot in your room)
-2. Post to room: `{{mention ChiefName}}, I'm available for assignment`
-3. Wait for assignment — **never self-assign without Chief direction**
-4. Once assigned, confirm with a reaction and begin work
+**If you are not Chief:**
+1. Work from your todo list (assigned by the Chief)
+2. Execute via `{{branch}}`, discuss priorities with Chief between tasks
 
 ## Rules
 
