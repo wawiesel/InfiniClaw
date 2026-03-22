@@ -57,7 +57,7 @@ Host machine (macOS / Linux)
 ├── signals.ts          → Signals: `{{mention}}` `{{branch}}` `{{merge}}` `{{send}}` — errors as `{{⚠️N}}`
 ├── ipc-commands.ts     → WBS mutations Chief-only; callouts use {{mention}}
 ├── container-mounts.ts → WBS data at `/workspace/data` (fixes mount shadowing)
-├── tool-call-breadcrumb.ts → Shared compact S3-linked tool call formatting (main brain + BB — DRY)
+├── tool-call-breadcrumb.ts → Shared compact S3-linked tool call formatting (main brain + BB — DRY). Exports `hasDetailsBlock()` for catching all `<details>` variants. S3-or-nothing: throws on upload/presign failure so callers suppress.
 ├── metrics.ts         → Fleet metrics: autonomy, MTBI, health grades, messages/day, task completion rate, version adoption latency (uses loadFleet() — no local fleet parsing)
 ├── room-relay.ts       → Cross-room messaging (TODO: migrate from intercom to operator account)
 ├── conversation-log.ts → Append conversation to disk logs

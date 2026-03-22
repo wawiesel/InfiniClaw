@@ -14,6 +14,11 @@ export function isToolCallBlock(text: string): boolean {
   return text.trimStart().startsWith('<details>') && text.includes('🔧');
 }
 
+/** Check if text contains any <details> block (tool call or otherwise). */
+export function hasDetailsBlock(text: string): boolean {
+  return text.includes('<details>');
+}
+
 /** Convert a tool call <details> block into a compact S3-linked breadcrumb. */
 export async function toolCallBreadcrumb(
   text: string,
@@ -36,8 +41,12 @@ details summary{cursor:pointer;color:#e6edf3;font-weight:600;padding:4px 0}code{
 <div class="meta">${esc(groupName)} · ${new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC</div>
 <div class="block">${text}</div></body></html>`;
 
-  void uploadHtml(s3Key, pageHtml).catch(() => {});
+  try {
+    await uploadHtml(s3Key, pageHtml);
+  } catch {
+    throw new Error('S3 upload failed — suppress tool call output');
+  }
   const url = await getPresignedUrl(s3Key);
-  const hashEl = url ? `<a href="${url}"><code>${hash}</code></a>` : `<code>${hash}</code>`;
-  return `<font color="#888888">🔧 <em>${esc(title)}</em> · ${hashEl}</font>`;
+  if (!url) throw new Error('S3 presign failed — suppress tool call output');
+  return `<font color="#888888">🔧 <em>${esc(title)}</em> · <a href="${url}"><code>${hash}</code></a></font>`;
 }

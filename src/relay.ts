@@ -22,7 +22,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { collectHealthData, sessionCleanup } from './health-check.js';
-import { isToolCallBlock, toolCallBreadcrumb } from './tool-call-breadcrumb.js';
+import { isToolCallBlock, hasDetailsBlock, toolCallBreadcrumb } from './tool-call-breadcrumb.js';
 import { runBranchBrainAgent } from './container-spawn.js';
 import type { ContainerOutput } from './container-spawn.js';
 import { upsertEnvLine } from './env-utils.js';
@@ -2305,17 +2305,30 @@ async function spawnBranchBrain(
       if (output.isProgress && output.result) {
         postedCount++;
         // Convert <details> tool call blocks to compact S3-linked breadcrumbs
+        // Catch ALL <details> blocks — never post raw details to the timeline
         let postText = output.result;
-        if (isToolCallBlock(postText)) {
-          try { postText = await toolCallBreadcrumb(postText, bot ?? 'bb', groupFolder); } catch { return; /* silently drop if breadcrumb fails — never post raw details */ }
+        if (hasDetailsBlock(postText)) {
+          if (isToolCallBlock(postText)) {
+            try { postText = await toolCallBreadcrumb(postText, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — silently drop */ }
+          } else {
+            return; // <details> without wrench — suppress entirely
+          }
         }
         lastPostedText = postText;
         await bbThreadReply(postText).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
       } else if (!output.isProgress && output.result && postedCount === 0) {
-        // Final result, nothing streamed yet
+        // Final result, nothing streamed yet — apply same <details> filtering
+        let finalText = output.result;
+        if (hasDetailsBlock(finalText)) {
+          if (isToolCallBlock(finalText)) {
+            try { finalText = await toolCallBreadcrumb(finalText, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — suppress */ }
+          } else {
+            return; // <details> without wrench — suppress entirely
+          }
+        }
         postedCount++;
-        lastPostedText = output.result;
-        await bbThreadReply(output.result).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
+        lastPostedText = finalText;
+        await bbThreadReply(finalText).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
       }
       // Re-inject objective after each completed BB turn to prevent drift.
       if (!output.isProgress) {

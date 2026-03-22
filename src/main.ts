@@ -112,7 +112,7 @@ import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { uploadContent, uploadHtml, getPresignedUrl } from './s3-sync.js';
 import { errStr, escapeRegex, envInt } from './utils.js';
 import { extractSignals, processSignals, auditSignals, formatSignalError } from './signals.js';
-import { toolCallBreadcrumb as sharedToolCallBreadcrumb, isToolCallBlock } from './tool-call-breadcrumb.js';
+import { toolCallBreadcrumb as sharedToolCallBreadcrumb, isToolCallBlock, hasDetailsBlock } from './tool-call-breadcrumb.js';
 import { exportHistoryToS3 } from './history-export.js';
 
 import { GIT_VERSION, SEMVER_TAG } from './version.js';
@@ -670,7 +670,7 @@ function lookupRoom(name: string): string | undefined {
 const relayTasksDir = path.join(process.cwd(), '_runtime', 'relay-tasks');
 let relayTasksDirReady = false;
 
-function writeBranchRelayTask(req: { title: string; objective: string }, chatJid: string): void {
+function writeBranchRelayTask(req: { title: string; objective: string }, chatJid: string, threadId?: string): void {
   try {
     if (!relayTasksDirReady) { fs.mkdirSync(relayTasksDir, { recursive: true }); relayTasksDirReady = true; }
     const taskId = `branch-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -682,10 +682,11 @@ function writeBranchRelayTask(req: { title: string; objective: string }, chatJid
       objective: req.objective,
       bot: ASSISTANT_NAME,
       chat_jid: chatJid,
+      thread_id: threadId || '',
       timestamp: new Date().toISOString(),
     }, null, 2));
     fs.renameSync(tempPath, taskFile);
-    logger.info({ title: req.title, bot: ASSISTANT_NAME }, 'signals: branch relay-task written');
+    logger.info({ title: req.title, bot: ASSISTANT_NAME, threadId: threadId?.slice(0, 20) }, 'signals: branch relay-task written');
   } catch (err) {
     logger.error({ err }, 'signals: failed to write branch relay-task');
   }
@@ -921,7 +922,7 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
       if (isActiveThreadFresh(ctx.chatJid)) {
         logger.warn({ chatJid: ctx.chatJid }, 'branchRequest skipped: nested branching from inside a fresh thread is not allowed');
       } else {
-        writeBranchRelayTask(branchRequest, ctx.chatJid);
+        pendingBranchRequest = branchRequest;
       }
     }
 
@@ -947,11 +948,18 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   // ── End Signals ──────────────────────────────────────────────────────
 
   // Convert <details> tool call blocks to S3 breadcrumbs (same as progress path)
-  if (sendText.includes('<details>') && isToolCallBlock(sendText)) {
-    try {
-      sendText = await sharedToolCallBreadcrumb(sendText, ASSISTANT_NAME, group?.name ?? ctx.chatJid);
-    } catch {
-      // Silently drop raw details — never post them to the timeline
+  // Catch ALL <details> blocks — if it has the wrench emoji, convert to breadcrumb;
+  // otherwise strip the block entirely. Never post raw <details> to the timeline.
+  if (hasDetailsBlock(sendText)) {
+    if (isToolCallBlock(sendText)) {
+      try {
+        sendText = await sharedToolCallBreadcrumb(sendText, ASSISTANT_NAME, group?.name ?? ctx.chatJid);
+      } catch {
+        // S3 failed — silently drop rather than posting raw details
+        return;
+      }
+    } else {
+      // <details> block without wrench emoji — suppress entirely
       return;
     }
   }
@@ -971,16 +979,13 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
       storeOutgoing(ctx.chatJid, sendText, sendThread);
       if (sentEventId) {
         if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
-        // ── {{branch}} signal: posted message IS the thread root — spawn BB under it
+        // ── {{branch}} signal: write relay task WITH thread_id so relay has a fallback
         if (pendingBranchRequest) {
-          void spawnBranchBrainFromSignal(
-            ctx.chatJid,
-            ctx.group.folder,
-            sentEventId,
-            pendingBranchRequest.title,
-            pendingBranchRequest.objective,
-          ).catch((err) => logger.error({ err, title: pendingBranchRequest!.title }, 'BB spawn error'));
+          writeBranchRelayTask(pendingBranchRequest, ctx.chatJid, sentEventId);
         }
+      } else if (pendingBranchRequest) {
+        // No sentEventId (channel doesn't support sendMessageReturningId) — write without thread_id
+        writeBranchRelayTask(pendingBranchRequest, ctx.chatJid);
       }
     } finally {
       if (ch.setTyping) await ch.setTyping(sendJid, false);
