@@ -656,7 +656,8 @@ Use this after completing a task that requires cross-bot verification. The assig
 
   // ── WBS ──────────────────────────────────────────────────────────────
 
-  const WBS_DATA_DIR = '/workspace/data';
+  // WBS data lives in the InfiniClaw repo's _runtime/data/ — accessible via the RW repo mount
+  const WBS_DATA_DIR = (process.env.INFINICLAW_ROOT || '/workspace/extra/InfiniClaw') + '/_runtime/data';
 
   type WbsStatus = 'backlog' | 'ready' | 'in_progress' | 'done';
   interface WbsItem {
