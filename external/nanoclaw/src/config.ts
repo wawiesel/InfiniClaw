@@ -63,7 +63,9 @@ function escapeRegex(str: string): string {
 }
 
 export function buildTriggerPattern(name: string): RegExp {
-  return new RegExp(`<m>${escapeRegex(name)}</m>`, 'i');
+  const escaped = escapeRegex(name);
+  // Match both {{mention Name}} and legacy <m>Name</m>
+  return new RegExp(`(?:\\{\\{mention\\s+${escaped}\\}\\}|<m>${escaped}</m>)`, 'i');
 }
 
 export const TRIGGER_PATTERN = buildTriggerPattern(ASSISTANT_NAME);

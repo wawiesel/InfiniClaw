@@ -20,7 +20,7 @@ Clean fork of [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw). Platfor
 | `sender-allowlist.ts` | Per-room sender allow/block rules |
 | `channels/` | Channel implementations |
 | `index.ts` | Main loop: `processGroupMessages` sends only the last agent result; auto-clears stale sessions on `isSessionError` |
-| `config.ts` | `ASSISTANT_NAME`, `TRIGGER_PATTERN` (`<m>Name</m>` match), shared constants (trailing newline cleanup). `CONTAINER_TIMEOUT` and `IDLE_TIMEOUT` default 24h (env-overridable). |
+| `config.ts` | `ASSISTANT_NAME`, `TRIGGER_PATTERN` (matches `{{mention Name}}` + legacy `<m>Name</m>`), shared constants. `CONTAINER_TIMEOUT` and `IDLE_TIMEOUT` default 24h (env-overridable). |
 | `env-utils.ts` | Env file parsing: `parseEnvLine`, `parseEnvFile`, `upsertEnvLine`, `isOllamaBaseUrl` |
 | `logger.ts` | Pino logger setup |
 | `timezone.ts` | Timezone resolution |
