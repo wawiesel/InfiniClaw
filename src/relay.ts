@@ -2930,9 +2930,9 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
           } else if (chiefBot) {
             const chiefEnv = loadProfileEnv(root, chiefBot);
             const chiefName = chiefEnv?.ASSISTANT_NAME || capitalizeName(chiefBot);
-            nudge = `<m>${name}</m>, you have no WBS assignment. Ask <m>${chiefName}</m> for your next task.`;
+            nudge = `{{mention ${name}}}, you have no WBS assignment. Ask {{mention ${chiefName}}} for your next task.`;
           } else {
-            nudge = `<m>${name}</m>, check GitHub issues and work on the highest priority item you can act on.`;
+            nudge = `{{mention ${name}}}, check Gitea issues and your WBS for work.`;
           }
           log(`heartbeat: nudged ${name} in ${roomName}${assignedTitle ? ` (WBS: "${assignedTitle}")` : ''}`);
         }
