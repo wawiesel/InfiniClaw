@@ -40,11 +40,12 @@ The tool posts the `🌿 title — objective` thread header automatically. Model
 ### How Branching Works
 
 1. Bot calls `branch_to_thread(title, objective)`
-2. Tool posts `🌿 <title> — <objective>` on the target room's main timeline
-3. Branch is spawned, forks the bot's session (`--continue --fork-session`) to inherit full context
-4. Branch streams output into the Matrix thread as it arrives
-5. Captain can converse with the branch normally while it runs
-6. Bot says "Branch dispatched." and stops inline work
+2. Tool returns signal text: `🌿 <title> — <objective>\n{{branch title="<title>" objective="<objective>"}}`
+3. Bot outputs the returned text verbatim as its next message — no commentary
+4. Relay intercepts the `{{branch}}` signal (see [22-signals](22-signals.md)), strips it, posts `🌿 <title> — <objective>` as the thread root
+5. Relay spawns the Branch Brain with that event ID as thread root — room is implicit (the posting conn IS the correct room, no `chat_jid` lookup needed)
+6. Branch streams output into the Matrix thread as it arrives
+7. Captain can converse with the branch normally while it runs
 
 **Ralph loop:** After every turn, the branch's purpose is re-injected into the branch context. This ensures the branch never loses track of its objective, regardless of how much other context accumulates during a long-running session.
 
@@ -156,7 +157,9 @@ Branch brains expose exactly 2 MCP tools. Everything else is automatic.
 
 ### 1. `branch_to_thread(title, objective)` — START
 
-Spawns a branch brain. The tool posts `🌿 <title> — <objective>` on the main timeline and uses that event as the thread root. Bot says nothing — no commentary, no "branch dispatched", silence.
+Returns signal text `🌿 <title> — <objective>\n{{branch title="<title>" objective="<objective>"}}`. The bot outputs this verbatim as its next message. The relay intercepts the `{{branch}}` signal, posts the message as the thread root, and spawns the Branch Brain under it. No IPC file. No `chat_jid` needed — room is implicit from the posting conn.
+
+Bot outputs the signal text and says nothing more — no commentary, no "branch dispatched", silence.
 
 Cannot be called from inside a thread.
 

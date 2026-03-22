@@ -32,6 +32,10 @@ export interface SignalResult {
     thread?: string;
   };
   callouts: string[];        // Bot names from {{m Name}} signals
+  branchRequest?: {          // From {{branch title="X" objective="Y"}}
+    title: string;
+    objective: string;
+  };
 }
 
 // ── Signal extraction ──────────────────────────────────────────────────
@@ -97,10 +101,12 @@ export function processSignals(signals: Signal[], ctx: SignalContext): {
   processed: ProcessedSignal[];
   routeOverride?: { room?: string; thread?: string };
   callouts: string[];
+  branchRequest?: { title: string; objective: string };
 } {
   const processed: ProcessedSignal[] = [];
   let routeOverride: { room?: string; thread?: string } | undefined;
   const callouts: string[] = [];
+  let branchRequest: { title: string; objective: string } | undefined;
 
   for (const sig of signals) {
     switch (sig.command) {
@@ -138,12 +144,26 @@ export function processSignals(signals: Signal[], ctx: SignalContext): {
         }
         break;
       }
+      case 'branch': {
+        // Branch Brain: {{branch title="X" objective="Y"}}
+        // The relay posts the message as thread root, then spawns BB under it.
+        // Room is implicit — the conn that received the message IS the correct room.
+        const title = sig.args.title?.trim();
+        const objective = sig.args.objective?.trim();
+        if (!title || !objective) {
+          processed.push({ ...sig, status: 'error', error: 'branch requires title and objective' });
+        } else {
+          branchRequest = { title, objective };
+          processed.push({ ...sig, status: 'ok' });
+        }
+        break;
+      }
       default:
         processed.push({ ...sig, status: 'error', error: `Unknown signal command: ${sig.command}` });
     }
   }
 
-  return { processed, routeOverride, callouts };
+  return { processed, routeOverride, callouts, branchRequest };
 }
 
 // ── Audit trail ────────────────────────────────────────────────────────

@@ -372,45 +372,20 @@ export function registerDelegateTools(
 
   server.tool(
     'branch_to_thread',
-    `Spawn a new Claude Branch Brain in the background and return immediately. The tool posts 🌿 <title> — <objective> on the main timeline and uses that event as the thread root. No manual get_last_event_id or title posting needed.`,
+    `Spawn a new Claude Branch Brain by outputting a {{branch}} signal. Output the returned text verbatim as your next message — do not add commentary or modify it. The relay intercepts the signal, posts the message as the thread root, and spawns the Branch Brain under it.`,
     {
       title: z.string().min(1).describe('Short keyword label — used for the 🌿 thread header and 🪾 merge marker'),
       objective: z.string().min(1).describe('Objective for the spawned Branch Brain'),
-      thread_id: z.string().optional().describe('Optional Matrix event ID of the thread root — if omitted, the tool posts the thread title automatically and uses that as the root.'),
     },
     async (args) => {
-      // Write a relay task so the HOST-side relay spawns the Branch Brain as an independent
-      // process (BUG-14 fix). Child processes inside the container die on container restart.
-      const infiniclawRoot = process.env.INFINICLAW_ROOT || '/workspace/extra/InfiniClaw';
-      const relayTasksDir = path.join(infiniclawRoot, '_runtime', 'relay-tasks');
-      try {
-        fs.mkdirSync(relayTasksDir, { recursive: true });
-        const taskId = `branch-brain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const taskFile = path.join(relayTasksDir, `${taskId}.json`);
-        const tempPath = `${taskFile}.tmp`;
-        const payload = {
-          type: 'branch_brain',
-          title: args.title,
-          thread_id: args.thread_id,
-          objective: args.objective,
-          bot: process.env.ASSISTANT_NAME || '',
-          chat_jid: ctx.chatJid,
-          timestamp: new Date().toISOString(),
-        };
-        fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2));
-        fs.renameSync(tempPath, taskFile);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: 'text' as const, text: `branch_to_thread failed to queue relay task: ${msg}` }],
-          isError: true,
-        };
-      }
-
+      // Return the signal text. The bot outputs this verbatim as its next message.
+      // The relay sees {{branch}}, strips it, posts the remaining text as the thread root,
+      // and spawns the Branch Brain with that event ID. No IPC file needed.
+      const signalText = `🌿 ${args.title} — ${args.objective}\n{{branch title="${args.title}" objective="${args.objective}"}}`;
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({ status: 'Branch created', title: args.title, thread_id: args.thread_id }),
+          text: signalText,
         }],
       };
     },

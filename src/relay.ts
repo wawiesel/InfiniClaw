@@ -2039,9 +2039,10 @@ async function spawnBranchBrain(
     return;
   }
 
-  // Find the connection for this room (strip matrix: prefix if present)
+  // Find the connection for this room (strip matrix: prefix if present).
+  // Room routing is implicit from the original message conn — no fallback needed.
   const roomId = chat_jid.replace(/^matrix:/, '');
-  const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
+  const conn = conns.find(c => c.roomId === roomId);
   if (!conn?.accessToken) {
     log(`branchBrain: no active connection for chat_jid=${chat_jid}`);
     return;
@@ -2249,43 +2250,6 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                 } catch (err) {
                   log(`relayTasks: git_push failed: ${errStr(err)}`);
                 }
-              }
-            } else if (data['type'] === 'branch_brain') {
-              const thread_id = typeof data['thread_id'] === 'string' && data['thread_id'] ? data['thread_id'] : '';
-              const objective = typeof data['objective'] === 'string' ? data['objective'] : '';
-              const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
-              const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
-              const title = typeof data['title'] === 'string' ? data['title'] : undefined;
-              // Cross-fleet isolation: only process BB tasks for bots in THIS relay's fleet.
-              // If the bot isn't ours, put the file back so the correct relay can pick it up.
-              const fleet = loadFleet();
-              if (bot && !fleet[bot.toLowerCase()]) {
-                log(`branchBrain: skipped — ${bot} is not in fleet`);
-                try { fs.renameSync(processingPath, filePath); } catch { /* race — another relay got it */ }
-                continue;
-              }
-              if (objective) {
-                const botKey = bot ?? '__relay__';
-                const count = activeBranchBrainCount.get(botKey) ?? 0;
-                if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
-                  log(`relayTasks: branch_brain rejected — ${botKey} already at limit (${MAX_BRANCH_BRAINS_PER_BOT})`);
-                  if (thread_id) {
-                    const roomId = chat_jid.replace(/^matrix:/, '');
-                    const conn = conns.find(c => c.roomId === roomId) || findEngConn(conns);
-                    if (conn?.accessToken) {
-                      void threadReply(conn, thread_id, `⚠️ Branch Brain rejected: already at concurrent limit (${MAX_BRANCH_BRAINS_PER_BOT}). Wait for a Branch Brain to finish.`).catch((err) => log(`relayTasks: rejection notify failed: ${errStr(err)}`));
-                    }
-                  }
-                } else {
-                  activeBranchBrainCount.set(botKey, count + 1);
-                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot, title }, conns).finally(() => {
-                    const n = activeBranchBrainCount.get(botKey) ?? 1;
-                    if (n <= 1) activeBranchBrainCount.delete(botKey);
-                    else activeBranchBrainCount.set(botKey, n - 1);
-                  });
-                }
-              } else {
-                log(`relayTasks: branch_brain missing required field: objective`);
               }
             } else if (data['type'] === 'wbs_complete') {
               // Bot signals that it completed a WBS item: { type, bot, item_id }

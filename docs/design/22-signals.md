@@ -34,6 +34,26 @@ Notify a specific bot. Replaces `<m>Tali</m>`.
 
 Route the message to a specific room and/or thread.
 
+### Branch
+
+```
+{{branch title="Fix tests" objective="Run the test suite and fix all failing tests"}}
+```
+
+Spawn a Branch Brain. The relay:
+1. Strips the signal from the message body
+2. Posts the remaining text as the thread root on the current timeline
+3. Uses the returned event ID as the BB thread root
+4. Spawns the Branch Brain under that thread
+
+Room is implicit — the message's conn IS the correct room. No `chat_jid` lookup needed.
+
+The bot outputs the full message as returned by `branch_to_thread`:
+```
+🌿 Fix tests — Run the test suite and fix all failing tests
+{{branch title="Fix tests" objective="Run the test suite and fix all failing tests"}}
+```
+
 ## Default Routing
 
 No signal needed for default behavior:
@@ -114,3 +134,4 @@ The bot sees this in its room context, learns the signal was bad, and can retry 
 | `set_thread(id)` | `{{send thread="id"}}` |
 | `send_message(text, recipient)` | `{{send room="recipient"}} text` |
 | No audit trail | `{{1 2}}` S3-linked audit |
+| `branch_to_thread` IPC relay-task file | `{{branch title="X" objective="Y"}}` signal |

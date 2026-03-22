@@ -24,6 +24,7 @@ import {
 import { startCredentialProxy } from 'nanoclaw/credential-proxy.js';
 import {
   ASSISTANT_ROLE,
+  BRANCH_BRAIN_TIMEOUT_MS,
   CAPTAIN_USER_ID,
   HEAP_LIMIT_MB,
   MAIN_GROUP_FOLDER,
@@ -114,7 +115,7 @@ import { extractSignals, processSignals, auditSignals, formatSignalError } from 
 import { exportHistoryToS3 } from './history-export.js';
 
 import { GIT_VERSION, SEMVER_TAG } from './version.js';
-import { runContainerAgent } from './container-spawn.js';
+import { runContainerAgent, runBranchBrainAgent } from './container-spawn.js';
 import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
@@ -813,6 +814,86 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
   }
 }
 
+// ── Branch Brain signal spawn ─────────────────────────────────────────
+
+const MAX_BRANCH_BRAINS_PER_BOT = parseInt(process.env.MAX_BRANCH_BRAINS_PER_BOT || '3', 10);
+const activeBranchBrainCount = new Map<string, number>();
+
+/**
+ * Spawn a Branch Brain after the bot outputs a {{branch title="X" objective="Y"}} signal.
+ * The `threadRootId` is the event ID of the message the bot just posted (the thread header).
+ * Room routing is implicit — same chatJid as the triggering message.
+ */
+async function spawnBranchBrainFromSignal(
+  chatJid: string,
+  groupFolder: string,
+  threadRootId: string,
+  title: string,
+  objective: string,
+): Promise<void> {
+  const bot = ASSISTANT_NAME.toLowerCase();
+  const count = activeBranchBrainCount.get(bot) ?? 0;
+  if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
+    logger.warn({ bot, count, title }, 'BB spawn rejected — at concurrency limit');
+    const ch = findChannel(channels, chatJid);
+    if (ch) {
+      void ch.sendMessage(chatJid, `⚠️ Branch Brain rejected: already at concurrent limit (${MAX_BRANCH_BRAINS_PER_BOT}). Wait for a Branch Brain to finish.`, threadRootId)
+        .catch(() => {});
+    }
+    return;
+  }
+  activeBranchBrainCount.set(bot, count + 1);
+  logger.info({ bot, title, threadRootId: threadRootId.slice(0, 20) }, 'Spawning BB from {{branch}} signal');
+
+  const containerNameTag = `bb-${title.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 20)}-${Date.now().toString(36)}`;
+  const sessionId = sessions[groupFolder];
+  const ch = findChannel(channels, chatJid);
+
+  const postToThread = async (text: string): Promise<void> => {
+    if (ch) await ch.sendMessage(chatJid, text, threadRootId).catch(() => {});
+  };
+
+  const bbPrompt = [
+    `You are Branch Brain "${title}". Your thread root event ID is ${threadRootId}.`,
+    `- Output channel is stdout only. Matrix/messaging tools (send_message, set_thread, branch_to_thread) are not available in this context.`,
+    `- Work sequentially. When done, post 🪾 ${title} — <result summary> as your final message.`,
+    '',
+    'Objective:',
+    objective,
+  ].join('\n');
+
+  try {
+    await runBranchBrainAgent(
+      {
+        prompt: bbPrompt,
+        bot,
+        groupFolder,
+        chatJid,
+        sessionId,
+        containerNameTag,
+        timeoutMs: BRANCH_BRAIN_TIMEOUT_MS,
+      },
+      (_proc, _containerName) => { /* no-op: queue tracking not needed for BBs */ },
+      async (output) => {
+        if (output.result) {
+          await postToThread(output.result);
+        }
+      },
+    );
+    // Merge marker in thread
+    await postToThread(`🪾 ${title} — ✅ merged`);
+    // Loudspeaker merge notice on main timeline (bot not in thread, so main brain sees it)
+    if (ch) void ch.sendMessage(chatJid, `🪾 ${title} — ✅ merged`).catch(() => {});
+  } catch (err) {
+    await postToThread(`🪾 ${title} — ⛔ failed: ${errStr(err)}`);
+    if (ch) void ch.sendMessage(chatJid, `🪾 ${title} — ⛔ failed`).catch(() => {});
+  } finally {
+    const n = activeBranchBrainCount.get(bot) ?? 1;
+    if (n <= 1) activeBranchBrainCount.delete(bot);
+    else activeBranchBrainCount.set(bot, n - 1);
+  }
+}
+
 async function handleResultOutput(ctx: OutputHandlerContext, text: string): Promise<void> {
   markProgress(ctx.chatJid, text);
   // Set state before channel send to preserve original behavior if send throws
@@ -826,6 +907,7 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
   let sendText = cleanText;
   let sendJid = ctx.chatJid;
   let sendThread = activeReplyThreadIds[ctx.chatJid];
+  let pendingBranchRequest: { title: string; objective: string } | undefined;
 
   if (signals.length > 0) {
     // Build room lookup from registered groups
@@ -837,7 +919,7 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
       return undefined;
     };
 
-    const { processed, routeOverride, callouts } = processSignals(signals, {
+    const { processed, routeOverride, callouts, branchRequest } = processSignals(signals, {
       botName,
       roomName,
       roomId: ctx.chatJid,
@@ -853,6 +935,9 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
     for (const name of callouts) {
       sendText = `<m>${name}</m> ${sendText}`;
     }
+
+    // Capture branch request for post-send spawning
+    pendingBranchRequest = branchRequest;
 
     // Audit trail: upload to S3 and get suffix
     const { suffix } = await auditSignals(processed, botName, roomName);
@@ -873,6 +958,7 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
       // Reset routing to default on error (fail safe)
       sendJid = ctx.chatJid;
       sendThread = activeReplyThreadIds[ctx.chatJid];
+      pendingBranchRequest = undefined;
     }
   }
   // ── End Signals ──────────────────────────────────────────────────────
@@ -892,6 +978,16 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
       storeOutgoing(ctx.chatJid, sendText, sendThread);
       if (sentEventId) {
         if (group) updateEventIdFile(group.folder, 'lastSent', sentEventId);
+        // ── {{branch}} signal: posted message IS the thread root — spawn BB under it
+        if (pendingBranchRequest) {
+          void spawnBranchBrainFromSignal(
+            ctx.chatJid,
+            ctx.group.folder,
+            sentEventId,
+            pendingBranchRequest.title,
+            pendingBranchRequest.objective,
+          ).catch((err) => logger.error({ err, title: pendingBranchRequest!.title }, 'BB spawn error'));
+        }
       }
     } finally {
       if (ch.setTyping) await ch.setTyping(sendJid, false);
