@@ -76,6 +76,10 @@ Bot identity is defined in three layers of CLAUDE.md:
 
 See `bots/README.md` for full structure.
 
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for commit style, PR process, and test requirements.
+
 ## Values
 
 See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity, consistency, functionality.

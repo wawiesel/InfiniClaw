@@ -4,10 +4,7 @@
 
 [Conventional Commits](https://www.conventionalcommits.org/) — `<type>[scope]: <description>`.
 Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`.
-Include on AI-assisted commits:
-```
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-```
+No `Co-Authored-By` trailers — no attribution clutter.
 
 ## PR Process
 
