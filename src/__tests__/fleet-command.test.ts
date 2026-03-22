@@ -16,57 +16,70 @@ beforeEach(() => {
 
 // ── Fleet selector parsing (logic extracted for unit testing) ────────────────
 
+/** Known duty room names — mirror of ROLE_ROOMS values in ship-config.ts. */
+const KNOWN_ROOMS = new Set(['bridge', 'engineering', 'astrometrics', 'lounge']);
+
+/** Mirror of FleetSelector in relay.ts — must stay in sync. */
+interface FleetSelector { fleet: string; roomFilter?: string; }
+
 /** Mirror of parseFleetSelector in relay.ts — must stay in sync. */
-function parseFleetSelector(arg: string, currentFleet: string): string {
+function parseFleetSelector(arg: string, currentFleet: string): FleetSelector {
   const normalized = arg.trim().toLowerCase();
-  if (!normalized) return currentFleet;
-  if (normalized === 'all') return 'all';
+  if (!normalized) return { fleet: currentFleet };
+  if (normalized === 'all') return { fleet: 'all' };
+  if (KNOWN_ROOMS.has(normalized)) return { fleet: currentFleet, roomFilter: normalized };
   const icMatch = normalized.match(/^ic(\d+)$/);
-  if (icMatch) return `infiniclaw${icMatch[1].padStart(2, '0')}`;
-  if (/^infiniclaw\d+$/.test(normalized)) return normalized;
-  return currentFleet;
+  if (icMatch) return { fleet: `infiniclaw${icMatch[1].padStart(2, '0')}` };
+  if (/^infiniclaw\d+$/.test(normalized)) return { fleet: normalized };
+  return { fleet: currentFleet };
 }
 
 describe('parseFleetSelector', () => {
   it('empty arg returns current fleet', () => {
-    expect(parseFleetSelector('', 'infiniclaw00')).toBe('infiniclaw00');
-    expect(parseFleetSelector('', 'infiniclaw01')).toBe('infiniclaw01');
+    expect(parseFleetSelector('', 'infiniclaw00')).toEqual({ fleet: 'infiniclaw00' });
+    expect(parseFleetSelector('', 'infiniclaw01')).toEqual({ fleet: 'infiniclaw01' });
   });
 
   it('all returns "all"', () => {
-    expect(parseFleetSelector('all', 'infiniclaw00')).toBe('all');
-    expect(parseFleetSelector('ALL', 'infiniclaw00')).toBe('all');
+    expect(parseFleetSelector('all', 'infiniclaw00')).toEqual({ fleet: 'all' });
+    expect(parseFleetSelector('ALL', 'infiniclaw00')).toEqual({ fleet: 'all' });
   });
 
   it('ic00 → infiniclaw00', () => {
-    expect(parseFleetSelector('ic00', 'infiniclaw01')).toBe('infiniclaw00');
+    expect(parseFleetSelector('ic00', 'infiniclaw01')).toEqual({ fleet: 'infiniclaw00' });
   });
 
   it('ic01 → infiniclaw01', () => {
-    expect(parseFleetSelector('ic01', 'infiniclaw00')).toBe('infiniclaw01');
+    expect(parseFleetSelector('ic01', 'infiniclaw00')).toEqual({ fleet: 'infiniclaw01' });
   });
 
   it('ic02 → infiniclaw02', () => {
-    expect(parseFleetSelector('ic02', 'infiniclaw00')).toBe('infiniclaw02');
+    expect(parseFleetSelector('ic02', 'infiniclaw00')).toEqual({ fleet: 'infiniclaw02' });
   });
 
   it('infiniclaw00 passthrough', () => {
-    expect(parseFleetSelector('infiniclaw00', 'infiniclaw01')).toBe('infiniclaw00');
+    expect(parseFleetSelector('infiniclaw00', 'infiniclaw01')).toEqual({ fleet: 'infiniclaw00' });
   });
 
   it('infiniclaw01 passthrough', () => {
-    expect(parseFleetSelector('infiniclaw01', 'infiniclaw00')).toBe('infiniclaw01');
+    expect(parseFleetSelector('infiniclaw01', 'infiniclaw00')).toEqual({ fleet: 'infiniclaw01' });
+  });
+
+  it('room name returns room filter with current fleet', () => {
+    expect(parseFleetSelector('engineering', 'infiniclaw00')).toEqual({ fleet: 'infiniclaw00', roomFilter: 'engineering' });
+    expect(parseFleetSelector('bridge', 'infiniclaw01')).toEqual({ fleet: 'infiniclaw01', roomFilter: 'bridge' });
+    expect(parseFleetSelector('astrometrics', 'infiniclaw00')).toEqual({ fleet: 'infiniclaw00', roomFilter: 'astrometrics' });
+    expect(parseFleetSelector('lounge', 'infiniclaw00')).toEqual({ fleet: 'infiniclaw00', roomFilter: 'lounge' });
   });
 
   it('unrecognized arg falls back to current fleet', () => {
-    expect(parseFleetSelector('engineering', 'infiniclaw00')).toBe('infiniclaw00');
-    expect(parseFleetSelector('bridge', 'infiniclaw01')).toBe('infiniclaw01');
+    expect(parseFleetSelector('foobar', 'infiniclaw00')).toEqual({ fleet: 'infiniclaw00' });
   });
 
   it('is case-insensitive', () => {
-    expect(parseFleetSelector('IC00', 'infiniclaw01')).toBe('infiniclaw00');
-    expect(parseFleetSelector('IC01', 'infiniclaw00')).toBe('infiniclaw01');
-    expect(parseFleetSelector('InfiniClaw00', 'infiniclaw01')).toBe('infiniclaw00');
+    expect(parseFleetSelector('IC00', 'infiniclaw01')).toEqual({ fleet: 'infiniclaw00' });
+    expect(parseFleetSelector('IC01', 'infiniclaw00')).toEqual({ fleet: 'infiniclaw01' });
+    expect(parseFleetSelector('InfiniClaw00', 'infiniclaw01')).toEqual({ fleet: 'infiniclaw00' });
   });
 });
 
@@ -180,6 +193,11 @@ describe('relay.ts multi-fleet implementation', () => {
 
   it('fleet handler has dynamic header label', () => {
     expect(source).toMatch(/fleetDisplayName\(targetFleet\)/);
+  });
+
+  it('fleet handler supports room filter', () => {
+    expect(source).toMatch(/roomFilter/);
+    expect(source).toMatch(/ROLE_ROOMS\[role\]/);
   });
 
   it('fleet handler supports !fleet all with section headers', () => {

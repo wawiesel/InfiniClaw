@@ -3598,19 +3598,30 @@ function fleetDisplayName(fleet: string): string {
   return d ? `${d.emoji}${d.name}` : fleet;
 }
 
+/** Parsed !fleet argument: either a fleet selector or a room filter. */
+interface FleetSelector {
+  fleet: string;       // canonical fleet ID or 'all'
+  roomFilter?: string; // duty room name to filter by (e.g. 'engineering', 'bridge')
+}
+
+/** Known duty room names for room-filter detection. */
+const KNOWN_ROOMS = new Set(Object.values(ROLE_ROOMS).map(r => r.room));
+
 /**
- * Parse a fleet selector arg from !fleet [arg] into a canonical fleet ID or 'all'.
- * Accepts: '', 'ic00', 'ic01', 'infiniclaw00', 'infiniclaw01', 'all'.
+ * Parse a fleet selector arg from !fleet [arg].
+ * Accepts fleet selectors: '', 'ic00', 'ic01', 'infiniclaw00', 'infiniclaw01', 'all'.
+ * Also accepts room names: 'engineering', 'bridge', 'astrometrics', 'lounge'.
  * Falls back to the current relay's fleet for unrecognized args.
  */
-function parseFleetSelector(arg: string): string {
+function parseFleetSelector(arg: string): FleetSelector {
   const normalized = arg.trim().toLowerCase();
-  if (!normalized) return fleetId();
-  if (normalized === 'all') return 'all';
+  if (!normalized) return { fleet: fleetId() };
+  if (normalized === 'all') return { fleet: 'all' };
+  if (KNOWN_ROOMS.has(normalized)) return { fleet: fleetId(), roomFilter: normalized };
   const icMatch = normalized.match(/^ic(\d+)$/);
-  if (icMatch) return `infiniclaw${icMatch[1].padStart(2, '0')}`;
-  if (/^infiniclaw\d+$/.test(normalized)) return normalized;
-  return fleetId();
+  if (icMatch) return { fleet: `infiniclaw${icMatch[1].padStart(2, '0')}` };
+  if (/^infiniclaw\d+$/.test(normalized)) return { fleet: normalized };
+  return { fleet: fleetId() };
 }
 
 // ── Register command handlers with the registry ──────────────────
@@ -3931,9 +3942,9 @@ function registerRelayCommands(): void {
 
     fleet: async (cmd, conn) => {
       try {
-        // Parse fleet selector: !fleet, !fleet ic00, !fleet ic01, !fleet all
+        // Parse fleet selector: !fleet, !fleet ic00, !fleet ic01, !fleet all, !fleet engineering
         const arg = cmd.slice('!fleet'.length).trim();
-        const targetFleet = parseFleetSelector(arg);
+        const { fleet: targetFleet, roomFilter } = parseFleetSelector(arg);
         const currentFleet = fleetId();
 
         // Every relay publishes its own report to S3, then the lowest-rank available relay
@@ -4036,6 +4047,15 @@ function registerRelayCommands(): void {
           }
         }
 
+        // Room filter: keep only bots whose role maps to the requested duty room
+        if (roomFilter) {
+          for (const botId of Object.keys(allBots)) {
+            const role = allBots[botId].role?.toLowerCase() ?? '';
+            const dutyRoom = ROLE_ROOMS[role]?.room;
+            if (dutyRoom !== roomFilter) delete allBots[botId];
+          }
+        }
+
         // Group by ship
         const byShip: Record<string, Array<[string, typeof allBots[string]]>> = {};
         for (const [botId, entry] of Object.entries(allBots)) {
@@ -4050,8 +4070,11 @@ function registerRelayCommands(): void {
           .map(b => b.grade as HealthGrade);
         const fleetGrade = botGrades.length > 0 ? computeFleetHealthGrade(botGrades) : 'A' as HealthGrade;
         const fleetTokPerDay = Object.values(allBots).reduce((sum, b) => sum + (b.tokPerDay ?? 0), 0);
-        // Dynamic header: fleet name or "All Fleets"
-        const headerLabel = targetFleet === 'all' ? '🌌🧪 All Fleets' : fleetDisplayName(targetFleet);
+        // Dynamic header: fleet name, room filter, or "All Fleets"
+        const roomIcon = roomFilter ? (Object.values(ROLE_ROOMS).find(r => r.room === roomFilter)?.icon ?? '') : '';
+        const headerLabel = roomFilter
+          ? `${roomIcon} ${roomFilter}`
+          : targetFleet === 'all' ? '🌌🧪 All Fleets' : fleetDisplayName(targetFleet);
         const threadRoot = await reply(conn, `${headerLabel}·${gradeEmoji(fleetGrade)}${fleetGrade}${activityEmoji(fleetTokPerDay)}`);
 
         // Sort ships: group by fleet (alphabetical), then by rank within fleet; drydock last
