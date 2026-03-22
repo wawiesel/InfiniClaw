@@ -56,7 +56,7 @@ Host machine (macOS / Linux)
 ├── signals.ts          → Signals protocol: `{{mention}}` `{{branch}}` `{{merge}}` `{{send}}` — positional, auto-titled
 ├── tool-call-breadcrumb.ts → Shared compact S3-linked tool call formatting (main brain + BB — DRY)
 ├── metrics.ts         → Fleet metrics: autonomy, MTBI, health grades (uses loadFleet() — no local fleet parsing)
-├── intercom-relay.ts   → Cross-room messaging via per-room intercom Matrix accounts
+├── intercom-relay.ts   → Cross-room messaging (TODO: migrate to operator account, remove intercom)
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts       → Copy persona skills into container session
 ├── mcp-sync.ts         → Sync MCP server config (persona → session)

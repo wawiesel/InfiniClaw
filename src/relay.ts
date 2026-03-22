@@ -4788,6 +4788,10 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               continue;
             }
 
+            // TODO: @operator mention routing — operator account (not intercom) monitors
+            // all rooms for @operator mentions and forwards to BTC. Needs operator sync
+            // loop extension, not dialtone (intercom won't be in all rooms).
+
             // @loudspeaker: <message> — on-duty bot broadcasts to all duty rooms
             // @loudspeaker (alone) — relay responds with fleet status in this room
             const lsCallout = /^@loudspeaker(?::\s*(.+))?$/is.exec(body);
