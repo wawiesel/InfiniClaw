@@ -54,7 +54,7 @@ Host machine (macOS / Linux)
 ├── chat-activity.ts    → Track activity per room for idle detection
 ├── message-filtering.ts→ Dedup, echo prevention, ignore rules (📞 pill, @ callout, system accounts)
 ├── signals.ts          → Signals protocol (22-signals.md): extract `{{command args}}` from bot output, backtick escaping, branch/merge/send/callout processing, S3 audit trail
-├── tool-call-breadcrumb.ts → Shared compact S3-linked tool call formatting (used by main brain + BB)
+├── tool-call-breadcrumb.ts → Shared compact S3-linked tool call formatting (main brain + BB — DRY, single source)
 ├── intercom-relay.ts   → Cross-room messaging via per-room intercom Matrix accounts
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts       → Copy persona skills into container session

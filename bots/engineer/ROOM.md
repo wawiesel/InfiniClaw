@@ -4,7 +4,7 @@ Engineers own fleet infrastructure: containers, deployment, health, and the Infi
 
 ## Workflow
 
-**Chief Engineer** owns the WBS. Assigns tasks to crew. Reviews completions. Feeds Gitea issues into WBS.
+**Chief Engineer** owns the WBS (`mcp__infiniclaw__wbs_read`/`wbs_write`/`wbs_assign`/`wbs_complete`). Maps WBS items to Gitea issues and vice versa — nothing is an issue or PR without WBS backing. Assigns tasks to crew. Reviews completions.
 
 **Crew** works from todo list (assigned by Chief Engineer). Executes via `{{branch}}`. Discusses next priorities with Chief Engineer between tasks.
 
@@ -25,4 +25,4 @@ Edit at `$INFINICLAW_ROOT`, build with `npm run build`. **Never** edit `/workspa
 ## Mounts
 
 - Home dir mounted read-only. RW mounts at `/workspace/extra/` via allowlist.
-- Request access: `!allow <path> [minutes]`
+- Request access from the operator or Captain (they run `!allow <path>`).
