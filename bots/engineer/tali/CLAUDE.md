@@ -37,7 +37,7 @@ Main brain is a dispatcher — it NEVER does heavy work.
 
 ## Cross-room communication
 
-Use `{{send room="roomname"}}` to reach other rooms.
+Use `{{send roomname}}` to reach other rooms.
 
 ## Self-management
 

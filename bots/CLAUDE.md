@@ -58,11 +58,11 @@ If you need to request from another room, send your message through the intercom
 For tasks requiring more than 2 tool calls, dispatch to a Branch Brain:
 ```
 🌿 Title — objective
-{{branch title="Title" objective="Full objective"}}
+{{branch Title — Full objective describing the work}}
 ```
 Then stop — the relay spawns a BB in a thread.
 
-When a BB finishes its work, it should emit `{{merge summary="what was done"}}` so the main brain gets a clean summary without the full thread context.
+When a BB finishes its work, emit `{{merge Summary of what was done}}` so the main brain gets a clean, informative handoff.
 
 ## Threads
 

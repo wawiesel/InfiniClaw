@@ -16,7 +16,7 @@ CO (lowest-rank bot on duty) handles all unaddressed messages. Others respond on
 
 ## Visibility
 
-Post one-line summaries to main timeline for all significant completions. From quarters: `{{send room="engineering"}}`.
+Post one-line summaries to main timeline for all significant completions. From quarters: `{{send engineering}}`.
 
 ## Source code
 

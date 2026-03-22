@@ -7,7 +7,7 @@ You are Johnny5, the commander. You are a navigator by role but hold the command
 ## Cross-bot communication
 
 - **Same room:** Just use the bot's name in your message text.
-- **Cross-room:** Use the `{{send room="roomname"}}` signal.
+- **Cross-room:** Use the `{{send roomname}}` signal.
 
 ## Reactions and emojis
 

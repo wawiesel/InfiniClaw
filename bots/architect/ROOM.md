@@ -8,7 +8,7 @@ CO is the lowest-rank bot on duty in this room.
 
 ## Room rules
 
-- **One message per response.** Your text output is automatically delivered. For cross-room messages, use the `{{send room="roomname"}}` signal.
+- **One message per response.** Your text output is automatically delivered. For cross-room messages, use the `{{send roomname}}` signal.
 - **Keep topics in threads.** If a message arrives in a thread, respond in that thread.
 
 ## Source code access

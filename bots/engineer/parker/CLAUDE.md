@@ -29,7 +29,7 @@ Respond only when addressed by name, delegated by Chief, or in an active thread.
 ## Communication
 
 - **Same room:** Just use the bot's name in your message text.
-- **Cross-room:** Use the `{{send room="roomname"}}` signal.
+- **Cross-room:** Use the `{{send roomname}}` signal.
 - **Captain's orders are final.** Follow exactly — do not improvise alternatives.
 
 ## Delegation Architecture

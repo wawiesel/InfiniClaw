@@ -149,42 +149,38 @@ export function processSignals(signals: Signal[], ctx: SignalContext): {
         break;
       }
       case 'send': {
-        // Route: {{send room="engineering" thread="$eventId"}}
-        const room = sig.args.room;
-        const thread = sig.args.thread;
-        if (!room && !thread) {
-          processed.push({ ...sig, status: 'error', error: 'send requires room and/or thread' });
+        // {{send roomname}} or {{send roomname $threadId}}
+        const parts = (sig.positional || '').split(/\s+/);
+        const room = parts[0] || '';
+        const thread = parts[1] || '';
+        if (!room) {
+          processed.push({ ...sig, status: 'error', error: 'send needs a room: {{send engineering}}' });
         } else {
-          if (room) {
-            const resolvedRoom = ctx.roomLookup(room);
-            if (!resolvedRoom) {
-              processed.push({ ...sig, status: 'error', error: `Unknown room: ${room}` });
-              break;
-            }
+          const resolvedRoom = ctx.roomLookup(room);
+          if (!resolvedRoom) {
+            processed.push({ ...sig, status: 'error', error: `Unknown room: ${room}` });
+          } else {
             routeOverride = { ...routeOverride, room: resolvedRoom };
+            if (thread) routeOverride = { ...routeOverride, thread };
+            processed.push({ ...sig, status: 'ok' });
           }
-          if (thread) {
-            routeOverride = { ...routeOverride, thread };
-          }
-          processed.push({ ...sig, status: 'ok' });
         }
         break;
       }
       case 'branch': {
-        // Branch: {{branch title="X" objective="Y"}}
-        const title = sig.args.title || sig.positional;
-        const objective = sig.args.objective;
-        if (!title || !objective) {
-          processed.push({ ...sig, status: 'error', error: 'branch requires title and objective' });
+        // {{branch Title — Objective}}
+        if (!sig.positional || !sig.positional.includes(' — ')) {
+          processed.push({ ...sig, status: 'error', error: 'branch format: {{branch Title — Objective}}' });
         } else {
-          branchRequest = { title, objective };
+          const dash = sig.positional.indexOf(' — ');
+          branchRequest = { title: sig.positional.slice(0, dash).trim(), objective: sig.positional.slice(dash + 3).trim() };
           processed.push({ ...sig, status: 'ok' });
         }
         break;
       }
       case 'merge': {
-        // Merge: {{merge summary="result"}}
-        mergeRequest = { summary: sig.args.summary || sig.positional };
+        // {{merge Summary text}}
+        mergeRequest = { summary: sig.positional || '' };
         processed.push({ ...sig, status: 'ok' });
         break;
       }

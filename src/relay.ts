@@ -2321,10 +2321,11 @@ async function spawnBranchBrain(
       const brainSucceeded = postedCount > 0;
       const timer = setTimeout(() => {
         branchBrainRestartTimers.delete(bot);
-        const status = brainSucceeded ? '✅ merged' : '⛔ failed';
-        const summaryText = mergeSummary || lastPostedText || '';
-        const summary = summaryText ? `\n\n${summaryText.slice(0, 4000)}` : '';
-        const mergeText = `🪾 ${announcedTitle} — ${status}${summary}`;
+        const status = brainSucceeded ? '✅' : '⛔';
+        // Prefer {{merge}} summary; skip raw tool call breadcrumbs as fallback
+        const hasCleanSummary = !!mergeSummary && (mergeSummary as string).length > 5;
+        const summaryLine = hasCleanSummary ? ` — ${(mergeSummary as string).slice(0, 2000)}` : '';
+        const mergeText = `🪾 ${announcedTitle} ${status}${summaryLine}`;
         const ls = loadLoudspeakerConfig();
         if (ls) {
           getLoudspeakerToken(ls.homeserver, ls.username, ls.password).then(token => {
