@@ -3150,8 +3150,12 @@ async function handleLifecycleCommand(
 
   // No local bots matched.
   if (bots.length === 0) {
-    // Target is on a different ship — stay silent; that ship handles it (fixes #77).
-    if (target && liveFleet[target] && liveFleet[target].ship !== HOSTNAME) return;
+    // Target is on a different ship — the other ship's relay handles it (fixes #77).
+    // Speaker provides feedback so the Captain isn't left in silence if that relay is offline.
+    if (target && liveFleet[target] && liveFleet[target].ship !== HOSTNAME) {
+      if (await electSpeaker()) await reply(conn, `📡 ${capitalizeName(target)} is on ${liveFleet[target].ship}`);
+      return;
+    }
     // Explicit target exists on this ship but isn't in the room — warn.
     if (target && scope === 'present' && liveFleet[target]?.ship === HOSTNAME) {
       const tEnv = (() => { try { return loadProfileEnv(root, target); } catch { return null; } })();
@@ -3391,6 +3395,8 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
   if (bots.length === 0) {
     if (targetBot && scope === 'present' && liveFleet[targetBot]?.ship === HOSTNAME) {
       await reply(conn, `📡 ${labelEnv?.ASSISTANT_NAME || capitalizeName(targetBot)} not in this room`);
+    } else if (targetBot && liveFleet[targetBot] && liveFleet[targetBot].ship !== HOSTNAME) {
+      await reply(conn, `📡 ${labelEnv?.ASSISTANT_NAME || capitalizeName(targetBot)} is on ${liveFleet[targetBot].ship}`);
     } else if (targetBot) {
       await helpReply(conn, `No local bot: ${targetBot}`);
     }

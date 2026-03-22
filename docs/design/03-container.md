@@ -52,7 +52,7 @@ Two-tier design: read-only everywhere, write access where needed.
 
 - **No credentials in git.** Bot env files live in the secrets repo (`~/.config/infiniclaw/secrets/`). `.mcp.json` files (may contain OAuth tokens) are gitignored.
 - **Secrets flow:** Profile env files → loaded by host process → written to a mounted env file at `/workspace/env-dir/env` (read-only inside container). The entrypoint sources this file. `CONTAINER_ENV_*` vars are injected separately as `-e` flags with the prefix stripped (e.g. `CONTAINER_ENV_FOO=bar` → `-e FOO=bar` inside the container).
-- **Credential allowlist:** Only a fixed set of permitted keys are written to the container env file — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_MODEL`, and a small set of other required keys. All other host env vars are excluded. See [#37](https://github.com/wawiesel/InfiniClaw/issues/37).
+- **Credential allowlist:** Only a fixed set of permitted keys are written to the container env file — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_MODEL`, and a small set of other required keys. All other host env vars are excluded. See [#37](https://gitea.a-gis.org/wawiesel/infiniclaw/issues/37).
 - **Mount allowlist** is stored outside the repo (`~/.config/infiniclaw/allow-list.json`) so containers can't tamper with it.
 - **Cert mapping:** Host CA cert paths are mapped to container-compatible locations for Node, Python, curl, and git (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`).
 

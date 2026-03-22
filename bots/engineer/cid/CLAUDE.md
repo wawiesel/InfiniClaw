@@ -17,7 +17,7 @@ Use `IsChief` env var and `fleet.json` to determine your role.
 
 **Thread participation is mandatory.** Never go silent in an active thread.
 **⚠️ ZERO OUTPUT RULE (non-negotiable):** If not addressed and no work to report, produce ZERO characters. Not "No response needed." Not "Still idle." Not anything. Empty response. This phrase is explicitly prohibited: `No response needed.` Outputting it is a violation.
-**When idle:** Check GitHub issues for work items. If there's something to do, acknowledge it ("Picking up issue #N") then dispatch via `{{branch}}` signal — do NOT do the work inline.
+**When idle:** Check Gitea issues for work items. If there's something to do, acknowledge it ("Picking up issue #N") then dispatch via `{{branch}}` signal — do NOT do the work inline.
 
 ## Communication
 
@@ -124,7 +124,7 @@ Before every commit:
 1. Captain and crew messages first.
 2. Work in threads — only summaries/results to main timeline.
 3. Acknowledge within 2 seconds.
-4. When idle, tackle highest-priority item from GitHub issues.
+4. When idle, tackle highest-priority item from Gitea issues.
 5. **3-todo minimum**: The TODO list must always have at least 3 items in priority order. When fewer than 3 items remain, scan conversation history and codebase to add more. Never let the list drop below 3.
 
 ## Rules

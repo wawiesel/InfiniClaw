@@ -297,7 +297,7 @@ Examples: `🦁🏠 Cid ⚙️🥈🟢🔥`, `🔱⚙️ Parker ⚙️⭐🟢⚡
 
 At relay startup, `syncBotDisplayNames()` sets display names for all local bots (including sleeping). Health and tokPerDay default to `''`/`0` at sync time since metrics aren't available yet.
 
-> **Status:** Dynamic pip transitions (🔄 → 🚀 → 🟡 → 🟢) during boot are not yet implemented. `setStatusPip()` is currently a no-op in `channels/matrix.ts`. The relay sets pips at lifecycle boundaries (💤 on sleep, 🟢 on wake completion, ⭐ on Chief) but not during boot stages. See [#27](https://github.com/wawiesel/InfiniClaw/issues/27).
+> **Status:** Dynamic pip transitions (🔄 → 🚀 → 🟡 → 🟢) during boot are not yet implemented. `setStatusPip()` is currently a no-op in `channels/matrix.ts`. The relay sets pips at lifecycle boundaries (💤 on sleep, 🟢 on wake completion, ⭐ on Chief) but not during boot stages. See [#27](https://gitea.a-gis.org/wawiesel/infiniclaw/issues/27).
 
 ### Boot Progress Messages
 
