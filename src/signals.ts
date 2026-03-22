@@ -228,7 +228,8 @@ ${sig.error ? `<tr><td><b>Error</b></td><td>${sig.error}</td></tr>` : ''}
       await uploadHtml(s3Key, html);
       const url = await getPresignedUrl(s3Key);
       sig.s3Url = url ?? undefined;
-      indices.push(url ? `[${idx}](${url})` : `${idx}`);
+      const icon = sig.status === 'error' ? `⚠️${idx}` : `${idx}`;
+      indices.push(url ? `[${icon}](${url})` : icon);
     } catch (err) {
       logger.warn({ err, s3Key }, 'Failed to upload signal audit');
       indices.push(`${idx}`);
@@ -241,9 +242,8 @@ ${sig.error ? `<tr><td><b>Error</b></td><td>${sig.error}</td></tr>` : ''}
 
 // ── Error notification ─────────────────────────────────────────────────
 
-/** Generate loudspeaker error message for failed signals */
-export function formatSignalError(sig: ProcessedSignal, botName: string, fallbackLocation: string): string {
-  const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+/** Format signal error as a compact direct message to the bot (not posted on timeline) */
+export function formatSignalError(sig: ProcessedSignal, _botName: string, _fallbackLocation: string): string {
   const s3Link = sig.s3Url ? ` [details](${sig.s3Url})` : '';
-  return `⚠️ Signal failed for ${botName} at ${time} — \`${sig.raw}\` — ${sig.error}. Message delivered to ${fallbackLocation}.${s3Link}`;
+  return `⚠️ \`${sig.command}\`: ${sig.error}${s3Link}`;
 }

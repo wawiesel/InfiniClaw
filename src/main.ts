@@ -921,18 +921,12 @@ async function handleResultOutput(ctx: OutputHandlerContext, text: string): Prom
     const { suffix } = await auditSignals(processed, botName, roomName);
     if (suffix) sendText = `${sendText}\n\n${suffix}`;
 
-    // Error handling: loudspeaker notification for failed signals
+    // Error handling: inject failure as direct context to the bot (not posted on timeline)
     const failedSignals = processed.filter(s => s.status === 'error');
     if (failedSignals.length > 0) {
-      const ch = findChannel(channels, ctx.chatJid);
-      if (ch) {
-        const fallbackLocation = `${roomName} main timeline`;
-        for (const failed of failedSignals) {
-          const errMsg = formatSignalError(failed, botName, fallbackLocation);
-          // Post via loudspeaker in bot's room
-          void ch.sendMessage(ctx.chatJid, errMsg).catch(() => {});
-        }
-      }
+      const fallbackLocation = `${roomName} main timeline`;
+      const errors = failedSignals.map(f => formatSignalError(f, botName, fallbackLocation)).join('\n');
+      logger.warn({ botName, errors }, 'Signal errors — injecting as context');
       // Reset routing to default on error (fail safe)
       sendJid = ctx.chatJid;
       sendThread = activeReplyThreadIds[ctx.chatJid];
