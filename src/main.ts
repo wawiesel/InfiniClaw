@@ -112,7 +112,7 @@ import { ensureContainerSystemRunning } from './podman-bootstrap.js';
 import { uploadContent, uploadHtml, getPresignedUrl } from './s3-sync.js';
 import { errStr, escapeRegex, envInt } from './utils.js';
 import { extractSignals, processSignals, auditSignals, formatSignalError } from './signals.js';
-import { toolCallBreadcrumb as sharedToolCallBreadcrumb, isToolCallBlock, hasDetailsBlock } from './tool-call-breadcrumb.js';
+import { toolCallBreadcrumb as sharedToolCallBreadcrumb, toolCallBreadcrumbFromData, isToolCallMarker, parseToolCallMarker, isToolCallBlock, hasDetailsBlock } from './tool-call-breadcrumb.js';
 import { exportHistoryToS3 } from './history-export.js';
 
 import { GIT_VERSION, SEMVER_TAG } from './version.js';
@@ -700,7 +700,7 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
     return;
   }
   markProgress(ctx.chatJid, text);
-  const isToolCall = text.includes('<details>');
+  const isToolCall = isToolCallMarker(text) || text.includes('<details>');
   if (isToolCall) {
     // Track whether this is a dispatch call
     // Enforce dispatch limit on main brain ({{branch}} signal sets turnDispatchCalled above)
@@ -720,7 +720,12 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
   if (isToolCall) {
     const group = registeredGroups[ctx.chatJid];
     const groupName = group?.name ?? ctx.chatJid;
-    toolCallHtml = await sharedToolCallBreadcrumb(text, ASSISTANT_NAME, groupName);
+    const parsed = parseToolCallMarker(text);
+    if (parsed) {
+      toolCallHtml = await toolCallBreadcrumbFromData(parsed, ASSISTANT_NAME, groupName);
+    } else {
+      toolCallHtml = await sharedToolCallBreadcrumb(text, ASSISTANT_NAME, groupName);
+    }
   }
   const now = Date.now();
   const inThread = Boolean(progressToolCallThreadIds[ctx.chatJid] ?? activeReplyThreadIds[ctx.chatJid]);
@@ -749,8 +754,9 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
           if (progressToolCallThreadIds[ctx.chatJid]) {
             sendToToolThread(progressToolCallThreadIds[ctx.chatJid]!);
           } else if (ch.sendMessageReturningId) {
-            const _toolTitleMatch = text.match(/🔧\s*([^<]{1,60})/);
-            const _toolCallLabel = _toolTitleMatch ? formatToolLabel(_toolTitleMatch[1].trim()) : 'Tool call';
+            const _parsedLabel = parseToolCallMarker(text)?.label;
+            const _toolTitleMatch = !_parsedLabel ? text.match(/🔧\s*([^<]{1,60})/) : null;
+            const _toolCallLabel = _parsedLabel ? formatToolLabel(_parsedLabel) : (_toolTitleMatch ? formatToolLabel(_toolTitleMatch[1].trim()) : 'Tool call');
             const _toolAnchor = lastProgressText[ctx.chatJid]
               || getChatActivity(ctx.chatJid)?.currentObjective?.slice(0, 80)
               || _toolCallLabel;
@@ -877,6 +883,16 @@ async function spawnBranchBrainFromSignal(
       async (output) => {
         if (output.result) {
           const text = output.result;
+          if (isToolCallMarker(text)) {
+            const parsed = parseToolCallMarker(text);
+            if (parsed) {
+              try {
+                const breadcrumb = await toolCallBreadcrumbFromData(parsed, ASSISTANT_NAME, groupFolder);
+                await postToThread(breadcrumb);
+              } catch { /* S3 failed — silently drop */ }
+            }
+            return;
+          }
           if (hasDetailsBlock(text)) return;
           await postToThread(text);
         }
@@ -2144,7 +2160,7 @@ async function main(): Promise<void> {
       const ch = findChannel(channels, jid);
       if (!ch) return;
       const text = stripInternalTags(rawText);
-      if (!text || hasDetailsBlock(text)) return;
+      if (!text || isToolCallMarker(text) || hasDetailsBlock(text)) return;
       await ch.sendMessage(jid, text);
       storeOutgoing(jid, text);
     },
@@ -2157,7 +2173,7 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'No channel found for IPC message');
         return;
       }
-      if (hasDetailsBlock(rawText)) return;
+      if (isToolCallMarker(rawText) || hasDetailsBlock(rawText)) return;
       await ch.sendMessage(jid, rawText, threadId);
       storeOutgoing(jid, rawText, threadId);
     },

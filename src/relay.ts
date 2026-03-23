@@ -22,7 +22,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { collectHealthData, sessionCleanup } from './health-check.js';
-import { isToolCallBlock, hasDetailsBlock, toolCallBreadcrumb } from './tool-call-breadcrumb.js';
+import { isToolCallBlock, hasDetailsBlock, toolCallBreadcrumb, isToolCallMarker, parseToolCallMarker, toolCallBreadcrumbFromData } from './tool-call-breadcrumb.js';
 import { runBranchBrainAgent } from './container-spawn.js';
 import type { ContainerOutput } from './container-spawn.js';
 import { upsertEnvLine } from './env-utils.js';
@@ -2305,10 +2305,14 @@ async function spawnBranchBrain(
       // Stream progress to Matrix thread
       if (output.isProgress && output.result) {
         postedCount++;
-        // Convert <details> tool call blocks to compact S3-linked breadcrumbs
-        // Catch ALL <details> blocks — never post raw details to the timeline
+        // Convert tool call markers/blocks to compact S3-linked breadcrumbs
         let postText = output.result;
-        if (hasDetailsBlock(postText)) {
+        if (isToolCallMarker(postText)) {
+          const parsed = parseToolCallMarker(postText);
+          if (parsed) {
+            try { postText = await toolCallBreadcrumbFromData(parsed, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — silently drop */ }
+          } else { return; }
+        } else if (hasDetailsBlock(postText)) {
           if (isToolCallBlock(postText)) {
             try { postText = await toolCallBreadcrumb(postText, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — silently drop */ }
           } else {
@@ -2318,9 +2322,14 @@ async function spawnBranchBrain(
         lastPostedText = postText;
         await bbThreadReply(postText).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
       } else if (!output.isProgress && output.result && postedCount === 0) {
-        // Final result, nothing streamed yet — apply same <details> filtering
+        // Final result, nothing streamed yet — apply same filtering
         let finalText = output.result;
-        if (hasDetailsBlock(finalText)) {
+        if (isToolCallMarker(finalText)) {
+          const parsed = parseToolCallMarker(finalText);
+          if (parsed) {
+            try { finalText = await toolCallBreadcrumbFromData(parsed, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — suppress */ }
+          } else { return; }
+        } else if (hasDetailsBlock(finalText)) {
           if (isToolCallBlock(finalText)) {
             try { finalText = await toolCallBreadcrumb(finalText, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — suppress */ }
           } else {

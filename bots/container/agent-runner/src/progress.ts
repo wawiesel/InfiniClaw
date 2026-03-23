@@ -1,16 +1,16 @@
 /**
  * InfiniClaw progress tracking and tool output formatting.
- * Used by the agent runner to format tool calls as HTML details elements
- * for display in Matrix threads.
+ * Emits tool calls as compact JSON markers (\x00TOOLCALL:{...}) so the
+ * host process can create S3 breadcrumbs. Never writes <details> HTML.
  */
 
 export const GENERAL_PROGRESS_DEDUPE_MS = 5_000;
 
 export function formatToolCallWithOutput(name: string, input: unknown, response: unknown): string {
-  const label = escapeHtml(describeToolCall(name, input));
-  const inputText = escapeHtml(formatToolInput(name, input));
-  const outputText = escapeHtml(formatToolResponse(response));
-  return `<details><summary><code>🔧 ${label}</code></summary><b>Input:</b><pre><code>${inputText}</code></pre><b>Output:</b><pre><code>${outputText}</code></pre></details>`;
+  const label = describeToolCall(name, input);
+  const inputText = formatToolInput(name, input);
+  const outputText = formatToolResponse(response);
+  return '\x00TOOLCALL:' + JSON.stringify({ label, input: inputText, output: outputText });
 }
 
 function formatToolInput(name: string, input: unknown): string {
