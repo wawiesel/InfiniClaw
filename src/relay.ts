@@ -89,6 +89,7 @@ import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
+import { runStaticAlignment } from './alignment.js';
 import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreatePrForBranch } from './gitea-wbs.js';
 import { pushAll, getClient as getS3Client } from './s3-sync.js';
 // health-staleness.ts helpers used by healthWatchdogLoop inline
@@ -1193,7 +1194,7 @@ function buildBotRoomMap(): Record<string, string> {
 
 function parseTarget(cmd: string, prefix: string): { matched: boolean; target?: string } {
   if (cmd !== prefix && !cmd.startsWith(prefix + ' ')) return { matched: false };
-  const target = cmd.slice(prefix.length).trim().toLowerCase() || undefined;
+  const target = cmd.slice(prefix.length).trim().split(/\s+/).filter(w => !w.startsWith('--'))[0]?.toLowerCase() || undefined;
   return { matched: true, target };
 }
 
@@ -3204,6 +3205,7 @@ async function handleLifecycleCommand(
   action: 'report' | 'dismiss' | 'sleep' | 'wake',
   target: string | undefined,
   conn: RoomConn,
+  args: string[] = [],
 ): Promise<void> {
   const root = resolveRoot();
   // BTC is a universal command room — all local bots reachable regardless of status.
@@ -3326,6 +3328,7 @@ async function handleLifecycleCommand(
       }
     } else if (action === 'wake') {
       // Wake sleeping/dreaming bot or restart already-awake bot (preserves current status)
+      const noAlign = args.includes('--no-align');
       const currentStatus = liveFleet[bot]?.status;
       const isRestart = currentStatus !== 'sleep' && currentStatus !== 'dream';
       const verb = isRestart ? 'restarting' : 'waking';
@@ -3353,6 +3356,22 @@ async function handleLifecycleCommand(
         stopBot(bot);
         killStaleContainers(bot);
         deployBot(root, bot);
+
+        // WBS 18.8: static alignment gate — run before starting bot
+        if (!noAlign) {
+          const alignReport = runStaticAlignment('main');
+          if (!alignReport.passed) {
+            const failures = alignReport.results.filter(r => !r.passed).map(r => r.name).join(', ');
+            const msg = `⛔ alignment failed: ${failures}`;
+            await step(msg);
+            await reply(progressConn, `⛔ ${name} alignment blocked — ${failures}. Use --no-align to skip.`);
+            if (!isRestart) await setBotDisplayStatus(root, bot, 'sleep');
+            continue;
+          }
+          await step('✅ alignment passed');
+          stepN--; // Don't count alignment as a numbered step
+        }
+
         await setBotDisplayStatus(root, bot, 'starting');
         await step('🚀 starting');
         startBot(root, bot);
@@ -3658,7 +3677,10 @@ function registerRelayCommands(): void {
     },
     wake: async (cmd, conn) => {
       const parsed = parseTarget(cmd, '!wake');
-      if (parsed.matched) await handleLifecycleCommand('wake', parsed.target, conn);
+      if (parsed.matched) {
+        const args = cmd.slice('!wake'.length).trim().split(/\s+/).filter(a => a.startsWith('--'));
+        await handleLifecycleCommand('wake', parsed.target, conn, args);
+      }
     },
 
     operator: async (cmd, conn) => {
