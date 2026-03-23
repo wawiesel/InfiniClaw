@@ -152,15 +152,23 @@ async function testNoCoAuthoredBy(ctx: TestContext): Promise<AlignmentResult> {
 /** WBS 18.3: Bot responds to commands (!health, !fleet, !wbs). */
 async function testCommandHandling(ctx: TestContext): Promise<AlignmentResult> {
   const name = 'command-handling';
-  // Send a simple ping-like message and check bot responds
-  const responses = await sendAndWait(ctx.dbPath, 'What is your status?', 45_000);
-  if (responses.length === 0) {
-    return { name, passed: false, evidence: 'Bot did not respond to status query within 45s.' };
+  const commands = ['!health', '!fleet', '!wbs'];
+  const failures: string[] = [];
+
+  for (const cmd of commands) {
+    const responses = await sendAndWait(ctx.dbPath, cmd, 45_000);
+    if (responses.length === 0) {
+      failures.push(`${cmd}: no response within 45s`);
+    }
+  }
+
+  if (failures.length > 0) {
+    return { name, passed: false, evidence: `Failed: ${failures.join('; ')}` };
   }
   return {
     name,
     passed: true,
-    evidence: `Bot responded with ${responses.length} message(s). First: "${responses[0].content.slice(0, 100)}"`,
+    evidence: `All ${commands.length} commands (!health, !fleet, !wbs) received responses.`,
   };
 }
 
@@ -209,6 +217,53 @@ async function testBranchSignal(ctx: TestContext): Promise<AlignmentResult> {
   };
 }
 
+/** WBS 18.5: Thread routing — replies stay in thread, no main timeline bleed. */
+async function testThreadRouting(ctx: TestContext): Promise<AlignmentResult> {
+  const name = 'thread-routing';
+  const msgs = readMessages(ctx.dbPath, 200);
+  const botMsgs = msgs.filter((m) => m.is_from_me === 1);
+  const contentCounts = new Map<string, number>();
+  for (const m of botMsgs) {
+    const key = m.content.trim().slice(0, 200);
+    contentCounts.set(key, (contentCounts.get(key) || 0) + 1);
+  }
+  const dupes = [...contentCounts.entries()].filter(([, count]) => count > 1);
+  if (dupes.length > 0) {
+    return {
+      name,
+      passed: false,
+      evidence: `Found ${dupes.length} duplicate bot message(s) — possible thread bleed.`,
+    };
+  }
+  return {
+    name,
+    passed: true,
+    evidence: `Checked ${botMsgs.length} bot message(s) — no duplicate content detected.`,
+  };
+}
+
+/** WBS 18.6: {{send}} cross-room routing delivers to target room. */
+async function testSendRouting(ctx: TestContext): Promise<AlignmentResult> {
+  const name = 'send-routing';
+  const responses = await sendAndWait(
+    ctx.dbPath,
+    'Send a one-line status update to the bridge room.',
+    45_000,
+  );
+  if (responses.length === 0) {
+    return { name, passed: false, evidence: 'Bot did not respond to cross-room send request within 45s.' };
+  }
+  const allContent = responses.map((r) => r.content).join('\n');
+  const hasSend = /\{\{send\s/.test(allContent);
+  return {
+    name,
+    passed: hasSend,
+    evidence: hasSend
+      ? `Bot used {{send}} signal for cross-room routing.`
+      : `Bot responded but did not use {{send}} signal. Response: "${allContent.slice(0, 150)}"`,
+  };
+}
+
 /** Basic boot test: bot starts and produces output. */
 async function testBotBoot(ctx: TestContext): Promise<AlignmentResult> {
   const name = 'bot-boot';
@@ -227,6 +282,8 @@ const ALIGNMENT_TESTS: AlignmentTest[] = [
   { name: 'branch-signal', fn: testBranchSignal },
   { name: 'command-handling', fn: testCommandHandling },
   { name: 's3-breadcrumbs', fn: testNoBareDetails },
+  { name: 'thread-routing', fn: testThreadRouting },
+  { name: 'send-routing', fn: testSendRouting },
 ];
 
 // ── Runner ─────────────────────────────────────────────────────────────
