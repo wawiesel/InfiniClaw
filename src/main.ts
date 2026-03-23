@@ -876,13 +876,8 @@ async function spawnBranchBrainFromSignal(
       (_proc, _containerName) => { /* no-op: queue tracking not needed for BBs */ },
       async (output) => {
         if (output.result) {
-          let text = output.result;
-          if (hasDetailsBlock(text)) {
-            if (isToolCallBlock(text)) {
-              try { text = await sharedToolCallBreadcrumb(text, ASSISTANT_NAME, registeredGroups[chatJid]?.name ?? chatJid); }
-              catch { return; }
-            } else { return; }
-          }
+          const text = output.result;
+          if (hasDetailsBlock(text)) return;
           await postToThread(text);
         }
       },
@@ -2148,14 +2143,8 @@ async function main(): Promise<void> {
     sendMessage: async (jid: string, rawText: string) => {
       const ch = findChannel(channels, jid);
       if (!ch) return;
-      let text = stripInternalTags(rawText);
-      if (!text) return;
-      if (hasDetailsBlock(text)) {
-        if (isToolCallBlock(text)) {
-          try { text = await sharedToolCallBreadcrumb(text, ASSISTANT_NAME, registeredGroups[jid]?.name ?? jid); }
-          catch { return; }
-        } else { return; }
-      }
+      const text = stripInternalTags(rawText);
+      if (!text || hasDetailsBlock(text)) return;
       await ch.sendMessage(jid, text);
       storeOutgoing(jid, text);
     },
@@ -2168,15 +2157,9 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'No channel found for IPC message');
         return;
       }
-      let text = rawText;
-      if (hasDetailsBlock(text)) {
-        if (isToolCallBlock(text)) {
-          try { text = await sharedToolCallBreadcrumb(text, ASSISTANT_NAME, registeredGroups[jid]?.name ?? jid); }
-          catch { return; }
-        } else { return; }
-      }
-      await ch.sendMessage(jid, text, threadId);
-      storeOutgoing(jid, text, threadId);
+      if (hasDetailsBlock(rawText)) return;
+      await ch.sendMessage(jid, rawText, threadId);
+      storeOutgoing(jid, rawText, threadId);
     },
     sendReaction: async (jid, eventId, emoji) => {
       const ch = findChannel(channels, jid);
