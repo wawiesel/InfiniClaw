@@ -876,7 +876,14 @@ async function spawnBranchBrainFromSignal(
       (_proc, _containerName) => { /* no-op: queue tracking not needed for BBs */ },
       async (output) => {
         if (output.result) {
-          await postToThread(output.result);
+          let text = output.result;
+          if (hasDetailsBlock(text)) {
+            if (isToolCallBlock(text)) {
+              try { text = await sharedToolCallBreadcrumb(text, ASSISTANT_NAME, registeredGroups[chatJid]?.name ?? chatJid); }
+              catch { return; }
+            } else { return; }
+          }
+          await postToThread(text);
         }
       },
     );
@@ -2141,20 +2148,32 @@ async function main(): Promise<void> {
     sendMessage: async (jid: string, rawText: string) => {
       const ch = findChannel(channels, jid);
       if (!ch) return;
-      const text = stripInternalTags(rawText);
-      if (text) {
-        await ch.sendMessage(jid, text);
-        storeOutgoing(jid, text);
+      let text = stripInternalTags(rawText);
+      if (!text) return;
+      if (hasDetailsBlock(text)) {
+        if (isToolCallBlock(text)) {
+          try { text = await sharedToolCallBreadcrumb(text, ASSISTANT_NAME, registeredGroups[jid]?.name ?? jid); }
+          catch { return; }
+        } else { return; }
       }
+      await ch.sendMessage(jid, text);
+      storeOutgoing(jid, text);
     },
   });
   startIpcWatcher({
     // TODO: Keep merge_request routing here while IPC task parsing lives in src/ipc-watcher.ts.
-    sendMessage: async (jid, text, threadId) => {
+    sendMessage: async (jid, rawText, threadId) => {
       const ch = findChannel(channels, jid);
       if (!ch) {
         logger.warn({ jid }, 'No channel found for IPC message');
         return;
+      }
+      let text = rawText;
+      if (hasDetailsBlock(text)) {
+        if (isToolCallBlock(text)) {
+          try { text = await sharedToolCallBreadcrumb(text, ASSISTANT_NAME, registeredGroups[jid]?.name ?? jid); }
+          catch { return; }
+        } else { return; }
       }
       await ch.sendMessage(jid, text, threadId);
       storeOutgoing(jid, text, threadId);
