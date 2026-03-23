@@ -27,7 +27,7 @@ bots/{role}/{name}/
   skills/                # Custom skills (optional)
 ```
 
-Role is resolved from the fleet state held in memory by the relay (persisted to `fleet.json` on disk). A base `bots/CLAUDE.md` provides shared instructions across all bots.
+Role is resolved from the fleet state held in memory by the relay (persisted to S3 and disk cache). A base `bots/CLAUDE.md` provides shared instructions across all bots.
 
 ## Bot Attributes
 
@@ -35,11 +35,11 @@ Every bot has runtime attributes that determine its behavior. Commands and event
 
 | Attribute | Type | Set by | Stored in |
 |-----------|------|--------|-----------|
-| `status` | `onduty` · `quarters` · `sleep` · `transit` · `retrospective` · `dream` · `ready` | Relay commands | `fleet.json` |
-| `triggerType` | `always` · `callout` · `never` | Relay on room moves | `fleet.json` |
-| `rank` | number | `!promote` / `!demote` | `fleet.json` |
-| `ship` | hostname | `!transport` | `fleet.json` |
-| `activeBrainModel` | model ID | runtime model switch | `fleet.json` |
+| `status` | `onduty` · `quarters` · `sleep` · `transit` · `retrospective` · `dream` · `ready` | Relay commands | S3 fleet state |
+| `triggerType` | `always` · `callout` · `never` | Relay on room moves | S3 fleet state |
+| `rank` | number | `!promote` / `!demote` | S3 fleet state |
+| `ship` | hostname | `!transport` | S3 fleet state |
+| `activeBrainModel` | model ID | runtime model switch | S3 fleet state |
 
 ### triggerType
 
@@ -78,7 +78,7 @@ retrospective → status=dream,         triggerType=never,    container=stop (gi
 dream done    → status=ready,         triggerType=always,   container=start (woken to quarters)
 ```
 
-The bot reads `triggerType` from fleet.json at startup and re-reads it periodically. This replaces hardcoded room-ID checks.
+The bot reads `triggerType` from fleet state at startup and re-reads it periodically. This replaces hardcoded room-ID checks.
 
 ### Duty Cycle Status Flow
 

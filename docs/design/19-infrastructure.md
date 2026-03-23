@@ -96,7 +96,7 @@ Both accept reads and writes. If one goes down, the other keeps serving. When it
 
 1. Run a second MinIO instance on another ship
 2. Configure site replication between the two instances
-3. Update `fleet.json` with both endpoints
+3. Update `fleet.json` (fleet state file) with both endpoints
 
 ### Failover
 
@@ -107,7 +107,7 @@ If the primary MinIO is unreachable:
 
 ## Fleet Configuration
 
-Add redundancy endpoints to `fleet.json`:
+Add redundancy endpoints to the fleet state file (`fleet.json`):
 
 ```json
 {
@@ -183,5 +183,5 @@ Currently, if the machine hosting Gitea or MinIO goes down, the entire fleet los
 4. **S3 failover** — Take down primary MinIO, write to fleet.
    *Check:* Write succeeds to secondary. When primary recovers, object replicates.
 
-5. **Fleet config** — `fleet.json` has both endpoints.
+5. **Fleet config** — Fleet state file (`fleet.json`) has both endpoints.
    *Check:* Code tries endpoint[0], falls back to endpoint[1] on failure.

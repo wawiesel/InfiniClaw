@@ -4,7 +4,7 @@ Roles define what a bot can do. Rooms define where a bot is and what state it's 
 
 ## Roles
 
-Roles are abstract capability sets. Personas are concrete bot identities assigned to a role. The mapping lives in `fleet.json` under each bot's entry. Bots are organized by role in `bots/{role}/{bot}/`.
+Roles are abstract capability sets. Personas are concrete bot identities assigned to a role. The mapping lives in fleet state under each bot's entry. Bots are organized by role in `bots/{role}/{bot}/`.
 
 Each role defines what a bot can do:
 
@@ -104,8 +104,8 @@ Display name format: `<pip> <name> <shipEmoji>` (e.g. `🟢 Cid 🦁`). Chief is
 
 A bot is **always** in its quarters room. It can be in at most one additional room:
 
-| fleet.json status | Rooms | Brain | triggerType | Container |
-|-------------------|-------|-------|-------------|-----------|
+| Status | Rooms | Brain | triggerType | Container |
+|--------|-------|-------|-------------|-----------|
 | `onduty` | Quarters + duty room | Full model | `callout` | Running |
 | `quarters` | Quarters only | Full model | `always` | Running |
 | `retrospective` | Quarters only | Full model | `always` | Running |
@@ -135,7 +135,7 @@ Three clean axes: **lifecycle** (`!wake`/`!sleep`), **duty** (`!report`/`!dismis
 
 ### !wake
 
-1. Update fleet.json: `status=quarters`, `triggerType=always`
+1. Update fleet state: `status=quarters`, `triggerType=always`
 2. Build and start the bot process (in quarters, full brain)
 3. Pip stages: 💤 → 🔄 → 🚀 → 🟡 → 🟢
 
@@ -143,7 +143,7 @@ Three clean axes: **lifecycle** (`!wake`/`!sleep`), **duty** (`!report`/`!dismis
 
 1. Stop the bot process, kill containers
 2. Login as bot, leave all rooms except quarters
-3. Update fleet.json: `status=sleep`, `triggerType=never`, pip → 💤
+3. Update fleet state: `status=sleep`, `triggerType=never`, pip → 💤
 
 ### !report
 
@@ -153,7 +153,7 @@ From a duty room: pull bot(s) into THIS duty room.
 From a non-duty room: send bot(s) to their RESPECTIVE duty rooms.
 
 1. Leave any non-quarters room, join duty room
-2. Update fleet.json: `status=onduty`, `triggerType=callout`
+2. Update fleet state: `status=onduty`, `triggerType=callout`
 3. `relay <Name> on duty` or `relay <Name> failed to report — <error>`
 
 ### !dismiss
@@ -161,7 +161,7 @@ From a non-duty room: send bot(s) to their RESPECTIVE duty rooms.
 **Instant** — bot keeps running in quarters with full capabilities.
 
 1. Leave duty room
-2. Update fleet.json: `status=quarters`, `triggerType=always`
+2. Update fleet state: `status=quarters`, `triggerType=always`
 3. `relay <Name> dismissed`
 
 ### !go
@@ -222,7 +222,7 @@ Change classification:
 
 ### Duty Timer
 
-`ondutyAt` is tracked per bot in `fleet.json` (set by `fleetUpdate` on `!report`, cleared on `!dismiss`). The `dutyCycleLoop` checks every 60s whether any onduty bot has exceeded `DUTY_CYCLE_MS`.
+`ondutyAt` is tracked per bot in fleet state (set by `fleetUpdate` on `!report`, cleared on `!dismiss`). The `dutyCycleLoop` checks every 60s whether any onduty bot has exceeded `DUTY_CYCLE_MS`.
 
 ### Phase 1: Retrospective
 
@@ -275,7 +275,7 @@ Standard Claude session compaction. The bot's conversation context is distilled 
 
 ### Room IDs
 
-Quarters room IDs are stored in `fleet.json` per bot:
+Quarters room IDs are stored in fleet state per bot (disk cache: `fleet.json`):
 
 ```json
 {
@@ -307,13 +307,13 @@ Ship space IDs in `ships.json`:
 ## Verification
 
 1. **Role determines mounts** — An engineer bot has rw access to InfiniClaw. A navigator has rw access to vault.
-   *Check:* Container mounts match role definitions in fleet.json.
+   *Check:* Container mounts match role definitions in fleet state.
 
 2. **Status transition** — `!dismiss cid` moves Cid from duty room to quarters.
-   *Check:* Cid leaves Engineering. Pip stays 🟢 (still online). fleet.json status → `quarters`.
+   *Check:* Cid leaves Engineering. Pip stays 🟢 (still online). Fleet state status → `quarters`.
 
 3. **triggerType on dismiss** — Dismissed bot switches to `always` trigger.
-   *Check:* fleet.json shows `triggerType: "always"` after dismiss. Brain model unchanged.
+   *Check:* Fleet state shows `triggerType: "always"` after dismiss. Brain model unchanged.
 
 4. **Chief election** — Two bots in Engineering, lowest rank number gets ⭐.
    *Check:* Lower-ranked bot's display name shows ⭐. Higher-ranked shows 🟢.

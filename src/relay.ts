@@ -42,7 +42,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId } from './ship-config.js';
+import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME } from './ship-config.js';
 import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
@@ -4476,6 +4476,70 @@ function registerRelayCommands(): void {
         await reply(conn, `📡 ${denyEnv?.ASSISTANT_NAME || capitalizeName(botName)} ${removed ? `mount revoked: ${hostPath}` : `no mount found: ${hostPath}`}`);
       } catch (err) {
         await reply(conn, `⛔ deny failed — ${errStr(err)}`);
+      }
+    },
+
+    create: async (cmd, conn) => {
+      // !create bot <name> <role> [ship]
+      const args = cmd.slice('!create '.length).trim().split(/\s+/);
+      if (args[0] !== 'bot' || args.length < 3) {
+        await helpReply(conn, 'Usage: !create bot <name> <role> [ship]');
+        return;
+      }
+      const [, nameRaw, roleRaw, shipRaw] = args;
+      const botName = nameRaw.toLowerCase();
+      const role = roleRaw.toLowerCase();
+
+      // Validate bot name
+      if (!isValidBotName(botName)) {
+        await helpReply(conn, `Invalid bot name: ${nameRaw} (must match ${SAFE_BOT_NAME.source})`);
+        return;
+      }
+      // Check if bot already exists
+      if (liveFleet[botName]) {
+        await helpReply(conn, `Bot '${botName}' already exists in fleet state`);
+        return;
+      }
+      // Validate role
+      if (!ROLE_ROOMS[role]) {
+        const validRoles = Object.keys(ROLE_ROOMS).join(', ');
+        await helpReply(conn, `Unknown role: ${roleRaw}. Valid: ${validRoles}`);
+        return;
+      }
+      // Resolve ship
+      let shipHostname: string;
+      let shipDisplay: string;
+      if (shipRaw) {
+        const ships = safeLoadShips();
+        const resolved = resolveShipName(shipRaw, ships);
+        if (!resolved) { await helpReply(conn, `Unknown ship: ${shipRaw}`); return; }
+        shipHostname = ships[resolved].hostname;
+        shipDisplay = resolved;
+      } else {
+        shipHostname = HOSTNAME;
+        shipDisplay = thisShipName();
+      }
+
+      const tr = await reply(conn, `📡 create bot ${botName}`);
+      const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
+      try {
+        // Determine rank: max rank among existing bots + 1
+        const maxRank = Math.max(0, ...Object.values(liveFleet).map(b => b.rank));
+        const entry: FleetEntry = {
+          role,
+          rank: maxRank + 1,
+          ship: shipHostname,
+          status: 'sleep',
+        };
+        liveFleet[botName] = entry;
+        fleetDirty = true;
+        await persistFleetSync();
+        await send(`✅ **${botName}** registered — role: ${role}, ship: ${shipDisplay}, rank: ${entry.rank}, status: sleep`);
+        await send(`Next: create \`bots/${botName}/env\` in secrets, persona dir \`bots/${role}/${botName}/\` in InfiniClaw, then \`!wake ${botName}\``);
+      } catch (err) {
+        // Roll back in-memory state on failure
+        delete liveFleet[botName];
+        await send(`⛔ create failed — ${errStr(err)}`);
       }
     },
 

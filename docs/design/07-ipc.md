@@ -35,7 +35,7 @@ Commands written by the container to `tasks/*.json`. Statuses: ✅ implemented, 
 | `stop_bot` | Sleep another bot | ✅ |
 | `rebuild_image` | Rebuild container image (5m cooldown) | ✅ |
 | `health_check` | Run health check and return results | ✅ |
-| `fleet_status` | Return fleet.json status | ✅ |
+| `fleet_status` | Return fleet state | ✅ |
 | `git_pull` | Pull InfiniClaw, rebuild, deploy to instances | ✅ |
 | `git_push` | Push InfiniClaw repo (via relay-tasks, requires host git credentials) | ✅ |
 | `bot_status` | Get pm2 + error log status | ✅ |

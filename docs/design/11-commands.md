@@ -165,7 +165,7 @@ Main:   ✅ secrets sync (Herc) operational (16:55 · 2.5h)
    *Check:* Relay log shows command received and processed.
 
 2. **Bot command works** — `!dismiss cid` removes bot from duty.
-   *Check:* Bot leaves duty room, fleet.json updated to `quarters`, `triggerType` to `always`.
+   *Check:* Bot leaves duty room, fleet state updated to `quarters`, `triggerType` to `always`.
 
 3. **Ship command works** — `!pull heracles` triggers sync + rebuild + restart.
    *Check:* Pull thread appears with numbered steps, all stages complete.

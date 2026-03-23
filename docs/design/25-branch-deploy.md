@@ -24,7 +24,7 @@ Reuses the Holodeck's proven code path: `git worktree → rsyncInstance → boot
 
 1. Parse `--branch <name>` in the `!wake` handler
 2. `git worktree add _runtime/branch-test/{bot} <branch>`
-3. Store `overrideBranch: "feat/new-tool"` on the bot's `fleet.json` entry
+3. Store `overrideBranch: "feat/new-tool"` on the bot's fleet state entry
 4. Call `bootstrapBot(branchWorktree, bot)` instead of `bootstrapBot(root, bot)`
 5. Git sync loop: skip instance updates for bots with `overrideBranch` set
 6. `!wake cid` (no `--branch`) or `!sleep` + `!wake` clears `overrideBranch`, removes worktree, redeploys from main
@@ -40,7 +40,7 @@ Reuses the Holodeck's proven code path: `git worktree → rsyncInstance → boot
 | File | Change |
 |------|--------|
 | `relay.ts` | Parse `--branch` from `!wake` args |
-| `relay.ts` | Write `overrideBranch` to fleet.json entry |
+| `relay.ts` | Write `overrideBranch` to fleet state entry |
 | `relay.ts` | Skip gitSync for bots with `overrideBranch` |
 | `service.ts` | Add `createBranchWorktree(bot, branch)` helper |
 | `service.ts` | Pass worktree path to `bootstrapBot` when `overrideBranch` is set |

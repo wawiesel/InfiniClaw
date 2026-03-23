@@ -74,6 +74,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'operator',      usage: '!operator [on|off|reset] [ship]', description: 'operator relay toggle or restart',  match: prefix('operator') },
   { name: 'metrics',       usage: '!metrics [scope]',            description: 'metrics (context-aware, 1d/7d)',       match: prefix('metrics') },
   { name: 'wbs',           usage: '!wbs [room] | !wbs x <id>',   description: 'show WBS; x <id> marks item done',     match: prefix('wbs') },
+  { name: 'create',        usage: '!create bot <name> <role> [ship]', description: 'register new bot in fleet state (S3)',  match: startsWith('create') },
   { name: 'version',       usage: '?version [n]',                 description: 'list recent versions (default 10)',     match: qPrefix('version') },
 ];
 

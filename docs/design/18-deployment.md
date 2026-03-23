@@ -36,7 +36,7 @@ This is the core gate. A fully self-contained InfiniClaw instance runs inside a 
 
 - A temporary "ship" is created with its own:
   - InfiniClaw instance (from the feature branch worktree)
-  - Secrets repo (synthetic — fake credentials, fleet.json, env files)
+  - Secrets repo (synthetic — fake credentials, fleet state file, env files)
   - Matrix rooms (or a mock Matrix layer)
   - S3 bucket (or mock)
 - The ship runs three bots:

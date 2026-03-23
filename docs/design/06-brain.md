@@ -51,7 +51,7 @@ The bot can use Matrix navigation tools (see [02-matrix](02-matrix.md)) to fetch
 
 > **Status:** Per-task model selection from persona/memory is not yet implemented. Branch brains receive the bot's `BRAIN_MODEL` forwarded as `ANTHROPIC_MODEL` via `mapBrainEnv()` (issue #24 fixed). Dynamic model selection per task is still planned.
 
-Brain preferences live in the bot's **persona and memory** — not in fleet.json or env files. The bot chooses its branch model at branch time based on the task. Over time, the bot develops guidance on which models work best for which tasks.
+Brain preferences live in the bot's **persona and memory** — not in fleet state or env files. The bot chooses its branch model at branch time based on the task. Over time, the bot develops guidance on which models work best for which tasks.
 
 ## Credential Mapping
 

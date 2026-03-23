@@ -4,7 +4,7 @@ InfiniClaw is a multi-agent orchestration system that operates a fleet of autono
 
 ## Definitions
 
-> **Fleet** — All ships and bots, collectively. Coordinated via `fleet.json` in the secrets repo.
+> **Fleet** — All ships and bots, collectively. State is authoritative in S3; `fleet.json` in the secrets repo is the bootstrap disk cache.
 >
 > **Ship** — A machine running a relay. Identified by hostname, registered in `ships.json`. Examples: HERACLES, Poseidon.
 >

@@ -9,15 +9,15 @@ The operator runs directly on the host machine (not in a container) inside a tmu
 Starting from nothing. Three foundational services must exist before any bot can run:
 
 1. **Matrix server** — Conduwuit homeserver is running (see `docs/solutions/matrix.md`). This is the communication backbone.
-2. **S3 (MinIO)** — Object storage for metrics, fleet reports, health checks, and error logs. Endpoint and credentials go in `fleet.json` under `s3`.
-3. **Secrets repo** — Operator initializes the secrets repo with `operator/`, `bots/fleet.json` (including S3 config), and credentials.
+2. **S3 (MinIO)** — Object storage for fleet state, metrics, fleet reports, health checks, and error logs. Endpoint and credentials go in `fleet.json` under `s3`.
+3. **Secrets repo** — Operator initializes the secrets repo with `operator/`, `bots/fleet.json` (bootstrap disk cache including S3 config), and credentials.
 
 With these three in place, the operator bootstraps the fleet:
 
 4. **BehindTheCurtain** — Operator creates the first room: a private channel between Captain and operator. This establishes the command link. Room naming: `🌑🎭 BehindTheCurtain`.
 5. **Operator and loudspeaker accounts** — Registered on the homeserver. Operator joins BehindTheCurtain. Captain is admin (power 100) in all rooms.
 6. **First ship** — Operator registers this machine in `ships.json`, creates a ship space, lounge, and quarters space on Matrix.
-7. **First bot (Norm)** — The simplest test: a normie with env file, fleet.json entry, and a quarters room. No duty rooms, no skills, no MCP. Just conversation in quarters. This validates the entire bot runtime end-to-end.
+7. **First bot (Norm)** — The simplest test: a normie with env file, fleet state entry, and a quarters room. No duty rooms, no skills, no MCP. Just conversation in quarters. This validates the entire bot runtime end-to-end.
 8. **Relay** — Operator starts the relay. It connects to Matrix and S3, discovers Norm, wakes him. The system is alive.
 9. **Growth** — Add more bots, more ships, duty rooms, intercom accounts. Each layer builds on what the operator already established.
 
@@ -46,7 +46,7 @@ Operators reply via `bash operator/matrix reply "<response>"` — always back to
 
 ## Ship Independence
 
-**Every operator must be able to create a fully deployed bot without depending on another ship.** This includes registering the Matrix account, creating the quarters room, updating fleet.json, and waking the bot. No step in the new-bot workflow should require SSH access to a specific machine.
+**Every operator must be able to create a fully deployed bot without depending on another ship.** This includes registering the Matrix account, creating the quarters room, updating fleet state, and waking the bot. No step in the new-bot workflow should require SSH access to a specific machine.
 
 The current gap: `conduwuit-ctl enable-registration` runs only on Poseidon (where Conduwuit is hosted), blocking account registration from Herc or Herm. See `docs/solutions/matrix.md` for the remote registration workaround until a proper admin API or relay command exists.
 
@@ -132,7 +132,7 @@ See [20-metrics.md](20-metrics.md) for complete definitions, targets, and alarm 
    *Check:* Loudspeaker replies with fleet status.
 
 5. **Quarters x-commands** — `!sleep cid` from Cid's quarters room works.
-   *Check:* Bot sleeps, fleet.json updated.
+   *Check:* Bot sleeps, fleet state updated.
 
 6. **Inter-operator inbox** — Post an item to `inbox.md` targeting another ship.
    *Check:* Other ship's operator picks it up on next startup or secrets sync.

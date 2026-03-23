@@ -50,7 +50,7 @@ Each ship is a Matrix space containing its local rooms. Space names use `<shipEm
     🦁🏠 Norm's Room   — private quarters for one bot
 ```
 
-Ship space and lounge IDs are in `ships.json`. Per-bot quarters room IDs are in `fleet.json`.
+Ship space and lounge IDs are in `ships.json`. Per-bot quarters room IDs are in the fleet state (disk cache: `fleet.json`).
 
 ### Permissions
 
@@ -171,7 +171,7 @@ curl -s -X PUT "$HOMESERVER/_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_
 
 ### 7. Save room IDs
 
-Store ship space/lounge/quarters IDs in `ships.json`, and per-bot quarters room IDs in `fleet.json`. Commit and push secrets.
+Store ship space/lounge/quarters IDs in `ships.json`, and per-bot quarters room IDs in the fleet state file (`fleet.json` disk cache). Commit and push secrets.
 
 ## Message Format
 
@@ -285,7 +285,7 @@ Navigation tools access the bot's current room (quarters or duty room). Matrix h
 
 | Tool | Purpose | Status |
 |------|---------|--------|
-| ~~`crew_roster`~~ | ~~List bots in the fleet~~ — **removed**: use `fleet.json` / `!fleet` | 🗑 |
+| ~~`crew_roster`~~ | ~~List bots in the fleet~~ — **removed**: use `!fleet` | 🗑 |
 | ~~`check_health`~~ | ~~Query fleet health snapshot~~ — **removed**: use `!metrics` | 🗑 |
 | `get_metrics` | Read this bot's own metrics: response latency, scores, crashes | 🔲 not yet implemented |
 

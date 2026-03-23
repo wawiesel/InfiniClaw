@@ -14,7 +14,7 @@ The fleet has three levels of organization:
 
 **Ship** = a named, ranked entity in `ships.json`. A ship is *hosted on* a system (via the `hostname` field), but is not the system itself. Ships can be moved between systems by updating `hostname` in `ships.json`. A single system can host multiple ships.
 
-**Bot** = an agent assigned to a ship (via the `ship` field in `fleet.json`). Bots move between ships via `!transport`.
+**Bot** = an agent assigned to a ship (via the `ship` field in fleet state). Bots move between ships via `!transport`.
 
 ## Ship Registry
 
@@ -41,7 +41,7 @@ Keys are short display names (e.g. `"Herc"`). Fields:
 
 Ships are ranked. The lowest-rank **active** ship is the default tiebreaker for speaker election (see below).
 
-The `commissioned` flag is a **ship-level** override in `ships.json` — distinct from per-bot `status` in `fleet.json`. A decommissioned ship (`commissioned: false`) keeps its relay running but will not wake any bots, regardless of their individual status. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
+The `commissioned` flag is a **ship-level** override in `ships.json` — distinct from per-bot `status` in fleet state. A decommissioned ship (`commissioned: false`) keeps its relay running but will not wake any bots, regardless of their individual status. This ensures all ships stay reachable — an operator can `!commission` a ship remotely at any time.
 
 ## The Relay
 
@@ -59,7 +59,7 @@ The relay is a pm2-managed Node.js process — one per **system**, always on. It
 
 **The relay runs on every system, always.** Even systems with only decommissioned ships keep their relay running — they just don't wake bots.
 
-When a command arrives (e.g. `!wake cid`), every system's relay sees it. Each checks if the target bot is local (via fleet.json). Only the owning system acts — the rest silently ignore.
+When a command arrives (e.g. `!wake cid`), every system's relay sees it. Each checks if the target bot is local (via in-memory fleet state). Only the owning system acts — the rest silently ignore.
 
 ### Matrix Accounts
 
@@ -83,7 +83,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 ### Startup Sequence
 
 1. Identify ship via `os.hostname()`
-2. Load fleet state from `fleet.json`
+2. Load fleet state (disk cache `fleet.json`, then overlay S3)
 3. Resolve Captain and operator user IDs from secrets
 4. Load intercom config (per-room Matrix credentials)
 5. Connect to Matrix rooms with staggered sync (one per room)
@@ -106,7 +106,7 @@ Started by `npm run cli relay install` and runs as pm2 process `infiniclaw-relay
 
 **InfiniClaw sync** detects source changes (TypeScript, package.json, Dockerfiles, tsconfig) and triggers a rebuild → deploy dist → restart bots → restart relay.
 
-**Secrets sync** handles fleet.json conflict resolution (accepts upstream on rebase conflicts). On new commits, checks for transport materializations — bots assigned to this ship with `status: 'transit'` get activated and started. Also scans `operator/inbox.md` for pending items targeting this ship.
+**Secrets sync** handles fleet state file conflict resolution (accepts upstream on rebase conflicts). On new commits, checks for transport materializations — bots assigned to this ship with `status: 'transit'` get activated and started. Also scans `operator/inbox.md` for pending items targeting this ship.
 
 ### Speaker Election
 
@@ -155,7 +155,7 @@ These files live at `~/.config/infiniclaw/` and are **not** in git. See `docs/de
 
 ### paths.json
 
-Maps logical names to local paths. Used by role-based mounts (fleet.json `roles[role].rw` → paths.json lookups).
+Maps logical names to local paths. Used by role-based mounts (fleet state `roles[role].rw` → paths.json lookups).
 
 ```json
 {
