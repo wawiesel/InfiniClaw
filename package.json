@@ -1,6 +1,6 @@
 {
   "name": "infiniclaw",
-  "version": "1.15.20",
+  "version": "1.15.21",
   "private": true,
   "type": "module",
   "workspaces": [

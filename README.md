@@ -110,4 +110,4 @@ Test timeout is configured in `vitest.config.ts` (10s default to accommodate pm2
 
 - **WBS 3.1 MCP tools**: `wbs_read`, `wbs_get_assigned`, `wbs_update` added to agent-runner tools. Bots can now read and update the Work Breakdown Structure directly from their tool context.
 - **WBS 5.1 `get_metrics` MCP tool**: Bots can call `get_metrics` (no args) to read their own performance data — current status, model, active groups with objectives and last error, and 1-day token usage computed from JSONL session files.
-<!-- auto-updated: 2026-03-23T15:21:39Z -->
+<!-- auto-updated: 2026-03-23T16:58:58Z -->
