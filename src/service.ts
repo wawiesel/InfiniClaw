@@ -641,7 +641,7 @@ export function removeStaleProcesses(): void {
     const out = execFileSync(PM2_BIN, ['jlist'], { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' });
     const list = JSON.parse(out) as Array<{ name: string }>;
     for (const proc of list) {
-      if (proc.name.startsWith(`${PM2_PREFIX}-`) && !validNames.has(proc.name) && !proc.name.includes('-holodeck')) {
+      if (proc.name.startsWith(`${PM2_PREFIX}-`) && !validNames.has(proc.name)) {
         pm2Stop(proc.name);
         console.log(`Removed stale process: ${proc.name}`);
       }
@@ -875,7 +875,6 @@ export function stopRelay(): void {
   // Stop all bots
   for (const bot of getActiveBots()) {
     pm2Stop(pm2Name(bot));
-    pm2Stop(pm2Name(holodeckBotName(bot)));
     console.log(`${bot}: stopped`);
   }
   killStaleContainers();
@@ -899,166 +898,6 @@ export function uninstallRelay(): void {
   console.log('Relay uninstalled.');
 }
 
-// ── Holodeck (blue-green test instances) ───────────────────────────────
-
-function holodeckBotName(bot: string): string {
-  return `${bot}-holodeck`;
-}
-
-export function holodeckCreate(bot: string, branch: string): void {
-  assertValidBotName(bot);
-  const activeBots = getActiveBots();
-  if (!activeBots.includes(bot)) {
-    throw new Error(`Unknown bot: ${bot}. Valid: ${activeBots.join(', ')}`);
-  }
-
-  const root = resolveRoot();
-  const worktree = path.join(root, '_holodeck', bot);
-  const hdBot = holodeckBotName(bot);
-  const instance = instanceDir(root, hdBot);
-
-  if (fs.existsSync(worktree)) {
-    throw new Error(`Holodeck already exists for ${bot}. Use holodeck_teardown first.`);
-  }
-
-  ensurePodmanReady();
-
-  // 1. Create git worktree from branch
-  console.log(`Creating worktree for branch '${branch}'...`);
-  fs.mkdirSync(path.dirname(worktree), { recursive: true });
-  const normalizedBranch = branch.trim();
-  if (!normalizedBranch) throw new Error('Branch name is required.');
-  execFileSync('git', ['check-ref-format', '--branch', normalizedBranch], { cwd: root, stdio: 'pipe' });
-  execFileSync('git', ['worktree', 'add', worktree, normalizedBranch], { cwd: root, stdio: 'inherit' });
-
-  // 2. Deploy worktree code to holodeck instance
-  fs.mkdirSync(instance, { recursive: true });
-  rsyncInstance(worktree, instance);
-
-  // 3. Install deps
-  const liveMods = path.join(instanceDir(root, bot), 'node_modules');
-  if (fs.existsSync(liveMods) && !fs.existsSync(path.join(instance, 'node_modules'))) {
-    // Symlink from live bot to save time (same deps in most cases)
-    console.log(`${hdBot}: linking node_modules from live ${bot}...`);
-    fs.symlinkSync(liveMods, path.join(instance, 'node_modules'));
-  }
-  if (!fs.existsSync(path.join(instance, 'node_modules'))) {
-    console.log(`${hdBot}: installing dependencies...`);
-    execSync('npm ci', { cwd: instance, stdio: 'inherit' });
-    execSync('npm rebuild better-sqlite3', { cwd: instance, stdio: 'inherit', timeout: 120_000 });
-  }
-
-  // 4. Build
-  console.log(`${hdBot}: building...`);
-  execSync('npm run build', { cwd: instance, stdio: 'inherit' });
-
-  // 5. Create holodeck profile (clone live bot, force terminal-only)
-  const config = loadShipConfig();
-  const hdProfileDir = path.join(config.secretsPath, 'bots', hdBot);
-  fs.mkdirSync(hdProfileDir, { recursive: true });
-  fs.copyFileSync(profileEnvPath(root, bot), profileEnvPath(root, hdBot));
-  // 6. Seed main room registration
-  const profileEnv = loadProfileEnv(root, hdBot);
-  const mainJid = profileEnv.MAIN_GROUP_JID || '';
-  const mainGroupName = profileEnv.MAIN_GROUP_NAME;
-  const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
-
-  // 7. Restore persona (from worktree, using live bot's persona name)
-  const persona = personaDir(worktree, bot);
-  if (fs.existsSync(persona)) {
-    const personaClaude = path.join(persona, 'CLAUDE.md');
-    if (fs.existsSync(personaClaude)) {
-      fs.appendFileSync(
-        path.join(instance, 'CLAUDE.md'),
-        '\n' + fs.readFileSync(personaClaude, 'utf-8'),
-      );
-    }
-  }
-  if (mainJid && mainGroupName) {
-    seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
-  }
-
-  // 8. Mark instance data as current
-  const dataDir = path.join(instance, 'data');
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(path.join(dataDir, 'run-id'), `${Date.now()}`);
-
-  // 9. Start via pm2
-  const logs = logDir(root);
-  fs.mkdirSync(logs, { recursive: true });
-  pm2StartBot(hdBot, process.execPath, instance, logs, root);
-
-  console.log(`\nHolodeck started: ${hdBot}`);
-  console.log(`  Branch: ${normalizedBranch}`);
-  console.log(`  Instance: ${instance}`);
-  console.log(`  Send: IPC holodeck_send (bot: "${bot}", message: "...")`);
-  console.log(`  Read: IPC holodeck_read (bot: "${bot}")`);
-  console.log(`  Logs: tail -f ${logs}/${hdBot}.log`);
-  console.log(`  Teardown: IPC holodeck_teardown (bot: "${bot}")`);
-  console.log(`  Status: IPC holodeck_status (bot: "${bot}")`);
-}
-
-export function holodeckTeardown(bot: string): void {
-  assertValidBotName(bot);
-  const root = resolveRoot();
-  const hdBot = holodeckBotName(bot);
-  const worktree = path.join(root, '_holodeck', bot);
-  const instance = instanceDir(root, hdBot);
-  const hdProfile = path.join(loadShipConfig().secretsPath, 'bots', hdBot);
-
-  // Stop service
-  pm2Stop(pm2Name(hdBot));
-  console.log(`${hdBot}: stopped`);
-
-  // Kill holodeck containers
-  stopContainersByPrefix(`nanoclaw-${hdBot}-`);
-
-  // Remove instance
-  if (fs.existsSync(instance)) {
-    fs.rmSync(instance, { recursive: true });
-    console.log(`Removed instance: ${instance}`);
-  }
-
-  // Remove profile
-  if (fs.existsSync(hdProfile)) {
-    fs.rmSync(hdProfile, { recursive: true });
-    console.log(`Removed profile: ${hdProfile}`);
-  }
-
-  // Remove worktree
-  if (fs.existsSync(worktree)) {
-    execFileSync('git', ['worktree', 'remove', worktree, '--force'], { cwd: root, stdio: 'inherit' });
-    console.log(`Removed worktree: ${worktree}`);
-  }
-
-  console.log(`Holodeck torn down for ${bot}.`);
-}
-
-export function holodeckPromote(bot: string): void {
-  assertValidBotName(bot);
-  const root = resolveRoot();
-  const worktree = path.join(root, '_holodeck', bot);
-  if (!fs.existsSync(worktree)) {
-    throw new Error(`No holodeck found for ${bot}.`);
-  }
-
-  // Get branch name from worktree
-  const branch = execSync('git branch --show-current', { cwd: worktree, encoding: 'utf-8' }).trim();
-  if (!branch) throw new Error('Cannot determine holodeck branch.');
-
-  // Merge into current branch
-  console.log(`Merging '${branch}' into current branch...`);
-  execFileSync('git', ['merge', branch], { cwd: root, stdio: 'inherit' });
-
-  // Teardown holodeck
-  holodeckTeardown(bot);
-
-  // Redeploy live bot
-  console.log(`Redeploying ${bot}...`);
-  bootstrapBot(root, bot);
-
-  console.log(`\nHolodeck promoted: '${branch}' merged, ${bot} redeployed.`);
-}
 
 // ── Room state stamp ───────────────────────────────────────────────────
 

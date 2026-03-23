@@ -31,9 +31,6 @@ import {
   instanceDir,
   loadProfileEnv,
   validateDeploy as serviceValidateDeploy,
-  holodeckCreate as serviceHolodeckCreate,
-  holodeckTeardown as serviceHolodeckTeardown,
-  holodeckPromote as serviceHolodeckPromote,
 } from './service.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { capitalizeName, statusMessage } from './formatting.js';
@@ -649,174 +646,6 @@ async function handleGitPull(data: CommandData, ctx: InfiniClawIpcContext): Prom
   }
 }
 
-// ── Holodeck handlers ────────────────────────────────────────────────────
-
-async function handleHolodeckCreate(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'holodeck_create')) return;
-  const bot = parseBot(data);
-  const branch = typeof data.branch === 'string' ? data.branch.trim() : '';
-  const chatJid = parseChatJid(data);
-  if (!branch) {
-    await safeSend(ctx, chatJid, '⛔ holodeck_create: missing branch name');
-    return;
-  }
-  if (!isSafeGitToken(branch)) {
-    await safeSend(ctx, chatJid, '⛔ holodeck_create: invalid branch name');
-    return;
-  }
-  logger.info({ bot, branch }, 'Holodeck create requested via IPC');
-  await safeSend(ctx, chatJid, `🔧 Creating holodeck for ${bot} from branch '${branch}'...`);
-  try {
-    serviceHolodeckCreate(bot, branch);
-    logger.info({ bot, branch }, 'Holodeck created');
-    await safeSend(ctx, chatJid, `✅ Holodeck created for ${bot} (branch: ${branch})`);
-  } catch (err) {
-    logger.error({ bot, branch, err }, 'Holodeck create failed');
-    await safeSend(ctx, chatJid, `⛔ holodeck_create failed for ${bot}: ${errStr(err)}`);
-  }
-}
-
-async function handleHolodeckTeardown(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'holodeck_teardown')) return;
-  const bot = parseBot(data);
-  const chatJid = parseChatJid(data);
-  logger.info({ bot }, 'Holodeck teardown requested via IPC');
-  try {
-    serviceHolodeckTeardown(bot);
-    logger.info({ bot }, 'Holodeck torn down');
-    await safeSend(ctx, chatJid, `✅ Holodeck torn down for ${bot}`);
-  } catch (err) {
-    logger.error({ bot, err }, 'Holodeck teardown failed');
-    await safeSend(ctx, chatJid, `⛔ holodeck_teardown failed for ${bot}: ${errStr(err)}`);
-  }
-}
-
-async function handleHolodeckPromote(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'holodeck_promote')) return;
-  const bot = parseBot(data);
-  const chatJid = parseChatJid(data);
-  logger.info({ bot }, 'Holodeck promote requested via IPC');
-  await safeSend(ctx, chatJid, `🔧 Promoting holodeck for ${bot} (merge + redeploy)...`);
-  try {
-    serviceHolodeckPromote(bot);
-    logger.info({ bot }, 'Holodeck promoted');
-    await safeSend(ctx, chatJid, `✅ Holodeck promoted for ${bot} — branch merged and live bot redeployed`);
-  } catch (err) {
-    logger.error({ bot, err }, 'Holodeck promote failed');
-    await safeSend(ctx, chatJid, `⛔ holodeck_promote failed for ${bot}: ${errStr(err)}`);
-  }
-}
-
-async function handleHolodeckSend(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'holodeck_send')) return;
-  const bot = parseBot(data);
-  const message = typeof data.message === 'string' ? data.message : '';
-  const chatJid = parseChatJid(data);
-  if (!message) {
-    await safeSend(ctx, chatJid, '⛔ holodeck_send: missing message');
-    return;
-  }
-  const hdBot = `${bot}-holodeck`;
-  const root = resolveRoot();
-  const dbPath = path.join(instanceDir(root, hdBot), 'store', 'messages.db');
-  if (!fs.existsSync(dbPath)) {
-    await safeSend(ctx, chatJid, `⛔ No holodeck instance for ${bot} (no messages.db)`);
-    return;
-  }
-  try {
-    const db = new Database(dbPath);
-    let msgId: string;
-    try {
-      msgId = `hd-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-      const timestamp = new Date().toISOString();
-      const jidRow = db.prepare('SELECT jid FROM registered_groups LIMIT 1').get() as { jid: string } | undefined;
-      const jid = jidRow?.jid || 'local:terminal';
-      db.prepare(
-        'INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, 0)',
-      ).run(msgId, jid, 'operator', 'Captain', message, timestamp);
-    } finally {
-      db.close();
-    }
-    logger.info({ bot: hdBot, msgId }, 'Holodeck message injected');
-    await safeSend(ctx, chatJid, `✅ Message sent to ${hdBot}`);
-  } catch (err) {
-    logger.error({ bot: hdBot, err }, 'Holodeck send failed');
-    await safeSend(ctx, chatJid, `⛔ holodeck_send failed: ${errStr(err)}`);
-  }
-}
-
-async function handleHolodeckRead(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'holodeck_read')) return;
-  const bot = parseBot(data);
-  const limit = typeof data.limit === 'number' && data.limit > 0 ? Math.min(data.limit, 100) : 20;
-  const chatJid = parseChatJid(data);
-  if (!chatJid) return;
-  const hdBot = `${bot}-holodeck`;
-  const root = resolveRoot();
-  const dbPath = path.join(instanceDir(root, hdBot), 'store', 'messages.db');
-  if (!fs.existsSync(dbPath)) {
-    await safeSend(ctx, chatJid, `⛔ No holodeck instance for ${bot} (no messages.db)`);
-    return;
-  }
-  try {
-    const db = new Database(dbPath, { readonly: true });
-    let rows: Array<{ sender_name: string; content: string; timestamp: string }>;
-    try {
-      rows = db.prepare(
-        'SELECT sender_name, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ?',
-      ).all(limit) as Array<{ sender_name: string; content: string; timestamp: string }>;
-    } finally {
-      db.close();
-    }
-    if (rows.length === 0) {
-      await safeSend(ctx, chatJid, `No messages in ${hdBot} holodeck.`);
-      return;
-    }
-    const formatted = rows.reverse().map(
-      (r) => `[${r.timestamp}] ${r.sender_name}: ${r.content.length > 200 ? r.content.slice(0, 200) + '...' : r.content}`,
-    ).join('\n');
-    await safeSend(ctx, chatJid, `**${hdBot} messages (last ${rows.length}):**\n\`\`\`\n${formatted}\n\`\`\``);
-  } catch (err) {
-    logger.error({ bot: hdBot, err }, 'Holodeck read failed');
-    await safeSend(ctx, chatJid, `⛔ holodeck_read failed: ${errStr(err)}`);
-  }
-}
-
-async function handleHolodeckStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'holodeck_status')) return;
-  const bot = parseBot(data);
-  const chatJid = parseChatJid(data);
-  if (!chatJid) return;
-  const hdBot = `${bot}-holodeck`;
-  try {
-    let serviceInfo = '';
-    try {
-      serviceInfo = execFileSync('npx', ['pm2', 'show', `infiniclaw-${hdBot}`], {
-        timeout: 5_000,
-        cwd: resolveRoot(),
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }).trim();
-    } catch (e) {
-      serviceInfo = e instanceof Error ? e.message : 'not running';
-    }
-    const root = resolveRoot();
-    const instance = instanceDir(root, hdBot);
-    const exists = fs.existsSync(instance);
-    const worktree = path.join(root, '_holodeck', bot);
-    const worktreeExists = fs.existsSync(worktree);
-    const parts = [
-      `**${hdBot} holodeck status:**`,
-      `Instance: ${exists ? instance : 'not deployed'}`,
-      `Worktree: ${worktreeExists ? worktree : 'none'}`,
-      `\`\`\`\n${serviceInfo}\n\`\`\``,
-    ];
-    await safeSend(ctx, chatJid, parts.join('\n'));
-  } catch (err) {
-    logger.error({ bot: hdBot, err }, 'Holodeck status failed');
-    await safeSend(ctx, chatJid, `⛔ holodeck_status failed: ${errStr(err)}`);
-  }
-}
 
 // ── Health & Fleet handlers ──────────────────────────────────────────
 
@@ -1241,12 +1070,6 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   fleet_status: handleFleetStatus,
   git_push: handleGitPush,
   git_pull: handleGitPull,
-  holodeck_create: handleHolodeckCreate,
-  holodeck_teardown: handleHolodeckTeardown,
-  holodeck_promote: handleHolodeckPromote,
-  holodeck_send: handleHolodeckSend,
-  holodeck_read: handleHolodeckRead,
-  holodeck_status: handleHolodeckStatus,
 
   wbs_assign: handleWbsAssign,
   wbs_complete: handleWbsComplete,

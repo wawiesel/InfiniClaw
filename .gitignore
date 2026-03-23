@@ -1,6 +1,5 @@
 /store/
 /_runtime/
-/_holodeck/
 # Claude Code — track settings and hooks, ignore ephemeral state
 .claude/*
 !.claude/settings.json
