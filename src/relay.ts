@@ -89,7 +89,7 @@ import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
-import { runStaticAlignment } from './alignment.js';
+import { runAlignment } from './alignment.js';
 import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreatePrForBranch } from './gitea-wbs.js';
 import { pushAll, getClient as getS3Client } from './s3-sync.js';
 // health-staleness.ts helpers used by healthWatchdogLoop inline
@@ -3359,9 +3359,9 @@ async function handleLifecycleCommand(
 
         // WBS 18.8: static alignment gate — run before starting bot
         if (!noAlign) {
-          const alignReport = runStaticAlignment('main');
+          const alignReport = await runAlignment(bot, 'main');
           if (!alignReport.passed) {
-            const failures = alignReport.results.filter(r => !r.passed).map(r => r.name).join(', ');
+            const failures = alignReport.results.filter((r: { passed: boolean; name: string }) => !r.passed).map((r: { name: string }) => r.name).join(', ');
             const msg = `⛔ alignment failed: ${failures}`;
             await step(msg);
             await reply(progressConn, `⛔ ${name} alignment blocked — ${failures}. Use --no-align to skip.`);
