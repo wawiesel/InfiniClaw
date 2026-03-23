@@ -3,6 +3,7 @@
 **Status:** Proposed
 **Date:** 2026-03-23
 **WBS:** TBD
+**Supersedes:** Portions of [08-threading.md](08-threading.md) (BB merge flow)
 
 ## Problem
 
@@ -28,7 +29,7 @@ Each fleet bot gets 3 dedicated BB accounts:
 | Parker | `@bb1-parker`, `@bb2-parker`, `@bb3-parker` |
 | Cid | `@bb1-cid`, `@bb2-cid`, `@bb3-cid` |
 
-3 accounts matches the existing BB concurrency limit per bot. If all 3 are active, new BB requests queue until one frees up.
+3 accounts matches the existing BB concurrency limit (`MAX_BRANCH_BRAINS_PER_BOT=3`). If all 3 are active, new BB requests queue until one frees up.
 
 ### Activation Lifecycle
 
@@ -36,14 +37,22 @@ Each fleet bot gets 3 dedicated BB accounts:
 1. MB dispatches {{branch Fix the crash}}
 2. Relay selects idle account from pool (e.g. @bb1-tali)
 3. Relay sets display name → "384729-tali" (random 6-digit index)
-4. Account joins room (if not already member)
-5. BB works in thread under identity "384729-tali"
-6. BB finishes → posts summary callout to MB in thread
-7. MB reviews thread, can exchange with BB (distinct identities)
-8. MB posts {{merge}} → relay posts squash summary to main timeline
-9. Display name resets, @bb1-tali returns to idle pool
-10. Next activation → same account becomes "517203-tali"
+4. BB works in thread under identity "384729-tali"
+5. BB finishes → posts summary callout to MB in thread
+6. MB reviews thread, can exchange with BB (distinct identities)
+7. MB posts {{merge}} → relay posts squash summary to main timeline
+   — OR MB posts {{abort}} → relay posts cancellation notice, discards
+8. Display name resets, @bb1-tali returns to idle pool
+9. Next activation → same account becomes "517203-tali"
 ```
+
+### Timeout and Crash Cleanup
+
+If a BB crashes or MB never sends `{{merge}}`/`{{abort}}`, the pool account would stay "busy" forever. Reuse the existing `BRANCH_BRAIN_TIMEOUT_MS` to reclaim:
+
+- When BB container exits (success or crash), start a reclaim timer
+- If MB hasn't sent `{{merge}}` or `{{abort}}` within `BRANCH_BRAIN_TIMEOUT_MS`, relay auto-reclaims the account, posts timeout notice to thread, and returns account to pool
+- If BB container itself times out (existing behavior), same reclaim applies
 
 ### Display Name Convention
 
@@ -69,9 +78,13 @@ New model (review-and-merge):
 MB → {{branch}} → BB works → BB posts summary → MB reviews in thread
 → MB asks questions / requests changes → BB responds
 → MB posts {{merge}} → relay squash-posts to main timeline
+— OR —
+→ MB posts {{abort}} → relay posts cancellation, discards results
 ```
 
-The `{{merge}}` signal is new. Until MB sends it, the thread stays open and results stay in the thread. MB controls when and how results reach the main timeline.
+**`{{merge}}`** — MB approves. Relay posts squash summary to main timeline, returns account to pool.
+
+**`{{abort}}`** — MB rejects. Relay posts cancellation notice to thread and main timeline, returns account to pool. No squash summary.
 
 ### Squash Summary
 
@@ -89,11 +102,34 @@ One message. Everything relevant. No churn.
 
 ## Account Management
 
-- **Registration:** One-time setup via Synapse admin API or manual registration
-- **Credentials:** Stored in bot env files alongside main account credentials
+- **Registration:** One-time setup via Conduwuit admin API or manual registration
+- **Room membership:** Permanent — BB accounts join duty rooms once during setup and stay joined. No per-task join/leave.
 - **Homeserver:** Same as fleet (`matrix.a-gis.org`)
 - **Persistence:** Accounts are permanent — no create/deactivate per task
 - **Display name:** Only state that changes per activation
+
+### Credential Configuration
+
+BB credentials stored in each bot's env file:
+
+```
+BB_POOL_USER_1=@bb1-tali:matrix.a-gis.org
+BB_POOL_TOKEN_1=syt_...
+BB_POOL_USER_2=@bb2-tali:matrix.a-gis.org
+BB_POOL_TOKEN_2=syt_...
+BB_POOL_USER_3=@bb3-tali:matrix.a-gis.org
+BB_POOL_TOKEN_3=syt_...
+```
+
+Relay reads these at startup and initializes the pool.
+
+## Relationship to Existing Design Docs
+
+This doc supersedes the BB merge flow defined in [08-threading.md](08-threading.md). Specifically:
+
+- **08-threading.md** defines BB threads as fire-and-forget with auto-merge. This doc replaces that with MB-controlled `{{merge}}`/`{{abort}}`.
+- **08-threading.md** thread routing remains unchanged — BB messages still go to threads, MB messages still go to main timeline.
+- **22-signals.md** gains two new signals: `{{merge}}` and `{{abort}}`.
 
 ## What This Does NOT Change
 
@@ -108,5 +144,7 @@ One message. Everything relevant. No churn.
 2. **Identity separation** — BB messages in thread show distinct sender from MB
 3. **MB review** — MB can post in thread and BB sees/responds to it
 4. **Merge control** — thread stays open until MB sends `{{merge}}`
-5. **Squash summary** — main timeline gets single structured result message
-6. **Pool return** — on merge, display name resets, account returns to idle pool
+5. **Abort control** — `{{abort}}` cancels thread, returns account to pool
+6. **Timeout reclaim** — crashed/abandoned BBs reclaimed after BRANCH_BRAIN_TIMEOUT_MS
+7. **Squash summary** — main timeline gets single structured result message
+8. **Pool return** — on merge/abort/timeout, display name resets, account returns to idle pool
