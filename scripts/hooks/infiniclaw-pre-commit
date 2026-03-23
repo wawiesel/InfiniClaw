@@ -5,6 +5,18 @@ set -euo pipefail
 
 staged=$(git diff --cached --name-only)
 
+# ── WBS 12.6: Single version source — sync package.json from SEMVER_VERSION ──
+if echo "$staged" | grep -qF 'SEMVER_VERSION'; then
+  semver=$(cat SEMVER_VERSION | tr -d '[:space:]')
+  # Strip leading 'v' for package.json
+  pkg_ver="${semver#v}"
+  if [[ -n "$pkg_ver" ]]; then
+    # Update package.json version in-place
+    sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$pkg_ver\"/" package.json
+    git add package.json
+  fi
+fi
+
 # ── Blocked for everyone ──
 
 if echo "$staged" | grep -q '^dist/'; then
