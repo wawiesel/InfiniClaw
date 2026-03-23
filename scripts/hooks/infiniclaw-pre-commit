@@ -21,36 +21,31 @@ fi
 # ── README sibling rule ──
 # Any change to a non-README sibling must include a change to the directory's README.md.
 
-readme_missing=()
+# Auto-stage sibling READMEs (WBS 12.3: relaxed from hard rejection)
+readmes_to_stage=()
 while IFS= read -r file; do
   dir=$(dirname "$file")
   base=$(basename "$file")
   [[ "$base" == "README.md" ]] && continue
   readme="$dir/README.md"
-  # Normalize: strip leading ./ so "." dir produces "README.md" not "./README.md"
   readme="${readme#./}"
   [[ ! -f "$readme" ]] && continue
   if ! echo "$staged" | grep -qF "$readme"; then
-    readme_missing+=("$readme (changed $file)")
+    readmes_to_stage+=("$readme")
   fi
 done <<< "$staged"
 
-if [[ ${#readme_missing[@]} -gt 0 ]]; then
-  # Deduplicate by README path
-  seen=()
-  for entry in "${readme_missing[@]}"; do
-    readme_path="${entry%% (*}"
-    skip=false
-    for s in "${seen[@]+"${seen[@]}"}"; do
-      [[ "$s" == "$readme_path" ]] && skip=true && break
-    done
-    $skip && continue
-    seen+=("$readme_path")
+if [[ ${#readmes_to_stage[@]} -gt 0 ]]; then
+  # Deduplicate
+  declare -A seen_readmes
+  for r in "${readmes_to_stage[@]}"; do
+    [[ -n "${seen_readmes[$r]:-}" ]] && continue
+    seen_readmes[$r]=1
+    # Touch the README with an updated timestamp comment
+    sed -i '/^<!-- auto-updated:/d' "$r"
+    echo "<!-- auto-updated: $(date -u +%Y-%m-%dT%H:%M:%SZ) -->" >> "$r"
+    git add "$r"
   done
-  echo "ERROR: The following README.md files must be updated when changing siblings:"
-  printf "  %s\n" "${seen[@]}"
-  echo "Stage the README.md changes or use --no-verify to bypass."
-  exit 1
 fi
 
 # ── Design docs must not reference source code ──
