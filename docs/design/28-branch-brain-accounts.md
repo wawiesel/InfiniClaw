@@ -5,6 +5,17 @@
 **WBS:** TBD
 **Supersedes:** Portions of [08-threading.md](08-threading.md) (BB merge flow)
 
+## Terminology
+
+| Abbreviation | Meaning |
+|---|---|
+| **MB** | Main Brain — the bot's primary process, always running |
+| **BB** | Branch Brain — a temporary worker spawned for a task |
+| **MT** | Main Timeline — the room's top-level message stream |
+| **BT** | Branch Thread — a Matrix thread where a BB works |
+
+These terms are used throughout InfiniClaw design docs.
+
 ## Problem
 
 Branch brains (BBs) share their parent bot's Matrix identity. This causes:

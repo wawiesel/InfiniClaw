@@ -56,4 +56,4 @@ See `docs/solutions/matrix.md` for Element Desktop math rendering setup.
 
 Historical planning files (`_old/IMPLEMENTATION_ROADMAP.md`) have been removed. Design history lives in git log.
 
-<!-- auto-updated: 2026-03-23T17:50:32Z -->
+<!-- auto-updated: 2026-03-23T17:51:21Z -->
