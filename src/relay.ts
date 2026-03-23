@@ -4949,9 +4949,26 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               continue;
             }
 
-            // TODO: @operator mention routing — operator account (not intercom) monitors
-            // all rooms for @operator mentions and forwards to BTC. Needs operator sync
-            // loop extension, not dialtone (intercom won't be in all rooms).
+            // WBS 6.2: @operator mention routing — any bot/user can route to operator tmux
+            if (/@operator\b/i.test(body) && event.sender !== captainUserId && event.sender !== operatorUserId && isOperatorRelayEnabled()) {
+              const senderName = event.sender.startsWith('@') ? event.sender.slice(1, event.sender.indexOf(':')) : event.sender;
+              const text = body.replace(/@operator\b/gi, '').trim();
+              log(`${conn.name}: @operator mention from ${senderName}: ${(text || body).slice(0, 80)}`);
+              const SESSION = 'operator';
+              try {
+                let existed = true;
+                try { execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' }); } catch { existed = false; }
+                if (!existed) {
+                  execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(loadShipConfig().secretsPath), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
+                  await sleep(3000);
+                }
+                execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', `[@operator from ${senderName} in ${conn.name}] ${text || body}`], { stdio: 'pipe' });
+                execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
+              } catch (err) {
+                log(`${conn.name}: @operator tmux send failed: ${errStr(err)}`);
+              }
+              // Don't continue — still process the message normally for the room
+            }
 
             // @loudspeaker: <message> — on-duty bot broadcasts to all duty rooms
             // @loudspeaker (alone) — relay responds with fleet status in this room
