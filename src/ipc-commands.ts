@@ -920,9 +920,27 @@ async function handleWbsComplete(data: CommandData, ctx: InfiniClawIpcContext): 
   }
   const root = resolveRoot();
   const itemId = typeof data.item_id === 'string' ? data.item_id : '';
+  const force = data.force === true;
   if (!room || !itemId) {
     logger.warn({ data }, 'wbs_complete: missing room or item_id');
     return;
+  }
+  // WBS 12.1: verify item ID in git log on main before completing
+  if (!force) {
+    try {
+      const gitLog = execFileSync('git', ['log', '--oneline', 'origin/main', '-50'], {
+        cwd: root, encoding: 'utf-8', timeout: 10_000,
+      }).trim();
+      const escaped = itemId.replace(/\./g, '\\.');
+      if (!new RegExp('\\b' + escaped + '\\b', 'i').test(gitLog)) {
+        const chatJid = parseChatJid(data);
+        await safeSend(ctx, chatJid, '\u274c WBS ' + itemId + ' not found in recent git log on main. Ship code first, or use force:true to override.');
+        logger.warn({ room, itemId }, 'wbs_complete rejected: not in git log');
+        return;
+      }
+    } catch (err) {
+      logger.warn({ err }, 'wbs_complete: git log check failed, proceeding');
+    }
   }
   const dataDir = path.join(root, '_runtime', 'data');
   const wbs = await readWbs(dataDir, room);
@@ -933,7 +951,7 @@ async function handleWbsComplete(data: CommandData, ctx: InfiniClawIpcContext): 
     void giteaCloseIssue(item.gitea_issue);
   }
   await writeWbs(dataDir, room, wbs);
-  logger.info({ room, itemId, unblocked }, 'WBS item completed, unblocked: %o', unblocked);
+  logger.info({ room, itemId, unblocked, force }, 'WBS item completed, unblocked: %o', unblocked);
 }
 
 async function handleWbsWrite(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {

@@ -190,3 +190,5 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`?` query commands** (`relay.ts`, `command-registry.ts`): Commands prefixed with `?` are read-only queries. Dispatched through the same `handleCommand`/`dispatch` pipeline as `!` commands. `?version [n]` lists the N most recent semver tags (default 10) with their one-line commit messages.
 
 - **Relay restart preserves bots** (`relay.ts`): On startup, the bootstrap checks which bots already have running pm2 processes and skips them — relay restarts (code updates) no longer disrupt running bots. `persistFleetSync()` writes fleet state to both disk and S3 synchronously before relay self-restart, preventing status loss when the new relay process loads fleet.json.
+
+<!-- WBS 12.1: wbs_complete git-log pre-check (2026-03-23) -->

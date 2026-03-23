@@ -651,10 +651,11 @@ Use this after completing a task that requires cross-bot verification. The assig
 
   server.tool(
     'wbs_complete',
-    'Mark a WBS task as done. Unblocks any dependent items. Chief only.',
+    'Mark a WBS task as done. Verifies item in git log on main first. Use force:true for non-code items. Chief only.',
     {
       item_id: z.string().describe('WBS item ID to mark complete (e.g. "3.1")'),
       room: z.string().optional().describe('Room name. Defaults to your current role room.'),
+      force: z.boolean().optional().describe('Skip git log pre-check (for non-code items).'),
     },
     async (args) => {
       const room = args.room || inferRoom();
@@ -662,6 +663,7 @@ Use this after completing a task that requires cross-bot verification. The assig
         type: 'wbs_complete',
         item_id: args.item_id,
         room,
+        force: args.force ?? false,
         chatJid,
         groupFolder,
         timestamp: new Date().toISOString(),
