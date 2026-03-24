@@ -1,0 +1,3 @@
+[submodule "bots/trader/parker/signal"]
+	path = bots/trader/parker/signal
+	url = ssh://git@localhost:2223/wawiesel/Money_Shaker.git
