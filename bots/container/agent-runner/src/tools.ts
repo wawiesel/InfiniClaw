@@ -879,8 +879,12 @@ Item fields for upsert:
     `Run a podman command on the host machine. Main group only.
 
 Allowed subcommands: ps, images, logs, inspect, run, stop, rm, build, exec, pull, start.
-Arguments are passed as an array (e.g. ["ps", "--filter", "name=infiniclaw"]).
-Output is returned as text (truncated to 2000 chars).`,
+Arguments are passed as an array (e.g. ["ps", "--filter", "name=nanoclaw"]).
+Output is returned as text (truncated to 2000 chars).
+
+IMPORTANT: Only BOTS run in containers (named "nanoclaw-{bot}-{group}", e.g. "nanoclaw-tali-engineering").
+The relay and operator are NOT containers — they run as pm2 processes on the host.
+Do NOT attempt "podman exec infiniclaw-relay" or similar — no such container exists.`,
     {
       args: z.array(z.string()).describe('Podman command arguments, e.g. ["ps", "--format", "{{.Names}}"]'),
     },
