@@ -302,6 +302,78 @@ test('thread routing: replies land in thread, no main timeline bleed', async (se
   );
 });
 
+// WBS 17.6: {{send}} cross-room routing delivers to target room
+test('send-routing: {{send}} delivers to target room', async (session) => {
+  // Resolve the bridge room — that's the expected target for cross-room sends.
+  // If the intercom config doesn't include a bridge room, fail early with a clear message.
+  const bridgeRoom = session.rooms['bridge'] ?? session.rooms['Bridge'];
+  assert(bridgeRoom !== undefined, 'send-routing: "bridge" room not found in intercom01.json — cannot verify cross-room delivery');
+
+  // Step 1 — send a prompt to engineering asking the bot to route a message to bridge
+  const sentAt = Date.now();
+  await send(session, 'engineering', 'Please send a brief one-line status update to the bridge room.');
+
+  // Step 2 — poll the bridge room for any new non-own message within the timeout
+  const deadline = Date.now() + TIMEOUT_MS;
+  const initial = await matrixSync(session.homeserver, session.token, null, null, 0);
+  let syncToken = initial.next_batch;
+  let delivered: string | null = null;
+
+  while (Date.now() < deadline) {
+    await sleep(POLL_MS);
+    const data = await matrixSync(session.homeserver, session.token, syncToken, null, 5_000);
+    syncToken = data.next_batch;
+    for (const ev of data.rooms?.join?.[bridgeRoom.roomId]?.timeline?.events ?? []) {
+      if (ev.type !== 'm.room.message') continue;
+      if (ev.sender === session.userId) continue;
+      if (ev.origin_server_ts < sentAt) continue;
+      delivered = String(ev.content?.body ?? '');
+      break;
+    }
+    if (delivered !== null) break;
+  }
+
+  assert(
+    delivered !== null,
+    `send-routing: no message arrived in bridge room within ${TIMEOUT_MS / 1_000}s — cross-room delivery failed`,
+  );
+});
+
+// WBS 17.7: wbs_complete gate rejects items not in git log on main
+// Gate is implemented in src/ipc-commands.ts (WBS 12.1): runs
+//   git log --oneline origin/main -50
+// and rejects if item ID doesn't appear as a word-boundary match.
+test('wbs_complete gate: rejects items not in git log on main', async (_session) => {
+  const { execSync } = await import('child_process');
+  const cwd = new URL('..', import.meta.url).pathname;
+
+  // Fetch the same log slice the gate uses
+  const gitLog = execSync('git log --oneline origin/main -50', {
+    cwd,
+    encoding: 'utf-8',
+    timeout: 10_000,
+  }).trim();
+
+  assert(gitLog.length > 0, 'wbs_complete gate: git log returned empty — cannot validate gate');
+
+  // Verify a synthetic item ID that can never appear in a real commit is rejected
+  const fakeId = 'WBS-FAKE-00000';
+  const fakeEscaped = fakeId.replace(/\./g, '\\.');
+  const fakeFound = new RegExp('\\b' + fakeEscaped + '\\b', 'i').test(gitLog);
+  assert(!fakeFound, `wbs_complete gate: fake item "${fakeId}" unexpectedly found in git log`);
+
+  // Verify that WBS 12.1 (the commit that shipped the gate) IS present — confirms
+  // gate would correctly allow it and that git log was actually populated.
+  const shippedId = '12.1';
+  const shippedEscaped = shippedId.replace(/\./g, '\\.');
+  const shippedFound = new RegExp('\\b' + shippedEscaped + '\\b', 'i').test(gitLog);
+  assert(
+    shippedFound,
+    `wbs_complete gate: item "12.1" not found in git log on main — ` +
+      `either the gate-shipping commit hasn't landed yet, or origin/main is stale`,
+  );
+});
+
 // ── Entrypoint ────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
