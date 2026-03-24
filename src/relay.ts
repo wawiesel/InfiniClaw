@@ -90,7 +90,7 @@ import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
-import { runAlignment } from './alignment.js';
+import { runStaticAlignment } from './alignment.js';
 import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreatePrForBranch } from './gitea-wbs.js';
 import { pushAll, getClient as getS3Client } from './s3-sync.js';
 // health-staleness.ts helpers used by healthWatchdogLoop inline
@@ -3596,11 +3596,11 @@ async function handleLifecycleCommand(
         killStaleContainers(bot);
         await deployBot(root, bot);
 
-        // WBS 18.8: static alignment gate — run before starting bot
-        // Alignment is best-effort: if sandbox isn't implemented yet, skip gracefully
+        // WBS 18.8: static alignment gate — run before starting bot (spec 27-alignment)
+        // Only static tests here; interactive tests are on-demand via alignment_run IPC.
         if (!noAlign) {
           try {
-            const alignReport = await runAlignment(bot, 'main');
+            const alignReport = runStaticAlignment('main');
             if (!alignReport.passed) {
               const failures = alignReport.results.filter((r: { passed: boolean; name: string }) => !r.passed).map((r: { name: string }) => r.name).join(', ');
               const msg = `⛔ alignment failed: ${failures}`;
