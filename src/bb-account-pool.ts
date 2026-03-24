@@ -20,6 +20,7 @@
 import crypto from 'crypto';
 
 import { logger } from 'nanoclaw/logger.js';
+import { markdownToHtml } from './matrix-api.js';
 
 // ── Pool size hard-clamp ─────────────────────────────────────────────
 
@@ -244,6 +245,8 @@ export async function sendBbMessage(
   const content: Record<string, any> = {
     msgtype: 'm.text',
     body: text,
+    format: 'org.matrix.custom.html',
+    formatted_body: markdownToHtml(text),
   };
   if (threadId) {
     content['m.relates_to'] = {
