@@ -42,15 +42,27 @@ import { giteaCreateIssueForWbs, giteaCloseIssue } from './gitea-wbs.js';
 
 /** Determine if a bot is the chief (lowest-ranked running bot) for a room. */
 function isRoomChief(botName: string, room: string): boolean {
-  const fleet = loadFleet();
-  const roleRoom = Object.entries(ROLE_ROOMS).find(([, v]) => v.room === room.toLowerCase());
-  if (!roleRoom) return false;
-  const role = roleRoom[0];
-  // Find all running bots in this role
-  const running = Object.entries(fleet)
-    .filter(([, e]) => e.role?.toLowerCase() === role && (RUNNING_STATUSES as readonly string[]).includes(e.status ?? ''))
-    .sort(([, a], [, b]) => (a.rank ?? 99) - (b.rank ?? 99));
-  return running.length > 0 && running[0][0] === botName.toLowerCase();
+  try {
+    const fleet = loadFleet();
+    const roleRoom = Object.entries(ROLE_ROOMS).find(([, v]) => v.room === room.toLowerCase());
+    if (!roleRoom) return false;
+    const role = roleRoom[0];
+    // Find all running bots in this role
+    const running = Object.entries(fleet)
+      .filter(([, e]) => e.role?.toLowerCase() === role && (RUNNING_STATUSES as readonly string[]).includes(e.status ?? ''))
+      .sort(([, a], [, b]) => (a.rank ?? 99) - (b.rank ?? 99));
+    return running.length > 0 && running[0][0] === botName.toLowerCase();
+  } catch {
+    // Fleet not initialized (bot process without S3 access) — fall back to crew-status
+    const crewPath = path.join(resolveRoot(), '_runtime', 'instances', botName.toLowerCase(), 'data', 'crew-status.json');
+    try {
+      const crew = JSON.parse(fs.readFileSync(crewPath, 'utf-8')) as { crew?: { name: string; isChief: boolean }[] };
+      const entry = crew.crew?.find(c => c.name.toLowerCase() === botName.toLowerCase());
+      return entry?.isChief ?? false;
+    } catch {
+      return false;
+    }
+  }
 }
 
 // ── Cooldown tracking ───────────────────────────────────────────────────
