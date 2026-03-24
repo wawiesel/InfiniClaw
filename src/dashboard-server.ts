@@ -137,24 +137,25 @@ function fleetHome(): string {
 }
 
 function bazaar(): string {
-  const stateFile = path.join(SIGNAL_DIR, 'state.json');
-  const modelFile = path.join(SIGNAL_DIR, 'model_state.json');
+  const stateFile   = path.join(SIGNAL_DIR, 'state.json');
+  const modelFile   = path.join(SIGNAL_DIR, 'model_state.json');
+  const priceFile   = path.join(SIGNAL_DIR, 'price_data.json');
+
   let signal = 'UNKNOWN', lastCheck = '';
-  let btcPrice = '', portfolioValue = '';
+  let btcPriceLive = 0, solPriceLive = 0, ethPriceLive = 0, smaLive = 0, totalLive = 0;
   let trades: Array<Record<string, unknown>> = [];
   let predictions: Array<Record<string, unknown>> = [];
+  let weights: Record<string, number> = {};
+  let runs = 0;
+  let btcHistory: number[] = [], solHistory: number[] = [], ethHistory: number[] = [];
+  let priceUpdated = '';
 
   if (fs.existsSync(stateFile)) {
     try {
       const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-      signal = state.signal || 'UNKNOWN';
+      signal    = state.signal || 'UNKNOWN';
       lastCheck = state.last_check || '';
-      trades = state.trades || [];
-      const lastTrade = trades.at(-1) as Record<string, unknown> | undefined;
-      if (lastTrade) {
-        btcPrice = lastTrade.btc_price ? `$${Number(lastTrade.btc_price).toLocaleString()}` : '';
-        portfolioValue = lastTrade.portfolio_value ? `$${Number(lastTrade.portfolio_value).toFixed(2)}` : '';
-      }
+      trades    = state.trades || [];
     } catch { /* ignore */ }
   }
 
@@ -162,35 +163,114 @@ function bazaar(): string {
     try {
       const model = JSON.parse(fs.readFileSync(modelFile, 'utf8'));
       predictions = model.predictions || [];
+      weights     = model.weights || {};
+      runs        = model.runs || 0;
     } catch { /* ignore */ }
   }
 
-  const signalClass = signal === 'BULL' ? 'ok' : signal === 'BEAR' ? 'err' : 'warn';
-  const tradesJson = JSON.stringify(trades);
-  const predsJson = JSON.stringify(predictions);
+  if (fs.existsSync(priceFile)) {
+    try {
+      const pd = JSON.parse(fs.readFileSync(priceFile, 'utf8'));
+      btcHistory   = pd.btc || [];
+      solHistory   = pd.sol || [];
+      ethHistory   = pd.eth || [];
+      btcPriceLive = pd.btc_price || 0;
+      solPriceLive = pd.sol_price || 0;
+      ethPriceLive = pd.eth_price || 0;
+      smaLive      = pd.sma || 0;
+      totalLive    = pd.total || 0;
+      priceUpdated = pd.updated || '';
+    } catch { /* ignore */ }
+  }
+
+  // Accuracy stats
+  function accStats(asset: string) {
+    const v3 = predictions.filter(p => p['asset'] === asset && p['actual_24h'] != null && p['model_v'] === 3);
+    const v2 = predictions.filter(p => p['asset'] === asset && p['actual_24h'] != null && p['model_v'] === 2);
+    const use = v3.length ? v3 : v2;
+    const mv  = v3.length ? 3 : 2;
+    if (!use.length) return { dir: '—', mape: '—', n: 0, mv };
+    const dir  = Math.round(use.filter(p => p['dir_correct']).length / use.length * 100);
+    const mape = (use.reduce((s, p) => s + Number(p['pct_error'] || 0), 0) / use.length).toFixed(1);
+    return { dir: `${dir}%`, mape: `${mape}%`, n: use.length, mv };
+  }
+  const solAcc = accStats('SOL');
+  const ethAcc = accStats('ETH');
+
+  const signalClass  = signal === 'BULL' ? 'ok' : signal === 'BEAR' ? 'err' : 'warn';
+  const pctSma       = smaLive ? ((btcPriceLive - smaLive) / smaLive * 100).toFixed(1) : '—';
+  const btcFmt       = btcPriceLive ? `$${Math.round(btcPriceLive).toLocaleString()}` : '—';
+  const smaFmt       = smaLive ? `$${Math.round(smaLive).toLocaleString()}` : '—';
+  const solDir       = typeof solAcc.dir === 'string' && solAcc.dir !== '—'
+    ? parseInt(solAcc.dir) >= 50 ? 'green' : parseInt(solAcc.dir) < 40 ? 'red' : 'yellow' : 'muted';
+  const ethDir       = typeof ethAcc.dir === 'string' && ethAcc.dir !== '—'
+    ? parseInt(ethAcc.dir) >= 50 ? 'green' : parseInt(ethAcc.dir) < 40 ? 'red' : 'yellow' : 'muted';
+
+  const tradesJson  = JSON.stringify(trades);
+  const predsJson   = JSON.stringify(predictions);
+  const btcJson     = JSON.stringify(btcHistory);
+  const solJson     = JSON.stringify(solHistory);
+  const ethJson     = JSON.stringify(ethHistory);
 
   const body = `
-<div class="card row" style="justify-content:space-between">
-  <div class="row">
-    <span>Signal: <span class="badge ${signalClass}">${signal}</span></span>
-    ${btcPrice ? `<span>BTC: <strong>${btcPrice}</strong></span>` : ''}
-    ${portfolioValue ? `<span>Portfolio: <strong>${portfolioValue}</strong></span>` : ''}
+<div class="card row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+  <div class="row" style="gap:16px;flex-wrap:wrap">
+    <span style="font-size:16px;font-weight:bold">Signal: <span class="badge ${signalClass}" style="font-size:14px;padding:3px 12px">${signal}</span></span>
+    <span>BTC <strong>${btcFmt}</strong></span>
+    <span>SMA <strong>${smaFmt}</strong> <span class="${signal === 'BULL' ? 'ok' : 'err'}" style="font-size:12px">${signal === 'BULL' ? '+' : ''}${pctSma}%</span></span>
+    ${totalLive ? `<span>Portfolio <strong>$${totalLive.toFixed(2)}</strong></span>` : ''}
+    ${solPriceLive ? `<span style="color:var(--muted)">SOL $${solPriceLive.toFixed(2)} · ETH $${ethPriceLive.toFixed(0)}</span>` : ''}
   </div>
-  ${lastCheck ? `<span class="muted">last run ${relTime(lastCheck)}</span>` : ''}
+  <span class="muted" style="font-size:12px">run #${runs} · ${lastCheck ? relTime(lastCheck) : '—'}</span>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px">
+  <div class="card" style="margin:0">
+    <h2>SOL Model [v${solAcc.mv}]</h2>
+    <div style="font-size:22px;font-weight:bold;color:var(--${solDir})">${solAcc.dir}</div>
+    <div class="muted">direction accuracy · ${solAcc.n} scored</div>
+    <div style="margin-top:4px;font-size:13px">MAPE <strong>${solAcc.mape}</strong> · GBM ${(weights['gbm']||0.33).toFixed(2)} RSI ${(weights['rsi']||0.33).toFixed(2)} SMA ${(weights['sma']||0.33).toFixed(2)}</div>
+  </div>
+  <div class="card" style="margin:0">
+    <h2>ETH Model [v${ethAcc.mv}]</h2>
+    <div style="font-size:22px;font-weight:bold;color:var(--${ethDir})">${ethAcc.dir}</div>
+    <div class="muted">direction accuracy · ${ethAcc.n} scored</div>
+    <div style="margin-top:4px;font-size:13px">MAPE <strong>${ethAcc.mape}</strong></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>BTC Price vs 50-Day SMA (120 days)</h2>
+  <canvas id="btcChart" height="200"></canvas>
 </div>
 
 <div class="card">
   <h2>Portfolio Value</h2>
-  <canvas id="portfolioChart" height="200"></canvas>
+  <canvas id="portfolioChart" height="180"></canvas>
 </div>
 
 <div class="card">
-  <h2>Price Predictions</h2>
-  <div class="row" style="margin-bottom:8px">
-    <button class="asset-btn" data-asset="ETH" style="background:var(--surface);color:var(--blue);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer">ETH</button>
-    <button class="asset-btn" data-asset="SOL" style="background:var(--surface);color:var(--blue);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer">SOL</button>
+  <h2>Price Predictions — P10/P90 Confidence Bands</h2>
+  <div class="row" style="margin-bottom:8px;gap:8px">
+    <button class="asset-btn" data-asset="ETH" style="background:var(--surface);color:var(--blue);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px">ETH</button>
+    <button class="asset-btn" data-asset="SOL" style="background:var(--surface);color:var(--blue);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px">SOL</button>
   </div>
   <canvas id="predChart" height="250"></canvas>
+</div>
+
+<div class="card">
+  <h2>SOL vs ETH Price (120 days)</h2>
+  <div class="row" style="margin-bottom:8px;gap:8px">
+    <button class="hist-btn" data-asset="SOL" style="background:var(--surface);color:var(--blue);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px">SOL</button>
+    <button class="hist-btn" data-asset="ETH" style="background:var(--surface);color:var(--blue);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px">ETH</button>
+    <button class="hist-btn" data-asset="BOTH" style="background:var(--blue);color:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px">Both</button>
+  </div>
+  <canvas id="altChart" height="200"></canvas>
+</div>
+
+<div class="card">
+  <h2>Dashboard Chart (Equity Curve + Forecast)</h2>
+  <img src="${BASE}/chart?t=${Date.now()}" style="width:100%;border-radius:4px" alt="dashboard">
 </div>
 
 <div class="card">
@@ -203,133 +283,153 @@ function bazaar(): string {
 <script>
 const trades = ${tradesJson};
 const predictions = ${predsJson};
-const colors = { green: '#3fb950', red: '#f85149', blue: '#58a6ff', muted: '#8b949e', yellow: '#d29922' };
+const btcHistory = ${btcJson};
+const solHistory = ${solJson};
+const ethHistory = ${ethJson};
+const C = { green:'#3fb950', red:'#f85149', blue:'58a6ff', orange:'#f0883e',
+            purple:'#a371f7', muted:'#8b949e', yellow:'#d29922', teal:'#00e5ff' };
 
-// Portfolio chart
-const portfolioCtx = document.getElementById('portfolioChart');
-new Chart(portfolioCtx, {
-  type: 'line',
-  data: {
-    labels: trades.map(t => new Date(t.timestamp)),
-    datasets: [{
-      label: 'Portfolio',
-      data: trades.map(t => t.portfolio_value),
-      borderColor: colors.blue,
-      backgroundColor: colors.blue + '20',
-      fill: true,
-      tension: 0.3,
-      pointRadius: 5,
-      pointBackgroundColor: trades.map(t =>
-        t.action === 'BUY_FROM_USDC' || t.action === 'AUTO_DEPLOY' ? colors.green : colors.red
-      ),
-    }]
-  },
-  options: {
-    responsive: true,
-    interaction: { mode: 'nearest', intersect: false },
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        callbacks: {
-          title: items => new Date(trades[items[0].dataIndex].timestamp).toLocaleString(),
-          afterLabel: item => trades[item.dataIndex].action
-        }
-      }
-    },
-    scales: {
-      x: { type: 'time', grid: { color: '#30363d' }, ticks: { color: '#8b949e' } },
-      y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', callback: v => '$' + v } }
-    }
-  }
+const gridColor = '#30363d', tickColor = '#8b949e';
+const scaleOpts = (cb) => ({
+  x: { type:'time', grid:{color:gridColor}, ticks:{color:tickColor,maxTicksLimit:8} },
+  y: { grid:{color:gridColor}, ticks:{color:tickColor, callback: cb || (v => '$'+Number(v).toFixed(0)) } }
 });
 
-// Prediction chart
-let predChart;
-function showPredictions(asset) {
-  const data = predictions.filter(p => p.asset === asset);
-  if (predChart) predChart.destroy();
-  const labels = data.map(p => new Date(p.timestamp * 1000));
-  predChart = new Chart(document.getElementById('predChart'), {
+// ── BTC + SMA chart ───────────────────────────────────────────────
+if (btcHistory.length > 10) {
+  const period = 50;
+  const n = btcHistory.length;
+  const now = Date.now();
+  const msPerDay = 86400000;
+  const btcLabels = btcHistory.map((_, i) => new Date(now - (n - 1 - i) * msPerDay));
+  const sma50 = btcHistory.map((_, i) => {
+    const slice = btcHistory.slice(Math.max(0, i - period + 1), i + 1);
+    return slice.reduce((a, b) => a + b, 0) / slice.length;
+  });
+  const bullBg = btcHistory.map((p, i) => p > sma50[i] ? '#3fb95015' : '#f8514915');
+  new Chart(document.getElementById('btcChart'), {
     type: 'line',
     data: {
-      labels,
+      labels: btcLabels,
       datasets: [
-        {
-          label: 'Price',
-          data: data.map(p => p.price_at_pred),
-          borderColor: colors.blue,
-          borderWidth: 2,
-          pointRadius: 0,
-        },
-        {
-          label: 'Predicted 24h',
-          data: data.map(p => p.pred_24h),
-          borderColor: colors.yellow,
-          borderWidth: 2,
-          borderDash: [5, 3],
-          pointRadius: 0,
-        },
-        {
-          label: 'Actual 24h',
-          data: data.map(p => p.actual_24h),
-          borderColor: colors.green,
-          borderWidth: 2,
-          pointRadius: data.map(p => p.actual_24h != null ? 3 : 0),
-        },
-        {
-          label: 'P90',
-          data: data.map(p => p.pred_p90),
-          borderColor: 'transparent',
-          backgroundColor: colors.muted + '15',
-          fill: '+1',
-          pointRadius: 0,
-        },
-        {
-          label: 'P10',
-          data: data.map(p => p.pred_p10),
-          borderColor: 'transparent',
-          pointRadius: 0,
-        },
+        { label:'BTC', data:btcHistory, borderColor:'#f0883e', borderWidth:2, pointRadius:0, tension:0.2 },
+        { label:'SMA50', data:sma50, borderColor:'#00e5ff', borderWidth:1.5, borderDash:[6,3], pointRadius:0 },
       ]
     },
     options: {
-      responsive: true,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        tooltip: {
-          callbacks: {
-            title: items => labels[items[0].dataIndex].toLocaleString()
-          }
-        }
+      responsive:true, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{labels:{color:tickColor}} },
+      scales: scaleOpts()
+    }
+  });
+}
+
+// ── Portfolio chart ───────────────────────────────────────────────
+if (trades.length) {
+  new Chart(document.getElementById('portfolioChart'), {
+    type: 'line',
+    data: {
+      labels: trades.map(t => new Date(t.timestamp)),
+      datasets: [{
+        label:'Portfolio $', data:trades.map(t => t.portfolio_value),
+        borderColor:'#58a6ff', backgroundColor:'#58a6ff20', fill:true, tension:0.3,
+        pointRadius:6,
+        pointBackgroundColor: trades.map(t =>
+          t.action==='BUY_FROM_USDC'||t.action==='AUTO_DEPLOY' ? C.green : C.red),
+        pointBorderColor:'#0d1117', pointBorderWidth:1,
+      }]
+    },
+    options: {
+      responsive:true, interaction:{mode:'nearest',intersect:false},
+      plugins:{ legend:{display:false},
+        tooltip:{ callbacks:{
+          title: items => new Date(trades[items[0].dataIndex].timestamp).toLocaleString(),
+          afterLabel: item => trades[item.dataIndex].action
+        }}
       },
-      scales: {
-        x: { type: 'time', grid: { color: '#30363d' }, ticks: { color: '#8b949e' } },
-        y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', callback: v => '$' + Number(v).toFixed(0) } }
-      }
+      scales: scaleOpts(v => '$'+Number(v).toFixed(2))
+    }
+  });
+}
+
+// ── Prediction chart ──────────────────────────────────────────────
+let predChart;
+function showPredictions(asset) {
+  const data = predictions.filter(p => p.asset === asset && p.price_at_pred);
+  if (predChart) predChart.destroy();
+  const labels = data.map(p => new Date(p.timestamp * 1000));
+  predChart = new Chart(document.getElementById('predChart'), {
+    type:'line',
+    data:{
+      labels,
+      datasets:[
+        { label:'Price', data:data.map(p=>p.price_at_pred), borderColor:'#58a6ff', borderWidth:2, pointRadius:0 },
+        { label:'Predicted 24h', data:data.map(p=>p.pred_24h), borderColor:C.yellow, borderWidth:2, borderDash:[5,3], pointRadius:0 },
+        { label:'Actual 24h', data:data.map(p=>p.actual_24h),
+          borderColor: C.green, borderWidth:2,
+          pointRadius: data.map(p => p.actual_24h != null ? 4 : 0),
+          pointBackgroundColor: data.map(p => p.dir_correct ? C.green : C.red),
+          pointBorderColor:'#0d1117', pointBorderWidth:1 },
+        { label:'P90', data:data.map(p=>p.pred_p90), borderColor:'transparent', backgroundColor:C.muted+'18', fill:'+1', pointRadius:0 },
+        { label:'P10', data:data.map(p=>p.pred_p10), borderColor:'transparent', pointRadius:0 },
+      ]
+    },
+    options:{
+      responsive:true, interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{labels:{color:tickColor}},
+        tooltip:{callbacks:{ title:items=>labels[items[0].dataIndex].toLocaleString() }}
+      },
+      scales: scaleOpts()
     }
   });
   document.querySelectorAll('.asset-btn').forEach(b => {
-    b.style.background = b.dataset.asset === asset ? colors.blue : 'var(--surface)';
-    b.style.color = b.dataset.asset === asset ? '#0d1117' : colors.blue;
+    b.style.background = b.dataset.asset===asset ? '#58a6ff' : 'var(--surface)';
+    b.style.color = b.dataset.asset===asset ? '#0d1117' : '#58a6ff';
   });
 }
 document.querySelectorAll('.asset-btn').forEach(b =>
-  b.addEventListener('click', () => showPredictions(b.dataset.asset))
-);
+  b.addEventListener('click', () => showPredictions(b.dataset.asset)));
 showPredictions('ETH');
 
-// Trade list
-const tradeList = document.getElementById('tradeList');
-tradeList.innerHTML = [...trades].reverse().map(t => {
-  const d = new Date(t.timestamp).toLocaleString();
-  const isBuy = t.action === 'BUY_FROM_USDC' || t.action === 'AUTO_DEPLOY';
-  const color = isBuy ? colors.green : colors.red;
-  const icon = isBuy ? '&#9650;' : '&#9660;';
-  return '<div style="padding:6px 0;border-bottom:1px solid #30363d;font-size:13px">' +
-    '<span style="color:' + color + '">' + icon + ' ' + t.action + '</span>' +
-    '<span class="muted" style="float:right">' + d + '</span><br>' +
-    '<span class="muted">BTC $' + (t.btc_price||0).toLocaleString() +
-    ' &middot; Portfolio $' + (t.portfolio_value||0).toFixed(2) + '</span></div>';
+// ── SOL/ETH history chart ─────────────────────────────────────────
+let altChart;
+function showAlt(asset) {
+  if (altChart) altChart.destroy();
+  const n = Math.max(solHistory.length, ethHistory.length);
+  const now = Date.now();
+  const labels = Array.from({length:n}, (_, i) => new Date(now - (n-1-i)*86400000));
+  const datasets = [];
+  if (asset==='SOL'||asset==='BOTH')
+    datasets.push({ label:'SOL', data:solHistory, borderColor:'#a371f7', borderWidth:2, pointRadius:0, tension:0.2 });
+  if (asset==='ETH'||asset==='BOTH')
+    datasets.push({ label:'ETH', data:ethHistory, borderColor:'#f0883e', borderWidth:2, pointRadius:0, tension:0.2,
+      yAxisID: asset==='BOTH' ? 'y2' : 'y' });
+  const scalesConf = { x:{type:'time',grid:{color:gridColor},ticks:{color:tickColor,maxTicksLimit:8}},
+    y:{grid:{color:gridColor},ticks:{color:tickColor,callback:v=>'$'+Number(v).toFixed(2)}} };
+  if (asset==='BOTH') scalesConf['y2'] = {position:'right',grid:{drawOnChartArea:false},ticks:{color:'#f0883e',callback:v=>'$'+Number(v).toFixed(0)}};
+  altChart = new Chart(document.getElementById('altChart'), {
+    type:'line', data:{labels,datasets},
+    options:{ responsive:true, interaction:{mode:'index',intersect:false},
+      plugins:{legend:{labels:{color:tickColor}}}, scales:scalesConf }
+  });
+  document.querySelectorAll('.hist-btn').forEach(b => {
+    b.style.background = b.dataset.asset===asset ? '#58a6ff' : 'var(--surface)';
+    b.style.color = b.dataset.asset===asset ? '#0d1117' : '#58a6ff';
+  });
+}
+document.querySelectorAll('.hist-btn').forEach(b =>
+  b.addEventListener('click', () => showAlt(b.dataset.asset)));
+showAlt('BOTH');
+
+// ── Trade list ────────────────────────────────────────────────────
+document.getElementById('tradeList').innerHTML = [...trades].reverse().map(t => {
+  const isBuy = t.action==='BUY_FROM_USDC'||t.action==='AUTO_DEPLOY';
+  const color = isBuy ? C.green : C.red;
+  return '<div style="padding:8px 0;border-bottom:1px solid #30363d;font-size:13px">' +
+    '<span style="color:'+color+'">'+(isBuy?'▲':'▼')+' '+t.action+'</span>' +
+    '<span class="muted" style="float:right">'+new Date(t.timestamp).toLocaleString()+'</span><br>' +
+    '<span class="muted">BTC $'+(t.btc_price||0).toLocaleString()+
+    ' &middot; Portfolio $'+(t.portfolio_value||0).toFixed(2)+'</span></div>';
 }).join('');
 </script>`;
 
