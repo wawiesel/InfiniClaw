@@ -570,7 +570,8 @@ async function handleRestartRelay(data: CommandData, ctx: InfiniClawIpcContext):
 }
 
 async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'git_push')) return;
+  // No requireMain gate — any bot (main or BB) can push code it committed.
+  // Validation (safe tokens) and cooldown below provide sufficient protection.
   const chatJid = parseChatJid(data);
   const remote = typeof data.remote === 'string' ? data.remote.trim() : 'origin';
   const branches = Array.isArray(data.branches) ? data.branches.map(String) : ['main'];
