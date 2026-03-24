@@ -60,6 +60,20 @@ Signals inside backtick code spans are **not processed**:
 {{branch example}}   — live, relay processes
 ```
 
+### Nested braces are literal
+
+The signal regex (`[^}]+`) stops at the first `}`. Any `{{` appearing *inside* a signal's arguments is literal text, not a nested signal:
+
+```
+{{branch Fix the {{merge}} handler in relay.ts}}
+```
+
+This parses as **one** signal with command `branch` and positional text `Fix the {{merge` — the first `}}` terminates the match. The trailing ` handler in relay.ts}}` is not parsed. To reference signal names in arguments, omit the braces:
+
+```
+{{branch Fix the merge handler in relay.ts}}
+```
+
 ## Default Routing
 
 No signal needed for default behavior:
