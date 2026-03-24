@@ -680,10 +680,7 @@ async function handleFleetStatus(data: CommandData, ctx: InfiniClawIpcContext): 
   const chatJid = parseChatJid(data);
   if (!chatJid) return;
   try {
-    const config = loadShipConfig();
-    const fleetPath = path.join(config.secretsPath, 'bots', 'fleet.json');
-    const fleet = JSON.parse(fs.readFileSync(fleetPath, 'utf-8'));
-    const bots = fleet.bots || {};
+    const bots = loadFleet();
     const lines: string[] = [`**Fleet status** (${shipTag()}):\n`];
     const byRole: Record<string, Array<[string, { rank: number; ship: string | null; status: string }]>> = {};
     for (const [name, entry] of Object.entries(bots) as Array<[string, { role: string; rank: number; ship: string | null; status: string }]>) {

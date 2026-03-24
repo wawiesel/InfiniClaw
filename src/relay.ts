@@ -42,7 +42,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME } from './ship-config.js';
 import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
@@ -1894,9 +1894,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             const engConn = findEngConn(conns);
             let restarted = 0;
             let threadRoot: string | undefined;
-            // Reload fleet from disk so status checks reflect transitions that happened
-            // while git sync was running (e.g. a bot going to sleep mid-cycle, #85).
-            try { liveFleet = loadFleetFromDisk(); } catch { /* best effort — fall back to cached */ }
+            // liveFleet is S3-backed in-memory state — always current, no disk reload needed (#85)
             for (const bot of getActiveBots()) {
               if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status)) continue;
               // Do NOT restart bots on duty — code changes apply during Dream phase after retrospective.
@@ -2636,9 +2634,7 @@ function secretsGitSync(): { ok: boolean; newCommits: number; output: string } {
           execSync('git checkout --ours bots/fleet.json', opts);
           execSync('git add bots/fleet.json', opts);
           execSync('git rebase --continue', { ...opts, env: { ...process.env, GIT_EDITOR: 'true' } });
-          log('secrets sync: resolved fleet.json conflict (accepted upstream)');
-          // Reload upstream fleet into memory (disk-fresh after rebase)
-          try { liveFleet = loadFleetFromDisk(); } catch { /* best effort */ }
+          log('secrets sync: resolved fleet.json conflict (accepted upstream — S3 is authoritative)');
           return { ok: true, output: 'rebased (fleet.json conflict resolved)', newCommits };
         }
       } catch { /* couldn't resolve — fall through */ }
@@ -2667,55 +2663,6 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
       } else if (result.newCommits > 0) {
         await reportRecovery('secrets sync', conns);
         log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
-        // Reload static config from disk (transport assignments come via git).
-        // Only merge structural/static fields — don't overwrite runtime state (status, etc.)
-        try {
-          const diskFleet = loadFleetFromDisk();
-          for (const [bot, entry] of Object.entries(diskFleet)) {
-            if (!liveFleet[bot]) { liveFleet[bot] = entry; continue; }
-            // Transport pickup: bot assigned to us but inactive (phase 1 by another ship)
-            if (entry.ship === HOSTNAME && entry.status === 'transit' && liveFleet[bot].ship !== HOSTNAME) {
-              liveFleet[bot].ship = HOSTNAME;
-              liveFleet[bot].status = 'transit'; // will be materialized below
-            }
-            // Merge static fields only (role, rank, title, quartersRoom, ship)
-            liveFleet[bot].role = entry.role;
-            liveFleet[bot].rank = entry.rank;
-            if (entry.title !== undefined) liveFleet[bot].title = entry.title;
-            if (entry.quartersRoom !== undefined) liveFleet[bot].quartersRoom = entry.quartersRoom;
-          }
-        } catch { /* no fleet on disk */ }
-
-        // Materialize — bots assigned here but not active (dematerialized on source ship)
-        if (!isShipCommissioned()) { /* decommissioned — skip materialize */ }
-        else try {
-          for (const [bot, entry] of Object.entries(liveFleet)) {
-            if (entry.ship === HOSTNAME && entry.status === 'transit') {
-              log(`transport: materializing ${bot}`);
-              fleetUpdate(bot, { status: 'quarters' });
-              fleetDirty = true;
-              persistFleet();
-              clearShipConfigCache();
-              const root = resolveRoot();
-              try {
-                ensurePodmanReady();
-                bootstrapBot(root, bot);
-                writeCrewStatus(root, bot);
-                void injectWbsTasks(root, bot);
-                const matEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-                for (const c of conns) {
-                  if (c.accessToken) {
-                    await reply(c, `📡 ${matEnv?.ASSISTANT_NAME || capitalizeName(bot)} materialized`).catch(() => {});
-                  }
-                }
-              } catch (err) {
-                log(`transport: materialize failed for ${bot}: ${errStr(err)}`);
-              }
-            }
-          }
-        } catch (err) {
-          log(`transport: materialize check failed: ${errStr(err)}`);
-        }
 
         // Check inbox for pending items targeting this ship
         try {
@@ -2748,6 +2695,57 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
         // Success with 0 new commits — still clear any prior failure
         await reportRecovery('secrets sync', conns);
       }
+
+      // ── S3 fleet state poll — detect new bots, transports, and structural changes ──
+      // S3 is authoritative; disk file is just a cache. Poll every sync cycle.
+      try {
+        const s3Fleet = await loadFleetAsync();
+        for (const [bot, entry] of Object.entries(s3Fleet)) {
+          if (!liveFleet[bot]) {
+            // New bot appeared in S3 (created via !create or another ship)
+            liveFleet[bot] = entry;
+            log(`fleet: discovered new bot ${bot} from S3 (role=${entry.role}, ship=${entry.ship})`);
+            continue;
+          }
+          // Transport pickup: bot assigned to us with transit status
+          if (entry.ship === HOSTNAME && entry.status === 'transit' && liveFleet[bot].ship !== HOSTNAME) {
+            liveFleet[bot].ship = HOSTNAME;
+            liveFleet[bot].status = 'transit'; // will be materialized below
+          }
+          // Merge structural fields from S3 (role, rank, title, quartersRoom)
+          liveFleet[bot].role = entry.role;
+          liveFleet[bot].rank = entry.rank;
+          if (entry.title !== undefined) liveFleet[bot].title = entry.title;
+          if (entry.quartersRoom !== undefined) liveFleet[bot].quartersRoom = entry.quartersRoom;
+        }
+        // Materialize — bots assigned here but in transit
+        if (isShipCommissioned()) {
+          for (const [bot, entry] of Object.entries(liveFleet)) {
+            if (entry.ship === HOSTNAME && entry.status === 'transit') {
+              log(`transport: materializing ${bot}`);
+              fleetUpdate(bot, { status: 'quarters' });
+              fleetDirty = true;
+              persistFleet();
+              clearShipConfigCache();
+              const root = resolveRoot();
+              try {
+                ensurePodmanReady();
+                bootstrapBot(root, bot);
+                writeCrewStatus(root, bot);
+                void injectWbsTasks(root, bot);
+                const matEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+                for (const c of conns) {
+                  if (c.accessToken) {
+                    await reply(c, `📡 ${matEnv?.ASSISTANT_NAME || capitalizeName(bot)} materialized`).catch(() => {});
+                  }
+                }
+              } catch (err) {
+                log(`transport: materialize failed for ${bot}: ${errStr(err)}`);
+              }
+            }
+          }
+        }
+      } catch { /* S3 poll failed — will retry next cycle */ }
     } catch (err) {
       log(`secrets sync loop error: ${errStr(err)}`);
     }
