@@ -24,7 +24,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { collectHealthData, sessionCleanup } from './health-check.js';
 import { isToolCallBlock, hasDetailsBlock, toolCallBreadcrumb, isToolCallMarker, parseToolCallMarker, toolCallBreadcrumbFromData } from './tool-call-breadcrumb.js';
 import { runBranchBrainAgent } from './container-spawn.js';
-import { acquireBbPoolSlot, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
+import { acquireBbPoolSlot, initBbPool, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
 import type { ContainerOutput } from './container-spawn.js';
 import { upsertEnvLine } from './env-utils.js';
 import {
@@ -2251,14 +2251,19 @@ async function spawnBranchBrain(
     return;
   }
 
-  // BB Account Pool (design doc 28): when BB_ACCOUNT_MODE=pool, acquire a
-  // dedicated pool account so BB posts under its own Matrix identity.
+  // BB Account Pool (design doc 28): when bot's env has BB_ACCOUNT_MODE=pool,
+  // acquire a dedicated pool account so BB posts under its own Matrix identity.
+  // Pool config is read from the bot's env file (not relay process.env).
   let bbPoolSlot: BbPoolSlot | null = null;
-  if (process.env.BB_ACCOUNT_MODE === 'pool' && bot && botSendHomeserver) {
+  if (bot && botSendHomeserver) {
     try {
-      bbPoolSlot = await acquireBbPoolSlot(bot, botSendHomeserver, conn.roomId);
-      if (bbPoolSlot) log(`branchBrain: pool slot acquired — ${bbPoolSlot.index}-${bot}`);
-      else log(`branchBrain: pool slot unavailable, falling back to shared identity`);
+      const botEnv = loadProfileEnv(resolveRoot(), bot);
+      if (botEnv.BB_ACCOUNT_MODE === 'pool') {
+        initBbPool(bot, botEnv);
+        bbPoolSlot = await acquireBbPoolSlot(bot, botSendHomeserver, conn.roomId);
+        if (bbPoolSlot) log(`branchBrain: pool slot acquired — ${bbPoolSlot.index}-${bot}`);
+        else log(`branchBrain: pool slot unavailable, falling back to shared identity`);
+      }
     } catch (err) {
       log(`branchBrain: pool acquire failed: ${errStr(err)}, falling back to shared`);
     }
@@ -2394,8 +2399,8 @@ async function spawnBranchBrain(
   bbResult.then(async (result) => {
     // Release BB pool slot (design doc 28)
     if (bbPoolSlot) {
-      await resetBbDisplayName(bbPoolSlot, bot ?? 'unknown').catch(() => {});
-      releaseBbPoolSlot(bbPoolSlot.slot);
+      await resetBbDisplayName(bbPoolSlot).catch(() => {});
+      releaseBbPoolSlot(bbPoolSlot.bot, bbPoolSlot.slot);
       log(`branchBrain: pool slot ${bbPoolSlot.slot} released`);
     }
     activeBranchBrainProcs.delete(replyThreadId);
@@ -2464,8 +2469,8 @@ async function spawnBranchBrain(
   }).catch(async (err) => {
     // Release BB pool slot on error (design doc 28)
     if (bbPoolSlot) {
-      await resetBbDisplayName(bbPoolSlot, bot ?? 'unknown').catch(() => {});
-      releaseBbPoolSlot(bbPoolSlot.slot);
+      await resetBbDisplayName(bbPoolSlot).catch(() => {});
+      releaseBbPoolSlot(bbPoolSlot.bot, bbPoolSlot.slot);
     }
     activeBranchBrainProcs.delete(replyThreadId);
     completeBranchTask(replyThreadId);

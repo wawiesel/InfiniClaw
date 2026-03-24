@@ -1,18 +1,21 @@
 /**
  * BB Account Pool — Design 28
  *
- * Each BB container has a pool of up to 3 permanent Matrix accounts.
- * Credentials are supplied via env vars:
+ * Each bot has a pool of up to 3 permanent Matrix accounts for Branch Brains.
+ * Credentials are supplied via env vars (from the bot's env file):
  *   BB_POOL_USER_1=@bb1-tali:matrix.server   BB_POOL_TOKEN_1=syt_...
  *   BB_POOL_USER_2=@bb2-tali:matrix.server   BB_POOL_TOKEN_2=syt_...
  *   BB_POOL_USER_3=@bb3-tali:matrix.server   BB_POOL_TOKEN_3=syt_...
+ *
+ * Pools are per-bot: each bot's credentials are isolated so multiple bots
+ * can use BB pools simultaneously without interference.
  *
  * On activation a free slot is claimed, its display name is set to
  * `{6-digit-index}-{botname}`, and the token is returned to the caller.
  * The slot must be released (releaseBbPoolSlot) when work is done.
  *
- * Old "shared" behaviour is the default; this module is only invoked when
- * BB_ACCOUNT_MODE=pool.
+ * The relay reads BB_ACCOUNT_MODE from each bot's env file, not from
+ * its own process.env. This allows per-bot pool configuration.
  */
 import crypto from 'crypto';
 
@@ -23,7 +26,7 @@ import { logger } from 'nanoclaw/logger.js';
 /** Hard maximum number of pool slots.  Any vars beyond this index are an error. */
 export const MAX_POOL_SIZE = 3;
 
-// ── Pool state ───────────────────────────────────────────────────────
+// ── Pool state (per-bot) ────────────────────────────────────────────
 
 interface PoolEntry {
   userId: string;
@@ -31,67 +34,75 @@ interface PoolEntry {
   accessToken: string;
 }
 
-/** Indexed 0..MAX_POOL_SIZE-1.  null = slot not configured. */
-let _pool: (PoolEntry | null)[] = [];
-/** true = slot is currently in use. */
-let _slotActive: boolean[] = [];
-let _initialised = false;
+interface BotPool {
+  pool: (PoolEntry | null)[];
+  slotActive: boolean[];
+}
+
+/** Per-bot pool state. Key = lowercase bot name. */
+const _botPools: Map<string, BotPool> = new Map();
 
 /**
- * Initialise the pool from env vars.
+ * Initialise the pool for a specific bot from its env vars.
  *
  * Hard-clamp: throws if BB_POOL_USER_N or BB_POOL_TOKEN_N is set for any
  * N > MAX_POOL_SIZE, since that indicates a misconfiguration.
  *
- * Called automatically on first acquire if not called explicitly.
+ * Safe to call multiple times for the same bot — re-initialises credentials
+ * while preserving active slot state (so in-flight BBs aren't disrupted).
  */
-export function initBbPool(env: NodeJS.ProcessEnv = process.env): void {
+export function initBbPool(bot: string, env: Record<string, string | undefined>): void {
   // Hard-clamp check: no extra slots permitted beyond MAX_POOL_SIZE.
   for (let extra = MAX_POOL_SIZE + 1; extra <= MAX_POOL_SIZE + 10; extra++) {
     if (env[`BB_POOL_USER_${extra}`] || env[`BB_POOL_TOKEN_${extra}`]) {
       throw new Error(
-        `BB pool misconfiguration: BB_POOL_USER_${extra}/BB_POOL_TOKEN_${extra} is set but pool is hard-clamped to ${MAX_POOL_SIZE} slots`,
+        `BB pool misconfiguration (${bot}): BB_POOL_USER_${extra}/BB_POOL_TOKEN_${extra} is set but pool is hard-clamped to ${MAX_POOL_SIZE} slots`,
       );
     }
   }
 
-  _pool = [];
-  _slotActive = [];
+  const existing = _botPools.get(bot);
+  const pool: (PoolEntry | null)[] = [];
+  const slotActive: boolean[] = [];
 
   for (let i = 0; i < MAX_POOL_SIZE; i++) {
     const n = i + 1;
     const userId = env[`BB_POOL_USER_${n}`] ?? '';
     const accessToken = env[`BB_POOL_TOKEN_${n}`] ?? '';
     if (userId && accessToken) {
-      _pool.push({ userId, accessToken });
-      logger.debug({ slot: n, userId }, 'BB pool: slot configured');
+      pool.push({ userId, accessToken });
+      logger.debug({ bot, slot: n, userId }, 'BB pool: slot configured');
     } else {
-      _pool.push(null);
+      pool.push(null);
     }
-    _slotActive.push(false);
+    // Preserve active state from existing pool to avoid disrupting in-flight BBs
+    slotActive.push(existing?.slotActive[i] ?? false);
   }
 
-  _initialised = true;
-  const configured = _pool.filter(Boolean).length;
-  logger.info({ configured, max: MAX_POOL_SIZE }, 'BB pool: initialised');
+  _botPools.set(bot, { pool, slotActive });
+  const configured = pool.filter(Boolean).length;
+  logger.info({ bot, configured, max: MAX_POOL_SIZE }, 'BB pool: initialised');
 }
 
 // ── Slot claim / release ─────────────────────────────────────────────
 
-/** Claim the first idle configured slot.  Returns 0-based index or -1. */
-function _claimSlot(): number {
+/** Claim the first idle configured slot for a bot.  Returns 0-based index or -1. */
+function _claimSlot(bot: string): number {
+  const bp = _botPools.get(bot);
+  if (!bp) return -1;
   for (let i = 0; i < MAX_POOL_SIZE; i++) {
-    if (_pool[i] && !_slotActive[i]) {
-      _slotActive[i] = true;
+    if (bp.pool[i] && !bp.slotActive[i]) {
+      bp.slotActive[i] = true;
       return i;
     }
   }
   return -1;
 }
 
-/** Release a previously claimed slot. */
-export function releaseBbPoolSlot(slot: number): void {
-  if (slot >= 0 && slot < MAX_POOL_SIZE) _slotActive[slot] = false;
+/** Release a previously claimed slot for a bot. */
+export function releaseBbPoolSlot(bot: string, slot: number): void {
+  const bp = _botPools.get(bot);
+  if (bp && slot >= 0 && slot < MAX_POOL_SIZE) bp.slotActive[slot] = false;
 }
 
 // ── Matrix CS API helpers ────────────────────────────────────────────
@@ -150,6 +161,8 @@ export interface BbPoolSlot {
   userId: string;
   accessToken: string;
   homeserver: string;
+  /** Bot this slot belongs to. */
+  bot: string;
 }
 
 /** Generate a zero-padded random 6-digit decimal string, e.g. "007412". */
@@ -161,13 +174,12 @@ function randomIndex(): string {
 /**
  * Acquire an idle BB pool slot for the given bot.
  *
- * - Reads credentials from BB_POOL_USER_N / BB_POOL_TOKEN_N env vars
- *   (pool is auto-initialised from process.env on first call)
+ * - Pool must be initialised via initBbPool(bot, env) before calling
  * - Sets the pool account's display name to `{index}-{bot}`
  * - Ensures the account is joined to the target room
  *
  * Returns null if all slots are busy, none are configured, or the
- * display-name call fails.  Caller MUST call releaseBbPoolSlot(slot.slot)
+ * display-name call fails.  Caller MUST call releaseBbPoolSlot(bot, slot.slot)
  * in a finally block.
  */
 export async function acquireBbPoolSlot(
@@ -175,15 +187,19 @@ export async function acquireBbPoolSlot(
   homeserver: string,
   roomId: string,
 ): Promise<BbPoolSlot | null> {
-  if (!_initialised) initBbPool();
+  const bp = _botPools.get(bot);
+  if (!bp) {
+    logger.warn({ bot }, 'BB pool: not initialised for bot');
+    return null;
+  }
 
-  const slotIdx = _claimSlot();
+  const slotIdx = _claimSlot(bot);
   if (slotIdx === -1) {
     logger.warn({ bot }, 'BB pool: all slots busy or unconfigured');
     return null;
   }
 
-  const entry = _pool[slotIdx]!;
+  const entry = bp.pool[slotIdx]!;
 
   try {
     const index = randomIndex();
@@ -200,18 +216,18 @@ export async function acquireBbPoolSlot(
       logger.debug({ err, roomId }, 'BB pool: joinRoom skipped or failed (may already be joined)');
     }
 
-    return { slot: slotIdx, index, userId: entry.userId, accessToken: entry.accessToken, homeserver };
+    return { slot: slotIdx, index, userId: entry.userId, accessToken: entry.accessToken, homeserver, bot };
   } catch (err) {
-    releaseBbPoolSlot(slotIdx);
+    releaseBbPoolSlot(bot, slotIdx);
     logger.warn({ err, bot, slotIdx }, 'BB pool: slot acquisition failed');
     return null;
   }
 }
 
 /** Reset the pool account display name back to a neutral placeholder. */
-export async function resetBbDisplayName(slot: BbPoolSlot, bot: string): Promise<void> {
+export async function resetBbDisplayName(slot: BbPoolSlot): Promise<void> {
   try {
-    await setBbDisplayName(slot.homeserver, slot.userId, slot.accessToken, `bb${slot.slot + 1}-${bot}`);
+    await setBbDisplayName(slot.homeserver, slot.userId, slot.accessToken, `bb${slot.slot + 1}-${slot.bot}`);
   } catch (err) {
     logger.warn({ err, userId: slot.userId }, 'BB pool: failed to reset display name');
   }
