@@ -2040,6 +2040,8 @@ interface BranchTaskEntry {
   awaitingMerge?: boolean;   // design doc 28: BB done, waiting for MB {{merge}}/{{abort}}
   mergeSummary?: string;     // BB's merge summary text, stored for squash post
   poolSlotInfo?: { bot: string; slot: number; index: string; userId: string; homeserver: string }; // pool slot to release on merge/abort
+  nudged?: boolean;       // thread staleness: soft nudge posted
+  staleClosed?: boolean;  // thread staleness: hard-closed due to age (spec 08-threading)
 }
 
 function branchTasksPath(): string {
@@ -2047,6 +2049,8 @@ function branchTasksPath(): string {
 }
 
 const THREAD_TASK_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+const THREAD_STALE_NUDGE_MS = envInt('THREAD_STALE_NUDGE_MS', 10 * 60_000);  // 10 min — soft nudge
+const THREAD_STALE_CLOSE_MS = envInt('THREAD_STALE_CLOSE_MS', 30 * 60_000);  // 30 min — hard close
 
 function readBranchTasks(): Record<string, BranchTaskEntry> {
   try {
@@ -2903,7 +2907,8 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
               fleetUpdate(bot, { status: 'quarters' });
               fleetDirty = true;
               persistFleet();
-              clearShipConfigCache();
+              // writeFleetAsync (called by persistFleet) already updates s3FleetCache;
+              // clearShipConfigCache() would null it, breaking subsequent loadFleet() calls.
               const root = resolveRoot();
               try {
                 ensurePodmanReady();
@@ -3224,6 +3229,39 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         // Reset to avoid spamming — only alert once per silence window
         botLastMainTimelinePost.set(bot, Date.now());
       }
+      // ── Thread staleness: nudge and close stale threads (spec 08-threading) ──
+      const branchTasks = readBranchTasks();
+      for (const [threadId, task] of Object.entries(branchTasks)) {
+        if (task.completed) continue; // already merged or closed
+        const age = Date.now() - task.createdAt;
+        const roomId = task.chat_jid?.replace(/^matrix:/, '');
+        if (!roomId) continue;
+        const threadConn = conns.find(c => c.roomId === roomId);
+        if (!threadConn) continue;
+        const label = task.title ? ` (${task.title})` : '';
+
+        // Hard close: forcibly close stale threads
+        if (age >= THREAD_STALE_CLOSE_MS && !task.staleClosed) {
+          log(`threadStale: hard-closing thread ${threadId.slice(0, 20)} (age ${Math.round(age / 60_000)}m)`);
+          task.completed = true;
+          task.staleClosed = true;
+          writeBranchTask(threadId, task);
+          const mins = Math.round(age / 60_000);
+          void threadReply(threadConn, threadId,
+            `📢 Thread closed${label} [${threadId}] — stale (${mins}m). Message redirected to main timeline. Start a new branch for follow-up.`);
+          continue;
+        }
+
+        // Soft nudge: one-time notice in thread
+        if (age >= THREAD_STALE_NUDGE_MS && !task.nudged) {
+          log(`threadStale: nudging thread ${threadId.slice(0, 20)} (age ${Math.round(age / 60_000)}m)`);
+          task.nudged = true;
+          writeBranchTask(threadId, task);
+          const mins = Math.round(age / 60_000);
+          void threadReply(threadConn, threadId,
+            `📢 Thread active for ${mins}m — wrap up and post a summary to the main timeline. Start a new branch for follow-up work.`);
+        }
+      }
     } catch (err) {
       log(`heartbeat error: ${errStr(err)}`);
     }
@@ -3261,7 +3299,6 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     // status=retrospective: container keeps running, bot reflects in quarters
     fleetUpdate(bot, { status: 'retrospective', ondutyAt: undefined });
     persistFleet();
-    clearShipConfigCache();
     void reabsorbWbsItems(root, bot);
     await restartBotForRoom(root, bot);
     writeCrewStatus(root, bot);
@@ -3327,7 +3364,6 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     // status=ready: like quarters but signals the bot just completed a duty cycle
     fleetUpdate(bot, { status: 'ready' });
     persistFleet();
-    clearShipConfigCache();
     bootstrapBot(root, bot);
     writeCrewStatus(root, bot);
     void injectWbsTasks(root, bot);
@@ -3496,7 +3532,6 @@ async function handleLifecycleCommand(
         }
         fleetUpdate(bot, { status: 'quarters', ondutyAt: undefined });
         persistFleet();
-        clearShipConfigCache();
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
         void reabsorbWbsItems(root, bot);
         await restartBotForRoom(root, bot);
@@ -3558,7 +3593,6 @@ async function handleLifecycleCommand(
         if (!isRestart) {
           fleetUpdate(bot, { status: 'quarters' });
           persistFleet();
-          clearShipConfigCache();
         }
         stopBot(bot);
         killStaleContainers(bot);
@@ -3610,10 +3644,22 @@ async function handleLifecycleCommand(
         recordInfraFailure('wake-build');
       }
     } else {
-      // Report: move awake bot to duty room. Skip sleeping/dreaming bots.
+      // Report: move bot to duty room.
+      // Untargeted: skip sleeping/dreaming bots. Targeted: wake first, then report.
       if (liveFleet[bot]?.status === 'sleep' || liveFleet[bot]?.status === 'dream') {
-        log(`!report ${name}: skipping (${liveFleet[bot]?.status})`);
-        continue;
+        if (!target) {
+          // Untargeted report — only reports awake bots (spec: 11-commands)
+          log(`!report ${name}: skipping (${liveFleet[bot]?.status})`);
+          continue;
+        }
+        // Targeted report — wake bot first, then fall through to report logic
+        log(`!report ${name}: waking sleeping bot (targeted report)`);
+        await tr(`📡 ${name} sleeping — waking first`);
+        fleetUpdate(bot, { status: 'quarters' });
+        persistFleet();
+        stopBot(bot);
+        killStaleContainers(bot);
+        await deployBot(root, bot);
       }
       if (liveFleet[bot]?.status === 'onduty') {
         await tr(`⚠️ ${name} already on duty`);
@@ -3639,7 +3685,6 @@ async function handleLifecycleCommand(
         }
         fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME, ondutyAt: Date.now() });
         persistFleet();
-        clearShipConfigCache();
         // Full redeploy so bot gets latest code (rsync + npm ci + build + stamp).
         // Previously only re-seeded rooms (restartBotForRoom) which left bots on
         // stale versions when !report interrupted a duty cycle retrospective.
@@ -5267,11 +5312,22 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 const isRelaySender = event.sender === conn.userId
                   || event.sender === operatorUserId
                   || (lsUserPrefix && event.sender.startsWith(lsUserPrefix));
-                if (task?.completed && !isRelaySender && !postedClosedNotices.has(relates.event_id)) {
-                  postedClosedNotices.add(relates.event_id);
-                  log(`dialtone: closed BB thread reply from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
+                if (task?.completed && !isRelaySender) {
                   const label = task.title ? ` (${task.title})` : '';
-                  void threadReply(conn, relates.event_id, `📢 Thread closed${label} [${relates.event_id}] — branch merged. Start a new branch for follow-up.`);
+                  if (task.staleClosed) {
+                    // Stale-closed: redirect EVERY bot message to main timeline (spec 08-threading)
+                    log(`dialtone: stale-closed thread redirect from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
+                    const senderName = senderLocal ? (capitalizeName(senderLocal)) : event.sender;
+                    if (conn.accessToken) void relaySend(conn.homeserver, conn.accessToken, conn.roomId,
+                      `📢 [redirected from stale thread${label}] ${senderName}: ${body}`);
+                    void threadReply(conn, relates.event_id,
+                      `📢 Thread closed${label} [${relates.event_id}] — stale. Message redirected to main timeline. Start a new branch for follow-up.`);
+                  } else if (!postedClosedNotices.has(relates.event_id)) {
+                    // Merged: one-time closure notice (existing behavior)
+                    postedClosedNotices.add(relates.event_id);
+                    log(`dialtone: closed BB thread reply from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
+                    void threadReply(conn, relates.event_id, `📢 Thread closed${label} [${relates.event_id}] — branch merged. Start a new branch for follow-up.`);
+                  }
                 }
               } else if (!isThreadReply) {
                 // Main-timeline message from ANY sender — fan out to all active branch brains.

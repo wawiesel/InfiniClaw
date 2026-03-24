@@ -143,6 +143,49 @@ loudspeaker00: 📢 Thread closed (BB-demo-captain) [$MDvDGuYiX3kVrO5mx-SCjTTPmS
 
 Completed threads are tracked in `_runtime/data/branch-tasks.json` with a 4-hour TTL. The registry is pruned on every read.
 
+## Thread Staleness
+
+Threads that stay active too long become invisible to the Captain (buried in thread UI). The relay enforces two time-based thresholds to keep work visible on the main timeline.
+
+### Soft Nudge — `THREAD_STALE_NUDGE_MS` (default 10 min)
+
+When a thread has been active for longer than the nudge threshold, the relay posts a loudspeaker notice **in the thread**:
+
+```
+📢 Thread active for 10m — wrap up and post a summary to the main timeline. Start a new branch for follow-up work.
+```
+
+This is a one-time nudge per thread (tracked to avoid repeat notices). The bot can act on it by merging or posting to main.
+
+### Hard Close — `THREAD_STALE_CLOSE_MS` (default 30 min)
+
+When a thread has been active for longer than the close threshold, the relay forcibly closes it. The thread is now **dead**, same as a merged thread.
+
+**When a bot attempts to post to a stale-closed thread:**
+
+1. The message is **not** posted to the thread
+2. The message is **redirected to the main timeline** automatically (content is not lost)
+3. The bot receives an error message telling it the thread is closed and to start a new branch
+
+```
+📢 Thread closed (<title>) [<thread_event_id>] — stale (30m). Message redirected to main timeline. Start a new branch for follow-up.
+```
+
+**Rationale:** The Captain prefers noisy over opaque. Work must be visible on the main timeline. If a thread runs long enough to become stale, the bot needs to surface its work.
+
+### Configuration
+
+Both thresholds are configurable via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `THREAD_STALE_NUDGE_MS` | `600000` (10 min) | Time before soft nudge |
+| `THREAD_STALE_CLOSE_MS` | `1800000` (30 min) | Time before hard close |
+
+### Interaction with BB Timeout
+
+`BRANCH_BRAIN_TIMEOUT_MS` (default 10 min) kills the BB process. Thread staleness is separate — it applies to the thread itself regardless of whether the BB is still running. A thread can be stale-closed even after the BB has already exited, if no merge occurred.
+
 ## Signals — Branch and Merge
 
 Branch lifecycle uses two signals (see [22-signals](22-signals.md)). No MCP tools needed.
@@ -207,3 +250,12 @@ Thread routing for non-branch messages uses the Signals protocol (see [22-signal
 
 9. **No nested branching** — Branch brain attempts to branch.
    *Check:* Rejected.
+
+10. **Stale nudge** — Branch runs longer than `THREAD_STALE_NUDGE_MS`.
+   *Check:* Loudspeaker posts nudge in thread after threshold. One-time only.
+
+11. **Stale close** — Branch runs longer than `THREAD_STALE_CLOSE_MS`.
+   *Check:* Thread closed. Bot's next message redirected to main timeline. Error message delivered.
+
+12. **Stale close content preserved** — Bot posts to a stale-closed thread.
+   *Check:* Message appears on main timeline (not in thread). Bot informed of closure.

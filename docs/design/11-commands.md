@@ -15,7 +15,7 @@ Commands work from any room the operator account has joined — duty rooms (via 
 | Command | Effect |
 |---------|--------|
 | `!todo [bot]` | Show bot's active tasks. No arg = all bots. |
-| `!report [bot]` | Send awake bot(s) to duty room. Skips sleeping bots. |
+| `!report [bot]` | **Untargeted:** report only awake bots (skip sleeping). **Targeted** (`!report tali`): wake sleeping bot first, then report to duty. |
 | `!dismiss [bot]` | Remove from duty, back to quarters. |
 | `!go [room] [bot]` | Send bot to a non-duty room (e.g. lounge). No args = list rooms. |
 | `!wake [bot]` | Start or restart container (sleeping → wake; awake → stop+rebuild+restart). |
