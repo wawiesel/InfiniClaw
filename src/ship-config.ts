@@ -289,6 +289,7 @@ export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<
 }
 
 export interface ShipEntry {
+  name?: string;            // full display name, e.g. "Poseidon"
   hostname: string;
   emoji?: string;
   type?: string;          // e.g. "cruiser"
@@ -406,15 +407,14 @@ export const ROLE_ROOMS: Record<string, { room: string; icon: string }> = {
 };
 
 /**
- * Short display tag: "🦁⭐ Herc" with status pip.
- * pip overrides the auto-derived status ('' commissioned, 💤 decommissioned).
+ * Display tag: full ship name from ships.json (e.g. "Poseidon", "Hercules").
+ * Falls back to hostname if ship not found.
  */
-export function shipTag(hostname?: string, pip?: string): string {
+export function shipTag(hostname?: string, _pip?: string): string {
   const found = findShipByHostname(hostname);
   if (!found) return hostname ?? os.hostname();
-  const [name, entry] = found;
-  const statusPip = pip ?? (entry.commissioned !== false ? '◉' : '💤');
-  return entry.emoji ? `${entry.emoji}${statusPip} ${name}` : `${statusPip} ${name}`;
+  const [shortName, entry] = found;
+  return entry.name ?? shortName;
 }
 
 /**
