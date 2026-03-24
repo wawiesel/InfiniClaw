@@ -2037,6 +2037,9 @@ interface BranchTaskEntry {
   createdAt: number;
   sessionId?: string;   // BB session ID stored for context recovery on relay restart
   completed?: boolean;  // true when BB has finished; kept for TTL-based thread reactivation
+  awaitingMerge?: boolean;   // design doc 28: BB done, waiting for MB {{merge}}/{{abort}}
+  mergeSummary?: string;     // BB's merge summary text, stored for squash post
+  poolSlotInfo?: { bot: string; slot: number; index: string; userId: string; homeserver: string }; // pool slot to release on merge/abort
 }
 
 function branchTasksPath(): string {
@@ -2093,6 +2096,91 @@ function completeBranchTask(threadId: string): void {
       fs.writeFileSync(p, JSON.stringify(tasks, null, 2));
     }
   } catch (err) { log(`branchTasks: complete failed: ${errStr(err)}`); }
+}
+
+/**
+ * Design doc 28: handle MB {{merge}} or {{abort}} for a pool-mode BB thread.
+ * Called when a bot posts a message containing {{merge}} or {{abort}} in a thread
+ * that has awaitingMerge=true.
+ */
+async function handleBbMergeAbort(
+  conn: RoomConn, threadId: string, action: 'merge' | 'abort', conns: RoomConn[],
+): Promise<void> {
+  const tasks = readBranchTasks();
+  const task = tasks[threadId];
+  if (!task?.awaitingMerge) {
+    log(`bbMergeAbort: thread=${threadId.slice(0, 20)} not awaiting merge`);
+    return;
+  }
+
+  const title = task.title || task.objective?.split('\n')[0]?.trim() || 'Branch Brain';
+  const bot = task.bot;
+  const poolInfo = task.poolSlotInfo;
+
+  // Release pool slot and reset display name
+  if (poolInfo) {
+    try {
+      const slot: BbPoolSlot = { bot: poolInfo.bot, slot: poolInfo.slot, index: poolInfo.index, userId: poolInfo.userId, accessToken: '', homeserver: poolInfo.homeserver };
+      // We need the token to reset display name — re-read from bot env
+      const botEnv = loadProfileEnv(resolveRoot(), poolInfo.bot);
+      const tokenKey = `BB_POOL_TOKEN_${poolInfo.slot + 1}`;
+      slot.accessToken = botEnv[tokenKey] || '';
+      if (slot.accessToken) {
+        await resetBbDisplayName(slot).catch(() => {});
+      }
+      releaseBbPoolSlot(poolInfo.bot, poolInfo.slot);
+      log(`bbMergeAbort: pool slot ${poolInfo.slot} released for ${poolInfo.bot}`);
+    } catch (err) { log(`bbMergeAbort: pool release failed: ${errStr(err)}`); }
+  }
+
+  // Mark task as completed
+  completeBranchTask(threadId);
+  task.awaitingMerge = false;
+  writeBranchTask(threadId, task);
+
+  if (action === 'merge') {
+    const summary = task.mergeSummary || '(no summary)';
+    // Post merge marker in thread
+    void threadReply(conn, threadId, `🪾 ${title} — ${summary}`);
+    // Post squash summary on main timeline via loudspeaker
+    const mergeText = `🪾 ${title} ✅ — ${summary.slice(0, 2000)}`;
+    const ls = loadLoudspeakerConfig();
+    if (ls) {
+      try {
+        const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
+        if (token) await relaySend(ls.homeserver, token, conn.roomId, mergeText);
+        else if (conn.accessToken) await relaySend(conn.homeserver, conn.accessToken, conn.roomId, mergeText);
+      } catch (err) { log(`bbMergeAbort: merge post failed: ${errStr(err)}`); }
+    } else if (conn.accessToken) {
+      await relaySend(conn.homeserver, conn.accessToken, conn.roomId, mergeText).catch((err) => log(`bbMergeAbort: merge post (no ls): ${errStr(err)}`));
+    }
+    // Write merge_request IPC task
+    if (bot) {
+      try {
+        const groupFolder = Object.entries(readBranchTasks()).find(([k]) => k === threadId)?.[1]?.chat_jid?.replace(/^matrix:/, '')?.replace(/[^a-zA-Z0-9]/g, '_') || 'unknown';
+        const ipcTasksDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'ipc', groupFolder, 'tasks');
+        fs.mkdirSync(ipcTasksDir, { recursive: true });
+        const taskFile = path.join(ipcTasksDir, `merge_request-${Date.now()}.json`);
+        fs.writeFileSync(taskFile, JSON.stringify({ type: 'merge_request', thread_id: threadId, bot, summary }));
+      } catch (err) { log(`bbMergeAbort: merge IPC failed: ${errStr(err)}`); }
+    }
+    log(`bbMergeAbort: merged thread=${threadId.slice(0, 20)} title=${title}`);
+  } else {
+    // Abort: post cancellation notice
+    void threadReply(conn, threadId, `❌ ${title} — aborted by MB`);
+    const abortText = `❌ ${title} — aborted`;
+    const ls = loadLoudspeakerConfig();
+    if (ls) {
+      try {
+        const token = await getLoudspeakerToken(ls.homeserver, ls.username, ls.password);
+        if (token) await relaySend(ls.homeserver, token, conn.roomId, abortText);
+        else if (conn.accessToken) await relaySend(conn.homeserver, conn.accessToken, conn.roomId, abortText);
+      } catch (err) { log(`bbMergeAbort: abort post failed: ${errStr(err)}`); }
+    } else if (conn.accessToken) {
+      await relaySend(conn.homeserver, conn.accessToken, conn.roomId, abortText).catch((err) => log(`bbMergeAbort: abort post (no ls): ${errStr(err)}`));
+    }
+    log(`bbMergeAbort: aborted thread=${threadId.slice(0, 20)} title=${title}`);
+  }
 }
 
 /**
@@ -2421,14 +2509,7 @@ async function spawnBranchBrain(
 
   // Handle completion asynchronously
   bbResult.then(async (result) => {
-    // Release BB pool slot (design doc 28)
-    if (bbPoolSlot) {
-      await resetBbDisplayName(bbPoolSlot).catch(() => {});
-      releaseBbPoolSlot(bbPoolSlot.bot, bbPoolSlot.slot);
-      log(`branchBrain: pool slot ${bbPoolSlot.slot} released`);
-    }
     activeBranchBrainProcs.delete(replyThreadId);
-    completeBranchTask(replyThreadId);
     if (bot) recordBranchBrainResult(bot, postedCount > 0);
     log(`branchBrain: done status=${result.status} posted=${postedCount}`);
 
@@ -2437,8 +2518,30 @@ async function spawnBranchBrain(
       bbThreadReply(`Branch Brain completed with no output${errDetail}`).catch((err) => log(`branchBrain: post failed: ${errStr(err)}`));
     }
 
-    // Post merge marker in thread — use {{merge}} summary if provided, else last output
     const mergeDescription = mergeSummary || (lastPostedText ? lastPostedText.slice(0, 2000) : '(no output)');
+
+    // Design doc 28: when pool mode is active, defer merge — MB must send {{merge}} or {{abort}}.
+    if (bbPoolSlot) {
+      // Store pending merge state so handleBbMergeAbort can finalize later
+      const tasks = readBranchTasks();
+      const task = tasks[replyThreadId];
+      if (task) {
+        task.awaitingMerge = true;
+        task.mergeSummary = mergeDescription;
+        task.poolSlotInfo = { bot: bbPoolSlot.bot, slot: bbPoolSlot.slot, index: bbPoolSlot.index, userId: bbPoolSlot.userId, homeserver: bbPoolSlot.homeserver };
+        writeBranchTask(replyThreadId, task);
+      }
+      // Post summary callout in thread for MB to review
+      bbThreadReply(`✅ BB work complete. Summary:\n\n${mergeDescription}\n\n⏳ Awaiting MB review — send \`{{merge}}\` to approve or \`{{abort}}\` to discard.`).catch((err) => log(`branchBrain: review callout failed: ${errStr(err)}`));
+      log(`branchBrain: pool mode — deferred merge, awaiting MB {{merge}}/{{abort}} for thread=${replyThreadId.slice(0, 20)}`);
+      // Do NOT release pool slot or reset display name yet — kept until merge/abort
+      return;
+    }
+
+    // Non-pool mode: auto-merge as before
+    completeBranchTask(replyThreadId);
+
+    // Post merge marker in thread
     bbThreadReply(`🪾 ${announcedTitle} — ${mergeDescription}`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
 
     // Persist notes for context recovery
@@ -2451,8 +2554,7 @@ async function spawnBranchBrain(
         fs.writeFileSync(path.join(botDataDir, `bb-pending-${replyThreadId.slice(0, 12)}.md`), content);
       } catch (err) { log(`branchBrain: failed to write pending delivery: ${errStr(err)}`); }
 
-      // Write merge_request IPC task so ipc-watcher clears delegateThreadIds even if
-      // the BB exited without sending {{merge}} (timeout, crash, or clean exit).
+      // Write merge_request IPC task so ipc-watcher clears delegateThreadIds
       try {
         const ipcTasksDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'ipc', groupFolder, 'tasks');
         fs.mkdirSync(ipcTasksDir, { recursive: true });
@@ -2462,7 +2564,7 @@ async function spawnBranchBrain(
       } catch (err) { log(`branchBrain: failed to write merge_request IPC task: ${errStr(err)}`); }
     }
 
-    // Loudspeaker merge notice on main timeline — ONLY path for BB results to reach main brain.
+    // Loudspeaker merge notice on main timeline
     if (bot) {
       const existing = branchBrainRestartTimers.get(bot);
       if (existing) clearTimeout(existing);
@@ -2470,7 +2572,6 @@ async function spawnBranchBrain(
       const timer = setTimeout(() => {
         branchBrainRestartTimers.delete(bot);
         const status = brainSucceeded ? '✅' : '⛔';
-        // Prefer {{merge}} summary; skip raw tool call breadcrumbs as fallback
         const hasCleanSummary = !!mergeSummary && (mergeSummary as string).length > 5;
         const summaryLine = hasCleanSummary ? ` — ${(mergeSummary as string).slice(0, 2000)}` : '';
         const mergeText = `🪾 ${announcedTitle} ${status}${summaryLine}`;
@@ -2502,7 +2603,7 @@ async function spawnBranchBrain(
     log(`branchBrain: spawn error: ${errStr(err)}`);
     bbThreadReply(`⚠️ Branch Brain failed: ${errStr(err)}`).catch(() => {});
 
-    // Write merge_request IPC task so ipc-watcher clears delegateThreadIds on crash/error.
+    // Write merge_request IPC task on crash/error
     if (bot) {
       try {
         const ipcTasksDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'ipc', groupFolder, 'tasks');
@@ -5109,6 +5210,22 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               const isThreadReply = relates?.rel_type === 'm.thread' && !!relates.event_id;
 
               if (isThreadReply && relates?.event_id) {
+                // Design doc 28: detect {{merge}}/{{abort}} from MB in threads awaiting review
+                const awaitTasks = readBranchTasks();
+                const awaitTask = awaitTasks[relates.event_id];
+                if (awaitTask?.awaitingMerge && body.includes('{{') && senderLocal && liveFleet[senderLocal]) {
+                  const { signals: threadSigs } = extractSignals(body);
+                  const mergeSig = threadSigs.find(s => s.command === 'merge');
+                  const abortSig = threadSigs.find(s => s.command === 'abort');
+                  if (mergeSig) {
+                    log(`bbMergeAbort: {{merge}} from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
+                    void handleBbMergeAbort(conn, relates.event_id, 'merge', conns);
+                  } else if (abortSig) {
+                    log(`bbMergeAbort: {{abort}} from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
+                    void handleBbMergeAbort(conn, relates.event_id, 'abort', conns);
+                  }
+                }
+
                 // Thread closure: completed BB threads are dead. Reply via loudspeaker.
                 const tasks = readBranchTasks();
                 const task = tasks[relates.event_id];
