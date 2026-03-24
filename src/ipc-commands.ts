@@ -863,7 +863,8 @@ async function handleSubmitVerification(data: CommandData, ctx: InfiniClawIpcCon
 
 async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   const room = typeof data.room === 'string' ? data.room : '';
-  if (!isRoomChief(ASSISTANT_NAME, room)) {
+  const senderBot = typeof data.bot === 'string' ? data.bot : ASSISTANT_NAME;
+  if (!isRoomChief(senderBot, room)) {
     await safeSend(ctx, parseChatJid(data), '❌ Only the Chief can assign WBS items.');
     return;
   }
@@ -914,7 +915,8 @@ async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Pr
 
 async function handleWbsComplete(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   const room = typeof data.room === 'string' ? data.room : '';
-  if (!isRoomChief(ASSISTANT_NAME, room)) {
+  const senderBot = typeof data.bot === 'string' ? data.bot : ASSISTANT_NAME;
+  if (!isRoomChief(senderBot, room)) {
     await safeSend(ctx, parseChatJid(data), '❌ Only the Chief can complete WBS items.');
     return;
   }
@@ -956,7 +958,8 @@ async function handleWbsComplete(data: CommandData, ctx: InfiniClawIpcContext): 
 
 async function handleWbsWrite(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
   const room = typeof data.room === 'string' ? data.room : '';
-  if (!isRoomChief(ASSISTANT_NAME, room)) {
+  const senderBot = typeof data.bot === 'string' ? data.bot : ASSISTANT_NAME;
+  if (!isRoomChief(senderBot, room)) {
     await safeSend(ctx, parseChatJid(data), '❌ Only the Chief can write WBS items.');
     return;
   }
