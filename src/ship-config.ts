@@ -460,6 +460,7 @@ export const ROLE_ROOMS: Record<string, { room: string; icon: string }> = {
   navigator: { room: 'bridge',       icon: '🌉' },
   engineer:  { room: 'engineering',  icon: '⚙️' },
   architect: { room: 'astrometrics', icon: '🔭' },
+  trader:    { room: 'bazaar',       icon: '💰' },
   normie:    { room: 'lounge',       icon: '🦋' },
 };
 
