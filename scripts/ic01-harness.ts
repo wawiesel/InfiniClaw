@@ -374,6 +374,68 @@ test('wbs_complete gate: rejects items not in git log on main', async (_session)
   );
 });
 
+// WBS 17.8: stale thread TTL expiry unblocks branch dispatch after timeout
+//
+// Requires the IC01 test fleet to be configured with a short BRANCH_THREAD_TTL_MS
+// (e.g. 5 000 ms) so the test completes in under a minute.  Set IC01_STALE_TTL_MS
+// in the harness env to match whatever the fleet uses; defaults to 5 000 ms.
+test('stale-thread-ttl: TTL expiry unblocks branch dispatch', async (session) => {
+  const staleTtlMs = Number(process.env['IC01_STALE_TTL_MS'] ?? 5_000);
+
+  // Step 1 — send !health to create an active reply-thread context in the bot
+  const sentAt = Date.now();
+  const threadRootId = await send(session, 'engineering', '!health');
+  const healthReply = await waitFor(
+    session,
+    'engineering',
+    /health|alive|ok|up|running|🟢|🔴|🟡/i,
+    { afterTs: sentAt, timeoutMs: 20_000 },
+  );
+  assert(healthReply !== null, 'stale-thread-ttl: prerequisite failed — no !health reply (bot down?)');
+
+  // Step 2 — wait long enough for the bot's BRANCH_THREAD_TTL_MS to elapse
+  const waitMs = staleTtlMs + 1_000; // 1 s overshoot ensures expiry
+  console.log(`    stale-thread-ttl: sleeping ${waitMs}ms for thread TTL to expire…`);
+  await sleep(waitMs);
+
+  // Step 3 — send !fleet; the bot should dispatch fresh because the stale thread
+  // context was cleared by isActiveThreadFresh() when the TTL elapsed
+  const dispatchAt = Date.now();
+  await send(session, 'engineering', '!fleet');
+
+  // Step 4 — collect all new bot messages in the standard timeout window
+  const msgs = await collectBotMessages(session, 'engineering', TIMEOUT_MS, dispatchAt);
+  assert(
+    msgs.length > 0,
+    'stale-thread-ttl: no bot response after TTL expiry — dispatch appears blocked',
+  );
+
+  const fleetPat = /fleet|infiniclaw|nanoclaw|IC0[01]|online|offline/i;
+
+  // Assert A: a fleet response arrived (bot was not blocked by stale thread)
+  const fleetMsg = msgs.find((e) => fleetPat.test(e.content?.body ?? ''));
+  assert(
+    fleetMsg !== undefined,
+    `stale-thread-ttl: no fleet response observed — branch dispatch still blocked after TTL\n` +
+      `  ${msgs.length} bot message(s) collected, none matched fleet pattern`,
+  );
+
+  // Assert B: the fleet response is NOT routed into the old stale thread root
+  const stallyRouted = msgs.filter((e) => {
+    const rel = e.content?.['m.relates_to'];
+    return (
+      rel?.rel_type === 'm.thread' &&
+      rel?.event_id === threadRootId &&
+      fleetPat.test(e.content?.body ?? '')
+    );
+  });
+  assert(
+    stallyRouted.length === 0,
+    `stale-thread-ttl: fleet reply still routed into expired thread ${threadRootId} — ` +
+      `TTL did not clear the active reply-thread context`,
+  );
+});
+
 // ── Entrypoint ────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
