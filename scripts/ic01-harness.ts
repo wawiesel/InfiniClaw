@@ -198,6 +198,110 @@ test('commit-hygiene: no Co-Authored-By in recent commits', async (_session) => 
   );
 });
 
+// ── Thread routing helpers ────────────────────────────────────────────
+
+/**
+ * Extended event shape exposing m.relates_to (not in the base SyncResponse type).
+ */
+interface ThreadEvent {
+  type: string;
+  sender: string;
+  event_id: string;
+  origin_server_ts: number;
+  content?: {
+    body?: string;
+    msgtype?: string;
+    'm.relates_to'?: { rel_type?: string; event_id?: string };
+  };
+}
+
+/**
+ * Collect all new non-own room.message events within `windowMs` after `afterTs`.
+ * Snapshots the sync position first so only genuinely new events are returned.
+ */
+async function collectBotMessages(
+  session: Session,
+  roomKey: string,
+  windowMs: number,
+  afterTs: number,
+): Promise<ThreadEvent[]> {
+  const room = resolveRoom(session, roomKey);
+  const deadline = Date.now() + windowMs;
+  const collected: ThreadEvent[] = [];
+  const initial = await matrixSync(session.homeserver, session.token, null, null, 0);
+  let syncToken = initial.next_batch;
+  while (Date.now() < deadline) {
+    await sleep(POLL_MS);
+    const data = await matrixSync(session.homeserver, session.token, syncToken, null, 5_000);
+    syncToken = data.next_batch;
+    for (const ev of data.rooms?.join?.[room.roomId]?.timeline?.events ?? []) {
+      if (ev.type !== 'm.room.message') continue;
+      if (ev.sender === session.userId) continue;
+      if (ev.origin_server_ts < afterTs) continue;
+      collected.push(ev as unknown as ThreadEvent);
+    }
+  }
+  return collected;
+}
+
+// WBS 17.5: thread routing — replies land in correct thread, no main timeline bleed
+test('thread routing: replies land in thread, no main timeline bleed', async (session) => {
+  const room = resolveRoom(session, 'engineering');
+
+  // Step 1 — send !health to establish the thread root (bot must already be up)
+  const healthSentAt = Date.now();
+  const threadRootId = await send(session, 'engineering', '!health');
+  const healthReply = await waitFor(
+    session,
+    'engineering',
+    /health|alive|ok|up|running|🟢|🔴|🟡/i,
+    { afterTs: healthSentAt, timeoutMs: 20_000 },
+  );
+  assert(healthReply !== null, 'thread routing: prerequisite failed — no !health reply (bot down?)');
+
+  // Step 2 — send !fleet inside the thread created by the !health event
+  const threadedAt = Date.now();
+  const threadedOk = await matrixSend({
+    homeserver: session.homeserver,
+    token: session.token,
+    roomId: room.roomId,
+    text: '!fleet',
+    threadRootId,
+    plain: true,
+  });
+  assert(threadedOk !== undefined, 'thread routing: failed to send threaded !fleet');
+
+  // Step 3 — collect all bot messages in the window following the threaded send
+  const msgs = await collectBotMessages(session, 'engineering', TIMEOUT_MS, threadedAt);
+
+  // Fleet pattern: avoid status pips (🟢/🔴/🟡) to prevent overlap with !health output
+  const fleetPat = /fleet|infiniclaw|nanoclaw|IC0[01]|online|offline/i;
+
+  // Assert A: a fleet reply arrived with the correct thread relation
+  const inThread = msgs.filter((e) => {
+    const rel = e.content?.['m.relates_to'];
+    return rel?.rel_type === 'm.thread' && rel?.event_id === threadRootId;
+  });
+  const threadFleet = inThread.find((e) => fleetPat.test(e.content?.body ?? ''));
+  assert(
+    threadFleet !== undefined,
+    `thread routing: no fleet reply found in thread ${threadRootId}\n` +
+      `  ${msgs.length} bot message(s) collected, ${inThread.length} in thread`,
+  );
+
+  // Assert B: no fleet reply posted outside the thread (main timeline bleed)
+  const bleeds = msgs.filter((e) => {
+    const rel = e.content?.['m.relates_to'];
+    const inCorrectThread = rel?.rel_type === 'm.thread' && rel?.event_id === threadRootId;
+    return !inCorrectThread && fleetPat.test(e.content?.body ?? '');
+  });
+  assert(
+    bleeds.length === 0,
+    `thread routing: ${bleeds.length} fleet reply(ies) outside thread (main timeline bleed)\n` +
+      `  First: ${preview(bleeds[0]?.content?.body ?? '')}`,
+  );
+});
+
 // ── Entrypoint ────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
