@@ -63,10 +63,16 @@ let cached: ShipConfig | null = null;
 /**
  * Module-level cache of S3-merged fleet state.
  * Populated by loadFleetAsync() at startup, updated by writeFleetAsync().
- * When set, loadFleet() returns this instead of disk-only data,
- * making S3 the effective source of truth for all callers.
+ * S3 is the authoritative source; disk is read-only bootstrap/cache.
+ * loadFleet() throws if this is null (loadFleetAsync not yet called).
  */
 let s3FleetCache: Record<string, BotEntry> | null = null;
+
+/**
+ * Module-level cache of fleet roles (role → { rw? }) seeded from disk fleet.json
+ * during loadFleetAsync() bootstrap. Runtime reads use this cache instead of disk.
+ */
+let s3RolesCache: Record<string, { rw?: string[] }> | null = null;
 
 /**
  * Module-level cache of S3-loaded ships.
@@ -210,11 +216,22 @@ export function botsPath(): string {
 }
 
 /** Load the full fleet config (all bots, not just this ship's).
- * Returns S3-merged cache when available (set by loadFleetAsync at startup).
- * Falls back to disk-only when S3 cache hasn't been populated yet. */
+ * Returns the S3-authoritative cache (set by loadFleetAsync at startup).
+ * Throws if loadFleetAsync() has not been called — disk fallback is bootstrap only. */
 export function loadFleet(): Record<string, BotEntry> {
-  if (s3FleetCache) return s3FleetCache;
-  return loadFleetFromDisk();
+  if (!s3FleetCache) {
+    throw new Error('Fleet not initialized — call loadFleetAsync() at startup before loadFleet()');
+  }
+  return s3FleetCache;
+}
+
+/**
+ * Get the fleet roles map (role → { rw? }) from the bootstrap cache.
+ * Populated by loadFleetAsync() from disk fleet.json on startup.
+ * Returns null if loadFleetAsync() has not been called yet.
+ */
+export function getFleetRoles(): Record<string, { rw?: string[] }> | null {
+  return s3RolesCache;
 }
 
 /** Load fleet from disk only (fleet.json). Bypasses S3 cache.
@@ -254,6 +271,13 @@ export function writeFleet(fleet: Record<string, BotEntry>): void {
  */
 export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
   const fleet = loadFleetFromDisk();
+  // Seed roles cache from disk during bootstrap (single read for runtime use)
+  try {
+    const raw = readJson<Record<string, unknown>>(FLEET_PATH);
+    if (isRecord(raw.roles)) {
+      s3RolesCache = raw.roles as Record<string, { rw?: string[] }>;
+    }
+  } catch { /* roles cache left null — isQuartersOnlyRole falls back to false */ }
   try {
     const { listKeys, downloadJson, uploadJson } = await s3Helpers();
 
@@ -291,20 +315,18 @@ export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
 }
 
 /**
- * Write fleet state: disk first (synchronous cache), then S3 (async).
- * Disk-first ensures loadFleet() always sees the latest state immediately.
- * Updates the S3 fleet cache so all callers see the new state.
+ * Write fleet state: S3-first (authoritative), disk as write-through cache.
+ * In-memory cache is updated immediately so loadFleet() sees the new state.
  *
  * Writes two S3 keys:
  *   - fleet-config/{fleetId}.json — full fleet (all bots), S3-authoritative
  *   - fleet-state/{ship}.json     — this ship's bots only, for fleet-report protocol
+ * Disk fleet.json is updated as a cache after S3 (best-effort).
  */
 export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<void> {
-  // Disk first — synchronous so disk-only fallback is fresh
-  writeFleet(fleet);
-  // Update in-memory cache — all loadFleet() callers see the new state immediately
+  // Update in-memory cache immediately — loadFleet() callers see the new state at once
   s3FleetCache = fleet;
-  // S3: build this ship's subset for fleet-state key (fleet-report protocol)
+  // S3 first — authoritative source for all fleet state
   const hostname = os.hostname();
   const shipName = findShipByHostname(hostname)?.[0] ?? hostname;
   const shipBots: Record<string, BotEntry> = {};
@@ -318,7 +340,9 @@ export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<
     await uploadJson(fleetConfigKey(), { ts: Date.now(), bots: fleet });
     // Per-ship runtime state — for fleet-report polling protocol
     await uploadJson(`fleet-state/${shipName}.json`, { ts: Date.now(), bots: shipBots });
-  } catch { /* S3 write failed — disk was already written above */ }
+  } catch { /* S3 write failed — disk cache update still attempted below */ }
+  // Disk is write-through cache — update after S3 (best-effort)
+  try { writeFleet(fleet); } catch { /* disk write failed — S3 is authoritative */ }
 }
 
 export interface ShipEntry {
@@ -455,8 +479,12 @@ export function shipTag(hostname?: string, _pip?: string): string {
  */
 export function isQuartersOnlyRole(role: string): boolean {
   try {
-    const raw = readJson<Record<string, unknown>>(FLEET_PATH);
-    const roleConfig = (raw.roles as Record<string, { rw?: string[] }> | undefined)?.[role];
+    // Use S3 cache (populated by loadFleetAsync bootstrap); disk fallback for pre-init callers
+    const roles = s3RolesCache ?? (() => {
+      const raw = readJson<Record<string, unknown>>(FLEET_PATH);
+      return isRecord(raw.roles) ? raw.roles as Record<string, { rw?: string[] }> : null;
+    })();
+    const roleConfig = roles?.[role];
     return !roleConfig?.rw || roleConfig.rw.length === 0;
   } catch {
     return false; // on error, don't block
@@ -468,4 +496,5 @@ export function clearShipConfigCache(): void {
   cached = null;
   s3FleetCache = null;
   s3ShipsCache = null;
+  s3RolesCache = null;
 }

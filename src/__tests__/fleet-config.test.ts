@@ -10,6 +10,8 @@ import {
   clearShipConfigCache,
   isValidBotName,
   SAFE_BOT_NAME,
+  loadFleet,
+  getFleetRoles,
 } from '../ship-config.js';
 
 beforeEach(() => {
@@ -140,6 +142,20 @@ describe('fleet-report S3 key format', () => {
   it('fleet-report key does not contain double slashes', () => {
     const key = `fleet-report/${fleetId()}/Herc.json`;
     expect(key.includes('//')).toBe(false);
+  });
+});
+
+// ── S3-only fleet runtime (WBS 10.5) ─────────────────────────────────────────
+
+describe('loadFleet — S3-only runtime', () => {
+  it('throws when cache is not initialized (no loadFleetAsync called)', () => {
+    expect(() => loadFleet()).toThrow('Fleet not initialized');
+  });
+});
+
+describe('getFleetRoles — returns null before loadFleetAsync', () => {
+  it('returns null when roles cache is empty', () => {
+    expect(getFleetRoles()).toBeNull();
   });
 });
 

@@ -8,7 +8,7 @@ import path from 'path';
 import { createHash } from 'crypto';
 import { logger } from 'nanoclaw/logger.js';
 import { isRecord } from './utils.js';
-import { isValidBotName } from './ship-config.js';
+import { isValidBotName, loadFleet, getFleetRoles } from './ship-config.js';
 import type { VolumeMount } from './run-container.js';
 
 interface AllowEntry {
@@ -23,7 +23,6 @@ interface AllowList {
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'infiniclaw');
 const ALLOW_LIST_PATH = path.join(CONFIG_DIR, 'allow-list.json');
 const PATHS_PATH = path.join(CONFIG_DIR, 'paths.json');
-const FLEET_PATH = path.join(CONFIG_DIR, 'secrets', 'bots', 'fleet.json');
 
 function expandTilde(p: string): string {
   const expanded = p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
@@ -209,13 +208,14 @@ function loadPaths(): Record<string, string> {
   }
 }
 
-/** Get role-based rw paths for a bot from fleet.json roles + paths.json. */
+/** Get role-based rw paths for a bot from S3 fleet cache (roles + paths.json). */
 function roleMounts(bot: string): AllowEntry[] {
   try {
-    const fleet = JSON.parse(fs.readFileSync(FLEET_PATH, 'utf-8'));
-    const botEntry = fleet.bots?.[bot];
+    const fleet = loadFleet();
+    const botEntry = fleet[bot];
     if (!botEntry?.role) return [];
-    const roleConfig = fleet.roles?.[botEntry.role];
+    const roles = getFleetRoles();
+    const roleConfig = roles?.[botEntry.role];
     if (!roleConfig?.rw) return [];
     const paths = loadPaths();
     return roleConfig.rw
