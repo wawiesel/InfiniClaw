@@ -131,7 +131,8 @@ const FAILURE_MAX_INTERVAL = 8 * 60 * 60_000;  // 8 hours
 const failureStates: Record<string, FailureState> = {};
 
 function findEngConn(conns: RoomConn[]): RoomConn | undefined {
-  return conns.find(c => c.name === 'engineering') || conns[0];
+  const engRoom = ROLE_ROOMS['engineer']?.room ?? 'engineering';
+  return conns.find(c => c.name === engRoom) || conns[0];
 }
 
 function formatTimestamp(): string {
@@ -2912,6 +2913,7 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
                 ensurePodmanReady();
                 bootstrapBot(root, bot);
                 writeCrewStatus(root, bot);
+                await setBotDisplayStatus(root, bot, 'quarters');
                 void injectWbsTasks(root, bot);
                 const matEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
                 for (const c of conns) {
@@ -4014,10 +4016,12 @@ function registerRelayCommands(): void {
         const ships = loadShips();
         const me = Object.entries(ships).find(([, e]) => e.hostname === HOSTNAME);
         if (!me) { await helpReply(conn, `${thisShipName()} not in ships.json`); return; }
+        const root = resolveRoot();
         for (const bot of getActiveBots()) {
           stopBot(bot);
           killStaleContainers(bot);
           fleetUpdate(bot, { status: 'sleep' });
+          await setBotDisplayStatus(root, bot, 'sleep');
         }
         me[1].commissioned = false;
         await writeShipsAsync(ships);
@@ -4217,6 +4221,7 @@ function registerRelayCommands(): void {
         fleetUpdate(bot, { status: 'transit', ship: targetShip });
         fleetDirty = true;
         persistFleet();
+        await setBotDisplayStatus(resolveRoot(), bot, 'transit');
         await send(`✅ ${botDisplayName} dematerialized — awaiting materialization on ${targetName}`);
       } catch (err) {
         await send(`⛔ transport failed — ${errStr(err)}`);
@@ -4866,6 +4871,9 @@ async function handleRank(cmd: string, conn: RoomConn, allConns: RoomConn[], isP
   fleetUpdate(result.swap, { rank: result.swapRank });
   fleetDirty = true;
   persistFleet();
+  // Update display names for both bots (rank medal changes)
+  await setBotDisplayStatus(root, result.target, liveFleet[result.target]?.status ?? 'quarters');
+  await setBotDisplayStatus(root, result.swap, liveFleet[result.swap]?.status ?? 'quarters');
   const swapEnv = (() => { try { return loadProfileEnv(root, result.swap); } catch { return null; } })();
   const swapDisplayName = swapEnv?.ASSISTANT_NAME || capitalizeName(result.swap);
   await send(formatRerankBotMsg(botDisplayName, result.targetRank, swapDisplayName, result.swapRank, role));

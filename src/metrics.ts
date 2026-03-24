@@ -21,6 +21,7 @@ import {
   loadFleet,
   thisShipName,
   safeLoadShips,
+  ROLE_ROOMS,
   type BotEntry,
 } from './ship-config.js';
 import { errStr } from './utils.js';
@@ -842,7 +843,9 @@ export function formatAllMetrics(snapshot: MetricsSnapshot): string {
 
 export function formatScopeMetrics(snapshot: MetricsSnapshot, scope: string): string {
   if (scope === 'operator') return formatOperatorMetrics(snapshot.operator);
-  if (scope === 'ship' || scope === 'engineering') return formatShipMetrics(snapshot.shipMetrics);
+  // Any duty room name maps to ship-level metrics
+  const knownRooms = new Set(Object.values(ROLE_ROOMS).map(r => r.room));
+  if (scope === 'ship' || knownRooms.has(scope)) return formatShipMetrics(snapshot.shipMetrics);
   if (scope === 'fleet') return formatFleetMetrics(snapshot.fleet);
   if (scope === 'all') return formatAllMetrics(snapshot);
 

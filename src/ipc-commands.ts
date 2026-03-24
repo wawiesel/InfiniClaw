@@ -13,7 +13,7 @@ import { isOllamaBaseUrl, parseEnvFile, upsertEnvLine } from './env-utils.js';
 
 import { ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { ASSISTANT_ROLE, MAIN_GROUP_FOLDER } from './infini-config.js';
-import { loadShipConfig, loadFleet, writeFleet, writeFleetAsync, shipTag, ROLE_ROOMS, RUNNING_STATUSES } from './ship-config.js';
+import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, writeFleetAsync, shipTag, ROLE_ROOMS, RUNNING_STATUSES } from './ship-config.js';
 import { runHealthCheck as healthCheck } from './health.js';
 import { logger } from 'nanoclaw/logger.js';
 import { errStr } from './utils.js';
@@ -889,7 +889,8 @@ async function handleWbsAssign(data: CommandData, ctx: InfiniClawIpcContext): Pr
     return;
   }
   // Validate bot is present in the target room (issue #156)
-  const fleet = loadFleet();
+  let fleet: Record<string, any>;
+  try { fleet = loadFleet(); } catch { fleet = loadFleetFromDisk(); }
   const botName = assignee.toLowerCase();
   const botEntry = fleet[botName];
   if (!botEntry) {
