@@ -97,6 +97,39 @@ export function fleetConfigKey(): string {
 /** S3 key for the ships registry (S3-authoritative). */
 export const SHIPS_S3_KEY = 'fleet-config/ships.json';
 
+/** S3 key for system aliases (hostname → display name). */
+export const SYSTEM_ALIASES_S3_KEY = 'fleet-config/system-aliases.json';
+
+// ── System aliases (hostname → display name, S3-authoritative) ──
+
+let systemAliasCache: Record<string, string> | null = null;
+
+/**
+ * Load system aliases from S3. Maps hostname → display name
+ * (e.g. "HERACLES" → "Hercules", "mac139160" → "Hermes").
+ * Writes /tmp/infiniclaw-system-name for bash scripts (operator/matrix).
+ */
+export async function loadSystemAliasesAsync(): Promise<Record<string, string>> {
+  try {
+    const { downloadJson } = await s3Helpers();
+    const data = await downloadJson<{ ts?: number; aliases: Record<string, string> }>(SYSTEM_ALIASES_S3_KEY);
+    if (data?.aliases) {
+      systemAliasCache = data.aliases;
+      // Write cache file for bash scripts
+      const name = systemAliasCache[os.hostname()] ?? os.hostname();
+      fs.writeFileSync('/tmp/infiniclaw-system-name', name);
+      return systemAliasCache;
+    }
+  } catch { /* S3 unavailable */ }
+  return systemAliasCache ?? {};
+}
+
+/** Get the display name for a system by hostname. Falls back to raw hostname. */
+export function systemName(hostname?: string): string {
+  const h = hostname ?? os.hostname();
+  return systemAliasCache?.[h] ?? h;
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -407,11 +440,12 @@ export const ROLE_ROOMS: Record<string, { room: string; icon: string }> = {
 };
 
 /**
- * Display tag: system hostname (e.g. "Poseidon", "HERACLES").
+ * Display tag: system display name from S3 aliases.
  * System identity, not ship name — ships and systems are different entities.
+ * Falls back to raw hostname if no alias configured.
  */
 export function shipTag(hostname?: string, _pip?: string): string {
-  return hostname ?? os.hostname();
+  return systemName(hostname);
 }
 
 /**

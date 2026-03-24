@@ -42,7 +42,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME, loadSystemAliasesAsync, systemName } from './ship-config.js';
 import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
@@ -5198,6 +5198,14 @@ async function main(): Promise<void> {
     log('ships: loaded from S3 (disk cache updated)');
   } catch (err) {
     log(`ships: S3 load failed, using disk: ${errStr(err)}`);
+  }
+
+  // Load system aliases from S3 (hostname → display name)
+  try {
+    await loadSystemAliasesAsync();
+    log(`system: display name = ${systemName()}`);
+  } catch (err) {
+    log(`system aliases: S3 load failed, using hostname: ${errStr(err)}`);
   }
 
   // Initialize in-memory fleet state: disk (static) + S3 (runtime) via loadFleetAsync
