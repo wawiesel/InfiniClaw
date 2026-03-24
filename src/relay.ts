@@ -1766,6 +1766,8 @@ const RELAY_FILES = [
   'package.json', 'package-lock.json',
 ];
 
+const DASHBOARD_FILES = ['src/dashboard-server.ts', 'src/status.ts'];
+
 function hasRelayChanges(root: string, commitCount: number): boolean {
   try {
     const execOpts = gitOpts(root, 10_000);
@@ -1774,6 +1776,17 @@ function hasRelayChanges(root: string, commitCount: number): boolean {
     return changed.split('\n').some(f => RELAY_FILES.includes(f));
   } catch {
     return true; // assume relay changed on error
+  }
+}
+
+function hasDashboardChanges(root: string, commitCount: number): boolean {
+  try {
+    const execOpts = gitOpts(root, 10_000);
+    const changed = execSync(`git diff HEAD~${commitCount}..HEAD --name-only`, execOpts).trim();
+    if (!changed) return false;
+    return changed.split('\n').some(f => DASHBOARD_FILES.includes(f));
+  } catch {
+    return false;
   }
 }
 
@@ -1958,6 +1971,17 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
               }
             } else {
               log('git sync: no relay-specific changes, skipping relay restart');
+            }
+            // Auto-restart dashboard pm2 if dashboard-server.ts or status.ts changed
+            if (hasDashboardChanges(resolveRoot(), result.newCommits)) {
+              try {
+                const dashName = `${process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw'}-dashboard`;
+                log('git sync: dashboard files changed — restarting dashboard');
+                execSync(`npx pm2 restart ${dashName}`, gitOpts(resolveRoot(), 10_000));
+                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `📊 dashboard restarted`);
+              } catch (err) {
+                log(`git sync: dashboard restart failed: ${errStr(err)}`);
+              }
             }
           }
         }
