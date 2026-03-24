@@ -492,15 +492,7 @@ async function loadState(): Promise<void> {
   const state = loadBaseState();
   lastTimestamp = state.lastTimestamp;
   lastAgentTimestamp = state.lastAgentTimestamp;
-  // Structural fix: clear sessions on every pm2 start so bots never resume stale
-  // conversations from a prior lifecycle.  Each process start = fresh conversation.
-  // BB forking still works because we save session IDs *after* each container completes.
-  sessions = {};
-  for (const folder of Object.keys(state.sessions)) {
-    deleteSession(folder);
-  }
-  try { fs.unlinkSync(path.join(DATA_DIR, 'current-session-id')); } catch { /* may not exist */ }
-  logger.info('Cleared stale sessions — fresh conversation on startup');
+  sessions = state.sessions;
 
   // Load registered groups from S3 (primary); fall back to SQLite for local/test environments
   const s3Key = `rooms/${ASSISTANT_NAME.toLowerCase()}/registered-groups.json`;
