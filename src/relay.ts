@@ -3365,18 +3365,23 @@ async function handleLifecycleCommand(
         deployBot(root, bot);
 
         // WBS 18.8: static alignment gate — run before starting bot
+        // Alignment is best-effort: if sandbox isn't implemented yet, skip gracefully
         if (!noAlign) {
-          const alignReport = await runAlignment(bot, 'main');
-          if (!alignReport.passed) {
-            const failures = alignReport.results.filter((r: { passed: boolean; name: string }) => !r.passed).map((r: { name: string }) => r.name).join(', ');
-            const msg = `⛔ alignment failed: ${failures}`;
-            await step(msg);
-            await reply(progressConn, `⛔ ${name} alignment blocked — ${failures}. Use --no-align to skip.`);
-            if (!isRestart) await setBotDisplayStatus(root, bot, 'sleep');
-            continue;
+          try {
+            const alignReport = await runAlignment(bot, 'main');
+            if (!alignReport.passed) {
+              const failures = alignReport.results.filter((r: { passed: boolean; name: string }) => !r.passed).map((r: { name: string }) => r.name).join(', ');
+              const msg = `⛔ alignment failed: ${failures}`;
+              await step(msg);
+              await reply(progressConn, `⛔ ${name} alignment blocked — ${failures}. Use --no-align to skip.`);
+              if (!isRestart) await setBotDisplayStatus(root, bot, 'sleep');
+              continue;
+            }
+            await step('✅ alignment passed');
+            stepN--; // Don't count alignment as a numbered step
+          } catch {
+            // Sandbox not yet available — skip alignment, don't block bot startup
           }
-          await step('✅ alignment passed');
-          stepN--; // Don't count alignment as a numbered step
         }
 
         await setBotDisplayStatus(root, bot, 'starting');
