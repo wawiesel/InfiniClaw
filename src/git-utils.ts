@@ -19,6 +19,40 @@ export function execErrOutput(err: unknown): string {
 }
 
 /**
+ * Read the version from package.json in dir and return it as a tag string (e.g. "v1.15.0").
+ * Returns null if the file is missing, invalid JSON, or has no valid non-empty string version.
+ */
+export function packageJsonVersion(dir: string): string | null {
+  try {
+    const raw = fs.readFileSync(path.join(dir, 'package.json'), 'utf-8');
+    const pkg = JSON.parse(raw) as unknown;
+    if (typeof pkg !== 'object' || pkg === null) return null;
+    const v = (pkg as Record<string, unknown>).version;
+    if (typeof v !== 'string' || v === '') return null;
+    return `v${v}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * If the version tag from package.json doesn't exist locally, create an annotated tag and push it.
+ * Returns the tag name if a new tag was created, null if tag already exists or no version found.
+ */
+export function tagVersionIfMissing(dir: string): string | null {
+  const tag = packageJsonVersion(dir);
+  if (!tag) return null;
+  const opts = gitOpts(dir);
+  const existing = execSync(`git tag -l ${tag}`, opts).trim();
+  if (existing) return null;
+  execSync(`git tag -a ${tag} -m "Release ${tag}"`, opts);
+  try {
+    execSync(`git push origin ${tag}`, opts);
+  } catch { /* best effort push */ }
+  return tag;
+}
+
+/**
  * Fetch origin, then stash → rebase onto targetRef → pop stash.
  * On rebase conflict: aborts and hard-resets to targetRef (origin is authoritative).
  * @param targetRef - git ref to advance to (default: 'origin/main'). Can be a tag or commit.
