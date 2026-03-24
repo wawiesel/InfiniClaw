@@ -50,21 +50,9 @@ You should be able to respond to any new message within seconds — not minutes.
 
 - Use emoji reactions freely on messages when appropriate — 👍 for agreement, ✅ when done, ❌ for problems, or any other emoji that fits the situation. Don't overdo it, but don't hold back either.
 
-## IPC tasks
+## Host actions
 
-Write JSON to `/workspace/ipc/tasks/` to trigger host-side actions:
-
-| Task type | Purpose | Example |
-|-----------|---------|---------|
-| `git_push` | Push commits to remote | `{"type":"git_push","remote":"origin","branches":["main"]}` |
-| `holodeck_create` | Create holodeck instance | `{"type":"holodeck_create","bot":"engineer","branch":"feature-x"}` |
-| `holodeck_teardown` | Tear down holodeck instance | `{"type":"holodeck_teardown","bot":"engineer"}` |
-| `holodeck_promote` | Promote holodeck (merge + redeploy) | `{"type":"holodeck_promote","bot":"engineer"}` |
-| `holodeck_send` | Send message to holodeck bot | `{"type":"holodeck_send","bot":"engineer","message":"test message"}` |
-| `holodeck_read` | Read holodeck bot messages | `{"type":"holodeck_read","bot":"engineer","limit":10}` |
-| `holodeck_status` | Check holodeck instance status | `{"type":"holodeck_status","bot":"engineer"}` |
-| `refresh_bot` | Refresh a bot | `{"type":"refresh_bot","bot":"engineer"}` |
-| `rebuild_image` | Rebuild container image | `{"type":"rebuild_image","bot":"architect"}` |
+Use MCP tools (`mcp__infiniclaw__*`) for host-side actions: `git_push`, `git_pull`, `restart_self`, `restart_relay`, `podman_exec`, `run_alignment`.
 
 ## Skills
 

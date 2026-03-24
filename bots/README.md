@@ -33,3 +33,4 @@ Bot memory lives in the secrets repo (`~/.config/infiniclaw/secrets/bots/{bot}/m
 
 - **On-duty heartbeat** (`bots/CLAUDE.md`): Chief (lowest rank, dynamic) uses WBS MCP tools; crew works assigned todo list.
 - **Signals**: All positional, all words — `{{mention Name}}`, `{{branch objective}}`, `{{merge summary}}`, `{{send roomname}}`.
+<!-- auto-updated: 2026-03-24T19:42:36Z -->

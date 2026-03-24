@@ -79,9 +79,9 @@ After every restart:
 2. If auth OK: cancel any existing trading tasks (`mcp__infiniclaw__list_tasks` + `mcp__infiniclaw__cancel_task`), then schedule with `mcp__infiniclaw__schedule_task`: `schedule_type="cron"`, `schedule_value="17 * * * *"`, `context_mode="group"`, prompt: `cd /workspace/extra/InfiniClaw/bots/trader/parker/signal && python3 strategy.py` — extract Captain message from output (after `--- Captain message ---`), send it as text, then send `dashboard.png` via `send_image`.
 3. If auth fails, notify Captain immediately.
 
-## IPC tasks
+## Host actions
 
-Write JSON to `/workspace/ipc/tasks/`: `git_push`, `refresh_bot`, `rebuild_image`
+Use MCP tools: `mcp__infiniclaw__git_push`, `mcp__infiniclaw__restart_self`, `mcp__infiniclaw__schedule_task`, `mcp__infiniclaw__list_tasks`, `mcp__infiniclaw__cancel_task`.
 
 ## Skills
 

@@ -41,12 +41,11 @@ Use `{{send roomname}}` to reach other rooms.
 ## Self-management
 
 - Brain mode: `mcp__infiniclaw__set_brain_mode` + restart. Default Opus. Sonnet only when Captain says.
-- **Self-update:** After pushing a version bump, if the update would be useful to you (e.g. fixes to threading, signals, container mounts, IPC), restart yourself so you run on the new code.
+- **Self-update:** After pushing a version bump, if the update would be useful to you (e.g. fixes to threading, signals, container mounts, MCP tools), restart yourself so you run on the new code.
 
-## IPC tasks
+## Host actions
 
-Write JSON to `/workspace/ipc/tasks/`:
-- `git_push`, `refresh_bot`, `rebuild_image`
+Use MCP tools: `mcp__infiniclaw__git_push`, `mcp__infiniclaw__restart_self`, `mcp__infiniclaw__restart_relay`, `mcp__infiniclaw__podman_exec`.
 
 ## Lobe preferences
 
@@ -61,7 +60,7 @@ Files written inside the container are **ephemeral** — they vanish when the co
 
 | What | How to share |
 |---|---|
-| Code/doc changes in InfiniClaw | `git add`, `git commit`, IPC `git_push` |
+| Code/doc changes in InfiniClaw | `git add`, `git commit`, `mcp__infiniclaw__git_push` |
 | Analysis, reports, review output | Upload to S3: `aws s3 cp <file> s3://infiniclaw/<path>` |
 | Quick findings | Post to Matrix (your room message IS your output) |
 | Persistent notes | `/workspace/persona/memory/` (auto-synced) |
