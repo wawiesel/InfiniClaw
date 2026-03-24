@@ -43,9 +43,13 @@ Use `{{send roomname}}` to reach other rooms.
 - Brain mode: `mcp__infiniclaw__set_brain_mode` + restart. Default Opus. Sonnet only when Captain says.
 - **Self-update:** After pushing a version bump, if the update would be useful to you (e.g. fixes to threading, signals, container mounts, MCP tools), restart yourself so you run on the new code.
 
-## Host actions
+## Host access
 
-Use MCP tools: `mcp__infiniclaw__git_push`, `mcp__infiniclaw__restart_self`, `mcp__infiniclaw__restart_relay`, `mcp__infiniclaw__podman_exec`.
+InfiniClaw is mounted at `/workspace/extra/InfiniClaw`. Use Bash directly for git log, grep, file reads, etc. — you do NOT need podman_exec for this.
+
+MCP tools for actions that go through the relay: `mcp__infiniclaw__git_push`, `mcp__infiniclaw__restart_self`, `mcp__infiniclaw__restart_relay`.
+
+**The relay is a pm2 process, NOT a container.** Do not use `podman_exec` on the relay. Only bot containers exist (named `nanoclaw-{bot}-{group}`).
 
 ## Lobe preferences
 

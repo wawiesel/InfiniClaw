@@ -107,9 +107,13 @@ You usually want to delegate these to a lobe so you don't burn main brain contex
 
 Your persona CLAUDE.md is writable at `/workspace/persona/CLAUDE.md` — edits persist across restarts. Room-level CLAUDE.md (`/workspace/CLAUDE.md`) is read-only.
 
-## Host actions
+## Host access
 
-Use MCP tools (`mcp__infiniclaw__*`) for host-side actions: `git_push`, `git_pull`, `restart_self`, `restart_relay`, `podman_exec`, `schedule_task`, `list_tasks`, `cancel_task`, etc. Never write raw JSON to `/workspace/ipc/tasks/` — always use the MCP tool.
+InfiniClaw is mounted at `/workspace/extra/InfiniClaw` (if allowed). Use Bash directly for git log, grep, file reads — you do NOT need podman_exec for filesystem access.
+
+Use MCP tools (`mcp__infiniclaw__*`) for relay-mediated actions: `git_push`, `git_pull`, `restart_self`, `restart_relay`, `schedule_task`, `list_tasks`, `cancel_task`, etc. Never write raw JSON to `/workspace/ipc/tasks/` — always use the MCP tool.
+
+**The relay is a pm2 process, NOT a container.** Only bot containers exist (named `nanoclaw-{bot}-{group}`). Do not use `podman_exec` on the relay.
 
 ## Skills
 
