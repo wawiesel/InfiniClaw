@@ -138,33 +138,200 @@ function fleetHome(): string {
 
 function bazaar(): string {
   const stateFile = path.join(SIGNAL_DIR, 'state.json');
-  let signal = 'UNKNOWN', lastCheck = '', portfolio = '';
-  let btcPrice = '', sma = '';
+  const modelFile = path.join(SIGNAL_DIR, 'model_state.json');
+  let signal = 'UNKNOWN', lastCheck = '';
+  let btcPrice = '', portfolioValue = '';
+  let trades: Array<Record<string, unknown>> = [];
+  let predictions: Array<Record<string, unknown>> = [];
 
   if (fs.existsSync(stateFile)) {
     try {
       const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
       signal = state.signal || 'UNKNOWN';
       lastCheck = state.last_check || '';
-      const lastTrade = state.trades?.at(-1);
+      trades = state.trades || [];
+      const lastTrade = trades.at(-1) as Record<string, unknown> | undefined;
       if (lastTrade) {
-        btcPrice = lastTrade.btc_price ? `$${lastTrade.btc_price.toLocaleString()}` : '';
+        btcPrice = lastTrade.btc_price ? `$${Number(lastTrade.btc_price).toLocaleString()}` : '';
+        portfolioValue = lastTrade.portfolio_value ? `$${Number(lastTrade.portfolio_value).toFixed(2)}` : '';
       }
     } catch { /* ignore */ }
   }
 
+  if (fs.existsSync(modelFile)) {
+    try {
+      const model = JSON.parse(fs.readFileSync(modelFile, 'utf8'));
+      predictions = model.predictions || [];
+    } catch { /* ignore */ }
+  }
+
   const signalClass = signal === 'BULL' ? 'ok' : signal === 'BEAR' ? 'err' : 'warn';
-  const chartTime = Date.now();
+  const tradesJson = JSON.stringify(trades);
+  const predsJson = JSON.stringify(predictions);
 
   const body = `
-<div class="card row">
-  <span>Signal: <span class="badge ${signalClass}">${signal}</span></span>
-  ${btcPrice ? `<span>BTC: <strong>${btcPrice}</strong></span>` : ''}
+<div class="card row" style="justify-content:space-between">
+  <div class="row">
+    <span>Signal: <span class="badge ${signalClass}">${signal}</span></span>
+    ${btcPrice ? `<span>BTC: <strong>${btcPrice}</strong></span>` : ''}
+    ${portfolioValue ? `<span>Portfolio: <strong>${portfolioValue}</strong></span>` : ''}
+  </div>
   ${lastCheck ? `<span class="muted">last run ${relTime(lastCheck)}</span>` : ''}
 </div>
+
 <div class="card">
-  <img src="${BASE}/chart?t=${chartTime}" alt="BTC Dashboard">
-</div>`;
+  <h2>Portfolio Value</h2>
+  <canvas id="portfolioChart" height="200"></canvas>
+</div>
+
+<div class="card">
+  <h2>Price Predictions</h2>
+  <div class="row" style="margin-bottom:8px">
+    <button class="asset-btn" data-asset="ETH" style="background:var(--surface);color:var(--blue);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer">ETH</button>
+    <button class="asset-btn" data-asset="SOL" style="background:var(--surface);color:var(--blue);border:1px solid var(--border);border-radius:4px;padding:4px 12px;cursor:pointer">SOL</button>
+  </div>
+  <canvas id="predChart" height="250"></canvas>
+</div>
+
+<div class="card">
+  <h2>Trade History</h2>
+  <div id="tradeList" style="max-height:300px;overflow-y:auto"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
+const trades = ${tradesJson};
+const predictions = ${predsJson};
+const colors = { green: '#3fb950', red: '#f85149', blue: '#58a6ff', muted: '#8b949e', yellow: '#d29922' };
+
+// Portfolio chart
+const portfolioCtx = document.getElementById('portfolioChart');
+new Chart(portfolioCtx, {
+  type: 'line',
+  data: {
+    labels: trades.map(t => new Date(t.timestamp)),
+    datasets: [{
+      label: 'Portfolio',
+      data: trades.map(t => t.portfolio_value),
+      borderColor: colors.blue,
+      backgroundColor: colors.blue + '20',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 5,
+      pointBackgroundColor: trades.map(t =>
+        t.action === 'BUY_FROM_USDC' || t.action === 'AUTO_DEPLOY' ? colors.green : colors.red
+      ),
+    }]
+  },
+  options: {
+    responsive: true,
+    interaction: { mode: 'nearest', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          title: items => new Date(trades[items[0].dataIndex].timestamp).toLocaleString(),
+          afterLabel: item => trades[item.dataIndex].action
+        }
+      }
+    },
+    scales: {
+      x: { type: 'time', grid: { color: '#30363d' }, ticks: { color: '#8b949e' } },
+      y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', callback: v => '$' + v } }
+    }
+  }
+});
+
+// Prediction chart
+let predChart;
+function showPredictions(asset) {
+  const data = predictions.filter(p => p.asset === asset);
+  if (predChart) predChart.destroy();
+  const labels = data.map(p => new Date(p.timestamp * 1000));
+  predChart = new Chart(document.getElementById('predChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Price',
+          data: data.map(p => p.price_at_pred),
+          borderColor: colors.blue,
+          borderWidth: 2,
+          pointRadius: 0,
+        },
+        {
+          label: 'Predicted 24h',
+          data: data.map(p => p.pred_24h),
+          borderColor: colors.yellow,
+          borderWidth: 2,
+          borderDash: [5, 3],
+          pointRadius: 0,
+        },
+        {
+          label: 'Actual 24h',
+          data: data.map(p => p.actual_24h),
+          borderColor: colors.green,
+          borderWidth: 2,
+          pointRadius: data.map(p => p.actual_24h != null ? 3 : 0),
+        },
+        {
+          label: 'P90',
+          data: data.map(p => p.pred_p90),
+          borderColor: 'transparent',
+          backgroundColor: colors.muted + '15',
+          fill: '+1',
+          pointRadius: 0,
+        },
+        {
+          label: 'P10',
+          data: data.map(p => p.pred_p10),
+          borderColor: 'transparent',
+          pointRadius: 0,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            title: items => labels[items[0].dataIndex].toLocaleString()
+          }
+        }
+      },
+      scales: {
+        x: { type: 'time', grid: { color: '#30363d' }, ticks: { color: '#8b949e' } },
+        y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e', callback: v => '$' + Number(v).toFixed(0) } }
+      }
+    }
+  });
+  document.querySelectorAll('.asset-btn').forEach(b => {
+    b.style.background = b.dataset.asset === asset ? colors.blue : 'var(--surface)';
+    b.style.color = b.dataset.asset === asset ? '#0d1117' : colors.blue;
+  });
+}
+document.querySelectorAll('.asset-btn').forEach(b =>
+  b.addEventListener('click', () => showPredictions(b.dataset.asset))
+);
+showPredictions('ETH');
+
+// Trade list
+const tradeList = document.getElementById('tradeList');
+tradeList.innerHTML = [...trades].reverse().map(t => {
+  const d = new Date(t.timestamp).toLocaleString();
+  const isBuy = t.action === 'BUY_FROM_USDC' || t.action === 'AUTO_DEPLOY';
+  const color = isBuy ? colors.green : colors.red;
+  const icon = isBuy ? '&#9650;' : '&#9660;';
+  return '<div style="padding:6px 0;border-bottom:1px solid #30363d;font-size:13px">' +
+    '<span style="color:' + color + '">' + icon + ' ' + t.action + '</span>' +
+    '<span class="muted" style="float:right">' + d + '</span><br>' +
+    '<span class="muted">BTC $' + (t.btc_price||0).toLocaleString() +
+    ' &middot; Portfolio $' + (t.portfolio_value||0).toFixed(2) + '</span></div>';
+}).join('');
+</script>`;
 
   return page('Bazaar — Trading', body, 300);
 }
