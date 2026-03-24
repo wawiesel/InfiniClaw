@@ -640,6 +640,7 @@ function pm2StartBot(bot: string, nodeBin: string, instance: string, logs: strin
 export function removeStaleProcesses(): void {
   const validNames = new Set(getActiveBots().map(pm2Name));
   validNames.add(RELAY_PM2_NAME);
+  validNames.add(`${PM2_PREFIX}-dashboard`);
   try {
     const out = execFileSync(PM2_BIN, ['jlist'], { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' });
     const list = JSON.parse(out) as Array<{ name: string }>;
