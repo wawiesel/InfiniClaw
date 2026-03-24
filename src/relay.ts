@@ -4313,6 +4313,8 @@ function registerRelayCommands(): void {
         // Assemble output — only bots on visible ships
         const hostnameToShip: Record<string, string> = {};
         for (const [sName, sEntry] of Object.entries(allShips)) hostnameToShip[sEntry.hostname] = sName;
+        // Visible-fleet ships take priority when hostnames collide (e.g. Posi & IC01 share "Poseidon")
+        for (const [sName, sEntry] of Object.entries(visibleShips)) hostnameToShip[sEntry.hostname] = sName;
         const visibleShipSet = new Set(visibleShipNames);
         const allBots: Record<string, FleetEntry & { name: string; gitVersion: string; semver?: string; localStatus: string; grade?: string; activity?: string; tokPerDay?: number }> = {};
         for (const [botId, entry] of Object.entries(liveFleet)) {
