@@ -557,8 +557,10 @@ Use this after completing a task that requires cross-bot verification. The assig
   }
 
   function inferRoom(): string {
+    const folder = process.env.MAIN_GROUP_FOLDER;
+    if (folder) return folder.toLowerCase();
     const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
-    const map: Record<string, string> = { engineer: 'engineering', navigator: 'bridge', architect: 'astrometrics' };
+    const map: Record<string, string> = { engineer: 'engineering', navigator: 'bridge', architect: 'astrometrics', trader: 'bazaar' };
     return map[role] || role;
   }
 
