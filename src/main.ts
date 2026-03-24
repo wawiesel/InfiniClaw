@@ -127,8 +127,9 @@ import { truncateJsonl } from './session-utils.js';
 
 // ── Display name helper ────────────────────────────────────────────────
 /** Build unified short display name. badge is used to derive health grade.
+ *  statusOverride replaces entry.status for the pip only (e.g. 'building'→🔄 during boot).
  *  Falls back to old format if fleet data is unavailable. */
-function botDisplayName(badge: string): string {
+function botDisplayName(badge: string, statusOverride?: string): string {
   try {
     const fleet = loadFleet();
     const entry = fleet[ASSISTANT_NAME.toLowerCase()];
@@ -142,7 +143,7 @@ function botDisplayName(badge: string): string {
     // Map transient pips to health grades; default to 'A' (🟢)
     const healthMap: Record<string, string> = { '🔴': 'F', '🟡': 'B', '🟠': 'C' };
     const health = healthMap[badge] ?? 'A';
-    return unifiedBotDisplay({ name: ASSISTANT_NAME, shipEmoji, locationEmoji, health, tokPerDay: 0, status: entry.status, role, rank: entry.rank, isChief, version: SEMVER_TAG ?? undefined }, 'short');
+    return unifiedBotDisplay({ name: ASSISTANT_NAME, shipEmoji, locationEmoji, health, tokPerDay: 0, status: statusOverride ?? entry.status, role, rank: entry.rank, isChief, version: SEMVER_TAG ?? undefined }, 'short');
   } catch {
     return `${badge} ${capitalizeName(ASSISTANT_NAME)}`; // fallback if fleet unavailable
   }
@@ -1858,7 +1859,7 @@ async function main(): Promise<void> {
     (MATRIX_ACCESS_TOKEN || (MATRIX_USERNAME && MATRIX_PASSWORD))
   ) {
     matrix = new MatrixChannel({
-      displayName: botDisplayName(initialBadge),
+      displayName: botDisplayName('🔄', 'building'),
       onMessage: (_chatJid, msg) => {
         const safeMsg = normalizeInboundMessage(msg);
         if (!safeMsg) {
@@ -1890,6 +1891,7 @@ async function main(): Promise<void> {
   if (matrix) {
     try {
       await matrix.connect();
+      matrixRef?.setDisplayName(botDisplayName('🚀', 'starting')).catch(() => {});
     } catch (err) {
       logger.error({ err }, 'Initial Matrix connection failed; continuing in degraded mode');
     }
@@ -2281,9 +2283,11 @@ async function main(): Promise<void> {
     enqueueCheck: (chatJid) => queue.enqueueMessageCheck(chatJid),
   });
   // Start message loop (blocks on resumeGate until resume finishes)
+  matrixRef?.setDisplayName(botDisplayName('🟡', 'waiting')).catch(() => {});
   startMessageLoop();
   // Resume flow: inject messages, run resume container, wait delay, then open gate
   await injectResumeMessage();
+  matrixRef?.setDisplayName(botDisplayName(initialBadge)).catch(() => {});
 
   // Periodic memory-save reminder (only when bot is actively working, not idle)
   const MEMORY_SAVE_INTERVAL_MS = 10 * 60 * 1000;
