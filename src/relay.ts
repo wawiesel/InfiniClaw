@@ -24,6 +24,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { collectHealthData, sessionCleanup } from './health-check.js';
 import { isToolCallBlock, hasDetailsBlock, toolCallBreadcrumb, isToolCallMarker, parseToolCallMarker, toolCallBreadcrumbFromData } from './tool-call-breadcrumb.js';
 import { runBranchBrainAgent } from './container-spawn.js';
+import { acquireBbPoolSlot, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
 import type { ContainerOutput } from './container-spawn.js';
 import { upsertEnvLine } from './env-utils.js';
 import {
@@ -2231,8 +2232,24 @@ async function spawnBranchBrain(
     return;
   }
 
-  // Helper: send thread replies as the bot when possible, fall back to loudspeaker.
+  // BB Account Pool (design doc 28): when BB_ACCOUNT_MODE=pool, acquire a
+  // dedicated pool account so BB posts under its own Matrix identity.
+  let bbPoolSlot: BbPoolSlot | null = null;
+  if (process.env.BB_ACCOUNT_MODE === 'pool' && bot && botSendHomeserver) {
+    try {
+      bbPoolSlot = await acquireBbPoolSlot(bot, botSendHomeserver, conn.roomId);
+      if (bbPoolSlot) log(`branchBrain: pool slot acquired — ${bbPoolSlot.index}-${bot}`);
+      else log(`branchBrain: pool slot unavailable, falling back to shared identity`);
+    } catch (err) {
+      log(`branchBrain: pool acquire failed: ${errStr(err)}, falling back to shared`);
+    }
+  }
+
+  // Helper: send thread replies as pool account (if acquired), bot account, or loudspeaker.
   const bbThreadReply = (text: string): Promise<string | undefined> => {
+    if (bbPoolSlot) {
+      return sendBbMessage(bbPoolSlot, conn.roomId, text, replyThreadId).then(() => undefined);
+    }
     if (botSendToken && botSendHomeserver) {
       return relaySend(botSendHomeserver, botSendToken, conn.roomId, text, replyThreadId);
     }
@@ -2355,7 +2372,13 @@ async function spawnBranchBrain(
   );
 
   // Handle completion asynchronously
-  bbResult.then((result) => {
+  bbResult.then(async (result) => {
+    // Release BB pool slot (design doc 28)
+    if (bbPoolSlot) {
+      await resetBbDisplayName(bbPoolSlot, bot ?? 'unknown').catch(() => {});
+      releaseBbPoolSlot(bbPoolSlot.slot);
+      log(`branchBrain: pool slot ${bbPoolSlot.slot} released`);
+    }
     activeBranchBrainProcs.delete(replyThreadId);
     completeBranchTask(replyThreadId);
     if (bot) recordBranchBrainResult(bot, postedCount > 0);
@@ -2419,7 +2442,12 @@ async function spawnBranchBrain(
       }, BRANCH_BRAIN_RESTART_DELAY);
       branchBrainRestartTimers.set(bot, timer);
     }
-  }).catch((err) => {
+  }).catch(async (err) => {
+    // Release BB pool slot on error (design doc 28)
+    if (bbPoolSlot) {
+      await resetBbDisplayName(bbPoolSlot, bot ?? 'unknown').catch(() => {});
+      releaseBbPoolSlot(bbPoolSlot.slot);
+    }
     activeBranchBrainProcs.delete(replyThreadId);
     completeBranchTask(replyThreadId);
     if (bot) recordBranchBrainResult(bot, false);
