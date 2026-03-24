@@ -22,9 +22,10 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import { collectHealthData, sessionCleanup } from './health-check.js';
-import { isToolCallBlock, hasDetailsBlock, toolCallBreadcrumb, isToolCallMarker, parseToolCallMarker, toolCallBreadcrumbFromData } from './tool-call-breadcrumb.js';
+import { isToolCallBlock, toolCallBreadcrumb } from './tool-call-breadcrumb.js';
 import { runBranchBrainAgent } from './container-spawn.js';
-import { acquireBbPoolSlot, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
+import { acquireBbPoolSlot, releaseBbPoolSlot, resetBbDisplayName } from './bb-account-pool.js';
+import type { BbPoolSlot } from './bb-account-pool.js';
 import type { ContainerOutput } from './container-spawn.js';
 import { upsertEnvLine } from './env-utils.js';
 import {
@@ -43,7 +44,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME, loadSystemAliasesAsync, systemName } from './ship-config.js';
+import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId } from './ship-config.js';
 import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
@@ -90,7 +91,6 @@ import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
 import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
-import { runAlignment } from './alignment.js';
 import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreatePrForBranch } from './gitea-wbs.js';
 import { pushAll, getClient as getS3Client } from './s3-sync.js';
 // health-staleness.ts helpers used by healthWatchdogLoop inline
@@ -1195,7 +1195,7 @@ function buildBotRoomMap(): Record<string, string> {
 
 function parseTarget(cmd: string, prefix: string): { matched: boolean; target?: string } {
   if (cmd !== prefix && !cmd.startsWith(prefix + ' ')) return { matched: false };
-  const target = cmd.slice(prefix.length).trim().split(/\s+/).filter(w => !w.startsWith('--'))[0]?.toLowerCase() || undefined;
+  const target = cmd.slice(prefix.length).trim().toLowerCase() || undefined;
   return { matched: true, target };
 }
 
@@ -1895,7 +1895,9 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             const engConn = findEngConn(conns);
             let restarted = 0;
             let threadRoot: string | undefined;
-            // liveFleet is S3-backed in-memory state — always current, no disk reload needed (#85)
+            // Reload fleet from disk so status checks reflect transitions that happened
+            // while git sync was running (e.g. a bot going to sleep mid-cycle, #85).
+            try { liveFleet = loadFleetFromDisk(); } catch { /* best effort — fall back to cached */ }
             for (const bot of getActiveBots()) {
               if (!(RUNNING_STATUSES as readonly string[]).includes(liveFleet[bot]?.status)) continue;
               // Do NOT restart bots on duty — code changes apply during Dream phase after retrospective.
@@ -1985,25 +1987,6 @@ const activeBranchBrainCount = new Map<string, number>(); // bot → active TB c
 
 // Active branch brain processes indexed by replyThreadId — used for context injection fan-out
 const activeBranchBrainProcs = new Map<string, { title: string; stdin: ReturnType<typeof spawn>['stdin'] }>();
-
-// Dedup: track recently spawned BB objectives to prevent double-spawn from
-// both Matrix detection and relay-task IPC file paths.
-const recentBBSpawns = new Map<string, number>(); // "bot:objectiveHash" → timestamp
-function bbSpawnKey(bot: string, objective: string): string {
-  // Use first 100 chars of objective as dedup key — close enough
-  return `${bot}:${objective.slice(0, 100)}`;
-}
-function isRecentBBSpawn(bot: string, objective: string): boolean {
-  const key = bbSpawnKey(bot, objective);
-  const ts = recentBBSpawns.get(key);
-  if (ts && Date.now() - ts < 60_000) return true;
-  recentBBSpawns.set(key, Date.now());
-  // Cleanup old entries
-  for (const [k, t] of recentBBSpawns) {
-    if (Date.now() - t > 120_000) recentBBSpawns.delete(k);
-  }
-  return false;
-}
 
 interface BranchTaskEntry {
   objective: string;
@@ -2226,7 +2209,25 @@ async function spawnBranchBrain(
   let announcementEventId: string | undefined;
   let botSendToken: string | undefined;
   let botSendHomeserver: string | undefined;
-  if (bot) {
+
+  // BB_ACCOUNT_MODE=pool: acquire a pseudonymous pool slot for this activation.
+  let bbPoolSlot: BbPoolSlot | null = null;
+  if (process.env.BB_ACCOUNT_MODE === 'pool' && bot) {
+    try {
+      bbPoolSlot = await acquireBbPoolSlot(bot, conn.homeserver, conn.roomId);
+      if (bbPoolSlot) {
+        botSendToken = bbPoolSlot.accessToken;
+        botSendHomeserver = bbPoolSlot.homeserver;
+        log(`branchBrain: pool mode — slot=${bbPoolSlot.slot + 1} index=${bbPoolSlot.index} userId=${bbPoolSlot.userId}`);
+      } else {
+        log(`branchBrain: pool mode — no slot available, falling back to bot account`);
+      }
+    } catch (err) {
+      log(`branchBrain: pool slot acquire failed: ${errStr(err)}`);
+    }
+  }
+
+  if (!bbPoolSlot && bot) {
     try {
       const { token, homeserver } = await botMatrixLogin(resolveRoot(), bot);
       botSendToken = token;
@@ -2247,28 +2248,13 @@ async function spawnBranchBrain(
   // Use the announcement event as the thread root; fall back to the triggering thread_id.
   const replyThreadId = announcementEventId || thread_id;
   if (!replyThreadId) {
+    if (bbPoolSlot) { void resetBbDisplayName(bbPoolSlot, bot ?? 'bb').finally(() => releaseBbPoolSlot(bbPoolSlot!.slot)); }
     log(`branchBrain: aborted — no thread root (announcement failed and no thread_id provided)`);
     return;
   }
 
-  // BB Account Pool (design doc 28): when BB_ACCOUNT_MODE=pool, acquire a
-  // dedicated pool account so BB posts under its own Matrix identity.
-  let bbPoolSlot: BbPoolSlot | null = null;
-  if (process.env.BB_ACCOUNT_MODE === 'pool' && bot && botSendHomeserver) {
-    try {
-      bbPoolSlot = await acquireBbPoolSlot(bot, botSendHomeserver, conn.roomId);
-      if (bbPoolSlot) log(`branchBrain: pool slot acquired — ${bbPoolSlot.index}-${bot}`);
-      else log(`branchBrain: pool slot unavailable, falling back to shared identity`);
-    } catch (err) {
-      log(`branchBrain: pool acquire failed: ${errStr(err)}, falling back to shared`);
-    }
-  }
-
-  // Helper: send thread replies as pool account (if acquired), bot account, or loudspeaker.
+  // Helper: send thread replies as the bot (or pool slot) when possible, fall back to loudspeaker.
   const bbThreadReply = (text: string): Promise<string | undefined> => {
-    if (bbPoolSlot) {
-      return sendBbMessage(bbPoolSlot, conn.roomId, text, replyThreadId).then(() => undefined);
-    }
     if (botSendToken && botSendHomeserver) {
       return relaySend(botSendHomeserver, botSendToken, conn.roomId, text, replyThreadId);
     }
@@ -2339,40 +2325,18 @@ async function spawnBranchBrain(
       // Stream progress to Matrix thread
       if (output.isProgress && output.result) {
         postedCount++;
-        // Convert tool call markers/blocks to compact S3-linked breadcrumbs
+        // Convert <details> tool call blocks to compact S3-linked breadcrumbs
         let postText = output.result;
-        if (isToolCallMarker(postText)) {
-          const parsed = parseToolCallMarker(postText);
-          if (parsed) {
-            try { postText = await toolCallBreadcrumbFromData(parsed, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — silently drop */ }
-          } else { return; }
-        } else if (hasDetailsBlock(postText)) {
-          if (isToolCallBlock(postText)) {
-            try { postText = await toolCallBreadcrumb(postText, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — silently drop */ }
-          } else {
-            return; // <details> without wrench — suppress entirely
-          }
+        if (isToolCallBlock(postText)) {
+          try { postText = await toolCallBreadcrumb(postText, bot ?? 'bb', groupFolder); } catch { /* post raw on failure */ }
         }
         lastPostedText = postText;
         await bbThreadReply(postText).catch((err) => log(`branchBrain: stream post failed: ${errStr(err)}`));
       } else if (!output.isProgress && output.result && postedCount === 0) {
-        // Final result, nothing streamed yet — apply same filtering
-        let finalText = output.result;
-        if (isToolCallMarker(finalText)) {
-          const parsed = parseToolCallMarker(finalText);
-          if (parsed) {
-            try { finalText = await toolCallBreadcrumbFromData(parsed, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — suppress */ }
-          } else { return; }
-        } else if (hasDetailsBlock(finalText)) {
-          if (isToolCallBlock(finalText)) {
-            try { finalText = await toolCallBreadcrumb(finalText, bot ?? 'bb', groupFolder); } catch { return; /* S3 failed — suppress */ }
-          } else {
-            return; // <details> without wrench — suppress entirely
-          }
-        }
+        // Final result, nothing streamed yet
         postedCount++;
-        lastPostedText = finalText;
-        await bbThreadReply(finalText).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
+        lastPostedText = output.result;
+        await bbThreadReply(output.result).catch((err) => log(`branchBrain: result post failed: ${errStr(err)}`));
       }
       // Re-inject objective after each completed BB turn to prevent drift.
       if (!output.isProgress) {
@@ -2391,13 +2355,7 @@ async function spawnBranchBrain(
   );
 
   // Handle completion asynchronously
-  bbResult.then(async (result) => {
-    // Release BB pool slot (design doc 28)
-    if (bbPoolSlot) {
-      await resetBbDisplayName(bbPoolSlot, bot ?? 'unknown').catch(() => {});
-      releaseBbPoolSlot(bbPoolSlot.slot);
-      log(`branchBrain: pool slot ${bbPoolSlot.slot} released`);
-    }
+  bbResult.then((result) => {
     activeBranchBrainProcs.delete(replyThreadId);
     completeBranchTask(replyThreadId);
     if (bot) recordBranchBrainResult(bot, postedCount > 0);
@@ -2461,12 +2419,12 @@ async function spawnBranchBrain(
       }, BRANCH_BRAIN_RESTART_DELAY);
       branchBrainRestartTimers.set(bot, timer);
     }
-  }).catch(async (err) => {
-    // Release BB pool slot on error (design doc 28)
+    // Release pool slot after all completion work is queued (timers are async, slot may be
+    // reused immediately — reset display name first so it doesn't linger).
     if (bbPoolSlot) {
-      await resetBbDisplayName(bbPoolSlot, bot ?? 'unknown').catch(() => {});
-      releaseBbPoolSlot(bbPoolSlot.slot);
+      void resetBbDisplayName(bbPoolSlot, bot ?? 'bb').finally(() => releaseBbPoolSlot(bbPoolSlot!.slot));
     }
+  }).catch((err) => {
     activeBranchBrainProcs.delete(replyThreadId);
     completeBranchTask(replyThreadId);
     if (bot) recordBranchBrainResult(bot, false);
@@ -2482,6 +2440,9 @@ async function spawnBranchBrain(
         fs.writeFileSync(taskFile, JSON.stringify({ type: 'merge_request', thread_id: replyThreadId, bot }));
         log(`branchBrain: wrote merge_request IPC task (catch) for ${bot} thread=${replyThreadId.slice(0, 20)}`);
       } catch (writeErr) { log(`branchBrain: failed to write merge_request IPC task (catch): ${errStr(writeErr)}`); }
+    }
+    if (bbPoolSlot) {
+      void resetBbDisplayName(bbPoolSlot, bot ?? 'bb').finally(() => releaseBbPoolSlot(bbPoolSlot!.slot));
     }
   });
 }
@@ -2550,7 +2511,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                 try { fs.renameSync(processingPath, filePath); } catch { /* race — another relay got it */ }
                 continue;
               }
-              if (objective && !isRecentBBSpawn(bot ?? '__relay__', objective)) {
+              if (objective) {
                 const botKey = bot ?? '__relay__';
                 const count = activeBranchBrainCount.get(botKey) ?? 0;
                 if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
@@ -2681,7 +2642,9 @@ function secretsGitSync(): { ok: boolean; newCommits: number; output: string } {
           execSync('git checkout --ours bots/fleet.json', opts);
           execSync('git add bots/fleet.json', opts);
           execSync('git rebase --continue', { ...opts, env: { ...process.env, GIT_EDITOR: 'true' } });
-          log('secrets sync: resolved fleet.json conflict (accepted upstream — S3 is authoritative)');
+          log('secrets sync: resolved fleet.json conflict (accepted upstream)');
+          // Reload upstream fleet into memory (disk-fresh after rebase)
+          try { liveFleet = loadFleetFromDisk(); } catch { /* best effort */ }
           return { ok: true, output: 'rebased (fleet.json conflict resolved)', newCommits };
         }
       } catch { /* couldn't resolve — fall through */ }
@@ -2710,6 +2673,55 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
       } else if (result.newCommits > 0) {
         await reportRecovery('secrets sync', conns);
         log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
+        // Reload static config from disk (transport assignments come via git).
+        // Only merge structural/static fields — don't overwrite runtime state (status, etc.)
+        try {
+          const diskFleet = loadFleetFromDisk();
+          for (const [bot, entry] of Object.entries(diskFleet)) {
+            if (!liveFleet[bot]) { liveFleet[bot] = entry; continue; }
+            // Transport pickup: bot assigned to us but inactive (phase 1 by another ship)
+            if (entry.ship === HOSTNAME && entry.status === 'transit' && liveFleet[bot].ship !== HOSTNAME) {
+              liveFleet[bot].ship = HOSTNAME;
+              liveFleet[bot].status = 'transit'; // will be materialized below
+            }
+            // Merge static fields only (role, rank, title, quartersRoom, ship)
+            liveFleet[bot].role = entry.role;
+            liveFleet[bot].rank = entry.rank;
+            if (entry.title !== undefined) liveFleet[bot].title = entry.title;
+            if (entry.quartersRoom !== undefined) liveFleet[bot].quartersRoom = entry.quartersRoom;
+          }
+        } catch { /* no fleet on disk */ }
+
+        // Materialize — bots assigned here but not active (dematerialized on source ship)
+        if (!isShipCommissioned()) { /* decommissioned — skip materialize */ }
+        else try {
+          for (const [bot, entry] of Object.entries(liveFleet)) {
+            if (entry.ship === HOSTNAME && entry.status === 'transit') {
+              log(`transport: materializing ${bot}`);
+              fleetUpdate(bot, { status: 'quarters' });
+              fleetDirty = true;
+              persistFleet();
+              clearShipConfigCache();
+              const root = resolveRoot();
+              try {
+                ensurePodmanReady();
+                bootstrapBot(root, bot);
+                writeCrewStatus(root, bot);
+                void injectWbsTasks(root, bot);
+                const matEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
+                for (const c of conns) {
+                  if (c.accessToken) {
+                    await reply(c, `📡 ${matEnv?.ASSISTANT_NAME || capitalizeName(bot)} materialized`).catch(() => {});
+                  }
+                }
+              } catch (err) {
+                log(`transport: materialize failed for ${bot}: ${errStr(err)}`);
+              }
+            }
+          }
+        } catch (err) {
+          log(`transport: materialize check failed: ${errStr(err)}`);
+        }
 
         // Check inbox for pending items targeting this ship
         try {
@@ -2742,57 +2754,6 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
         // Success with 0 new commits — still clear any prior failure
         await reportRecovery('secrets sync', conns);
       }
-
-      // ── S3 fleet state poll — detect new bots, transports, and structural changes ──
-      // S3 is authoritative; disk file is just a cache. Poll every sync cycle.
-      try {
-        const s3Fleet = await loadFleetAsync();
-        for (const [bot, entry] of Object.entries(s3Fleet)) {
-          if (!liveFleet[bot]) {
-            // New bot appeared in S3 (created via !create or another ship)
-            liveFleet[bot] = entry;
-            log(`fleet: discovered new bot ${bot} from S3 (role=${entry.role}, ship=${entry.ship})`);
-            continue;
-          }
-          // Transport pickup: bot assigned to us with transit status
-          if (entry.ship === HOSTNAME && entry.status === 'transit' && liveFleet[bot].ship !== HOSTNAME) {
-            liveFleet[bot].ship = HOSTNAME;
-            liveFleet[bot].status = 'transit'; // will be materialized below
-          }
-          // Merge structural fields from S3 (role, rank, title, quartersRoom)
-          liveFleet[bot].role = entry.role;
-          liveFleet[bot].rank = entry.rank;
-          if (entry.title !== undefined) liveFleet[bot].title = entry.title;
-          if (entry.quartersRoom !== undefined) liveFleet[bot].quartersRoom = entry.quartersRoom;
-        }
-        // Materialize — bots assigned here but in transit
-        if (isShipCommissioned()) {
-          for (const [bot, entry] of Object.entries(liveFleet)) {
-            if (entry.ship === HOSTNAME && entry.status === 'transit') {
-              log(`transport: materializing ${bot}`);
-              fleetUpdate(bot, { status: 'quarters' });
-              fleetDirty = true;
-              persistFleet();
-              clearShipConfigCache();
-              const root = resolveRoot();
-              try {
-                ensurePodmanReady();
-                bootstrapBot(root, bot);
-                writeCrewStatus(root, bot);
-                void injectWbsTasks(root, bot);
-                const matEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
-                for (const c of conns) {
-                  if (c.accessToken) {
-                    await reply(c, `📡 ${matEnv?.ASSISTANT_NAME || capitalizeName(bot)} materialized`).catch(() => {});
-                  }
-                }
-              } catch (err) {
-                log(`transport: materialize failed for ${bot}: ${errStr(err)}`);
-              }
-            }
-          }
-        }
-      } catch { /* S3 poll failed — will retry next cycle */ }
     } catch (err) {
       log(`secrets sync loop error: ${errStr(err)}`);
     }
@@ -3259,7 +3220,6 @@ async function handleLifecycleCommand(
   action: 'report' | 'dismiss' | 'sleep' | 'wake',
   target: string | undefined,
   conn: RoomConn,
-  args: string[] = [],
 ): Promise<void> {
   const root = resolveRoot();
   // BTC is a universal command room — all local bots reachable regardless of status.
@@ -3382,7 +3342,6 @@ async function handleLifecycleCommand(
       }
     } else if (action === 'wake') {
       // Wake sleeping/dreaming bot or restart already-awake bot (preserves current status)
-      const noAlign = args.includes('--no-align');
       const currentStatus = liveFleet[bot]?.status;
       const isRestart = currentStatus !== 'sleep' && currentStatus !== 'dream';
       const verb = isRestart ? 'restarting' : 'waking';
@@ -3410,27 +3369,6 @@ async function handleLifecycleCommand(
         stopBot(bot);
         killStaleContainers(bot);
         deployBot(root, bot);
-
-        // WBS 18.8: static alignment gate — run before starting bot
-        // Alignment is best-effort: if sandbox isn't implemented yet, skip gracefully
-        if (!noAlign) {
-          try {
-            const alignReport = await runAlignment(bot, 'main');
-            if (!alignReport.passed) {
-              const failures = alignReport.results.filter((r: { passed: boolean; name: string }) => !r.passed).map((r: { name: string }) => r.name).join(', ');
-              const msg = `⛔ alignment failed: ${failures}`;
-              await step(msg);
-              await reply(progressConn, `⛔ ${name} alignment blocked — ${failures}. Use --no-align to skip.`);
-              if (!isRestart) await setBotDisplayStatus(root, bot, 'sleep');
-              continue;
-            }
-            await step('✅ alignment passed');
-            stepN--; // Don't count alignment as a numbered step
-          } catch {
-            // Sandbox not yet available — skip alignment, don't block bot startup
-          }
-        }
-
         await setBotDisplayStatus(root, bot, 'starting');
         await step('🚀 starting');
         startBot(root, bot);
@@ -3689,30 +3627,19 @@ function fleetDisplayName(fleet: string): string {
   return d ? `${d.emoji}${d.name}` : fleet;
 }
 
-/** Parsed !fleet argument: either a fleet selector or a room filter. */
-interface FleetSelector {
-  fleet: string;       // canonical fleet ID or 'all'
-  roomFilter?: string; // duty room name to filter by (e.g. 'engineering', 'bridge')
-}
-
-/** Known duty room names for room-filter detection. */
-const KNOWN_ROOMS = new Set(Object.values(ROLE_ROOMS).map(r => r.room));
-
 /**
- * Parse a fleet selector arg from !fleet [arg].
- * Accepts fleet selectors: '', 'ic00', 'ic01', 'infiniclaw00', 'infiniclaw01', 'all'.
- * Also accepts room names: 'engineering', 'bridge', 'astrometrics', 'lounge'.
+ * Parse a fleet selector arg from !fleet [arg] into a canonical fleet ID or 'all'.
+ * Accepts: '', 'ic00', 'ic01', 'infiniclaw00', 'infiniclaw01', 'all'.
  * Falls back to the current relay's fleet for unrecognized args.
  */
-function parseFleetSelector(arg: string): FleetSelector {
+function parseFleetSelector(arg: string): string {
   const normalized = arg.trim().toLowerCase();
-  if (!normalized) return { fleet: fleetId() };
-  if (normalized === 'all') return { fleet: 'all' };
-  if (KNOWN_ROOMS.has(normalized)) return { fleet: fleetId(), roomFilter: normalized };
+  if (!normalized) return fleetId();
+  if (normalized === 'all') return 'all';
   const icMatch = normalized.match(/^ic(\d+)$/);
-  if (icMatch) return { fleet: `infiniclaw${icMatch[1].padStart(2, '0')}` };
-  if (/^infiniclaw\d+$/.test(normalized)) return { fleet: normalized };
-  return { fleet: fleetId() };
+  if (icMatch) return `infiniclaw${icMatch[1].padStart(2, '0')}`;
+  if (/^infiniclaw\d+$/.test(normalized)) return normalized;
+  return fleetId();
 }
 
 // ── Register command handlers with the registry ──────────────────
@@ -3736,10 +3663,7 @@ function registerRelayCommands(): void {
     },
     wake: async (cmd, conn) => {
       const parsed = parseTarget(cmd, '!wake');
-      if (parsed.matched) {
-        const args = cmd.slice('!wake'.length).trim().split(/\s+/).filter(a => a.startsWith('--'));
-        await handleLifecycleCommand('wake', parsed.target, conn, args);
-      }
+      if (parsed.matched) await handleLifecycleCommand('wake', parsed.target, conn);
     },
 
     operator: async (cmd, conn) => {
@@ -4036,9 +3960,9 @@ function registerRelayCommands(): void {
 
     fleet: async (cmd, conn) => {
       try {
-        // Parse fleet selector: !fleet, !fleet ic00, !fleet ic01, !fleet all, !fleet engineering
+        // Parse fleet selector: !fleet, !fleet ic00, !fleet ic01, !fleet all
         const arg = cmd.slice('!fleet'.length).trim();
-        const { fleet: targetFleet, roomFilter } = parseFleetSelector(arg);
+        const targetFleet = parseFleetSelector(arg);
         const currentFleet = fleetId();
 
         // Every relay publishes its own report to S3, then the lowest-rank available relay
@@ -4141,15 +4065,6 @@ function registerRelayCommands(): void {
           }
         }
 
-        // Room filter: keep only bots whose role maps to the requested duty room
-        if (roomFilter) {
-          for (const botId of Object.keys(allBots)) {
-            const role = allBots[botId].role?.toLowerCase() ?? '';
-            const dutyRoom = ROLE_ROOMS[role]?.room;
-            if (dutyRoom !== roomFilter) delete allBots[botId];
-          }
-        }
-
         // Group by ship
         const byShip: Record<string, Array<[string, typeof allBots[string]]>> = {};
         for (const [botId, entry] of Object.entries(allBots)) {
@@ -4164,11 +4079,8 @@ function registerRelayCommands(): void {
           .map(b => b.grade as HealthGrade);
         const fleetGrade = botGrades.length > 0 ? computeFleetHealthGrade(botGrades) : 'A' as HealthGrade;
         const fleetTokPerDay = Object.values(allBots).reduce((sum, b) => sum + (b.tokPerDay ?? 0), 0);
-        // Dynamic header: fleet name, room filter, or "All Fleets"
-        const roomIcon = roomFilter ? (Object.values(ROLE_ROOMS).find(r => r.room === roomFilter)?.icon ?? '') : '';
-        const headerLabel = roomFilter
-          ? `${roomIcon} ${roomFilter}`
-          : targetFleet === 'all' ? '🌌🧪 All Fleets' : fleetDisplayName(targetFleet);
+        // Dynamic header: fleet name or "All Fleets"
+        const headerLabel = targetFleet === 'all' ? '🌌🧪 All Fleets' : fleetDisplayName(targetFleet);
         const threadRoot = await reply(conn, `${headerLabel}·${gradeEmoji(fleetGrade)}${fleetGrade}${activityEmoji(fleetTokPerDay)}`);
 
         // Sort ships: group by fleet (alphabetical), then by rank within fleet; drydock last
@@ -4526,70 +4438,6 @@ function registerRelayCommands(): void {
         await reply(conn, `📡 ${denyEnv?.ASSISTANT_NAME || capitalizeName(botName)} ${removed ? `mount revoked: ${hostPath}` : `no mount found: ${hostPath}`}`);
       } catch (err) {
         await reply(conn, `⛔ deny failed — ${errStr(err)}`);
-      }
-    },
-
-    create: async (cmd, conn) => {
-      // !create bot <name> <role> [ship]
-      const args = cmd.slice('!create '.length).trim().split(/\s+/);
-      if (args[0] !== 'bot' || args.length < 3) {
-        await helpReply(conn, 'Usage: !create bot <name> <role> [ship]');
-        return;
-      }
-      const [, nameRaw, roleRaw, shipRaw] = args;
-      const botName = nameRaw.toLowerCase();
-      const role = roleRaw.toLowerCase();
-
-      // Validate bot name
-      if (!isValidBotName(botName)) {
-        await helpReply(conn, `Invalid bot name: ${nameRaw} (must match ${SAFE_BOT_NAME.source})`);
-        return;
-      }
-      // Check if bot already exists
-      if (liveFleet[botName]) {
-        await helpReply(conn, `Bot '${botName}' already exists in fleet state`);
-        return;
-      }
-      // Validate role
-      if (!ROLE_ROOMS[role]) {
-        const validRoles = Object.keys(ROLE_ROOMS).join(', ');
-        await helpReply(conn, `Unknown role: ${roleRaw}. Valid: ${validRoles}`);
-        return;
-      }
-      // Resolve ship
-      let shipHostname: string;
-      let shipDisplay: string;
-      if (shipRaw) {
-        const ships = safeLoadShips();
-        const resolved = resolveShipName(shipRaw, ships);
-        if (!resolved) { await helpReply(conn, `Unknown ship: ${shipRaw}`); return; }
-        shipHostname = ships[resolved].hostname;
-        shipDisplay = resolved;
-      } else {
-        shipHostname = HOSTNAME;
-        shipDisplay = thisShipName();
-      }
-
-      const tr = await reply(conn, `📡 create bot ${botName}`);
-      const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
-      try {
-        // Determine rank: max rank among existing bots + 1
-        const maxRank = Math.max(0, ...Object.values(liveFleet).map(b => b.rank));
-        const entry: FleetEntry = {
-          role,
-          rank: maxRank + 1,
-          ship: shipHostname,
-          status: 'sleep',
-        };
-        liveFleet[botName] = entry;
-        fleetDirty = true;
-        await persistFleetSync();
-        await send(`✅ **${botName}** registered — role: ${role}, ship: ${shipDisplay}, rank: ${entry.rank}, status: sleep`);
-        await send(`Next: create \`bots/${botName}/env\` in secrets, persona dir \`bots/${role}/${botName}/\` in InfiniClaw, then \`!wake ${botName}\``);
-      } catch (err) {
-        // Roll back in-memory state on failure
-        delete liveFleet[botName];
-        await send(`⛔ create failed — ${errStr(err)}`);
       }
     },
 
@@ -5042,38 +4890,6 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               relayAck(conn.homeserver, conn.accessToken, conn.roomId, event.event_id);
             }
 
-            // ── {{branch}} signal detection from Matrix messages ──────────
-            // Durable: even if the bot container dies after posting, the signal
-            // persists in Matrix and the relay picks it up here.
-            if (body.includes('{{') && senderLocal && liveFleet[senderLocal] && event.event_id && markProcessed(event.event_id)) {
-              const { signals } = extractSignals(body);
-              for (const sig of signals) {
-                if (sig.command === 'branch') {
-                  const objective = sig.positional || sig.args['objective'] || '';
-                  const title = sig.args['title'] || objective.slice(0, 60) || 'branch';
-                  if (objective && !isRecentBBSpawn(senderLocal, objective)) {
-                    const chatJid = `matrix:${conn.roomId}`;
-                    log(`branchBrain: detected {{branch}} in Matrix from ${senderLocal} — "${title.slice(0, 40)}"`);
-                    const botKey = senderLocal;
-                    const count = activeBranchBrainCount.get(botKey) ?? 0;
-                    if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
-                      log(`branchBrain: rejected — ${botKey} at limit (${MAX_BRANCH_BRAINS_PER_BOT})`);
-                    } else {
-                      activeBranchBrainCount.set(botKey, count + 1);
-                      void spawnBranchBrain(
-                        { thread_id: '', objective, chat_jid: chatJid, bot: senderLocal, title },
-                        conns,
-                      ).finally(() => {
-                        const n = activeBranchBrainCount.get(botKey) ?? 1;
-                        if (n <= 1) activeBranchBrainCount.delete(botKey);
-                        else activeBranchBrainCount.set(botKey, n - 1);
-                      });
-                    }
-                  }
-                }
-              }
-            }
-
             // ── Branch Brain: context injection + thread closure ──────────
             if (body && !body.startsWith('!')) {
               const relates = (event.content as Record<string, unknown>)?.['m.relates_to'] as { rel_type?: string; event_id?: string } | undefined;
@@ -5126,26 +4942,9 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
               continue;
             }
 
-            // WBS 6.2: @operator mention routing — any bot/user can route to operator tmux
-            if (/@operator\b/i.test(body) && event.sender !== captainUserId && event.sender !== operatorUserId && isOperatorRelayEnabled()) {
-              const senderName = event.sender.startsWith('@') ? event.sender.slice(1, event.sender.indexOf(':')) : event.sender;
-              const text = body.replace(/@operator\b/gi, '').trim();
-              log(`${conn.name}: @operator mention from ${senderName}: ${(text || body).slice(0, 80)}`);
-              const SESSION = 'operator';
-              try {
-                let existed = true;
-                try { execFileSync('tmux', ['has-session', '-t', SESSION], { stdio: 'pipe' }); } catch { existed = false; }
-                if (!existed) {
-                  execFileSync('tmux', ['new-session', '-d', '-s', SESSION, '-c', path.dirname(loadShipConfig().secretsPath), 'claude'], { stdio: ['pipe', 'pipe', 'pipe'] });
-                  await sleep(3000);
-                }
-                execFileSync('tmux', ['send-keys', '-t', SESSION, '-l', `[@operator from ${senderName} in ${conn.name}] ${text || body}`], { stdio: 'pipe' });
-                execFileSync('tmux', ['send-keys', '-t', SESSION, 'Enter'], { stdio: 'pipe' });
-              } catch (err) {
-                log(`${conn.name}: @operator tmux send failed: ${errStr(err)}`);
-              }
-              // Don't continue — still process the message normally for the room
-            }
+            // TODO: @operator mention routing — operator account (not intercom) monitors
+            // all rooms for @operator mentions and forwards to BTC. Needs operator sync
+            // loop extension, not dialtone (intercom won't be in all rooms).
 
             // @loudspeaker: <message> — on-duty bot broadcasts to all duty rooms
             // @loudspeaker (alone) — relay responds with fleet status in this room
@@ -5277,14 +5076,6 @@ async function main(): Promise<void> {
     log('ships: loaded from S3 (disk cache updated)');
   } catch (err) {
     log(`ships: S3 load failed, using disk: ${errStr(err)}`);
-  }
-
-  // Load system aliases from S3 (hostname → display name)
-  try {
-    await loadSystemAliasesAsync();
-    log(`system: display name = ${systemName()}`);
-  } catch (err) {
-    log(`system aliases: S3 load failed, using hostname: ${errStr(err)}`);
   }
 
   // Initialize in-memory fleet state: disk (static) + S3 (runtime) via loadFleetAsync

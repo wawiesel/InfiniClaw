@@ -183,6 +183,21 @@ test('tool output: S3 breadcrumbs, no inline <details>', async (session) => {
   assertMatch(body, /<font[^>]*>.*🔧|🔧.*<\/font>/i, 'tool output: S3 breadcrumb format');
 });
 
+// WBS 17.4: no Co-Authored-By lines in recent commits on main
+test('commit-hygiene: no Co-Authored-By in recent commits', async (_session) => {
+  const { execSync } = await import('child_process');
+  const cwd = new URL('..', import.meta.url).pathname;
+  const log = execSync('git log --format=%B -50 origin/main', {
+    cwd,
+    encoding: 'utf-8',
+    timeout: 10_000,
+  }).trim();
+  assert(
+    !/Co-Authored-By:/i.test(log),
+    `Co-Authored-By line found in recent commits on origin/main`,
+  );
+});
+
 // ── Entrypoint ────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
