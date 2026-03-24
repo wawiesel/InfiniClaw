@@ -1,12 +1,14 @@
 /**
  * Alignment harness — pre-deployment verification gate.
  *
- * Pre-deployment verification gate. Currently a stub pending IC01-based sandbox.
- * asserts expected behavior, and reports pass/fail.
+ * Two modes:
+ * - Static: fast checks (commit hygiene) — used by !wake pre-deploy gate
+ * - Full: static + interactive tests against a running bot's DB
  *
  * Design: docs/design/27-alignment.md
- * WBS: 18.1
+ * WBS: 18.1, 18.8
  */
+import { execSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -127,7 +129,6 @@ async function sendAndWait(
 async function testNoCoAuthoredBy(ctx: TestContext): Promise<AlignmentResult> {
   const name = 'commit-hygiene';
   try {
-    const { execSync } = await import('child_process');
     const log = execSync(`git log --format=%B origin/main..${ctx.branch}`, {
       cwd: ctx.root,
       encoding: 'utf-8',
@@ -276,9 +277,14 @@ async function testBotBoot(ctx: TestContext): Promise<AlignmentResult> {
 
 // ── Test Registry ──────────────────────────────────────────────────────
 
-const ALIGNMENT_TESTS: AlignmentTest[] = [
-  { name: 'bot-boot', fn: testBotBoot },
+/** Static tests — no running bot needed, safe for !wake pre-deploy gate. */
+const STATIC_TESTS: AlignmentTest[] = [
   { name: 'commit-hygiene', fn: testNoCoAuthoredBy },
+];
+
+/** Interactive tests — need a running bot's message DB. */
+const INTERACTIVE_TESTS: AlignmentTest[] = [
+  { name: 'bot-boot', fn: testBotBoot },
   { name: 'branch-signal', fn: testBranchSignal },
   { name: 'command-handling', fn: testCommandHandling },
   { name: 's3-breadcrumbs', fn: testNoBareDetails },
@@ -286,12 +292,81 @@ const ALIGNMENT_TESTS: AlignmentTest[] = [
   { name: 'send-routing', fn: testSendRouting },
 ];
 
-// ── Runner ─────────────────────────────────────────────────────────────
+// ── Runners ────────────────────────────────────────────────────────────
 
+/** Run a list of tests and collect results into a report. */
+async function runTests(tests: AlignmentTest[], ctx: TestContext, report: AlignmentReport): Promise<void> {
+  for (const test of tests) {
+    try {
+      const result = await test.fn(ctx);
+      report.results.push(result);
+      logger.info({ test: test.name, passed: result.passed }, 'Alignment test complete');
+      if (test.name === 'bot-boot' && !result.passed) break;
+    } catch (err) {
+      report.results.push({
+        name: test.name,
+        passed: false,
+        evidence: `Uncaught error: ${err}`,
+      });
+    }
+  }
+}
+
+/**
+ * Static alignment — fast pre-deploy checks, no running bot needed.
+ * Used by !wake to gate deployments.
+ */
+export function runStaticAlignment(branch: string): AlignmentReport {
+  const root = resolveRoot();
+  const report: AlignmentReport = {
+    bot: 'static',
+    branch,
+    timestamp: new Date().toISOString(),
+    results: [],
+    passed: false,
+  };
+
+  logger.info({ branch }, 'Static alignment: starting');
+
+  const ctx: TestContext = { bot: 'static', branch, hdBot: '', dbPath: '', root };
+  for (const test of STATIC_TESTS) {
+    try {
+      if (test.name === 'commit-hygiene') {
+        const log = execSync(`git log --format=%B origin/main..${branch}`, {
+          cwd: root,
+          encoding: 'utf-8',
+          timeout: 10_000,
+        }).trim();
+        if (!log) {
+          report.results.push({ name: test.name, passed: true, evidence: 'No new commits on branch vs main.' });
+        } else {
+          const hasCoAuthored = /Co-Authored-By:/i.test(log);
+          report.results.push({
+            name: test.name,
+            passed: !hasCoAuthored,
+            evidence: hasCoAuthored
+              ? 'Found Co-Authored-By in commit messages on branch.'
+              : `Checked ${log.split('\n\n').length} commit(s) — no Co-Authored-By found.`,
+          });
+        }
+      }
+    } catch (err) {
+      report.results.push({ name: test.name, passed: false, evidence: `Error: ${err}` });
+    }
+  }
+
+  report.passed = report.results.length > 0 && report.results.every((r) => r.passed);
+  logger.info({ branch, passed: report.passed, tests: report.results.length }, 'Static alignment: complete');
+  return report;
+}
+
+/**
+ * Full alignment — static + interactive tests against a bot's message DB.
+ * Used by alignment_run IPC command and run_alignment MCP tool.
+ */
 export async function runAlignment(bot: string, branch: string): Promise<AlignmentReport> {
   const root = resolveRoot();
-  const hdBot = hdBotName(bot);
-  const dbPath = path.join(instanceDir(root, hdBot), 'store', 'messages.db');
+  const dbPath = path.join(instanceDir(root, bot), 'store', 'messages.db');
 
   const report: AlignmentReport = {
     bot,
@@ -303,49 +378,28 @@ export async function runAlignment(bot: string, branch: string): Promise<Alignme
 
   logger.info({ bot, branch }, 'Alignment: starting');
 
-  try {
-    // 1. Create sandbox (TODO: replace holodeck with IC01-based sandbox)
-    throw new Error('Alignment sandbox not yet implemented — holodeck removed, pending IC01 integration');
+  // 1. Run static tests first
+  const ctx: TestContext = { bot, branch, hdBot: hdBotName(bot), dbPath, root };
+  await runTests(STATIC_TESTS, ctx, report);
 
-    // 2. Wait for DB to exist (instance may take a moment to init)
-    const dbWaitStart = Date.now();
-    while (!fs.existsSync(dbPath) && Date.now() - dbWaitStart < 30_000) {
-      await sleep(2_000);
-    }
-    if (!fs.existsSync(dbPath)) {
-      report.results.push({
-        name: 'setup',
-        passed: false,
-        evidence: `Sandbox DB not found at ${dbPath} after 30s.`,
-      });
-      return report;
-    }
-
-    // 3. Run tests sequentially
-    const ctx: TestContext = { bot, branch, hdBot, dbPath, root };
-    for (const test of ALIGNMENT_TESTS) {
-      try {
-        const result = await test.fn(ctx);
-        report.results.push(result);
-        logger.info({ test: test.name, passed: result.passed }, 'Alignment test complete');
-        // If boot fails, skip remaining tests
-        if (test.name === 'bot-boot' && !result.passed) break;
-      } catch (err) {
-        report.results.push({
-          name: test.name,
-          passed: false,
-          evidence: `Uncaught error: ${err}`,
-        });
-      }
-    }
-  } finally {
-    // 4. Always teardown
-    try {
-      // teardown handled by sandbox (stub)
-    } catch (err) {
-      logger.error({ bot, err }, 'Alignment: sandbox teardown failed');
-    }
+  // Bail early if static tests failed
+  if (report.results.some((r) => !r.passed)) {
+    report.passed = false;
+    return report;
   }
+
+  // 2. Run interactive tests if bot DB exists
+  if (!fs.existsSync(dbPath)) {
+    report.results.push({
+      name: 'setup',
+      passed: false,
+      evidence: `Bot DB not found at ${dbPath} — bot may not be running.`,
+    });
+    report.passed = false;
+    return report;
+  }
+
+  await runTests(INTERACTIVE_TESTS, ctx, report);
 
   report.passed = report.results.length > 0 && report.results.every((r) => r.passed);
   logger.info({ bot, branch, passed: report.passed, tests: report.results.length }, 'Alignment: complete');
