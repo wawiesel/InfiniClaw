@@ -219,7 +219,7 @@ Use this after making code changes that require a process restart.`,
 
   server.tool(
     'get_last_event_id',
-    'Get the Matrix event ID of the last message received in this room. Use this event ID as the thread_id parameter in send_message to create or reply in a Matrix thread.',
+    'Get the Matrix event ID of the last message received in this room. Use when you need to react to or thread from the last message.',
     {},
     async () => {
       const idsFile = path.join(ipcDir, 'last_event_ids.json');
@@ -874,7 +874,7 @@ Item fields for upsert:
     `Run a podman command on the host machine. Main group only.
 
 Allowed subcommands: ps, images, logs, inspect, run, stop, rm, build, exec, pull, start.
-Arguments are passed as an array (e.g. ["ps", "--filter", "name=nanoclaw"]).
+Arguments are passed as an array (e.g. ["ps", "--filter", "name=infiniclaw"]).
 Output is returned as text (truncated to 2000 chars).`,
     {
       args: z.array(z.string()).describe('Podman command arguments, e.g. ["ps", "--format", "{{.Names}}"]'),

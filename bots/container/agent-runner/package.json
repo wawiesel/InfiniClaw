@@ -1,8 +1,8 @@
 {
-  "name": "nanoclaw-agent-runner",
+  "name": "infiniclaw-agent-runner",
   "version": "2.1.0",
   "type": "module",
-  "description": "Container-side agent runner for NanoClaw (Claude Code CLI runtime)",
+  "description": "Container-side agent runner for InfiniClaw (Claude Code CLI runtime)",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

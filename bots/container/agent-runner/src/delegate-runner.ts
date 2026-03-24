@@ -391,7 +391,7 @@ The tool handles the entire flow:
 6. Returns {"status":"Lobe started","lobe_id":"..."} immediately
 7. On lobe exit, writes result-<lobe_id>.json to IPC input for next-turn processing
 
-You never need to call send_message, set_thread, or get_last_event_id manually for delegations.`,
+You never need to call get_last_event_id manually for delegations.`,
     {
       reason: z.string().min(1).describe('Short reason shown on the main timeline, e.g. "Save memory: threading fix"'),
       objective: z.string().describe('Full detailed prompt/objective for the lobe to execute'),
@@ -468,7 +468,7 @@ You never need to call send_message, set_thread, or get_last_event_id manually f
         '- Do NOT create Python virtual environments inside /workspace/persona/temp or /workspace/extra.',
         '- If a Python environment is required, create it under /workspace/cache/venvs.',
         '- Route large model/package caches under /workspace/cache.',
-        '- Do NOT use send_message, send_image, send_file, or any intercom/communication tools. Your output is delivered to the delegate thread automatically — using those tools would route to the wrong channel.',
+        '- Do NOT use send_image, send_file, or any intercom/communication tools. Your output is delivered to the delegate thread automatically — using those tools would route to the wrong channel.',
         '',
         'Objective:',
         args.objective,

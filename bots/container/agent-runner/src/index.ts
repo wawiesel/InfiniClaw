@@ -1,5 +1,5 @@
 /**
- * NanoClaw Agent Runner — Claude Code CLI Runtime
+ * InfiniClaw Agent Runner — Claude Code CLI Runtime
  * Runs inside a container, receives config via stdin, outputs result to stdout.
  * Spawns `claude` CLI instead of using the Agent SDK directly.
  *
@@ -475,7 +475,7 @@ function writeMcpConfig(containerInput: ContainerInput, env: Record<string, stri
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
-  const nanoclaw: Record<string, unknown> = {
+  const mcpConfig: Record<string, unknown> = {
     command: 'node',
     args: [mcpServerPath],
     env: {
@@ -486,7 +486,7 @@ function writeMcpConfig(containerInput: ContainerInput, env: Record<string, stri
   };
 
   // Forward proxy/cert vars to MCP server
-  const nanocrawEnv = nanoclaw.env as Record<string, string>;
+  const mcpEnv = mcpConfig.env as Record<string, string>;
   const forwardVars = [
     'ASSISTANT_NAME', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
     'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE',
@@ -496,12 +496,12 @@ function writeMcpConfig(containerInput: ContainerInput, env: Record<string, stri
     const val = env[key] || env[`NANOCLAW_${key}`];
     if (val) {
       const envKey = key === 'ASSISTANT_NAME' ? 'INFINICLAW_ASSISTANT_NAME' : key;
-      nanocrawEnv[envKey] = val;
+      mcpEnv[envKey] = val;
     }
   }
 
   const mcpServers: Record<string, unknown> = {
-    infiniclaw: nanoclaw,
+    infiniclaw: mcpConfig,
   };
 
   // Add validated external MCP servers
