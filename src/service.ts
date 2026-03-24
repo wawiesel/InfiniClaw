@@ -873,20 +873,24 @@ export function startRelay(): void {
 }
 
 /**
- * Stop the relay + all bots.
+ * Stop the relay process only. Bots and BBs keep running independently.
+ * Use stopAll() to stop everything (e.g. uninstall).
  */
 export function stopRelay(): void {
-  const root = resolveRoot();
+  pm2Stop(RELAY_PM2_NAME);
+  console.log('relay: stopped');
+}
 
-  // Stop all bots (preserve running Branch Brains — they're independent work units)
+/**
+ * Stop relay + all bots + all containers. Used by uninstall.
+ */
+export function stopAll(): void {
   for (const bot of getActiveBots()) {
     pm2Stop(pm2Name(bot));
     console.log(`${bot}: stopped`);
   }
-  killStaleContainers(undefined, { preserveBBs: true });
+  killStaleContainers();
   removeStaleProcesses();
-
-  // Stop relay
   pm2Stop(RELAY_PM2_NAME);
   console.log('relay: stopped');
 }
@@ -895,7 +899,7 @@ export function stopRelay(): void {
  * Uninstall: stop everything, remove pm2 startup.
  */
 export function uninstallRelay(): void {
-  stopRelay();
+  stopAll();
   try {
     execFileSync(PM2_BIN, ['unstartup'], { stdio: 'inherit' });
   } catch {

@@ -1986,6 +1986,25 @@ const activeBranchBrainCount = new Map<string, number>(); // bot → active TB c
 // Active branch brain processes indexed by replyThreadId — used for context injection fan-out
 const activeBranchBrainProcs = new Map<string, { title: string; stdin: ReturnType<typeof spawn>['stdin'] }>();
 
+// Dedup: track recently spawned BB objectives to prevent double-spawn from
+// both Matrix detection and relay-task IPC file paths.
+const recentBBSpawns = new Map<string, number>(); // "bot:objectiveHash" → timestamp
+function bbSpawnKey(bot: string, objective: string): string {
+  // Use first 100 chars of objective as dedup key — close enough
+  return `${bot}:${objective.slice(0, 100)}`;
+}
+function isRecentBBSpawn(bot: string, objective: string): boolean {
+  const key = bbSpawnKey(bot, objective);
+  const ts = recentBBSpawns.get(key);
+  if (ts && Date.now() - ts < 60_000) return true;
+  recentBBSpawns.set(key, Date.now());
+  // Cleanup old entries
+  for (const [k, t] of recentBBSpawns) {
+    if (Date.now() - t > 120_000) recentBBSpawns.delete(k);
+  }
+  return false;
+}
+
 interface BranchTaskEntry {
   objective: string;
   chat_jid: string;
@@ -2531,7 +2550,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                 try { fs.renameSync(processingPath, filePath); } catch { /* race — another relay got it */ }
                 continue;
               }
-              if (objective) {
+              if (objective && !isRecentBBSpawn(bot ?? '__relay__', objective)) {
                 const botKey = bot ?? '__relay__';
                 const count = activeBranchBrainCount.get(botKey) ?? 0;
                 if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
@@ -5021,6 +5040,38 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             // 📡 — relay received acknowledgement for Captain messages
             if (event.sender === captainUserId && event.event_id && conn.accessToken) {
               relayAck(conn.homeserver, conn.accessToken, conn.roomId, event.event_id);
+            }
+
+            // ── {{branch}} signal detection from Matrix messages ──────────
+            // Durable: even if the bot container dies after posting, the signal
+            // persists in Matrix and the relay picks it up here.
+            if (body.includes('{{') && senderLocal && liveFleet[senderLocal] && event.event_id && markProcessed(event.event_id)) {
+              const { signals } = extractSignals(body);
+              for (const sig of signals) {
+                if (sig.command === 'branch') {
+                  const objective = sig.positional || sig.args['objective'] || '';
+                  const title = sig.args['title'] || objective.slice(0, 60) || 'branch';
+                  if (objective && !isRecentBBSpawn(senderLocal, objective)) {
+                    const chatJid = `matrix:${conn.roomId}`;
+                    log(`branchBrain: detected {{branch}} in Matrix from ${senderLocal} — "${title.slice(0, 40)}"`);
+                    const botKey = senderLocal;
+                    const count = activeBranchBrainCount.get(botKey) ?? 0;
+                    if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
+                      log(`branchBrain: rejected — ${botKey} at limit (${MAX_BRANCH_BRAINS_PER_BOT})`);
+                    } else {
+                      activeBranchBrainCount.set(botKey, count + 1);
+                      void spawnBranchBrain(
+                        { thread_id: '', objective, chat_jid: chatJid, bot: senderLocal, title },
+                        conns,
+                      ).finally(() => {
+                        const n = activeBranchBrainCount.get(botKey) ?? 1;
+                        if (n <= 1) activeBranchBrainCount.delete(botKey);
+                        else activeBranchBrainCount.set(botKey, n - 1);
+                      });
+                    }
+                  }
+                }
+              }
             }
 
             // ── Branch Brain: context injection + thread closure ──────────
