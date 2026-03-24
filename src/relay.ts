@@ -43,7 +43,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME, loadSystemAliasesAsync, systemName } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME, loadSystemAliasesAsync, systemName } from './ship-config.js';
 import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
@@ -2907,8 +2907,6 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
               fleetUpdate(bot, { status: 'quarters' });
               fleetDirty = true;
               persistFleet();
-              // writeFleetAsync (called by persistFleet) already updates s3FleetCache;
-              // clearShipConfigCache() would null it, breaking subsequent loadFleet() calls.
               const root = resolveRoot();
               try {
                 ensurePodmanReady();
@@ -3652,14 +3650,11 @@ async function handleLifecycleCommand(
           log(`!report ${name}: skipping (${liveFleet[bot]?.status})`);
           continue;
         }
-        // Targeted report — wake bot first, then fall through to report logic
+        // Targeted report — mark as quarters so report handler can deploy+start
         log(`!report ${name}: waking sleeping bot (targeted report)`);
         await tr(`📡 ${name} sleeping — waking first`);
         fleetUpdate(bot, { status: 'quarters' });
         persistFleet();
-        stopBot(bot);
-        killStaleContainers(bot);
-        await deployBot(root, bot);
       }
       if (liveFleet[bot]?.status === 'onduty') {
         await tr(`⚠️ ${name} already on duty`);
