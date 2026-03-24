@@ -1930,7 +1930,7 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             for (const bot of getActiveBots()) {
               if (liveFleet[bot]?.status !== 'sleep' && liveFleet[bot]?.status !== 'dream') continue;
               try {
-                deployBot(resolveRoot(), bot);
+                await deployBot(resolveRoot(), bot);
                 log(`git sync: deployed ${bot} (sleeping)`);
                 const botDeployEnv = (() => { try { return loadProfileEnv(root, bot); } catch { return null; } })();
                 if (engConn && threadRoot) await threadReply(engConn, threadRoot, `✅ ${botDeployEnv?.ASSISTANT_NAME || capitalizeName(bot)} deployed (sleeping)`);
@@ -3110,7 +3110,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     persistFleet();
     clearShipConfigCache();
     void reabsorbWbsItems(root, bot);
-    restartBotForRoom(root, bot);
+    await restartBotForRoom(root, bot);
     writeCrewStatus(root, bot);
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} dismissed → retrospective`);
@@ -3346,7 +3346,7 @@ async function handleLifecycleCommand(
         clearShipConfigCache();
         // Restart bot so NanoClaw monitors quarters (lightweight — no rebuild)
         void reabsorbWbsItems(root, bot);
-        restartBotForRoom(root, bot);
+        await restartBotForRoom(root, bot);
         writeCrewStatus(root, bot);
         await tr(`✅ ${name} dismissed`);
         publishFleetReport().catch(() => {});
@@ -3409,7 +3409,7 @@ async function handleLifecycleCommand(
         }
         stopBot(bot);
         killStaleContainers(bot);
-        deployBot(root, bot);
+        await deployBot(root, bot);
 
         // WBS 18.8: static alignment gate — run before starting bot
         // Alignment is best-effort: if sandbox isn't implemented yet, skip gracefully
@@ -3492,9 +3492,9 @@ async function handleLifecycleCommand(
         // stale versions when !report interrupted a duty cycle retrospective.
         stopBot(bot);
         killStaleContainers(bot);
-        deployBot(root, bot);
+        await deployBot(root, bot);
         // Re-seed with exact dutyRoomId to avoid intercom.json lookup issues (#193)
-        restartBotForRoom(root, bot, dutyRoomId);
+        await restartBotForRoom(root, bot, dutyRoomId);
         writeCrewStatus(root, bot);
         void injectWbsTasks(root, bot);
         await tr(`✅ ${name} on duty`);

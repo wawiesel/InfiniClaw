@@ -109,7 +109,7 @@ import { shouldIgnoreMessage } from './message-filtering.js';
 import { appendConversationLog } from './conversation-log.js';
 import { statusMessage, escapeHtml } from './formatting.js';
 import { ensureContainerSystemRunning } from './podman-bootstrap.js';
-import { uploadContent, uploadHtml, getPresignedUrl } from './s3-sync.js';
+import { uploadContent, uploadHtml, getPresignedUrl, downloadJson, uploadJson } from './s3-sync.js';
 import { errStr, escapeRegex, envInt } from './utils.js';
 import { extractSignals, processSignals, auditSignals, formatSignalError } from './signals.js';
 import { toolCallBreadcrumb as sharedToolCallBreadcrumb, toolCallBreadcrumbFromData, isToolCallMarker, parseToolCallMarker, isToolCallBlock, hasDetailsBlock } from './tool-call-breadcrumb.js';
@@ -488,14 +488,32 @@ const queue = new GroupQueue();
 
 // ── State load/save ────────────────────────────────────────────────────
 
-function loadState(): void {
+async function loadState(): Promise<void> {
   const state = loadBaseState();
   lastTimestamp = state.lastTimestamp;
   lastAgentTimestamp = state.lastAgentTimestamp;
   sessions = state.sessions;
-  registeredGroups = state.registeredGroups;
 
-  // Ensure isMain is set on any group with the main folder (may be missing from older DBs)
+  // Load registered groups from S3 (primary); fall back to SQLite for local/test environments
+  const s3Key = `rooms/${ASSISTANT_NAME.toLowerCase()}/registered-groups.json`;
+  try {
+    const s3Data = await downloadJson<{ ts?: number; groups?: Record<string, RegisteredGroup> }>(s3Key);
+    if (s3Data?.groups && Object.keys(s3Data.groups).length > 0) {
+      registeredGroups = s3Data.groups;
+      // Sync to SQLite so alignment.ts and status.ts can still read via direct DB queries
+      for (const [jid, group] of Object.entries(registeredGroups)) {
+        setRegisteredGroup(jid, group);
+      }
+      logger.info({ groupCount: Object.keys(registeredGroups).length, source: 's3' }, 'Registered groups loaded');
+    } else {
+      registeredGroups = state.registeredGroups;
+    }
+  } catch (err) {
+    logger.warn({ err }, 'S3 registered groups load failed — falling back to SQLite');
+    registeredGroups = state.registeredGroups;
+  }
+
+  // Ensure isMain is set on any group with the main folder (may be missing from older data)
   for (const [jid, group] of Object.entries(registeredGroups)) {
     if (group.folder === MAIN_GROUP_FOLDER && !group.isMain) {
       registeredGroups[jid] = { ...group, isMain: true };
@@ -536,10 +554,18 @@ function saveState(): void {
   setRouterState('main_model', mainLlm);
 }
 
+function persistGroupsToS3(): void {
+  const s3Key = `rooms/${ASSISTANT_NAME.toLowerCase()}/registered-groups.json`;
+  uploadJson(s3Key, { ts: Date.now(), groups: registeredGroups }).catch((err) => {
+    logger.warn({ err }, 'S3 registered groups persist failed');
+  });
+}
+
 function registerGroup(jid: string, group: RegisteredGroup): void {
   if (group.folder === MAIN_GROUP_FOLDER) group = { ...group, isMain: true };
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
+  persistGroupsToS3();
 
   const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
@@ -554,6 +580,7 @@ function unregisterGroup(jid: string): void {
   const group = registeredGroups[jid];
   delete registeredGroups[jid];
   deleteRegisteredGroup(jid);
+  persistGroupsToS3();
   logger.info({ jid, folder: group?.folder }, 'Group unregistered');
 }
 
@@ -1770,7 +1797,7 @@ async function main(): Promise<void> {
   // Validate config and warn about missing values
   const configWarnings = validateConfig();
   for (const w of configWarnings) logger.warn(w);
-  loadState();
+  await loadState();
 
   // Populate bot Matrix user IDs for human-vs-bot message filtering
   try {

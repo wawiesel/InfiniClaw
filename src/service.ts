@@ -9,8 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import Database from 'better-sqlite3';
-
+import { downloadJson, uploadJson } from './s3-sync.js';
 import { parseEnvFile } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
 import { recoverPodman, stopContainersByPrefix, getPodmanContainerNames, stopContainer } from './podman-utils.js';
@@ -96,13 +95,15 @@ function profileEnvPath(_root: string, bot: string): string {
   return path.join(config.secretsPath, 'bots', bot, 'env');
 }
 
+/** S3 key for a bot's registered-groups JSON. */
+function roomsS3Key(bot: string): string {
+  return `rooms/${bot}/registered-groups.json`;
+}
+
 /** Clear all room registrations and stale group/IPC folders so room transitions are atomic. */
-function clearRoomRegistrations(instanceBase: string): void {
-  const storeDir = path.join(instanceBase, 'store');
-  fs.mkdirSync(storeDir, { recursive: true });
-  const db = new Database(path.join(storeDir, 'messages.db'));
-  try { db.exec(`DELETE FROM registered_groups`); } catch { /* table may not exist yet */ }
-  finally { db.close(); }
+async function clearRoomRegistrations(instanceBase: string): Promise<void> {
+  const bot = path.basename(instanceBase);
+  await uploadJson(roomsS3Key(bot), { ts: Date.now(), groups: {} });
   // Clean stale group and IPC folders from previous room assignments
   for (const subdir of ['groups', path.join('data', 'ipc')]) {
     const dir = path.join(instanceBase, subdir);
@@ -117,24 +118,20 @@ function clearRoomRegistrations(instanceBase: string): void {
   }
 }
 
-/** Seed the registered_groups table with a room. */
-function seedMainRoomRegistration(instanceBase: string, mainJid: string, mainGroupName: string, mainGroupFolder: string, requiresTrigger: boolean): void {
-  const storeDir = path.join(instanceBase, 'store');
-  fs.mkdirSync(storeDir, { recursive: true });
-  const seedDb = new Database(path.join(storeDir, 'messages.db'));
-  try {
-    seedDb.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-      jid TEXT PRIMARY KEY, name TEXT NOT NULL, folder TEXT NOT NULL UNIQUE,
-      trigger_pattern TEXT NOT NULL, added_at TEXT NOT NULL,
-      container_config TEXT, requires_trigger INTEGER DEFAULT 1
-    )`);
-    seedDb.prepare(
-      `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(mainJid, mainGroupName, mainGroupFolder, '', new Date().toISOString(), requiresTrigger ? 1 : 0);
-  } finally {
-    seedDb.close();
-  }
+/** Seed the S3 room registry with a room entry. */
+async function seedMainRoomRegistration(instanceBase: string, mainJid: string, mainGroupName: string, mainGroupFolder: string, requiresTrigger: boolean): Promise<void> {
+  const bot = path.basename(instanceBase);
+  const key = roomsS3Key(bot);
+  const existing = await downloadJson<{ ts?: number; groups?: Record<string, unknown> }>(key);
+  const groups: Record<string, unknown> = existing?.groups ?? {};
+  groups[mainJid] = {
+    name: mainGroupName,
+    folder: mainGroupFolder,
+    trigger: '',
+    added_at: new Date().toISOString(),
+    requires_trigger: requiresTrigger,
+  };
+  await uploadJson(key, { ts: Date.now(), groups });
 }
 
 // ── Env loading ────────────────────────────────────────────────────────
@@ -291,7 +288,7 @@ export function killRogueProcesses(): void {
 /**
  * Full deploy: rsync → npm ci if needed → build.
  */
-export function deployBot(root: string, bot: string): void {
+export async function deployBot(root: string, bot: string): Promise<void> {
   const instance = instanceDir(root, bot);
   fs.mkdirSync(instance, { recursive: true });
 
@@ -330,13 +327,13 @@ export function deployBot(root: string, bot: string): void {
   const fleet = loadFleet();
   const botStatus = fleet[bot]?.status;
   const quartersRoom = fleet[bot]?.quartersRoom;
-  clearRoomRegistrations(instance);
+  await clearRoomRegistrations(instance);
 
   if (botStatus === 'quarters' && quartersRoom) {
     // Bot is in quarters — seed quarters room as main
     const quartersJid = `matrix:${quartersRoom}`;
     const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
-    seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
+    await seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
     console.log(`${bot}: pre-registered quarters (${quartersName})`);
   } else {
     // Bot is on duty or other — derive duty room from ROLE_ROOMS + intercom.json
@@ -354,7 +351,7 @@ export function deployBot(root: string, bot: string): void {
         }
       } catch { /* intercom.json not found — fall through */ }
       if (dutyRoomJid) {
-        seedMainRoomRegistration(instance, dutyRoomJid, dutyRoom.room, dutyRoom.room, true);
+        await seedMainRoomRegistration(instance, dutyRoomJid, dutyRoom.room, dutyRoom.room, true);
         console.log(`${bot}: pre-registered duty room ${dutyRoom.room}`);
       } else {
         console.log(`${bot}: no intercom.json entry for ${dutyRoom.room} — room seed skipped`);
@@ -366,7 +363,7 @@ export function deployBot(root: string, bot: string): void {
       const mainGroupName = profileEnv.MAIN_GROUP_NAME;
       const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
       if (mainJid && mainGroupName) {
-        seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
+        await seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
         console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
       }
     }
@@ -717,7 +714,7 @@ export function refreshBot(root: string, bot: string): void {
  *   exact Matrix room ID the bot was sent to. Pass it here to seed that room
  *   directly, bypassing the fragile intercom.json lookup that caused #193.
  */
-export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: string): void {
+export async function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: string): Promise<void> {
   const instance = instanceDir(root, bot);
   const profileEnv = loadProfileEnv(root, bot);
   const fleet = loadFleet();
@@ -725,11 +722,11 @@ export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: s
   const quartersRoom = fleet[bot]?.quartersRoom;
 
   // Clear stale rooms then re-seed based on current fleet status
-  clearRoomRegistrations(instance);
+  await clearRoomRegistrations(instance);
   if (botStatus === 'quarters' && quartersRoom) {
     const quartersJid = `matrix:${quartersRoom}`;
     const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
-    seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
+    await seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
   } else if (botStatus === 'onduty' && knownDutyRoomId) {
     // Relay provided the exact room ID — seed it directly (#193).
     // Use the duty room name as BOTH group name AND folder name so the IPC
@@ -737,7 +734,7 @@ export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: s
     const role = (fleet[bot]?.role ?? '').toLowerCase();
     const dutyRoom = ROLE_ROOMS[role];
     const roomName = dutyRoom?.room ?? (profileEnv.MAIN_GROUP_NAME || 'main');
-    seedMainRoomRegistration(instance, `matrix:${knownDutyRoomId}`, roomName, roomName, true);
+    await seedMainRoomRegistration(instance, `matrix:${knownDutyRoomId}`, roomName, roomName, true);
   } else {
     // Bot is onduty — derive duty room from ROLE_ROOMS + intercom.json
     const role = (fleet[bot]?.role ?? '').toLowerCase();
@@ -771,14 +768,14 @@ export function restartBotForRoom(root: string, bot: string, knownDutyRoomId?: s
         // Use the duty room name as BOTH the group name AND folder name.
         // The relay writes IPC messages to ipc/<roomName>/input/, so the
         // folder must match the room name for the IPC watcher to find them.
-        seedMainRoomRegistration(instance, dutyRoomJid, dutyRoom.room, dutyRoom.room, true);
+        await seedMainRoomRegistration(instance, dutyRoomJid, dutyRoom.room, dutyRoom.room, true);
       }
     }
     if (!dutyRoom) {
       // No duty room for this role — use env MAIN_GROUP_NAME as fallback
       const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
       if (mainJid && profileEnv.MAIN_GROUP_NAME) {
-        seedMainRoomRegistration(instance, mainJid, profileEnv.MAIN_GROUP_NAME, mainGroupFolder, true);
+        await seedMainRoomRegistration(instance, mainJid, profileEnv.MAIN_GROUP_NAME, mainGroupFolder, true);
       }
     }
   }

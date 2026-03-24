@@ -147,13 +147,15 @@ function validateDeploy(bot: string): { ok: boolean; errors: string } {
   );
 }
 
-function deployInstance(bot: string): { ok: boolean; output: string } {
-  return trySync((): { ok: boolean; output: string } => {
+async function deployInstance(bot: string): Promise<{ ok: boolean; output: string }> {
+  try {
     const root = resolveRoot();
-    serviceDeployBot(root, bot);
+    await serviceDeployBot(root, bot);
     serviceRebuildImage(root, bot);
     return { ok: true, output: '' };
-  }, (err) => ({ ok: false, output: errStr(err) }));
+  } catch (err) {
+    return { ok: false, output: errStr(err) };
+  }
 }
 
 function rebuildImage(bot: string): { ok: boolean; output: string } {
@@ -370,7 +372,7 @@ async function handleRefreshBot(data: CommandData, ctx: InfiniClawIpcContext): P
 
 async function handleSelfRefresh(bot: string, chatJid: string | null, ctx: InfiniClawIpcContext): Promise<void> {
   logger.info({ bot }, 'Deploy validation passed — deploying to self then refreshing');
-  const deploy = deployInstance(bot);
+  const deploy = await deployInstance(bot);
   if (!deploy.ok) {
     logger.error({ bot, output: deploy.output }, 'Self-deploy failed — aborting refresh');
     await safeSend(ctx, chatJid, `⛔ self-deploy failed — not refreshing:\n\n\`\`\`\n${truncateOutput(deploy.output)}\n\`\`\``);
