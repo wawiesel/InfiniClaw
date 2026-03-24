@@ -74,7 +74,7 @@ Each room gets its own IPC directory. This prevents cross-room privilege escalat
 
 ## Main Room Elevation
 
-Only the main room's containers can run privileged IPC commands (`refresh_bot`, `rebuild_image`, `git_push`). Other rooms are restricted to task scheduling and thread management.
+Only the main room's containers can run privileged IPC commands (`refresh_bot`, `rebuild_image`). Other rooms are restricted to task scheduling and thread management.
 
 ## Processing
 
