@@ -246,7 +246,7 @@ export async function sendBbMessage(
     msgtype: 'm.text',
     body: text,
     format: 'org.matrix.custom.html',
-    formatted_body: markdownToHtml(text),
+    formatted_body: text,
   };
   if (threadId) {
     content['m.relates_to'] = {
