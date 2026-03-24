@@ -3078,6 +3078,9 @@ async function metricsLoop(): Promise<void> {
 
 const HEARTBEAT_INTERVAL = envInt('HEARTBEAT_INTERVAL_MS', 15 * 60_000); // 15 min default
 const AUTO_SLEEP_IDLE_MS = envInt('AUTO_SLEEP_IDLE_MS', 30 * 60_000); // 30 min default; 0 = disabled
+/** Silence detection: per-bot last main-timeline post timestamp (excludes thread replies). */
+const botLastMainTimelinePost: Map<string, number> = new Map();
+const BOT_SILENCE_THRESHOLD_MS = envInt('BOT_SILENCE_THRESHOLD_MS', 5 * 60_000); // 5 min
 
 /** Check if a bot has a running container. */
 function hasRunningContainer(bot: string): boolean {
@@ -3200,6 +3203,26 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         }
 
         await relaySend(conn.homeserver, conn.accessToken, conn.roomId, nudge);
+      }
+      // ── Silence detection: post status when active bot is silent on main timeline ──
+      for (const bot of getActiveBots()) {
+        if (!hasRunningContainer(bot)) continue;
+        const lastPost = botLastMainTimelinePost.get(bot);
+        if (!lastPost) continue; // haven't seen any posts yet — skip
+        const silenceMs = Date.now() - lastPost;
+        if (silenceMs < BOT_SILENCE_THRESHOLD_MS) continue;
+        // Bot has a running container but hasn't posted to main timeline in > threshold
+        const roomName = buildBotRoomMap()[bot];
+        if (!roomName) continue;
+        const conn = conns.find((c) => c.name === roomName);
+        if (!conn?.accessToken) continue;
+        const env = (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })();
+        const name = env?.ASSISTANT_NAME || capitalizeName(bot);
+        const mins = Math.round(silenceMs / 60_000);
+        await relaySend(conn.homeserver, conn.accessToken, conn.roomId,
+          `📡 ${name} active (container running) — last main-timeline post ${mins}m ago`);
+        // Reset to avoid spamming — only alert once per silence window
+        botLastMainTimelinePost.set(bot, Date.now());
       }
     } catch (err) {
       log(`heartbeat error: ${errStr(err)}`);
@@ -5154,6 +5177,13 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             if (senderLocal && liveFleet[senderLocal]) {
               // Bot message — stop the latency clock
               recordBotReply(senderLocal, evTs);
+              // Track main-timeline vs thread activity for silence detection
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const relatesTo = (event.content as any)?.['m.relates_to'];
+              const isThread = relatesTo?.rel_type === 'm.thread';
+              if (!isThread) {
+                botLastMainTimelinePost.set(senderLocal, evTs);
+              }
             } else if (event.sender === captainUserId && conn.userId !== event.sender) {
               // Captain message in a duty/quarters room — start latency clock for local bots in this room
               for (const [bot, entry] of Object.entries(liveFleet)) {

@@ -212,30 +212,67 @@ function bazaar(): string {
   const solJson     = JSON.stringify(solHistory);
   const ethJson     = JSON.stringify(ethHistory);
 
-  const body = `
-<div class="card row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
-  <div class="row" style="gap:16px;flex-wrap:wrap">
-    <span style="font-size:16px;font-weight:bold">Signal: <span class="badge ${signalClass}" style="font-size:14px;padding:3px 12px">${signal}</span></span>
-    <span>BTC <strong>${btcFmt}</strong></span>
-    <span>SMA <strong>${smaFmt}</strong> <span class="${signal === 'BULL' ? 'ok' : 'err'}" style="font-size:12px">${signal === 'BULL' ? '+' : ''}${pctSma}%</span></span>
-    ${totalLive ? `<span>Portfolio <strong>$${totalLive.toFixed(2)}</strong></span>` : ''}
-    ${solPriceLive ? `<span style="color:var(--muted)">SOL $${solPriceLive.toFixed(2)} · ETH $${ethPriceLive.toFixed(0)}</span>` : ''}
-  </div>
-  <span class="muted" style="font-size:12px">run #${runs} · ${lastCheck ? relTime(lastCheck) : '—'}</span>
-</div>
+  // ── Read additional state fields written by strategy.py ──────────
+  let portfolioTotal = 0, btcPriceSnap = 0, initialDeposit = 0, alpacaEquity = 0;
+  if (fs.existsSync(stateFile)) {
+    try {
+      const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      portfolioTotal = state.portfolio_total || totalLive || 0;
+      btcPriceSnap   = state.btc_price || btcPriceLive || 0;
+      initialDeposit = state.initial || 83.93;
+    } catch { /* ignore */ }
+  }
+  const alpacaFile = path.join(SIGNAL_DIR, 'alpaca_state.json');
+  if (fs.existsSync(alpacaFile)) {
+    try {
+      const as = JSON.parse(fs.readFileSync(alpacaFile, 'utf8'));
+      alpacaEquity = as.portfolio_value || 0;
+    } catch { /* ignore */ }
+  }
+  const totalAll = portfolioTotal + alpacaEquity;
+  const pnl      = portfolioTotal - initialDeposit;
+  const pnlSign  = pnl >= 0 ? '+' : '';
+  const pnlColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  const sigColor = signal === 'BULL' ? 'var(--green)' : 'var(--red)';
+  const sigBg    = signal === 'BULL' ? '#0d2818' : '#2d0d0d';
+  const btcDisplay = (btcPriceSnap || btcPriceLive) ? `$${Math.round(btcPriceSnap || btcPriceLive).toLocaleString()}` : '—';
 
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px">
-  <div class="card" style="margin:0">
-    <h2>SOL Model [v${solAcc.mv}]</h2>
-    <div style="font-size:22px;font-weight:bold;color:var(--${solDir})">${solAcc.dir}</div>
-    <div class="muted">direction accuracy · ${solAcc.n} scored</div>
-    <div style="margin-top:4px;font-size:13px">MAPE <strong>${solAcc.mape}</strong> · GBM ${(weights['gbm']||0.33).toFixed(2)} RSI ${(weights['rsi']||0.33).toFixed(2)} SMA ${(weights['sma']||0.33).toFixed(2)}</div>
+  // Overall weighted accuracy (simple count-based for TS)
+  function overallAcc() {
+    const all = predictions.filter(p => p['actual_24h'] != null);
+    if (!all.length) return '—';
+    return Math.round(all.filter(p => p['dir_correct']).length / all.length * 100) + '%';
+  }
+
+  const body = `
+<style>
+  .cmd-strip { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:20px; }
+  .tile { border-radius:10px; padding:18px 14px; text-align:center; border:2px solid #30363d; }
+  .tile .tlabel { font-size:10px; color:#8b949e; text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; }
+  .tile .tbig { font-size:2.2rem; font-weight:800; line-height:1; margin-bottom:8px; }
+  .tile .tsub1 { font-size:0.88rem; color:#c9d1d9; margin-bottom:3px; }
+  .tile .tsub2 { font-size:0.75rem; color:#8b949e; }
+  @media(max-width:600px){ .cmd-strip{ grid-template-columns:1fr; } .tile .tbig{ font-size:1.7rem; } }
+</style>
+
+<div class="cmd-strip">
+  <div class="tile" style="background:${sigBg};border-color:${sigColor}">
+    <div class="tlabel">Market Signal</div>
+    <div class="tbig" style="color:${sigColor}">${signal}</div>
+    <div class="tsub1">BTC ${btcDisplay} &nbsp; ${pctSma !== '—' ? (signal==='BULL'?'+':'')+pctSma+'% SMA' : ''}</div>
+    <div class="tsub2">SMA-50 ${smaFmt} · run #${runs} · ${lastCheck ? relTime(lastCheck) : '—'}</div>
   </div>
-  <div class="card" style="margin:0">
-    <h2>ETH Model [v${ethAcc.mv}]</h2>
-    <div style="font-size:22px;font-weight:bold;color:var(--${ethDir})">${ethAcc.dir}</div>
-    <div class="muted">direction accuracy · ${ethAcc.n} scored</div>
-    <div style="margin-top:4px;font-size:13px">MAPE <strong>${ethAcc.mape}</strong></div>
+  <div class="tile" style="background:#0d1a2d;border-color:#ffd93d">
+    <div class="tlabel">Total Portfolio</div>
+    <div class="tbig" style="color:#ffd93d">$${totalAll ? totalAll.toFixed(2) : (portfolioTotal||totalLive||0).toFixed(2)}</div>
+    <div class="tsub1">P&amp;L <span style="color:${pnlColor}">${pnlSign}$${pnl.toFixed(2)}</span></div>
+    <div class="tsub2">Crypto $${(portfolioTotal||totalLive||0).toFixed(0)}${alpacaEquity ? ` + Stocks $${alpacaEquity.toLocaleString()}` : ''}</div>
+  </div>
+  <div class="tile" style="background:#0d1a2d;border-color:#00e5ff">
+    <div class="tlabel">Algorithm Score</div>
+    <div class="tbig" style="color:#00e5ff">${overallAcc()}</div>
+    <div class="tsub1">SOL <strong style="color:var(--${solDir})">${solAcc.dir}</strong> &nbsp; ETH <strong style="color:var(--${ethDir})">${ethAcc.dir}</strong></div>
+    <div class="tsub2">move-weighted directional · ${predictions.filter(p=>p['actual_24h']!=null).length} scored</div>
   </div>
 </div>
 
