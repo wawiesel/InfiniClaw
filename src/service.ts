@@ -13,7 +13,7 @@ import Database from 'better-sqlite3';
 
 import { parseEnvFile } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
-import { recoverPodman, stopContainersByPrefix } from './podman-utils.js';
+import { recoverPodman, stopContainersByPrefix, getPodmanContainerNames, stopContainer } from './podman-utils.js';
 
 import { loadShipConfig, loadFleet, isValidBotName, ROLE_ROOMS } from './ship-config.js';
 import { shellQuote, errStr } from './utils.js';
@@ -255,11 +255,17 @@ export function ensurePodmanReady(): void {
   }
 }
 
-export function killStaleContainers(onlyBot?: string): void {
+export function killStaleContainers(onlyBot?: string, opts?: { preserveBBs?: boolean }): void {
   if (onlyBot) assertValidBotName(onlyBot);
   const prefix = onlyBot ? `nanoclaw-${onlyBot}-` : 'nanoclaw-';
-  const stopped = stopContainersByPrefix(prefix, 5);
-  for (const name of stopped) {
+  const names = getPodmanContainerNames().filter((n) => n.startsWith(prefix));
+  for (const name of names) {
+    // Preserve running Branch Brain containers during relay stop — they're independent work units
+    if (opts?.preserveBBs && name.includes('-bb-')) {
+      console.log(`Preserving BB container: ${name}`);
+      continue;
+    }
+    stopContainer(name, 5);
     console.log(`Stopping stale container: ${name}`);
   }
 }
@@ -872,12 +878,12 @@ export function startRelay(): void {
 export function stopRelay(): void {
   const root = resolveRoot();
 
-  // Stop all bots
+  // Stop all bots (preserve running Branch Brains — they're independent work units)
   for (const bot of getActiveBots()) {
     pm2Stop(pm2Name(bot));
     console.log(`${bot}: stopped`);
   }
-  killStaleContainers();
+  killStaleContainers(undefined, { preserveBBs: true });
   removeStaleProcesses();
 
   // Stop relay
