@@ -47,14 +47,17 @@ Each fleet bot gets 3 dedicated BB accounts:
 ```
 1. MB dispatches {{branch Fix the crash}}
 2. Relay selects idle account from pool (e.g. @bb1-tali)
-3. Relay sets display name → "384729-tali" (random 6-digit index)
-4. BB works in thread under identity "384729-tali"
-5. BB finishes → posts summary callout to MB in thread
-6. MB reviews thread, can exchange with BB (distinct identities)
-7. MB posts {{merge}} → relay posts squash summary to main timeline
+3. Relay sets display name → "384729-tali" (random 6-digit index) — BEFORE joining the room
+4. BB joins the room
+5. Relay posts thread root message identifying the active BB account (display name + Matrix ID + task ref)
+6. BB works in thread under identity "384729-tali"
+7. BB finishes → posts summary callout to MB in thread
+8. MB reviews thread, can exchange with BB (distinct identities)
+9. MB posts {{merge}} → relay posts squash summary to main timeline
    — OR MB posts {{abort}} → relay posts cancellation notice, discards
-8. Display name resets, @bb1-tali returns to idle pool
-9. Next activation → same account becomes "517203-tali"
+10. BB leaves the room
+11. Display name resets, @bb1-tali returns to idle pool
+12. Next activation → same account becomes "517203-tali"
 ```
 
 ### Timeout and Crash Cleanup
@@ -76,6 +79,22 @@ Examples: `384729-tali`, `517203-parker`, `091844-cid`
 - The numeric index makes each activation unique and traceable in room history
 - The bot name suffix identifies which MB owns this BB
 - Random (not sequential) to avoid implying ordering
+
+### Thread Root Message
+
+The relay must post a thread root message that identifies the active BB account **before** BB sends any work messages. Required fields:
+
+- **Display name** — the randomised identity for this activation (e.g. `384729-tali`)
+- **Matrix ID** — the underlying pool account (e.g. `@bb1-tali:matrix.a-gis.org`)
+- **Task reference** — the branch task description from the `{{branch}}` signal
+
+Example:
+```
+BB activated: 384729-tali (@bb1-tali:matrix.a-gis.org)
+Task: Fix the crash
+```
+
+This lets MB (and room observers) immediately correlate the thread to a specific pool account and task without inspecting relay logs.
 
 ### MB Review Protocol
 
@@ -114,7 +133,7 @@ One message. Everything relevant. No churn.
 ## Account Management
 
 - **Registration:** One-time setup via Conduwuit admin API or manual registration
-- **Room membership:** Permanent — BB accounts join duty rooms once during setup and stay joined. No per-task join/leave.
+- **Room membership:** Per-activation — BB accounts join the room **after** the display name is set and **leave** when the activation ends (merge, abort, or timeout). Accounts are not room members while idle.
 - **Homeserver:** Same as fleet (`matrix.a-gis.org`)
 - **Persistence:** Accounts are permanent — no create/deactivate per task
 - **Display name:** Only state that changes per activation
@@ -163,11 +182,15 @@ This doc supersedes the BB merge flow defined in [08-threading.md](08-threading.
 
 ## Verification
 
-1. **Pool allocation** — BB dispatch selects idle account, sets display name, marks busy
-2. **Identity separation** — BB messages in thread show distinct sender from MB
-3. **MB review** — MB can post in thread and BB sees/responds to it
-4. **Merge control** — thread stays open until MB sends `{{merge}}`
-5. **Abort control** — `{{abort}}` cancels thread, returns account to pool
-6. **Timeout reclaim** — crashed/abandoned BBs reclaimed after BRANCH_BRAIN_TIMEOUT_MS
-7. **Squash summary** — main timeline gets single structured result message
-8. **Pool return** — on merge/abort/timeout, display name resets, account returns to idle pool
+1. **Pool allocation** — BB dispatch selects idle account, marks busy
+2. **Display name first** — display name is set to `<index>-<bot>` before BB joins the room; the account must not appear in the room under the old name
+3. **Join on activation** — BB account is not a room member while idle; it joins only after display name is set
+4. **Thread root identifies BB** — the relay-posted thread root message includes the display name, Matrix ID, and task reference before any BB work messages
+5. **Identity separation** — BB messages in thread show distinct sender from MB
+6. **MB review** — MB can post in thread and BB sees/responds to it
+7. **Merge control** — thread stays open until MB sends `{{merge}}`
+8. **Abort control** — `{{abort}}` cancels thread, returns account to pool
+9. **Leave on deactivation** — BB leaves the room on merge, abort, or timeout reclaim; idle accounts have no room membership
+10. **Timeout reclaim** — crashed/abandoned BBs reclaimed after BRANCH_BRAIN_TIMEOUT_MS
+11. **Squash summary** — main timeline gets single structured result message
+12. **Pool return** — on merge/abort/timeout, display name resets, account returns to idle pool
