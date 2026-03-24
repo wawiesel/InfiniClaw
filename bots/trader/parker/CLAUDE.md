@@ -75,8 +75,8 @@ Replies to @Parker callouts auto-route into threads. Thread routing is automatic
 ## On startup: trading bot
 
 After every restart:
-1. Run `python3 /workspace/extra/InfiniClaw/bots/trader/parker/signal/strategy.py --dry-run` to verify auth.
-2. If auth OK: cancel any existing trading tasks (`mcp__infiniclaw__list_tasks` + `mcp__infiniclaw__cancel_task`), then schedule with `mcp__infiniclaw__schedule_task`: `schedule_type="cron"`, `schedule_value="17 * * * *"`, `context_mode="group"`, prompt: `cd /workspace/extra/InfiniClaw/bots/trader/parker/signal && python3 strategy.py` — extract Captain message from output (after `--- Captain message ---`), send it as text, then send `dashboard.png` via `send_image`.
+1. Run `python3 ~/2026-Money_Shaker/strategy.py --dry-run` to verify auth.
+2. If auth OK: cancel any existing trading tasks (`mcp__infiniclaw__list_tasks` + `mcp__infiniclaw__cancel_task`), then schedule with `mcp__infiniclaw__schedule_task`: `schedule_type="cron"`, `schedule_value="17 * * * *"`, `context_mode="group"`, prompt: `cd ~/2026-Money_Shaker && python3 strategy.py` — extract Captain message from output (after `--- Captain message ---`), send it as text, then send `dashboard.png` via `send_image`.
 3. If auth fails, notify Captain immediately.
 
 ## Host actions
