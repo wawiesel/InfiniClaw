@@ -15,6 +15,7 @@ import { botBadge, capitalizeName, GRADE_EMOJI, formatDuration as formatDuration
 import { matrixGetMessages } from './matrix-api.js';
 import { uploadContent } from './s3-sync.js';
 import { resolveRoot } from './service.js';
+import { SEMVER_TAG } from './version.js';
 import {
   loadShipConfig,
   loadFleet,
@@ -82,6 +83,8 @@ export interface ShipMetrics {
   infraFailures: RollingMetric;
   /** Code version string (populated by relay, not metrics) */
   codeVersion?: string;
+  /** Seconds from git tag push to this bot running the version. null if untagged. */
+  versionAdoptionLatencySeconds?: number | null;
 }
 
 export interface FleetMetrics {
@@ -597,9 +600,26 @@ function rollingPointsRate(events: ScoreEvent[], windowDays: number): number {
   return Math.round((total / windowDays) * 10) / 10;
 }
 
+/** Get the Unix timestamp (seconds) when a git tag was created. Returns null on failure. */
+function getTagTimestampSeconds(tag: string): number | null {
+  try {
+    const ts = execSync(`git log -1 --format=%ct "${tag}"`, {
+      cwd: resolveRoot(), encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const n = parseInt(ts, 10);
+    return isNaN(n) ? null : n;
+  } catch {
+    return null;
+  }
+}
+
 function computeShipMetrics(): ShipMetrics {
   const pm2Info = getPm2Info();
   const relay = pm2Info.find(p => p.name === 'infiniclaw-relay');
+  const tagTs = SEMVER_TAG ? getTagTimestampSeconds(SEMVER_TAG) : null;
+  const versionAdoptionLatencySeconds = tagTs != null
+    ? Math.round(Date.now() / 1000 - tagTs)
+    : null;
   return {
     name: thisShipName(),
     relayUptimeSeconds: relay?.uptimeMs ? Math.round(relay.uptimeMs / 1000) : 0,
@@ -608,6 +628,7 @@ function computeShipMetrics(): ShipMetrics {
       day7: relay?.restartsSince(7) ?? 0,
     },
     infraFailures: rolling(infraFailureEvents),
+    versionAdoptionLatencySeconds,
   };
 }
 
@@ -788,12 +809,16 @@ export function formatShipMetrics(m: ShipMetrics): string {
   const ships = safeLoadShips();
   const entry = ships[m.name];
   const tag = entry?.emoji ? `${entry.emoji} ${m.name}` : m.name;
-  return [
+  const lines = [
     `**${tag}**`,
     `  Relay uptime: ${uptime}`,
     `  Relay restarts: ${fmtRolling(m.relayRestarts)}`,
     `  Sync/build failures: ${fmtRolling(m.infraFailures)}`,
-  ].join('\n');
+  ];
+  if (m.versionAdoptionLatencySeconds != null) {
+    lines.push(`  Version adoption latency: ${formatDurationMs(m.versionAdoptionLatencySeconds * 1000)}`);
+  }
+  return lines.join('\n');
 }
 
 export function formatFleetMetrics(m: FleetMetrics): string {
