@@ -3300,6 +3300,7 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     void reabsorbWbsItems(root, bot);
     await restartBotForRoom(root, bot);
     writeCrewStatus(root, bot);
+    await setBotDisplayStatus(root, bot, 'retrospective');
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} dismissed → retrospective`);
   } catch (err) {
@@ -3534,6 +3535,7 @@ async function handleLifecycleCommand(
         void reabsorbWbsItems(root, bot);
         await restartBotForRoom(root, bot);
         writeCrewStatus(root, bot);
+        await setBotDisplayStatus(root, bot, 'quarters');
         await tr(`✅ ${name} dismissed`);
         publishFleetReport().catch(() => {});
       } catch (err) {
@@ -3690,6 +3692,7 @@ async function handleLifecycleCommand(
         await restartBotForRoom(root, bot, dutyRoomId);
         writeCrewStatus(root, bot);
         void injectWbsTasks(root, bot);
+        await setBotDisplayStatus(root, bot, 'onduty');
         await tr(`✅ ${name} on duty`);
         sendLifecycleMsg(bot, 'started', rank).catch(() => {});
         publishFleetReport().catch(() => {});

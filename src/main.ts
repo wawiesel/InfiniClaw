@@ -121,7 +121,7 @@ import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
 import { capitalizeName, unifiedBotDisplay } from './formatting.js';
-import { loadFleet, findShipByHostname, ROLE_ROOMS } from './ship-config.js';
+import { loadFleet, loadFleetFromDisk, findShipByHostname, ROLE_ROOMS } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
 import { truncateJsonl } from './session-utils.js';
 
@@ -131,7 +131,8 @@ import { truncateJsonl } from './session-utils.js';
  *  Falls back to old format if fleet data is unavailable. */
 function botDisplayName(badge: string, statusOverride?: string): string {
   try {
-    const fleet = loadFleet();
+    let fleet: Record<string, any>;
+    try { fleet = loadFleet(); } catch { fleet = loadFleetFromDisk(); }
     const entry = fleet[ASSISTANT_NAME.toLowerCase()];
     if (!entry) return `${badge} ${capitalizeName(ASSISTANT_NAME)}`;
     const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
