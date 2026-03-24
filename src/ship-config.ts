@@ -407,14 +407,11 @@ export const ROLE_ROOMS: Record<string, { room: string; icon: string }> = {
 };
 
 /**
- * Display tag: full ship name from ships.json (e.g. "Poseidon", "Hercules").
- * Falls back to hostname if ship not found.
+ * Display tag: system hostname (e.g. "Poseidon", "HERACLES").
+ * System identity, not ship name — ships and systems are different entities.
  */
 export function shipTag(hostname?: string, _pip?: string): string {
-  const found = findShipByHostname(hostname);
-  if (!found) return hostname ?? os.hostname();
-  const [shortName, entry] = found;
-  return entry.name ?? shortName;
+  return hostname ?? os.hostname();
 }
 
 /**
