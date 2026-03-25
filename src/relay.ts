@@ -5222,20 +5222,22 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             const body = event.content.body?.trim() || '';
 
             // ── Response latency tracking ──
-            // Extract sender's local username (strip @...:domain)
+            // Extract sender's local username (strip @...:domain), then resolve
+            // to fleet key via botUserIdMap (handles -bot suffix mismatch).
             const senderLocal = event.sender?.startsWith('@')
               ? event.sender.slice(1, event.sender.indexOf(':'))
               : '';
+            const senderBot = (event.sender && botUserIdMap.get(event.sender)) || (liveFleet[senderLocal] ? senderLocal : '');
             const evTs = event.origin_server_ts ?? Date.now();
-            if (senderLocal && liveFleet[senderLocal]) {
+            if (senderBot && liveFleet[senderBot]) {
               // Bot message — stop the latency clock
-              recordBotReply(senderLocal, evTs);
+              recordBotReply(senderBot, evTs);
               // Track main-timeline vs thread activity for silence detection
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const relatesTo = (event.content as any)?.['m.relates_to'];
               const isThread = relatesTo?.rel_type === 'm.thread';
               if (!isThread) {
-                botLastMainTimelinePost.set(senderLocal, evTs);
+                botLastMainTimelinePost.set(senderBot, evTs);
               }
             } else if (event.sender === captainUserId && conn.userId !== event.sender) {
               // Captain message in a duty/quarters room — start latency clock for local bots in this room
@@ -5258,23 +5260,23 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
             // ── {{branch}} signal detection from Matrix messages ──────────
             // Durable: even if the bot container dies after posting, the signal
             // persists in Matrix and the relay picks it up here.
-            if (body.includes('{{') && senderLocal && liveFleet[senderLocal] && event.event_id && markProcessed(event.event_id)) {
+            if (body.includes('{{') && senderBot && liveFleet[senderBot] && event.event_id && markProcessed(event.event_id)) {
               const { signals } = extractSignals(body);
               for (const sig of signals) {
                 if (sig.command === 'branch') {
                   const objective = sig.positional || sig.args['objective'] || '';
                   const title = sig.args['title'] || objective.slice(0, 60) || 'branch';
-                  if (objective && !isRecentBBSpawn(senderLocal, objective)) {
+                  if (objective && !isRecentBBSpawn(senderBot, objective)) {
                     const chatJid = `matrix:${conn.roomId}`;
-                    log(`branchBrain: detected {{branch}} in Matrix from ${senderLocal} — "${title.slice(0, 40)}"`);
-                    const botKey = senderLocal;
+                    log(`branchBrain: detected {{branch}} in Matrix from ${senderBot} — "${title.slice(0, 40)}"`);
+                    const botKey = senderBot;
                     const count = activeBranchBrainCount.get(botKey) ?? 0;
                     if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
                       log(`branchBrain: rejected — ${botKey} at limit (${MAX_BRANCH_BRAINS_PER_BOT})`);
                     } else {
                       activeBranchBrainCount.set(botKey, count + 1);
                       void spawnBranchBrain(
-                        { thread_id: '', objective, chat_jid: chatJid, bot: senderLocal, title },
+                        { thread_id: '', objective, chat_jid: chatJid, bot: senderBot, title },
                         conns,
                       ).finally(() => {
                         const n = activeBranchBrainCount.get(botKey) ?? 1;
