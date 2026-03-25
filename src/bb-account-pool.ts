@@ -230,6 +230,23 @@ export async function acquireBbPoolSlot(
   }
 }
 
+/** Leave a room as the BB pool account. Called on deactivation (merge/abort/timeout/error). */
+export async function leaveBbRoom(slot: BbPoolSlot, roomId: string): Promise<void> {
+  try {
+    const encoded = encodeURIComponent(roomId);
+    await matrixFetch(
+      slot.homeserver,
+      'POST',
+      `/_matrix/client/v3/rooms/${encoded}/leave`,
+      {},
+      slot.accessToken,
+    );
+    logger.info({ bot: slot.bot, slot: slot.slot + 1, userId: slot.userId, roomId }, 'BB pool: left room');
+  } catch (err) {
+    logger.warn({ err, userId: slot.userId, roomId }, 'BB pool: failed to leave room');
+  }
+}
+
 /** Reset the pool account display name back to a neutral placeholder. */
 export async function resetBbDisplayName(slot: BbPoolSlot): Promise<void> {
   try {

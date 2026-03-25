@@ -24,7 +24,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { collectHealthData, sessionCleanup } from './health-check.js';
 import { isToolCallBlock, hasDetailsBlock, toolCallBreadcrumb, isToolCallMarker, parseToolCallMarker, toolCallBreadcrumbFromData } from './tool-call-breadcrumb.js';
 import { runBranchBrainAgent } from './container-spawn.js';
-import { acquireBbPoolSlot, initBbPool, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
+import { acquireBbPoolSlot, initBbPool, leaveBbRoom, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
 import type { ContainerOutput } from './container-spawn.js';
 import { upsertEnvLine } from './env-utils.js';
 import {
@@ -2131,6 +2131,7 @@ async function handleBbMergeAbort(
       const tokenKey = `BB_POOL_TOKEN_${poolInfo.slot + 1}`;
       slot.accessToken = botEnv[tokenKey] || '';
       if (slot.accessToken) {
+        await leaveBbRoom(slot, conn.roomId).catch(() => {});
         await resetBbDisplayName(slot).catch(() => {});
       }
       releaseBbPoolSlot(poolInfo.bot, poolInfo.slot);
@@ -2401,6 +2402,12 @@ async function spawnBranchBrain(
     return threadReply(conn, replyThreadId, text);
   };
 
+  // Design doc 28.4: thread root identifies BB — post activation message in thread
+  if (bbPoolSlot) {
+    const idMsg = `BB activated: ${bbPoolSlot.index}-${bot} (${bbPoolSlot.userId})\nTask: ${announcedTitle}`;
+    bbThreadReply(idMsg).catch((err) => log(`branchBrain: BB identification message failed: ${errStr(err)}`));
+  }
+
   // Try to fork from the bot's active session so BB inherits main brain context.
   const mainSessionId = bot ? readBotSessionId(bot) : null;
   if (mainSessionId) {
@@ -2603,6 +2610,7 @@ async function spawnBranchBrain(
   }).catch(async (err) => {
     // Release BB pool slot on error (design doc 28)
     if (bbPoolSlot) {
+      await leaveBbRoom(bbPoolSlot, conn.roomId).catch(() => {});
       await resetBbDisplayName(bbPoolSlot).catch(() => {});
       releaseBbPoolSlot(bbPoolSlot.bot, bbPoolSlot.slot);
     }
@@ -3247,6 +3255,21 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
         // Hard close: forcibly close stale threads
         if (age >= THREAD_STALE_CLOSE_MS && !task.staleClosed) {
           log(`threadStale: hard-closing thread ${threadId.slice(0, 20)} (age ${Math.round(age / 60_000)}m)`);
+          // Release BB pool slot if this was a pool-mode thread (design doc 28.3)
+          if (task.poolSlotInfo) {
+            try {
+              const pi = task.poolSlotInfo;
+              const botEnv = loadProfileEnv(resolveRoot(), pi.bot);
+              const token = botEnv[`BB_POOL_TOKEN_${pi.slot + 1}`] || '';
+              if (token) {
+                const slot: BbPoolSlot = { bot: pi.bot, slot: pi.slot, index: pi.index, userId: pi.userId, accessToken: token, homeserver: pi.homeserver };
+                await leaveBbRoom(slot, roomId).catch(() => {});
+                await resetBbDisplayName(slot).catch(() => {});
+              }
+              releaseBbPoolSlot(pi.bot, pi.slot);
+              log(`threadStale: pool slot ${pi.slot} released for ${pi.bot}`);
+            } catch (err) { log(`threadStale: pool release failed: ${errStr(err)}`); }
+          }
           task.completed = true;
           task.staleClosed = true;
           writeBranchTask(threadId, task);
