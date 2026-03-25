@@ -146,6 +146,21 @@ At startup, relay counts configured `BB_POOL_USER_N` env vars to determine actua
 
 This prevents silent failures where the relay tries to activate a BB account that doesn't exist.
 
+### Permissions Required
+
+Operator checklist per bot (e.g. Tali):
+
+| # | What | Where | Who |
+|---|---|---|---|
+| 1 | Register `@bb{1,2,3}-tali:matrix.a-gis.org` | Conduwuit admin API | Operator |
+| 2 | Generate access token per account | Conduwuit admin API | Operator |
+| 3 | Set `BB_POOL_USER_N` / `BB_POOL_TOKEN_N` | `bots/{role}/{name}/env` | Operator |
+| 4 | Set `BB_ACCOUNT_MODE=pool` | Relay env (or per-bot env) | Operator |
+| 5 | Ensure accounts can join duty rooms | Room ACLs / invite | Operator |
+| 6 | Restart bot container to pick up env | `!wake` or podman restart | Operator/Bot |
+
+Without steps 1-5, pool initializes with 0 slots and BBs silently fall back to the main bot account.
+
 ## Relationship to Existing Design Docs
 
 This doc supersedes the BB merge flow defined in [08-threading.md](08-threading.md). Specifically:
