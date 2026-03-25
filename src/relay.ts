@@ -2377,7 +2377,11 @@ async function spawnBranchBrain(
       const botEnv = loadProfileEnv(resolveRoot(), bot);
       if (botEnv.BB_ACCOUNT_MODE === 'pool') {
         initBbPool(bot, botEnv);
-        bbPoolSlot = await acquireBbPoolSlot(bot, botSendHomeserver, conn.roomId);
+        bbPoolSlot = await acquireBbPoolSlot(bot, botSendHomeserver, conn.roomId, async (userId) => {
+          // Invite BB account to room via operator (rooms may be invite-only)
+          const { accessToken: opToken } = resolveOperatorConfig();
+          if (opToken) await matrixInvite(botSendHomeserver, opToken, conn.roomId, userId);
+        });
         if (bbPoolSlot) log(`branchBrain: pool slot acquired — ${bbPoolSlot.index}-${bot}`);
         else log(`branchBrain: pool slot unavailable, falling back to shared identity`);
       }

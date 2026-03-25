@@ -187,6 +187,7 @@ export async function acquireBbPoolSlot(
   bot: string,
   homeserver: string,
   roomId: string,
+  inviteFn?: (userId: string) => Promise<void>,
 ): Promise<BbPoolSlot | null> {
   const bp = _botPools.get(bot);
   if (!bp) {
@@ -209,12 +210,16 @@ export async function acquireBbPoolSlot(
     await setBbDisplayName(homeserver, entry.userId, entry.accessToken, displayName);
     logger.info({ bot, slot: slotIdx + 1, userId: entry.userId, displayName }, 'BB pool slot acquired');
 
-    // Ensure the account is in the room before posting
+    // Invite BB account to room (rooms may be invite-only), then join
+    if (inviteFn) {
+      try { await inviteFn(entry.userId); } catch (err) {
+        logger.debug({ err, roomId }, 'BB pool: invite failed (may already be member)');
+      }
+    }
     try {
       await joinBbRoom(homeserver, roomId, entry.accessToken);
     } catch (err) {
-      // 403 / already-joined is not fatal
-      logger.debug({ err, roomId }, 'BB pool: joinRoom skipped or failed (may already be joined)');
+      logger.warn({ err, roomId, userId: entry.userId }, 'BB pool: joinRoom failed');
     }
 
     return { slot: slotIdx, index, userId: entry.userId, accessToken: entry.accessToken, homeserver, bot };
