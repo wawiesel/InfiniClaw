@@ -492,8 +492,29 @@ const server = http.createServer((req, res) => {
   }
 
   if (url === `${BASE}/bazaar`) {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(bazaar());
+    const htmlFile = path.join(SIGNAL_DIR, 'dashboard.html');
+    if (fs.existsSync(htmlFile)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+      fs.createReadStream(htmlFile).pipe(res);
+    } else {
+      res.writeHead(404);
+      res.end('dashboard.html not found in signal dir');
+    }
+    return;
+  }
+
+  // Serve JSON data files from SIGNAL_DIR for the dashboard's fetch() calls
+  const JSON_FILES = ['state.json', 'model_state.json', 'alpaca_state.json', 'price_data.json'];
+  const fileName = url.replace(`${BASE}/`, '');
+  if (JSON_FILES.includes(fileName)) {
+    const dataFile = path.join(SIGNAL_DIR, fileName);
+    if (fs.existsSync(dataFile)) {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+      fs.createReadStream(dataFile).pipe(res);
+    } else {
+      res.writeHead(404);
+      res.end('not found');
+    }
     return;
   }
 
