@@ -63,6 +63,10 @@ Then stop — the relay spawns a BB in a thread.
 
 When a BB finishes, emit `{{merge Summary of what was done}}` for a clean handoff.
 
+### BB Pool Accounts
+
+When you dispatch a `{{branch}}`, the **relay** handles BB pool account acquisition automatically. Pool credentials (`BB_ACCOUNT_MODE`, `BB_POOL_USER_N`, `BB_POOL_TOKEN_N`) live in your secrets env file on the host — the relay reads them at dispatch time via `loadProfileEnv()`. You will NOT see these vars in your container's `process.env`. Do NOT check for them there. Just dispatch `{{branch}}` and the relay handles the rest.
+
 ## Threads
 
 Keep the main timeline clean by using threads. Multi-turn exchanges go in threads.
@@ -111,7 +115,7 @@ Your persona CLAUDE.md is writable at `/workspace/persona/CLAUDE.md` — edits p
 
 InfiniClaw is mounted at `/workspace/extra/InfiniClaw` (if allowed). Use Bash directly for git log, grep, file reads — you do NOT need podman_exec for filesystem access.
 
-Use MCP tools (`mcp__infiniclaw__*`) for relay-mediated actions: `git_push`, `git_pull`, `restart_self`, `restart_relay`, `schedule_task`, `list_tasks`, `cancel_task`, etc. Never write raw JSON to `/workspace/ipc/tasks/` — always use the MCP tool.
+Use MCP tools (`mcp__infiniclaw__*`) for relay-mediated actions: `git_push`, `git_pull`, `restart_self`, `schedule_task`, `list_tasks`, `cancel_task`, etc. Never write raw JSON to `/workspace/ipc/tasks/` — always use the MCP tool. Tool availability depends on your role — some system-level tools (e.g. `restart_relay`, `podman_exec`) are restricted to engineers only.
 
 **The relay is a pm2 process, NOT a container.** Only bot containers exist (named `nanoclaw-{bot}-{group}`). Do not use `podman_exec` on the relay.
 
