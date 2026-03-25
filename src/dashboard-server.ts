@@ -14,7 +14,7 @@ import { resolveRoot } from './service.js';
 
 const PORT = parseInt(process.env['FLEET_DASHBOARD_PORT'] || '3080', 10);
 const BASE = '/infiniclaw/fleet/ic01';
-const SIGNAL_DIR = path.join(resolveRoot(), 'bots/engineer/parker/signal');
+const SIGNAL_DIR = path.join(resolveRoot(), 'bots/trader/parker/signal');
 
 // ── HTML helpers ───────────────────────────────────────────────────
 
