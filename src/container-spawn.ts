@@ -300,6 +300,23 @@ function resolveMcpServers(): Record<string, Record<string, unknown>> | undefine
   return roleDir ? readPersonaGroupMcpServers(roleDir) : undefined;
 }
 
+/** Read per-role disallowed tools from bots/{role}/disallowed-tools.json. */
+function resolveRoleDisallowedTools(): string[] {
+  const rootDir = process.env.INFINICLAW_ROOT;
+  const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
+  if (!rootDir || !role) return [];
+  const filePath = path.join(rootDir, 'bots', role, 'disallowed-tools.json');
+  try {
+    if (fs.existsSync(filePath)) {
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      if (Array.isArray(data)) return data.filter((t): t is string => typeof t === 'string');
+    }
+  } catch (err) {
+    logger.warn({ err, filePath }, 'Failed to parse role disallowed-tools.json');
+  }
+  return [];
+}
+
 // ── Main orchestrator ───────────────────────────────────────────────
 
 export async function runContainerAgent(
@@ -369,7 +386,7 @@ export async function runContainerAgent(
     ...input,
     groupFolder: group.folder,
     ...(safeContainerNameTag ? { containerNameTag: safeContainerNameTag } : {}),
-    disallowedTools: DISALLOWED_TOOLS,
+    disallowedTools: [...DISALLOWED_TOOLS, ...resolveRoleDisallowedTools()],
     ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
     ...(mcpServers ? { mcpServers } : {}),
   };
