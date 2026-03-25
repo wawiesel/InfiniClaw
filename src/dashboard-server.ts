@@ -229,7 +229,6 @@ function bazaar(): string {
       alpacaEquity = as.portfolio_value || 0;
     } catch { /* ignore */ }
   }
-  const totalAll = portfolioTotal + alpacaEquity;
   const pnl      = portfolioTotal - initialDeposit;
   const pnlSign  = pnl >= 0 ? '+' : '';
   const pnlColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
@@ -263,10 +262,10 @@ function bazaar(): string {
     <div class="tsub2">SMA-50 ${smaFmt} · run #${runs} · ${lastCheck ? relTime(lastCheck) : '—'}</div>
   </div>
   <div class="tile" style="background:#0d1a2d;border-color:#ffd93d">
-    <div class="tlabel">Total Portfolio</div>
-    <div class="tbig" style="color:#ffd93d">$${totalAll ? totalAll.toFixed(2) : (portfolioTotal||totalLive||0).toFixed(2)}</div>
+    <div class="tlabel">Crypto Portfolio</div>
+    <div class="tbig" style="color:#ffd93d">$${(portfolioTotal||totalLive||0).toFixed(2)}</div>
     <div class="tsub1">P&amp;L <span style="color:${pnlColor}">${pnlSign}$${pnl.toFixed(2)}</span></div>
-    <div class="tsub2">Crypto $${(portfolioTotal||totalLive||0).toFixed(0)}${alpacaEquity ? ` + Stocks $${alpacaEquity.toLocaleString()}` : ''}</div>
+    <div class="tsub2">BTC · SOL · ETH · USDC</div>
   </div>
   <div class="tile" style="background:#0d1a2d;border-color:#00e5ff">
     <div class="tlabel">Algorithm Score</div>
@@ -309,6 +308,14 @@ function bazaar(): string {
   <h2>Dashboard Chart (Equity Curve + Forecast)</h2>
   <img src="${BASE}/chart?t=${Date.now()}" style="width:100%;border-radius:4px" alt="dashboard">
 </div>
+
+${alpacaEquity ? `
+<div class="card" style="opacity:0.7;border-color:#30363d">
+  <h2 style="color:#6e7681">Paper Portfolio — Alpaca (Simulated, not real funds)</h2>
+  <div class="row" style="gap:24px">
+    <div><span style="font-size:1.4rem;font-weight:bold;color:#8b949e">$${alpacaEquity.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span><div class="muted">Value</div></div>
+  </div>
+</div>` : ''}
 
 <div class="card">
   <h2>Trade History</h2>
