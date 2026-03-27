@@ -262,9 +262,9 @@ function bazaar(): string {
     <div class="tsub2">SMA-50 ${smaFmt} · run #${runs} · ${lastCheck ? relTime(lastCheck) : '—'}</div>
   </div>
   <div class="tile" style="background:#0d1a2d;border-color:#ffd93d">
-    <div class="tlabel">Crypto Portfolio</div>
-    <div class="tbig" style="color:#ffd93d">$${(portfolioTotal||totalLive||0).toFixed(2)}</div>
-    <div class="tsub1">P&amp;L <span style="color:${pnlColor}">${pnlSign}$${pnl.toFixed(2)}</span></div>
+    <div class="tlabel">Total Portfolio</div>
+    <div class="tbig" style="color:#ffd93d">P&amp;L ${pnlSign}$${Math.abs(pnl).toFixed(2)}</div>
+    <div class="tsub1">Crypto $${(portfolioTotal||totalLive||0).toFixed(0)}</div>
     <div class="tsub2">BTC · SOL · ETH · USDC</div>
   </div>
   <div class="tile" style="background:#0d1a2d;border-color:#00e5ff">
@@ -309,14 +309,6 @@ function bazaar(): string {
   <img src="${BASE}/chart?t=${Date.now()}" style="width:100%;border-radius:4px" alt="dashboard">
 </div>
 
-${alpacaEquity ? `
-<div class="card" style="opacity:0.7;border-color:#30363d">
-  <h2 style="color:#6e7681">Paper Portfolio — Alpaca (Simulated, not real funds)</h2>
-  <div class="row" style="gap:24px">
-    <div><span style="font-size:1.4rem;font-weight:bold;color:#8b949e">$${alpacaEquity.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span><div class="muted">Value</div></div>
-  </div>
-</div>` : ''}
-
 <div class="card">
   <h2>Trade History</h2>
   <div id="tradeList" style="max-height:300px;overflow-y:auto"></div>
@@ -332,7 +324,6 @@ const solHistory = ${solJson};
 const ethHistory = ${ethJson};
 const C = { green:'#3fb950', red:'#f85149', blue:'58a6ff', orange:'#f0883e',
             purple:'#a371f7', muted:'#8b949e', yellow:'#d29922', teal:'#00e5ff' };
-
 const gridColor = '#30363d', tickColor = '#8b949e';
 const scaleOpts = (cb) => ({
   x: { type:'time', grid:{color:gridColor}, ticks:{color:tickColor,maxTicksLimit:8} },
