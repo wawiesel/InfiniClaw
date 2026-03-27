@@ -98,7 +98,7 @@ start_router() {
   kill_listeners
   : >"$LOG_FILE"
 
-  env ROUTER_HOST="$ROUTER_HOST" ROUTER_PORT="$ROUTER_PORT" node router.js >>"$LOG_FILE" 2>&1 &
+  env ROUTER_HOST="$ROUTER_HOST" ROUTER_PORT="$ROUTER_PORT" node router.cjs >>"$LOG_FILE" 2>&1 &
   pid="$!"
   printf '%s\n' "$pid" >"$PID_FILE"
 
