@@ -62,6 +62,7 @@ Each bot's LLM is configured via env keys in `secrets/bots/{name}/env`:
 | `BRAIN_MODEL` | `ANTHROPIC_MODEL` | Model ID — forwarded to both main brain container and branch brains via `mapBrainEnv()` (issue #24 fixed) |
 | `BRAIN_OAUTH_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth authentication |
 | `BRAIN_API_KEY` | `ANTHROPIC_API_KEY` | API key authentication |
+| `BRAIN_BASE_URL` | `ANTHROPIC_BASE_URL` | Endpoint override (e.g., shared ClaudeCodeRouterLite at http://127.0.0.1:43177) |
 
 The container never sees the raw `BRAIN_*` names — the host maps them in the pm2 startup script before the bot process runs. This keeps bot configuration (secrets repo) decoupled from Claude Code internals.
 

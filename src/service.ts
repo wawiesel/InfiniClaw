@@ -267,6 +267,43 @@ export function killStaleContainers(onlyBot?: string, opts?: { preserveBBs?: boo
   }
 }
 
+// ── Router (ClaudeCodeRouterLite) ──────────────────────────────────────
+
+function routerCtlPath(root: string): string {
+  return path.join(root, 'tools', 'router', 'router-ctl.sh');
+}
+
+function startRouter(root?: string): void {
+  const resolvedRoot = root ?? resolveRoot();
+  const ctl = routerCtlPath(resolvedRoot);
+  if (!fs.existsSync(ctl)) {
+    console.warn('router: router-ctl.sh not found; skipping router start');
+    return;
+  }
+  try {
+    execFileSync('bash', [ctl, 'start'], {
+      cwd: path.dirname(ctl),
+      stdio: 'inherit',
+    });
+  } catch (err) {
+    console.warn(`router: failed to start (${errStr(err)})`);
+  }
+}
+
+function stopRouter(root?: string): void {
+  const resolvedRoot = root ?? resolveRoot();
+  const ctl = routerCtlPath(resolvedRoot);
+  if (!fs.existsSync(ctl)) return;
+  try {
+    execFileSync('bash', [ctl, 'stop'], {
+      cwd: path.dirname(ctl),
+      stdio: 'inherit',
+    });
+  } catch (err) {
+    console.warn(`router: failed to stop (${errStr(err)})`);
+  }
+}
+
 // ── Process cleanup ────────────────────────────────────────────────────
 
 export function killRogueProcesses(): void {
@@ -811,6 +848,9 @@ export async function installRelay(): Promise<void> {
     env: { ...process.env, PATH: `${nodeBinDir}:${process.env.PATH}` },
   });
 
+  // Start router (shared host service) then relay
+  startRouter(root);
+
   // Start relay
   startRelay();
 
@@ -831,6 +871,7 @@ export async function installRelay(): Promise<void> {
  */
 export function startRelay(): void {
   const root = resolveRoot();
+  startRouter(root);
   const logs = logDir(root);
   fs.mkdirSync(logs, { recursive: true });
   pm2Stop(RELAY_PM2_NAME);
@@ -876,6 +917,7 @@ export function startRelay(): void {
  */
 export function stopRelay(): void {
   pm2Stop(RELAY_PM2_NAME);
+  stopRouter();
   console.log('relay: stopped');
 }
 
@@ -890,9 +932,9 @@ export function stopAll(): void {
   killStaleContainers();
   removeStaleProcesses();
   pm2Stop(RELAY_PM2_NAME);
+  stopRouter();
   console.log('relay: stopped');
 }
-
 /**
  * Uninstall: stop everything, remove pm2 startup.
  */
