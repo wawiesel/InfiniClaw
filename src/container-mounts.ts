@@ -10,7 +10,7 @@ import { parseEnvLine } from './env-utils.js';
 import { logger } from 'nanoclaw/logger.js';
 import { loadSkillsToSession } from './skill-sync.js';
 import { mountsForBot } from './allow-list.js';
-import { loadFleet, loadShipConfig } from './ship-config.js';
+import { loadFleet, loadFleetAsync, loadShipConfig } from './ship-config.js';
 import type { RegisteredGroup } from 'nanoclaw/types.js';
 import type { VolumeMount } from './run-container.js';
 
@@ -37,6 +37,8 @@ export function buildBotDirectory(): Record<string, string> {
   }
   if (!fs.existsSync(profilesDir)) return {};
   // Only include bots that are in this relay's fleet config
+  // Ensure fleet is initialized from S3 cache before reading
+  try { /* best effort */ void loadFleetAsync(); } catch { /* ignore */ }
   const fleetBots = new Set(Object.keys(loadFleet()));
   const directory: Record<string, string> = {};
   try {
