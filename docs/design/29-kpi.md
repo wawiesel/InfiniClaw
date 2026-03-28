@@ -173,5 +173,5 @@ Parker's startup routine should check KPI alongside the trading bot auth check.
 |------|------|
 | `bots/container/agent-runner/src/tools.ts` | `get_kpi` tool registration |
 | `src/dashboard-server.ts` | KPI column in fleet home table |
-| `docs/design/29-kpi-framework.md` | This spec |
+| `docs/design/29-kpi.md` | This spec |
 | `_runtime/data/kpi-config.json` | Per-bot formula config (runtime, gitignored) |

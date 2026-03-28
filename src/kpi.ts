@@ -1,6 +1,6 @@
 /**
  * KPI computation — shared by dashboard-server and (by copy) agent-runner tools.
- * Design: docs/design/29-kpi-framework.md
+ * Design: docs/design/29-kpi.md
  */
 import fs from 'fs';
 import path from 'path';

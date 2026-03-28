@@ -882,7 +882,7 @@ Parker's formula: 0.5×ollama_uptime + 0.5×roi_over_hodling
 Default formula:  0.4×availability + 0.3×autonomy_score + 0.3×quality_score
 
 Config: {INFINICLAW_ROOT}/_runtime/data/kpi-config.json
-Design: docs/design/29-kpi-framework.md`,
+Design: docs/design/29-kpi.md`,
     {
       bot: z.string().optional().describe('Bot name, "fleet" for all bots, or omit for yourself'),
     },
