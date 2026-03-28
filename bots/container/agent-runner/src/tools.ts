@@ -872,6 +872,149 @@ Item fields for upsert:
     },
   );
 
+  // ── KPI ──────────────────────────────────────────────────────────
+
+  server.tool(
+    'get_kpi',
+    `Get KPI score for a bot (or all bots). Each bot has a configurable formula that produces a score in [0.0, 1.0].
+
+Parker's formula: 0.5×ollama_uptime + 0.5×roi_over_hodling
+Default formula:  0.4×availability + 0.3×autonomy_score + 0.3×quality_score
+
+Config: {INFINICLAW_ROOT}/_runtime/data/kpi-config.json
+Design: docs/design/29-kpi-framework.md`,
+    {
+      bot: z.string().optional().describe('Bot name, "fleet" for all bots, or omit for yourself'),
+    },
+    async (args) => {
+      const infiniclaw = process.env.INFINICLAW_ROOT || '/workspace/extra/InfiniClaw';
+      const selfName = (process.env.INFINICLAW_ASSISTANT_NAME || 'unknown').toLowerCase();
+      const target = (args.bot || selfName).toLowerCase();
+
+      // ── KPI config ───────────────────────────────────────────────
+      interface KpiFormula { components: Record<string, number> }
+      interface KpiConfig { default: KpiFormula; [bot: string]: KpiFormula }
+
+      const defaultConfig: KpiConfig = {
+        default: { components: { availability: 0.4, autonomy_score: 0.3, quality_score: 0.3 } },
+        parker: { components: { ollama_uptime: 0.5, roi_over_hodling: 0.5 } },
+      };
+
+      let config = defaultConfig;
+      const configPath = path.join(infiniclaw, '_runtime/data/kpi-config.json');
+      try {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as KpiConfig;
+      } catch { /* use defaults */ }
+
+      // ── Component computation ─────────────────────────────────────
+      function clamp(v: number, lo = 0, hi = 1): number {
+        return Math.max(lo, Math.min(hi, v));
+      }
+
+      function readStatusJson(botName: string): Record<string, unknown> | null {
+        const p = path.join(infiniclaw, '_runtime/instances', botName, 'ipc/status.json');
+        try { return JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>; } catch { return null; }
+      }
+
+      function computeComponent(name: string, botName: string, status: Record<string, unknown> | null): number {
+        switch (name) {
+          case 'availability': {
+            const groups = status?.['groups'] as Array<{ hasProcess?: boolean }> | undefined;
+            if (!groups?.length) return 0;
+            return groups.some(g => g.hasProcess) ? 1.0 : 0.0;
+          }
+          case 'autonomy_score': {
+            const snap = status?.['metricsSnapshot'] as { fleet?: { autonomyScore?: { day1?: number } } } | undefined;
+            const score = snap?.fleet?.autonomyScore?.day1;
+            return score != null ? clamp(score / 100) : 0.5;
+          }
+          case 'quality_score': {
+            const snap = status?.['metricsSnapshot'] as { bot?: { score?: { day1?: number } } } | undefined;
+            const score = snap?.bot?.score?.day1;
+            return score != null ? clamp((score + 3) / 6) : 0.5;
+          }
+          case 'relay_uptime': {
+            const snap = status?.['metricsSnapshot'] as { shipMetrics?: { relayUptimeSeconds?: number } } | undefined;
+            const secs = snap?.shipMetrics?.relayUptimeSeconds;
+            return secs != null ? clamp(secs / 86400) : 0.5;
+          }
+          case 'ollama_uptime': {
+            const provider = (status?.['provider'] as string | undefined || '').toLowerCase();
+            return provider === 'ollama' ? 1.0 : 0.0;
+          }
+          case 'roi_over_hodling': {
+            // Only meaningful for parker — reads signal files
+            try {
+              const priceFile = path.join(infiniclaw, 'bots/trader/parker/signal/price_data.json');
+              const stateFile = path.join(infiniclaw, 'bots/trader/parker/signal/state.json');
+              const priceData = JSON.parse(fs.readFileSync(priceFile, 'utf-8')) as {
+                total?: number; btc_price?: number;
+              };
+              const stateData = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as {
+                trades?: Array<{ portfolio_value?: number; timestamp?: string }>;
+              };
+              const trades = stateData.trades || [];
+              const currentValue = priceData.total;
+              // Find initial portfolio value from first trade
+              const firstTrade = trades.find(t => t.portfolio_value != null);
+              if (!currentValue || !firstTrade?.portfolio_value) return 0.5;
+              const initial = firstTrade.portfolio_value;
+              const roiRaw = (currentValue - initial) / initial; // e.g. +0.20 = 20% gain
+              return clamp(0.5 + roiRaw / 2);
+            } catch { return 0.5; }
+          }
+          default: return 0.5;
+        }
+      }
+
+      // ── Compute KPI for one bot ───────────────────────────────────
+      function computeKpi(botName: string): { score: number; breakdown: string[]; formulaKey: string } {
+        const formula = config[botName] || config['default'] || defaultConfig.default;
+        const formulaKey = config[botName] ? `${botName} (custom)` : 'default';
+        const status = readStatusJson(botName);
+        let score = 0;
+        const breakdown: string[] = [];
+        for (const [comp, weight] of Object.entries(formula.components)) {
+          const val = computeComponent(comp, botName, status);
+          const contribution = weight * val;
+          score += contribution;
+          const w = weight.toFixed(2);
+          const v = val.toFixed(2);
+          const c = contribution.toFixed(2);
+          breakdown.push(`  ${comp.padEnd(18)} ${w} × ${v} = ${c}`);
+        }
+        return { score, breakdown, formulaKey };
+      }
+
+      // ── Fleet mode ────────────────────────────────────────────────
+      if (target === 'fleet') {
+        const instancesDir = path.join(infiniclaw, '_runtime/instances');
+        let bots: string[] = [];
+        try { bots = fs.readdirSync(instancesDir); } catch { /* no instances dir */ }
+        if (!bots.length) bots = [selfName];
+
+        const lines = ['**KPI Fleet Summary**', ''];
+        for (const b of bots.sort()) {
+          const { score, formulaKey } = computeKpi(b);
+          const bar = '█'.repeat(Math.round(score * 14)) + '░'.repeat(14 - Math.round(score * 14));
+          lines.push(`  ${b.padEnd(12)} ${score.toFixed(2)}  ${bar}  (${formulaKey})`);
+        }
+        return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+      }
+
+      // ── Single bot mode ───────────────────────────────────────────
+      const { score, breakdown, formulaKey } = computeKpi(target);
+      const lines = [
+        `**KPI: ${target} — ${score.toFixed(2)}**`,
+        '',
+        ...breakdown,
+        '',
+        `Formula: ${formulaKey}`,
+      ];
+      return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    },
+  );
+
   // ── Podman exec ───────────────────────────────────────────────────
 
   server.tool(

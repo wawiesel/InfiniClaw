@@ -11,6 +11,7 @@ import path from 'path';
 
 import { getSystemStatus } from './status.js';
 import { resolveRoot } from './service.js';
+import { loadKpiConfig, computeBotKpi, kpiBadge } from './kpi.js';
 
 const PORT = parseInt(process.env['FLEET_DASHBOARD_PORT'] || '3080', 10);
 const BASE = '/infiniclaw/fleet/ic01';
@@ -84,6 +85,8 @@ function relTime(iso: string | undefined): string {
 
 function fleetHome(): string {
   const status = getSystemStatus(resolveRoot());
+  const kpiConfig = loadKpiConfig(resolveRoot());
+
   const rows = status.bots.map((b) => {
     const svc = b.service === 'running'
       ? '<span class="badge ok">running</span>'
@@ -95,11 +98,13 @@ function fleetHome(): string {
       ? `<span class="badge err">${b.recentErrors.length} err</span>`
       : '';
     const tasks = b.tasks.filter(t => t.status === 'active').length;
+    const kpi = computeBotKpi(resolveRoot(), b.name, kpiConfig);
     return `<tr>
       <td>${b.name}</td>
       <td>${svc}</td>
       <td>${b.model || '—'}</td>
       <td>${hb} ${errBadge}</td>
+      <td>${kpiBadge(kpi)}</td>
       <td>${b.containers.length}</td>
       <td>${tasks}</td>
     </tr>`;
@@ -113,11 +118,13 @@ function fleetHome(): string {
       ? '<span class="badge warn">stale</span>'
       : b.lastHeartbeat ? relTime(b.lastHeartbeat) : '—';
     const tasks = b.tasks.filter(t => t.status === 'active').length;
+    const kpi = computeBotKpi(resolveRoot(), b.name, kpiConfig);
     return `<div class="bot-card">
       <div class="name">${b.name} ${svc}</div>
       <div class="meta">
         <span>${b.model || '—'}</span>
         <span>hb ${hb}</span>
+        <span>kpi ${kpiBadge(kpi)}</span>
         <span>${b.containers.length} containers</span>
         <span>${tasks} tasks</span>
         ${b.recentErrors.length > 0 ? `<span class="badge err">${b.recentErrors.length} err</span>` : ''}
@@ -128,7 +135,7 @@ function fleetHome(): string {
   const body = `
 <div class="card">
   <table>
-    <thead><tr><th>Bot</th><th>Service</th><th>Model</th><th>Heartbeat</th><th>Containers</th><th>Tasks</th></tr></thead>
+    <thead><tr><th>Bot</th><th>Service</th><th>Model</th><th>Heartbeat</th><th>KPI</th><th>Containers</th><th>Tasks</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </div>
