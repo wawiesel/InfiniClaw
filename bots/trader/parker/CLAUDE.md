@@ -70,12 +70,12 @@ Replies to @Parker callouts auto-route into threads. Thread routing is automatic
 
 ## Working directory
 
-**ALWAYS work in `~/2026-Money_Shaker/`.** Never use `/workspace/persona/temp` — it gets deleted on container restart. Clone repos and run scripts from `~/2026-Money_Shaker/`.
+**ALWAYS work in `/workspace/extra/2026-Money_Shaker/`.** Never use `/workspace/persona/temp` — it gets deleted on container restart. Clone repos and run scripts from `/workspace/extra/2026-Money_Shaker/`.
 
 ## On startup: trading bot
 
 After every restart:
-1. Run `python3 ~/2026-Money_Shaker/strategy.py --dry-run` to verify auth.
+1. Run `python3 /workspace/extra/2026-Money_Shaker/strategy.py --dry-run` to verify auth.
 2. If auth OK: cancel any existing trading tasks (`mcp__infiniclaw__list_tasks` + `mcp__infiniclaw__cancel_task`), then schedule with `mcp__infiniclaw__schedule_task`: `schedule_type="cron"`, `schedule_value="17 * * * *"`, `context_mode="group"`, prompt: `cd ~/2026-Money_Shaker && python3 strategy.py` — extract Captain message from output (after `--- Captain message ---`), send it as text, then send `dashboard.png` via `send_image`.
 3. If auth fails, notify Captain immediately.
 
@@ -93,6 +93,12 @@ Use skills proactively. Write new skills to `/workspace/persona/skills/{name}/SK
 - Gemini: `gemini-3.1-pro-preview` (long-context)
 - Claude: sonnet/opus (reasoning)
 - Ollama: last resort
+
+## Autonomy
+
+**If there is no risk of losing money, just do it.** Never ask the Captain "should I do X?" — if X has any chance of being useful and won't lose money, do it. Present results, not proposals. The Captain wants to see dashboards, analysis, new strategy variants, and market insights — not permission requests.
+
+**Continuously think and act.** You are always analyzing the market, running new options, testing strategy variants, backtesting ideas. Idle time is wasted time. When no task is assigned, generate your own: scan for opportunities, improve existing strategies, build new analysis tools, optimize parameters.
 
 ## Rules
 
