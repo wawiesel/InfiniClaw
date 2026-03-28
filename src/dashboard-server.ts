@@ -11,6 +11,7 @@ import path from 'path';
 
 import { getSystemStatus } from './status.js';
 import { resolveRoot } from './service.js';
+import { loadKpiConfig, computeBotKpi, kpiBadge } from './kpi.js';
 
 const PORT = parseInt(process.env['FLEET_DASHBOARD_PORT'] || '3080', 10);
 const BASE = '/infiniclaw/fleet/ic01';
@@ -80,90 +81,11 @@ function relTime(iso: string | undefined): string {
   return `${Math.floor(ms / 3600000)}h ago`;
 }
 
-// ── KPI ────────────────────────────────────────────────────────────
-
-interface KpiFormula { components: Record<string, number> }
-interface KpiConfig { default: KpiFormula; [bot: string]: KpiFormula }
-
-const KPI_DEFAULT_CONFIG: KpiConfig = {
-  default: { components: { availability: 0.4, autonomy_score: 0.3, quality_score: 0.3 } },
-  parker: { components: { ollama_uptime: 0.5, roi_over_hodling: 0.5 } },
-};
-
-function loadKpiConfig(): KpiConfig {
-  const configPath = path.join(resolveRoot(), '_runtime/data/kpi-config.json');
-  try { return JSON.parse(fs.readFileSync(configPath, 'utf-8')) as KpiConfig; } catch { return KPI_DEFAULT_CONFIG; }
-}
-
-function readBotStatus(botName: string): Record<string, unknown> | null {
-  const p = path.join(resolveRoot(), '_runtime/instances', botName, 'ipc/status.json');
-  try { return JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>; } catch { return null; }
-}
-
-function kpiComponent(name: string, status: Record<string, unknown> | null): number {
-  const clamp = (v: number) => Math.max(0, Math.min(1, v));
-  switch (name) {
-    case 'availability': {
-      const groups = status?.['groups'] as Array<{ hasProcess?: boolean }> | undefined;
-      return groups?.some(g => g.hasProcess) ? 1.0 : 0.0;
-    }
-    case 'autonomy_score': {
-      const snap = status?.['metricsSnapshot'] as { fleet?: { autonomyScore?: { day1?: number } } } | undefined;
-      const v = snap?.fleet?.autonomyScore?.day1;
-      return v != null ? clamp(v / 100) : 0.5;
-    }
-    case 'quality_score': {
-      const snap = status?.['metricsSnapshot'] as { bot?: { score?: { day1?: number } } } | undefined;
-      const v = snap?.bot?.score?.day1;
-      return v != null ? clamp((v + 3) / 6) : 0.5;
-    }
-    case 'relay_uptime': {
-      const snap = status?.['metricsSnapshot'] as { shipMetrics?: { relayUptimeSeconds?: number } } | undefined;
-      const v = snap?.shipMetrics?.relayUptimeSeconds;
-      return v != null ? clamp(v / 86400) : 0.5;
-    }
-    case 'ollama_uptime': {
-      const provider = (status?.['provider'] as string | undefined || '').toLowerCase();
-      return provider === 'ollama' ? 1.0 : 0.0;
-    }
-    case 'roi_over_hodling': {
-      try {
-        const pd = JSON.parse(fs.readFileSync(path.join(SIGNAL_DIR, 'price_data.json'), 'utf-8')) as { total?: number };
-        const st = JSON.parse(fs.readFileSync(path.join(SIGNAL_DIR, 'state.json'), 'utf-8')) as {
-          trades?: Array<{ portfolio_value?: number }>;
-        };
-        const current = pd.total;
-        const initial = (st.trades || []).find(t => t.portfolio_value != null)?.portfolio_value;
-        if (!current || !initial) return 0.5;
-        return clamp(0.5 + (current - initial) / initial / 2);
-      } catch { return 0.5; }
-    }
-    default: return 0.5;
-  }
-}
-
-function computeBotKpi(botName: string, config: KpiConfig): number | null {
-  const formula = config[botName.toLowerCase()] || config['default'];
-  if (!formula) return null;
-  const status = readBotStatus(botName.toLowerCase());
-  let score = 0;
-  for (const [comp, weight] of Object.entries(formula.components)) {
-    score += weight * kpiComponent(comp, status);
-  }
-  return score;
-}
-
-function kpiBadge(score: number | null): string {
-  if (score == null) return '—';
-  const cls = score >= 0.8 ? 'ok' : score >= 0.6 ? 'warn' : 'err';
-  return `<span class="badge ${cls}">${score.toFixed(2)}</span>`;
-}
-
 // ── Pages ──────────────────────────────────────────────────────────
 
 function fleetHome(): string {
   const status = getSystemStatus(resolveRoot());
-  const kpiConfig = loadKpiConfig();
+  const kpiConfig = loadKpiConfig(resolveRoot());
 
   const rows = status.bots.map((b) => {
     const svc = b.service === 'running'
@@ -176,7 +98,7 @@ function fleetHome(): string {
       ? `<span class="badge err">${b.recentErrors.length} err</span>`
       : '';
     const tasks = b.tasks.filter(t => t.status === 'active').length;
-    const kpi = computeBotKpi(b.name, kpiConfig);
+    const kpi = computeBotKpi(resolveRoot(), b.name, kpiConfig);
     return `<tr>
       <td>${b.name}</td>
       <td>${svc}</td>
@@ -196,7 +118,7 @@ function fleetHome(): string {
       ? '<span class="badge warn">stale</span>'
       : b.lastHeartbeat ? relTime(b.lastHeartbeat) : '—';
     const tasks = b.tasks.filter(t => t.status === 'active').length;
-    const kpi = computeBotKpi(b.name, kpiConfig);
+    const kpi = computeBotKpi(resolveRoot(), b.name, kpiConfig);
     return `<div class="bot-card">
       <div class="name">${b.name} ${svc}</div>
       <div class="meta">

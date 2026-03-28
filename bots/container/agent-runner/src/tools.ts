@@ -945,8 +945,8 @@ Design: docs/design/29-kpi-framework.md`,
           case 'roi_over_hodling': {
             // Only meaningful for parker — reads signal files
             try {
-              const priceFile = path.join(infiniclaw, 'bots/engineer/parker/signal/price_data.json');
-              const stateFile = path.join(infiniclaw, 'bots/engineer/parker/signal/state.json');
+              const priceFile = path.join(infiniclaw, 'bots/trader/parker/signal/price_data.json');
+              const stateFile = path.join(infiniclaw, 'bots/trader/parker/signal/state.json');
               const priceData = JSON.parse(fs.readFileSync(priceFile, 'utf-8')) as {
                 total?: number; btc_price?: number;
               };
