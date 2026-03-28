@@ -220,7 +220,7 @@ export function botsPath(): string {
  * Throws if loadFleetAsync() has not been called — disk fallback is bootstrap only. */
 export function loadFleet(): Record<string, BotEntry> {
   if (!s3FleetCache) {
-    throw new Error('Fleet not initialized — call loadFleetAsync() at startup before loadFleet()');
+    return loadFleetFromDisk();
   }
   return s3FleetCache;
 }
