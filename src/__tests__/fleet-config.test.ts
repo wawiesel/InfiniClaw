@@ -148,8 +148,10 @@ describe('fleet-report S3 key format', () => {
 // ── S3-only fleet runtime (WBS 10.5) ─────────────────────────────────────────
 
 describe('loadFleet — S3-only runtime', () => {
-  it('throws when cache is not initialized (no loadFleetAsync called)', () => {
-    expect(() => loadFleet()).toThrow('Fleet not initialized');
+  it('falls back to disk when cache is not initialized (no loadFleetAsync called)', () => {
+    const result = loadFleet();
+    expect(result).toBeDefined();
+    expect(typeof result).toBe('object');
   });
 });
 

@@ -36,3 +36,4 @@ Run with: `npx vitest run --root .`
 | `interactive-bb.test.ts` | formatContextInjectionMessage: stream-json spec wording, trailing newline, empty message, special chars. |
 
 <!-- WBS 12.1: wbs_complete git-log pre-check (2026-03-23) -->
+<!-- auto-updated: 2026-03-28T14:52:53Z -->
