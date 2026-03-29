@@ -245,7 +245,7 @@ Off-duty bots (lounge, quarters, sleep) cannot use the loudspeaker. The relay si
 
 ### @room intercom
 
-> **Status:** Not yet implemented. The relay does not currently parse `@room` cross-room routing from bots.
+> **Status:** Partial — `@room` cross-room routing is implemented for the `{{send}}` signal path (WBS 6.1 ✅), but bot-originated `@room: <message>` mention syntax in outgoing text is not yet parsed by the relay. This is a confirmed gap.
 
 On-duty bots can send messages across rooms by mentioning the target room name:
 
@@ -311,11 +311,11 @@ Chief-only write tools and crew read tools for the room WBS. See [12-co](12-co.m
 
 | Tool | Role access | Purpose | Status |
 |------|-------------|---------|--------|
-| `wbs_read` | All | Read WBS items for this room | 🔲 not yet implemented |
-| `wbs_write` | Chief only | Add/update/remove WBS items | 🔲 not yet implemented |
-| `wbs_assign` | Chief only | Assign a task to a bot | 🔲 not yet implemented |
-| `wbs_complete` | Chief only | Mark a task done (unblocks dependents) | 🔲 not yet implemented |
-| `wbs_get_assigned` | All | Get this bot's currently assigned tasks | 🔲 not yet implemented |
+| `wbs_read` | All | Read WBS items for this room | ✅ |
+| `wbs_write` | Chief only | Add/update/remove WBS items | ✅ |
+| `wbs_assign` | Chief only | Assign a task to a bot | ✅ |
+| `wbs_complete` | Chief only | Mark a task done (unblocks dependents) | ✅ |
+| `wbs_get_assigned` | All | Get this bot's currently assigned tasks | ✅ |
 
 ### Holodeck
 
