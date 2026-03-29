@@ -44,6 +44,9 @@ import {
   recordVersionDeployed,
   getVersionDeployEvents,
   getVersionAdoptionLatency,
+  computeRelayUptimePct,
+  recordRelayStart,
+  recordRelayStop,
   type Alert,
   type MetricsSnapshot,
   type RollingMetric,
@@ -425,15 +428,15 @@ describe('formatting', () => {
     expect(result).toContain('💤');
   });
 
-  it('formatShipMetrics shows name, uptime, restarts, infra failures', () => {
+  it('formatShipMetrics shows name, uptime %, restarts, infra failures', () => {
     const result = formatShipMetrics({
       name: 'Herc',
-      relayUptimeSeconds: 7200,
+      relayUptimePct: { day1: 92, day7: 98 },
       relayRestarts: { day1: 3, day7: 1 },
       infraFailures: { day1: 2, day7: 0.4 },
     });
     expect(result).toContain('Herc');
-    expect(result).toContain('2h');
+    expect(result).toContain('92%');
     expect(result).toContain('3');
     expect(result).toContain('Sync/build failures');
     expect(result).toContain('2/day (1d)');
@@ -505,7 +508,7 @@ describe('formatScopeMetrics', () => {
     ],
     shipMetrics: {
       name: 'Herc',
-      relayUptimeSeconds: 3600,
+      relayUptimePct: { day1: 100, day7: 100 },
       relayRestarts: { day1: 0, day7: 0 }, infraFailures: { day1: 0, day7: 0 },
     },
     fleet: { availability: 100, autonomyScore: { day1: 80, day7: 90 } },
@@ -602,7 +605,7 @@ describe('formatAllMetrics', () => {
       ],
       shipMetrics: {
         name: 'Herc',
-        relayUptimeSeconds: 86400,
+        relayUptimePct: { day1: 100, day7: 100 },
         relayRestarts: { day1: 1, day7: 0 }, infraFailures: { day1: 0, day7: 0 },
       },
       fleet: { availability: 100, autonomyScore: { day1: 100, day7: 100 } },
@@ -971,7 +974,7 @@ describe('checkAlerts', () => {
       branchBrainSuccess: { day1: -1, day7: -1 }, tokenThroughput: { day1: -1, day7: -1 },
       messagesPerDay: { day1: 10, day7: 8 }, taskCompletionRate: { day1: 90, day7: 85 },
       status: 'onduty', processRunning: true }],
-    shipMetrics: { name: 'Herc', relayUptimeSeconds: 86400, relayRestarts: { day1: 0, day7: 0 }, infraFailures: { day1: 0, day7: 0 } },
+    shipMetrics: { name: 'Herc', relayUptimePct: { day1: 100, day7: 100 }, relayRestarts: { day1: 0, day7: 0 }, infraFailures: { day1: 0, day7: 0 } },
     fleet: { availability: 100, autonomyScore: { day1: 100, day7: 100 } },
   };
 
@@ -1156,5 +1159,67 @@ describe('syncTodosMetrics', () => {
 
   it('does nothing when todos dir does not exist', () => {
     expect(() => syncTodosMetrics('cid')).not.toThrow();
+  });
+});
+
+// ── Relay uptime timestamp tracking ───────────────────────────────────
+
+describe('computeRelayUptimePct', () => {
+  beforeEach(setup);
+
+  it('returns 0 with no intervals', () => {
+    expect(computeRelayUptimePct(1)).toBe(0);
+  });
+
+  it('returns 100 for a continuous 24h run', () => {
+    recordRelayStart(daysAgo(1));
+    recordRelayStop(Date.now());
+    expect(computeRelayUptimePct(1)).toBe(100);
+  });
+
+  it('returns ~50 for a 12h run in a 24h window', () => {
+    recordRelayStart(hoursAgo(12));
+    recordRelayStop(Date.now());
+    const pct = computeRelayUptimePct(1);
+    expect(pct).toBeGreaterThanOrEqual(49);
+    expect(pct).toBeLessThanOrEqual(51);
+  });
+
+  it('accounts for open (current) interval', () => {
+    recordRelayStart(hoursAgo(24));
+    // No stop — relay is still running
+    expect(computeRelayUptimePct(1)).toBe(100);
+  });
+
+  it('sums multiple intervals correctly', () => {
+    // Two 6-hour runs = 50% of 24h window
+    recordRelayStart(hoursAgo(20));
+    recordRelayStop(hoursAgo(14));
+    recordRelayStart(hoursAgo(8));
+    recordRelayStop(hoursAgo(2));
+    const pct = computeRelayUptimePct(1);
+    expect(pct).toBeGreaterThanOrEqual(48);
+    expect(pct).toBeLessThanOrEqual(52);
+  });
+
+  it('ignores intervals outside the window', () => {
+    recordRelayStart(daysAgo(10));
+    recordRelayStop(daysAgo(9));
+    expect(computeRelayUptimePct(1)).toBe(0);
+  });
+
+  it('clips intervals that partially overlap the window start', () => {
+    // Started 36h ago, stopped 12h ago — only last 24h counts = 12h/24h = 50%
+    recordRelayStart(hoursAgo(36));
+    recordRelayStop(hoursAgo(12));
+    const pct = computeRelayUptimePct(1);
+    expect(pct).toBeGreaterThanOrEqual(49);
+    expect(pct).toBeLessThanOrEqual(51);
+  });
+
+  it('is cleared by resetMetrics', () => {
+    recordRelayStart(hoursAgo(6));
+    resetMetrics();
+    expect(computeRelayUptimePct(1)).toBe(0);
   });
 });

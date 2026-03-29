@@ -47,7 +47,7 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 | Metric | Formula | Good | Alarm | Status |
 |--------|---------|------|-------|--------|
 | **Fleet availability** | % of non-sleeping bots with running processes (snapshot) | 100% | < 80% | ✅ Tracked |
-| **Relay uptime %** | % of last 24h relay was running (approx: current uptime / 86400s) | 100% (1d) | < 90% | ✅ Tracked (approx) |
+| **Relay uptime %** | % of last 24h relay was running (from start/stop timestamps) | 100% (1d) | < 90% | ✅ Tracked |
 | **Response latency** | p50/p95 time from Captain mention to first bot reply | < 30s p50 | > 2min p95 | ✅ Tracked |
 | **Crashes/day** | PM2 restart count per day | 0 | > 2/day | ✅ Tracked |
 | **OOM kills/day** | Container killed by memory limit per day | 0 | Any | ✅ Tracked |
@@ -56,7 +56,7 @@ Five categories. A mature fleet scores well on all five. A fleet in crisis will 
 
 **Fleet availability** = `running / (total − sleeping − transit) × 100`. A bot in `quarters`, `onduty`, `retrospective`, or `ready` is "assigned" and counts in the denominator. Displayed as `avail XX%` in `!metrics` footer. 100% = all assigned bots have running processes.
 
-**Relay uptime %** is approximated as `min(uptimeSeconds, 86400) / 86400 × 100`. If the relay has been continuously running for 22h, that's 92%. If it just restarted, it's near 0%. Displayed as `up 91% (1d)` in `!metrics`. This understates reliability if the relay restarts quickly, but a low % always means something went wrong recently. The precise implementation (recording stop/start timestamps) is planned — see below.
+**Relay uptime %** = sum of time relay was running within the window / window length × 100. Intervals are recorded in `_runtime/data/relay-uptime.jsonl`: each relay start appends a `{ start, end: null }` entry; each clean shutdown closes the open interval with `end`. Ungraceful stops (crashes) are closed on next startup using the file's mtime. Displayed as `up 91% (1d)` in `!metrics`.
 
 **Response latency** measures the user experience — how long does the Captain wait? A bot that's running but slow to respond is as useless as one that's down. Source: relay tracks the delta between curtainLoop event timestamp and first bot reply.
 
@@ -146,7 +146,7 @@ Read Claude Code todos JSON from `_runtime/instances/{bot}/data/sessions/main/.c
 ## Accuracy Notes
 
 - **Restart approximation**: PM2 only tracks cumulative restarts, not per-event timestamps. Rolling counts use an approximation: if the process started within the window, all restarts are counted as in-window. If running longer than the window, count shows 0 until next restart.
-- **Uptime % approximation**: `min(uptimeSeconds, 86400) / 86400`. Underestimates stability if relay restarts briefly multiple times. Overestimates if relay crashed and stayed down but just recovered.
+- **Uptime % precision**: Computed from actual start/stop timestamps in `_runtime/data/relay-uptime.jsonl`. Crash stops are approximated using the file's mtime — accurate to within the heartbeat interval.
 - **Sync failures**: Counted per `reportFailure()` call — a build that fails 3× in one day counts as 3.
 - **Interventions**: Counted from relay's `backfillOperatorEvents()` on startup plus in-memory accumulation. Accuracy depends on Matrix history availability.
 

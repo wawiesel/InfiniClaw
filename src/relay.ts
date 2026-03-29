@@ -51,6 +51,9 @@ import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
 import {
   initMetrics,
+  loadRelayUptimeHistory,
+  recordRelayStart,
+  recordRelayStop,
   recordOperatorMessage,
   recordScoreReaction,
   recordBranchBrainResult,
@@ -1588,7 +1591,8 @@ function formatCombinedMetrics(
     }, 'short');
 
     // Ship-level metrics suffix
-    const uptimePct = Math.min(Math.round(s.shipMetrics.relayUptimeSeconds / 864), 100);
+    const uptimeRaw = s.shipMetrics.relayUptimePct as { day1?: number } | number | undefined;
+    const uptimePct = typeof uptimeRaw === 'number' ? uptimeRaw : (uptimeRaw?.day1 ?? 0);
     const uptimeTag = `up ${uptimePct}%`;
     const infraRaw = s.shipMetrics.infraFailures as { day1?: number; day7?: number } | number;
     const syncFail = typeof infraRaw === 'number' ? infraRaw : (infraRaw?.day1 ?? 0);
@@ -5712,6 +5716,8 @@ async function main(): Promise<void> {
       btcRoomId = opConf.rooms?.['BehindTheCurtain'] ?? '';
     } catch { /* ok — curtainLoop will also handle this */ }
     initMetrics({ btcRoomId, operatorUid: operatorUserId, captainUid: captainUserId });
+    loadRelayUptimeHistory();
+    recordRelayStart();
     log('metrics: initialized');
   }
 
@@ -5770,6 +5776,7 @@ async function main(): Promise<void> {
   // Reassigns the module-level `shutdown` so healthLoop can call it for drain timeout.
   shutdown = async () => {
     log('shutting down — persisting fleet state');
+    recordRelayStop();
     // Blue-green handoff: write "drained" so the new relay knows it can take over
     if (isDraining) {
       log('handoff: writing drained status before exit');
