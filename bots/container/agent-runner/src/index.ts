@@ -193,61 +193,6 @@ function findSessionFile(sessionId: string): string | null {
   return null;
 }
 
-/**
- * Truncate older JSONL entries to bring file under maxBytes.
- * Keeps: session metadata lines (queue-operation, summary) at the top,
- * last-prompt at the bottom, and as many recent conversation turns as fit.
- * Returns the number of bytes removed.
- */
-function truncateSessionFile(filePath: string, maxBytes: number): number {
-  const content = fs.readFileSync(filePath, 'utf-8');
-  if (content.length <= maxBytes) return 0;
-
-  const lines = content.split('\n').filter((l) => l.trim());
-  // Separate metadata (queue-operation, summary) from conversation turns
-  const metadata: string[] = [];
-  const tail: string[] = []; // last-prompt
-  const conversation: string[] = [];
-
-  for (const line of lines) {
-    try {
-      const obj = JSON.parse(line);
-      if (obj.type === 'queue-operation' || obj.type === 'summary') {
-        metadata.push(line);
-      } else if (obj.type === 'last-prompt') {
-        tail.push(line);
-      } else {
-        conversation.push(line);
-      }
-    } catch {
-      conversation.push(line); // unparseable → treat as conversation
-    }
-  }
-
-  // Calculate how much space metadata + tail take
-  const fixedSize = metadata.reduce((s, l) => s + l.length + 1, 0)
-    + tail.reduce((s, l) => s + l.length + 1, 0);
-  const budget = maxBytes - fixedSize;
-
-  // Keep as many recent conversation lines as fit within budget
-  const kept: string[] = [];
-  let usedBytes = 0;
-  for (let i = conversation.length - 1; i >= 0; i--) {
-    const lineSize = conversation[i].length + 1;
-    if (usedBytes + lineSize > budget) break;
-    kept.unshift(conversation[i]);
-    usedBytes += lineSize;
-  }
-
-  const removed = conversation.length - kept.length;
-  if (removed === 0) return 0;
-
-  const truncated = [...metadata, ...kept, ...tail].join('\n') + '\n';
-  const bytesRemoved = content.length - truncated.length;
-  fs.writeFileSync(filePath, truncated);
-  return bytesRemoved;
-}
-
 // --- Claude CLI spawning ---
 
 interface ClaudeRunResult {
@@ -643,20 +588,22 @@ async function main(): Promise<void> {
   // Main loop: run claude -> check for messages -> resume
   try {
     while (true) {
-      // Truncate older session entries if JSONL file exceeds size limit — prevents OOM on --resume
+      // Rotate session if JSONL file exceeds size limit — prevents OOM on --resume.
+      // Old session file is left on disk; a fresh session starts with a context note.
       if (sessionId && SESSION_MAX_BYTES > 0) {
         const sessionFile = findSessionFile(sessionId);
         if (sessionFile) {
           try {
             const { size } = fs.statSync(sessionFile);
             if (size > SESSION_MAX_BYTES) {
-              log(`Session file ${Math.round(size / 1024)}KB > ${Math.round(SESSION_MAX_BYTES / 1024)}KB limit — truncating older entries`);
-              const removed = truncateSessionFile(sessionFile, SESSION_MAX_BYTES);
-              if (removed > 0) {
-                log(`Truncated ${Math.round(removed / 1024)}KB of older conversation entries`);
-              }
+              const sizeKb = Math.round(size / 1024);
+              const limitKb = Math.round(SESSION_MAX_BYTES / 1024);
+              log(`Session file ${sizeKb}KB > ${limitKb}KB limit — rotating to new session (old session ${sessionId} left on disk)`);
+              prompt = `[System note: previous session exceeded the ${limitKb}KB size limit and has been archived. A new session is starting. Continue from current task.]\n\n${prompt}`;
+              sessionId = undefined;
+              writeOutput({ status: 'success', result: null, newSessionId: undefined, isSessionError: true });
             }
-          } catch { /* stat/truncate failed — proceed as-is */ }
+          } catch { /* stat failed — proceed as-is */ }
         }
       }
 
