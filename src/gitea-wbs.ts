@@ -96,6 +96,59 @@ export async function giteaCloseIssue(issueNumber: number): Promise<void> {
   }
 }
 
+// ── Standalone issue + comment (GDS) ─────────────────────────────────────────
+
+/**
+ * Create a standalone Gitea issue (not tied to WBS in_progress transition).
+ * Returns the new issue number, or null on failure.
+ */
+export async function giteaCreateIssue(title: string, body: string): Promise<number | null> {
+  const gitea = loadGiteaAdminConfig();
+  if (!gitea) return null;
+  try {
+    const resp = await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues`, {
+      method: 'POST',
+      headers: giteaHeaders(gitea.token),
+      body: JSON.stringify({ title, body }),
+    });
+    if (!resp.ok) {
+      logger.warn({ status: resp.status, title }, 'gitea: failed to create issue');
+      return null;
+    }
+    const data = await resp.json() as { number: number };
+    logger.info({ issueNumber: data.number, title }, 'gitea: issue created');
+    return data.number;
+  } catch (err) {
+    logger.warn({ err, title }, 'gitea: createIssue threw');
+    return null;
+  }
+}
+
+/**
+ * Post a comment on a Gitea issue. Returns comment ID or null on failure.
+ */
+export async function giteaCommentOnIssue(issueNumber: number, body: string): Promise<number | null> {
+  const gitea = loadGiteaAdminConfig();
+  if (!gitea) return null;
+  try {
+    const resp = await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues/${issueNumber}/comments`, {
+      method: 'POST',
+      headers: giteaHeaders(gitea.token),
+      body: JSON.stringify({ body }),
+    });
+    if (!resp.ok) {
+      logger.warn({ status: resp.status, issueNumber }, 'gitea: failed to comment on issue');
+      return null;
+    }
+    const data = await resp.json() as { id: number };
+    logger.info({ commentId: data.id, issueNumber }, 'gitea: comment posted');
+    return data.id;
+  } catch (err) {
+    logger.warn({ err, issueNumber }, 'gitea: commentOnIssue threw');
+    return null;
+  }
+}
+
 // ── PR creation ───────────────────────────────────────────────────────────────
 
 /**

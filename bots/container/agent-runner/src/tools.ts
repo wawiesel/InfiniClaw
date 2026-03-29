@@ -1106,6 +1106,110 @@ Do NOT attempt "podman exec infiniclaw-relay" or similar — no such container e
     },
   );
 
+  // ── GDS (Gitea Dev System) tools ───────────────────────────────────
+
+  server.tool(
+    'gitea_create_issue',
+    'Create a standalone Gitea issue. Returns the issue number.',
+    {
+      title: z.string().describe('Issue title'),
+      body: z.string().describe('Issue body (markdown)'),
+    },
+    async (args) => {
+      writeIpcFile(tasksDir, { type: 'gitea_create_issue', title: args.title, body: args.body, chatJid, groupFolder, timestamp: new Date().toISOString() });
+      return { content: [{ type: 'text' as const, text: `Gitea issue creation queued: ${args.title}` }] };
+    },
+  );
+
+  server.tool(
+    'gitea_comment',
+    'Post a comment on a Gitea issue.',
+    {
+      issue_number: z.number().int().describe('Gitea issue number'),
+      body: z.string().describe('Comment body (markdown)'),
+    },
+    async (args) => {
+      writeIpcFile(tasksDir, { type: 'gitea_comment', issue_number: args.issue_number, body: args.body, chatJid, groupFolder, timestamp: new Date().toISOString() });
+      return { content: [{ type: 'text' as const, text: `Comment queued for issue #${args.issue_number}` }] };
+    },
+  );
+
+  server.tool(
+    'gds_create',
+    `Create a new GDS (Gitea Dev System) task. Initializes the gate pipeline:
+survey → estimate → artifacts → plan_approve → execute_30 → execute_60 → execute_90 → demo → done.
+Creates a Gitea issue and S3 state. Returns the issue number.`,
+    {
+      title: z.string().describe('Task title'),
+      description: z.string().optional().describe('Task description with design spec reference'),
+      inspector: z.string().describe('Inspector bot name for gate reviews'),
+      wbs_id: z.string().optional().describe('Associated WBS item ID'),
+    },
+    async (args) => {
+      writeIpcFile(tasksDir, {
+        type: 'gds_create', title: args.title, description: args.description || '',
+        inspector: args.inspector, wbs_id: args.wbs_id || '',
+        bot: process.env.INFINICLAW_ASSISTANT_NAME || '', chatJid, groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `GDS creation queued: ${args.title}` }] };
+    },
+  );
+
+  server.tool(
+    'gds_submit_evidence',
+    `Submit evidence for the current GDS gate. Posts to Gitea and updates state.
+The gate must be the current pending gate. Evidence triggers inspector review.`,
+    {
+      issue_number: z.number().int().describe('GDS Gitea issue number'),
+      gate: z.string().describe('Gate name (survey, estimate, artifacts, execute_30, execute_60, execute_90)'),
+      evidence: z.string().describe('Evidence summary (markdown)'),
+      tokens_used: z.number().int().optional().describe('Cumulative tokens used at this gate'),
+      time_elapsed_min: z.number().optional().describe('Minutes elapsed since execution started'),
+    },
+    async (args) => {
+      writeIpcFile(tasksDir, {
+        type: 'gds_submit_evidence', issue_number: args.issue_number, gate: args.gate,
+        evidence: args.evidence, tokens_used: args.tokens_used, time_elapsed_min: args.time_elapsed_min,
+        bot: process.env.INFINICLAW_ASSISTANT_NAME || '', chatJid, groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Evidence submitted for gate ${args.gate} on GDS #${args.issue_number}` }] };
+    },
+  );
+
+  server.tool(
+    'gds_approve_gate',
+    `Approve the current GDS gate. Inspector-only (captain approves via Matrix command).
+Approves the current pending or inspector_approved gate.`,
+    {
+      issue_number: z.number().int().describe('GDS Gitea issue number'),
+    },
+    async (args) => {
+      writeIpcFile(tasksDir, {
+        type: 'gds_approve_gate', issue_number: args.issue_number,
+        bot: process.env.INFINICLAW_ASSISTANT_NAME || '', chatJid, groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Gate approval queued for GDS #${args.issue_number}` }] };
+    },
+  );
+
+  server.tool(
+    'gds_status',
+    'Get the status of a GDS task or list all active GDS tasks.',
+    {
+      issue_number: z.number().int().optional().describe('Specific GDS issue number. Omit to list all active.'),
+    },
+    async (args) => {
+      writeIpcFile(tasksDir, {
+        type: 'gds_status', issue_number: args.issue_number,
+        chatJid, groupFolder, timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: args.issue_number ? `Status query queued for GDS #${args.issue_number}` : 'Listing all active GDS tasks...' }] };
+    },
+  );
+
   // ── Delegate tools ──────────────────────────────────────────────────
 
   registerDelegateTools(server, {

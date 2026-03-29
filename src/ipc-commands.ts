@@ -36,7 +36,8 @@ import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { capitalizeName, statusMessage } from './formatting.js';
 import { readWbs, writeWbs, assignItem, completeItem } from './wbs.js';
 import { runAlignment, formatReport } from './alignment.js';
-import { giteaCreateIssueForWbs, giteaCloseIssue } from './gitea-wbs.js';
+import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreateIssue, giteaCommentOnIssue } from './gitea-wbs.js';
+import { readGds, writeGds, createGdsState, submitEvidence, approveGate, listActiveGds, canPushToMain } from './gds.js';
 
 // ── Chief check ─────────────────────────────────────────────────────────
 
@@ -592,6 +593,16 @@ async function handleGitPush(data: CommandData, ctx: InfiniClawIpcContext): Prom
     return;
   }
 
+  // GDS merge guard: if pushing to main and bot has active GDS, require demo gate approval
+  if (branches.includes('main')) {
+    const pushCheck = await canPushToMain(ASSISTANT_NAME);
+    if (!pushCheck.allowed) {
+      logger.warn({ bot: ASSISTANT_NAME, reason: pushCheck.reason }, 'git_push to main blocked by GDS');
+      await safeSend(ctx, chatJid, `⛔ ${pushCheck.reason}`);
+      return;
+    }
+  }
+
   const cooldownMsg = checkCooldown('git_push', GIT_PUSH_COOLDOWN_MS);
   if (cooldownMsg) {
     logger.warn({ remote, branches }, 'git_push rejected — cooldown active');
@@ -1087,6 +1098,131 @@ async function handleAlignmentRun(data: CommandData, ctx: InfiniClawIpcContext):
   }
 }
 
+// ── GDS (Gitea Dev System) handlers ──────────────────────────────────────────
+
+async function handleGiteaCreateIssue(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const chatJid = data.chat_jid as string;
+  const title = data.title as string;
+  const body = data.body as string;
+  if (!title || !body) { await safeSend(ctx, chatJid, '⛔ gitea_create_issue: title and body required'); return; }
+  const issueNumber = await giteaCreateIssue(title, body);
+  if (issueNumber) {
+    await safeSend(ctx, chatJid, `✅ Gitea issue #${issueNumber} created`);
+  } else {
+    await safeSend(ctx, chatJid, '⛔ gitea_create_issue: failed to create issue');
+  }
+}
+
+async function handleGiteaComment(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const chatJid = data.chat_jid as string;
+  const issueNumber = Number(data.issue_number);
+  const body = data.body as string;
+  if (!issueNumber || !body) { await safeSend(ctx, chatJid, '⛔ gitea_comment: issue_number and body required'); return; }
+  const commentId = await giteaCommentOnIssue(issueNumber, body);
+  if (commentId) {
+    await safeSend(ctx, chatJid, `✅ Comment posted on issue #${issueNumber}`);
+  } else {
+    await safeSend(ctx, chatJid, '⛔ gitea_comment: failed to post comment');
+  }
+}
+
+async function handleGdsCreate(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const chatJid = data.chat_jid as string;
+  const title = data.title as string;
+  const description = data.description as string || '';
+  const inspector = data.inspector as string || '';
+  const wbsId = data.wbs_id as string || undefined;
+  if (!title) { await safeSend(ctx, chatJid, '⛔ gds_create: title required'); return; }
+  if (!inspector) { await safeSend(ctx, chatJid, '⛔ gds_create: inspector required'); return; }
+
+  // Create Gitea issue
+  const issueBody = `# GDS: ${title}\n\n${description}\n\n---\n*Engineer*: ${ASSISTANT_NAME}\n*Inspector*: ${inspector}\n${wbsId ? `*WBS*: ${wbsId}` : ''}`;
+  const issueNumber = await giteaCreateIssue(`GDS: ${title}`, issueBody);
+  if (!issueNumber) { await safeSend(ctx, chatJid, '⛔ gds_create: failed to create Gitea issue'); return; }
+
+  // Create GDS state in S3
+  const state = createGdsState({ gitea_issue: issueNumber, title, engineer: ASSISTANT_NAME, inspector, wbs_id: wbsId });
+  await writeGds(state);
+
+  await safeSend(ctx, chatJid, `✅ GDS #${issueNumber} created: ${title}\nGates: survey → estimate → artifacts → plan_approve → execute_30 → execute_60 → execute_90 → demo → done\nCurrent gate: survey (pending)`);
+}
+
+async function handleGdsSubmitEvidence(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const chatJid = data.chat_jid as string;
+  const issueNumber = Number(data.issue_number);
+  const gateName = data.gate as string;
+  const evidence = data.evidence as string;
+  const tokensUsed = data.tokens_used != null ? Number(data.tokens_used) : undefined;
+  const timeElapsedMin = data.time_elapsed_min != null ? Number(data.time_elapsed_min) : undefined;
+  if (!issueNumber || !gateName || !evidence) {
+    await safeSend(ctx, chatJid, '⛔ gds_submit_evidence: issue_number, gate, and evidence required');
+    return;
+  }
+
+  const state = await readGds(issueNumber);
+  if (!state) { await safeSend(ctx, chatJid, `⛔ GDS #${issueNumber} not found`); return; }
+
+  const result = submitEvidence(state, gateName as any, evidence, tokensUsed, timeElapsedMin);
+  if (!result.ok) { await safeSend(ctx, chatJid, `⛔ ${result.error}`); return; }
+
+  // Post evidence to Gitea
+  await giteaCommentOnIssue(issueNumber, `## Gate: ${gateName}\n\n${evidence}${tokensUsed != null ? `\n\n**Tokens used**: ${tokensUsed}` : ''}${timeElapsedMin != null ? `\n**Time elapsed**: ${timeElapsedMin} min` : ''}`);
+
+  await writeGds(state);
+  await safeSend(ctx, chatJid, `✅ Evidence submitted for gate ${gateName} on GDS #${issueNumber}. Awaiting inspector approval.`);
+}
+
+async function handleGdsApproveGate(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const chatJid = data.chat_jid as string;
+  const issueNumber = Number(data.issue_number);
+  if (!issueNumber) { await safeSend(ctx, chatJid, '⛔ gds_approve_gate: issue_number required'); return; }
+
+  const state = await readGds(issueNumber);
+  if (!state) { await safeSend(ctx, chatJid, `⛔ GDS #${issueNumber} not found`); return; }
+
+  // Determine approver role from fleet
+  const role = determineApproverRole(ASSISTANT_NAME);
+  const result = approveGate(state, ASSISTANT_NAME, role);
+  if (!result.ok) { await safeSend(ctx, chatJid, `⛔ ${result.error}`); return; }
+
+  // Post approval to Gitea
+  const approvalType = role === 'inspector' ? 'Inspector approved' : 'Captain/Operator approved';
+  await giteaCommentOnIssue(issueNumber, `## ✅ ${approvalType}: ${state.current_gate}\n\nApproved by: ${ASSISTANT_NAME} (${role})`);
+
+  await writeGds(state);
+  const advancedMsg = result.advanced ? ` → advanced to ${state.current_gate}` : ' (awaiting captain approval)';
+  await safeSend(ctx, chatJid, `✅ Gate approved on GDS #${issueNumber}${advancedMsg}`);
+}
+
+async function handleGdsStatus(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const chatJid = data.chat_jid as string;
+  const issueNumber = data.issue_number != null ? Number(data.issue_number) : null;
+
+  if (issueNumber) {
+    const state = await readGds(issueNumber);
+    if (!state) { await safeSend(ctx, chatJid, `⛔ GDS #${issueNumber} not found`); return; }
+    const gatesSummary = state.gates.map(g => `${g.status === 'approved' ? '✅' : g.status === 'inspector_approved' ? '🔍' : g.status === 'pending' ? '⏳' : '⬜'} ${g.name}`).join('\n');
+    await safeSend(ctx, chatJid, `**GDS #${state.gitea_issue}: ${state.title}**\nEngineer: ${state.engineer} | Inspector: ${state.inspector}\nCurrent gate: ${state.current_gate}\n\n${gatesSummary}`);
+  } else {
+    const active = await listActiveGds();
+    if (active.length === 0) { await safeSend(ctx, chatJid, 'No active GDS tasks.'); return; }
+    const lines = active.map(g => `#${g.gitea_issue} ${g.title} — ${g.current_gate} (${g.engineer}/${g.inspector})`);
+    await safeSend(ctx, chatJid, `**Active GDS tasks:**\n${lines.join('\n')}`);
+  }
+}
+
+/** Determine if caller is inspector, captain, or other based on fleet role. */
+function determineApproverRole(botName: string): 'inspector' | 'captain' | 'operator' {
+  try {
+    const fleet = loadFleet();
+    const entry = fleet[botName];
+    if (entry?.role === 'inspector') return 'inspector';
+  } catch { /* fall through */ }
+  // Captain and operator are identified by Matrix user ID, not fleet role.
+  // For now, non-inspector bots cannot approve. Captain approves via !gds command in relay.
+  return 'inspector'; // Default — relay handles captain/operator approvals separately
+}
+
 const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   set_brain_mode: handleSetBrainMode,
   refresh_bot: handleRefreshBot,
@@ -1111,6 +1247,14 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
 
   podman_exec: handlePodmanExec,
   alignment_run: handleAlignmentRun,
+
+  // GDS (Gitea Dev System)
+  gitea_create_issue: handleGiteaCreateIssue,
+  gitea_comment: handleGiteaComment,
+  gds_create: handleGdsCreate,
+  gds_submit_evidence: handleGdsSubmitEvidence,
+  gds_approve_gate: handleGdsApproveGate,
+  gds_status: handleGdsStatus,
 };
 
 export async function handleInfiniClawCommand(

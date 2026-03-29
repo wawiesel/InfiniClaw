@@ -461,6 +461,7 @@ export const ROLE_ROOMS: Record<string, { room: string; icon: string }> = {
   engineer:  { room: 'engineering',  icon: '⚙️' },
   architect: { room: 'astrometrics', icon: '🔭' },
   trader:    { room: 'bazaar',       icon: '💰' },
+  inspector: { room: 'engineering',  icon: '🔍' },
   normie:    { room: 'lounge',       icon: '🦋' },
 };
 
