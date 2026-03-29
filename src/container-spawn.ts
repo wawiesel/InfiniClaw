@@ -293,17 +293,17 @@ function resolveContainerName(
 
 // ── MCP servers ─────────────────────────────────────────────────────
 
-function resolveMcpServers(): Record<string, Record<string, unknown>> | undefined {
-  const rootDir = process.env.INFINICLAW_ROOT;
-  const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
+function resolveMcpServers(secrets?: Record<string, string>): Record<string, Record<string, unknown>> | undefined {
+  const rootDir = secrets?.INFINICLAW_ROOT ?? process.env.INFINICLAW_ROOT;
+  const role = ((secrets?.ASSISTANT_ROLE ?? process.env.ASSISTANT_ROLE) || '').toLowerCase();
   const roleDir = rootDir && role ? path.join(rootDir, 'bots', role) : undefined;
   return roleDir ? readPersonaGroupMcpServers(roleDir) : undefined;
 }
 
 /** Read per-role disallowed tools from bots/{role}/disallowed-tools.json. */
-function resolveRoleDisallowedTools(): string[] {
-  const rootDir = process.env.INFINICLAW_ROOT;
-  const role = (process.env.ASSISTANT_ROLE || '').toLowerCase();
+function resolveRoleDisallowedTools(secrets?: Record<string, string>): string[] {
+  const rootDir = secrets?.INFINICLAW_ROOT ?? process.env.INFINICLAW_ROOT;
+  const role = ((secrets?.ASSISTANT_ROLE ?? process.env.ASSISTANT_ROLE) || '').toLowerCase();
   if (!rootDir || !role) return [];
   const filePath = path.join(rootDir, 'bots', role, 'disallowed-tools.json');
   try {
@@ -381,18 +381,18 @@ export async function runContainerAgent(
 
   // Assemble effective input
   const { containerName, safeContainerNameTag } = resolveContainerName(group, input.containerNameTag);
-  const mcpServers = resolveMcpServers();
+  const mcpServers = resolveMcpServers(secrets);
   const effectiveInput: ContainerInput & { disallowedTools?: string[] } = {
     ...input,
     groupFolder: group.folder,
     ...(safeContainerNameTag ? { containerNameTag: safeContainerNameTag } : {}),
-    disallowedTools: [...DISALLOWED_TOOLS, ...resolveRoleDisallowedTools()],
+    disallowedTools: [...DISALLOWED_TOOLS, ...resolveRoleDisallowedTools(secrets)],
     ...(Object.keys(mappedSecrets).length > 0 ? { secrets: mappedSecrets } : {}),
     ...(mcpServers ? { mcpServers } : {}),
   };
 
   // Build container args
-  const personaConfig = getPersonaContainerConfig();
+  const personaConfig = getPersonaContainerConfig(secrets);
   const portPublish = safeContainerNameTag ? [] : personaConfig.portPublish;
   const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaConfig.memoryMb, imageOverride);
   const configTimeout = input.timeoutOverrideMs || group.containerConfig?.timeout || CONTAINER_TIMEOUT;
@@ -500,6 +500,9 @@ export async function runBranchBrainAgent(
   for (const key of [...ALLOWED_ENV_VARS, 'MATRIX_USERNAME', 'MATRIX_PASSWORD']) {
     if (botEnv[key]) mergedSecrets[key] = botEnv[key];
   }
+  // PERSONA_NAME is a computed var set in MB's start script, never written to the
+  // bot's env file. Set it explicitly so BB mounts the correct persona and CLAUDE.md.
+  mergedSecrets['PERSONA_NAME'] = input.bot;
 
   // Route BB IPC files to the parent bot's instance data dir so the bot's
   // IPC watcher (running in the bot's pm2 process) processes them.
