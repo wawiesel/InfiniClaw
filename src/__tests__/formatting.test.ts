@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   rankMedal,
   botBadge,
+  bbCountIndicator,
   unifiedBotDisplay,
   unifiedShipDisplay,
   type UnifiedBotDisplayParams,
@@ -168,6 +169,57 @@ describe('unifiedBotDisplay — long', () => {
   it('formats 10M+ tok as rounded M', () => {
     const out = unifiedBotDisplay({ ...BASE, tokPerDay: 39_333_000 }, 'long');
     expect(out).toContain('🔥[39M tok/d]');
+  });
+});
+
+// ── bbCountIndicator ───────────────────────────────────────────
+
+describe('bbCountIndicator', () => {
+  it('returns empty string when count is 0', () => {
+    expect(bbCountIndicator(0)).toBe('');
+  });
+
+  it('returns 🌿×1 for one active BB', () => {
+    expect(bbCountIndicator(1)).toBe('🌿×1');
+  });
+
+  it('returns 🌿×3 for three active BBs', () => {
+    expect(bbCountIndicator(3)).toBe('🌿×3');
+  });
+});
+
+describe('unifiedBotDisplay — BB count', () => {
+  it('short: no indicator when activeBbCount is 0', () => {
+    const out = unifiedBotDisplay({ ...BASE, activeBbCount: 0 }, 'short');
+    expect(out).not.toContain('🌿');
+  });
+
+  it('short: shows 🌿×2 when two BBs active', () => {
+    const out = unifiedBotDisplay({ ...BASE, activeBbCount: 2 }, 'short');
+    expect(out).toContain('🌿×2');
+  });
+
+  it('short: no indicator when activeBbCount omitted', () => {
+    const out = unifiedBotDisplay(BASE, 'short');
+    expect(out).not.toContain('🌿');
+  });
+
+  it('long: shows 🌿[2 BB] when two BBs active', () => {
+    const out = unifiedBotDisplay({ ...BASE, activeBbCount: 2 }, 'long');
+    expect(out).toContain('🌿[2 BB]');
+  });
+
+  it('long: no BB segment when activeBbCount is 0', () => {
+    const out = unifiedBotDisplay({ ...BASE, activeBbCount: 0 }, 'long');
+    expect(out).not.toContain('🌿');
+  });
+
+  it('short: BB indicator appears after activity emoji', () => {
+    const out = unifiedBotDisplay({ ...BASE, activeBbCount: 1, tokPerDay: 500_000 }, 'short');
+    const fireIdx = out.indexOf('🔥');
+    const leafIdx = out.indexOf('🌿');
+    expect(fireIdx).toBeGreaterThan(-1);
+    expect(leafIdx).toBeGreaterThan(fireIdx);
   });
 });
 

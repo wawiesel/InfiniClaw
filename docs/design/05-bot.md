@@ -183,16 +183,18 @@ Short: 🦁 Herc 🛳️⭐🟢🔥
 ### Bot Display
 
 ```
-Long:  🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16 tok/d]
-Short: 🦁🏠 Tali ⚙️🥈🟢🔥
+Long:  🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16 tok/d]·🌿[2 BB]
+Short: 🦁🏠 Tali ⚙️🥈🟢🔥 🌿×2
 ```
+
+The `🌿×N` / `🌿[N BB]` suffix is omitted when no branch brains are active.
 
 ### Field Order
 
 Both ships and bots follow the same structure:
 
 ```
-<prefix> <Name> <type/role><rank>·<health>·<activity>
+<prefix> <Name> <type/role><rank>·<health>·<activity>[·<bb>]
 ```
 
 | Field | Ship | Bot |
@@ -203,6 +205,7 @@ Both ships and bots follow the same structure:
 | **rank** | Medal `⭐[1]` | Medal `🥈[2]` |
 | **health** | Grade emoji `🟢[A]` | Grade emoji `🟢[A]` |
 | **activity** | Throughput `🔥[32 tok/d]` | Throughput `🔥[16 tok/d]` |
+| **bb** | — | Active branch brains `🌿×2` / `🌿[2 BB]` (omitted when 0) |
 
 In **long** format, each field shows `<emoji>[<value>]` separated by `·` (interpunct).
 In **short** format, only emojis — no values or labels.

@@ -119,8 +119,8 @@ KPI Fleet Summary
 
 The tool reads:
 - `{INFINICLAW_ROOT}/_runtime/instances/{bot}/ipc/status.json` — bot status snapshot
-- `{INFINICLAW_ROOT}/bots/engineer/parker/signal/price_data.json` — for `roi_over_hodling`
-- `{INFINICLAW_ROOT}/bots/engineer/parker/signal/state.json` — for `roi_over_hodling`
+- `{INFINICLAW_ROOT}/bots/trader/parker/signal/price_data.json` — for `roi_over_hodling`
+- `{INFINICLAW_ROOT}/bots/trader/parker/signal/state.json` — for `roi_over_hodling`
 
 For `bot = "fleet"`, iterates over all instances found under `_runtime/instances/`.
 

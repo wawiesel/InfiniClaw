@@ -190,6 +190,12 @@ export interface UnifiedBotDisplayParams {
   rank: number;          // 1, 2, 3+
   isChief: boolean;      // true if CO (lowest-rank awake in role)
   version?: string;      // semver tag e.g. "v1.3.12" — appended to name
+  activeBbCount?: number; // number of active branch brain slots (0 or omitted = none)
+}
+
+/** Branch-brain count indicator. Returns "🌿×N" when N > 0, else "". */
+export function bbCountIndicator(count: number): string {
+  return count > 0 ? `🌿×${count}` : '';
 }
 
 /** Status-aware health emoji: sleep→💤, building→🔄, starting→🚀, online→🟢, etc. */
@@ -204,8 +210,8 @@ function statusHealthEmoji(status: string, health: string): string {
 }
 
 /** Build a unified bot display string.
- *  Long:  🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16K tok/d]
- *  Short: 🦁🏠 Tali ⚙️ 🥈 🟢 🔥
+ *  Long:  🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16K tok/d]·🌿[2 BB]
+ *  Short: 🦁🏠 Tali ⚙️ 🥈 🟢 🔥 🌿×2
  *  Pass nameWidth to pad the name for column alignment in fleet output.
  */
 export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosity, nameWidth = 0): string {
@@ -213,20 +219,22 @@ export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosi
   const roleIcon = ROLE_ICONS[p.role] ?? '';
   const healthEmoji = statusHealthEmoji(p.status, p.health);
   const actEmoji = activityEmoji(p.tokPerDay);
+  const bbEmoji = bbCountIndicator(p.activeBbCount ?? 0);
   const prefix = `${p.shipEmoji}${p.locationEmoji}`;
   const baseName = capitalizeName(p.name);
   const name = (p.version ? `${baseName} ${p.version}` : baseName).padEnd(nameWidth);
 
   if (verbosity === 'short') {
-    const icons = [roleIcon, medal, healthEmoji, actEmoji].filter(Boolean).join(' ');
+    const icons = [roleIcon, medal, healthEmoji, actEmoji, bbEmoji].filter(Boolean).join(' ');
     return `${prefix} ${name} ${icons}`;
   }
 
-  // Long format: 🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16K tok/d]
+  // Long format: 🦁🏠 Tali ⚙️engineer·🥈[2]·🟢[A]·🔥[16K tok/d]·🌿[2 BB]
   const rolePart = `${roleIcon}${p.role}`;
   const rankPart = `${medal}[${p.rank}]`;
   const healthPart = `${healthEmoji}[${p.health || '?'}]`;
   const actPart = `·${actEmoji}[${fmtTok(p.tokPerDay)} tok/d]`;
+  const bbPart = bbEmoji ? `·🌿[${p.activeBbCount} BB]` : '';
 
-  return `${prefix} ${name} ${rolePart}·${rankPart}·${healthPart}${actPart}`;
+  return `${prefix} ${name} ${rolePart}·${rankPart}·${healthPart}${actPart}${bbPart}`;
 }

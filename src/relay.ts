@@ -24,7 +24,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { collectHealthData, sessionCleanup } from './health-check.js';
 import { isToolCallBlock, hasDetailsBlock, toolCallBreadcrumb, isToolCallMarker, parseToolCallMarker, toolCallBreadcrumbFromData } from './tool-call-breadcrumb.js';
 import { runBranchBrainAgent } from './container-spawn.js';
-import { acquireBbPoolSlot, initBbPool, leaveBbRoom, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
+import { acquireBbPoolSlot, getActiveBbCount, initBbPool, leaveBbRoom, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
 import type { ContainerOutput } from './container-spawn.js';
 import { upsertEnvLine } from './env-utils.js';
 import {
@@ -35,6 +35,7 @@ import {
   matrixInvite,
   matrixJoin,
   matrixLeave,
+  matrixKick,
   matrixSetDisplayName,
   matrixSetRoomName,
   matrixSendReaction,
@@ -1117,6 +1118,7 @@ function buildBotDisplayParams(
     rank: entry?.rank ?? 99,
     isChief: co,
     version: overrides?.version ?? botSemver(root, botName) ?? undefined,
+    activeBbCount: getActiveBbCount(botName),
   };
 }
 
@@ -2122,6 +2124,9 @@ async function handleBbMergeAbort(
   const bot = task.bot;
   const poolInfo = task.poolSlotInfo;
 
+  // Capture BB user info for post-marker kick
+  let bbKickUserId: string | undefined;
+
   // Release pool slot and reset display name
   if (poolInfo) {
     try {
@@ -2131,9 +2136,9 @@ async function handleBbMergeAbort(
       const tokenKey = `BB_POOL_TOKEN_${poolInfo.slot + 1}`;
       slot.accessToken = botEnv[tokenKey] || '';
       if (slot.accessToken) {
-        await leaveBbRoom(slot, conn.roomId).catch(() => {});
         await resetBbDisplayName(slot).catch(() => {});
       }
+      bbKickUserId = poolInfo.userId;
       releaseBbPoolSlot(poolInfo.bot, poolInfo.slot);
       log(`bbMergeAbort: pool slot ${poolInfo.slot} released for ${poolInfo.bot}`);
     } catch (err) { log(`bbMergeAbort: pool release failed: ${errStr(err)}`); }
@@ -2186,6 +2191,17 @@ async function handleBbMergeAbort(
       await relaySend(conn.homeserver, conn.accessToken, conn.roomId, abortText).catch((err) => log(`bbMergeAbort: abort post (no ls): ${errStr(err)}`));
     }
     log(`bbMergeAbort: aborted thread=${threadId.slice(0, 20)} title=${title}`);
+  }
+
+  // Kick BB pool account from room after marker is posted
+  if (bbKickUserId) {
+    try {
+      const { accessToken: opToken } = resolveOperatorConfig();
+      if (opToken) {
+        const kicked = await matrixKick(conn.homeserver, opToken, conn.roomId, bbKickUserId, `BB ${action}`);
+        log(`bbMergeAbort: kick ${bbKickUserId} ${kicked ? 'ok' : 'failed'}`);
+      }
+    } catch (err) { log(`bbMergeAbort: kick failed: ${errStr(err)}`); }
   }
 }
 
