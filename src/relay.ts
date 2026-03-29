@@ -2430,9 +2430,8 @@ async function spawnBranchBrain(
     log(`branchBrain: forking from main session=${mainSessionId.slice(0, 8)}...`);
   }
 
-  // Register task in branch-tasks.json
-  const sessionId = crypto.randomUUID();
-  writeBranchTask(replyThreadId, { objective, chat_jid, bot, title: announcedTitle, createdAt: Date.now(), sessionId });
+  // Register task in branch-tasks.json; sessionId is populated once the BB reports its real session ID.
+  writeBranchTask(replyThreadId, { objective, chat_jid, bot, title: announcedTitle, createdAt: Date.now() });
 
   const fullPrompt = objective;
 
@@ -2447,6 +2446,7 @@ async function spawnBranchBrain(
   let postedCount = 0;
   let lastPostedText = '';
   let mergeSummary: string | undefined; // Set by {{merge}} signal from BB
+  let capturedBbSessionId: string | undefined; // Real BB session ID, captured from ContainerOutput.newSessionId
 
   // Spawn via unified container pipeline — same path as main brains.
   // BB inherits disallowed tools, mounts, secrets, container config.
@@ -2467,6 +2467,17 @@ async function spawnBranchBrain(
       log(`branchBrain: spawned container=${containerName} fork=${!!mainSessionId}`);
     },
     async (output: ContainerOutput) => {
+      // Capture the BB's real session ID as soon as the container reports it.
+      // Stored per-thread in branch-tasks.json so any BB can be resumed after a relay restart.
+      if (output.newSessionId && !capturedBbSessionId) {
+        capturedBbSessionId = output.newSessionId;
+        const tasks = readBranchTasks();
+        if (tasks[replyThreadId]) {
+          tasks[replyThreadId].sessionId = capturedBbSessionId;
+          writeBranchTask(replyThreadId, tasks[replyThreadId]);
+        }
+        log(`branchBrain: captured BB sessionId=${capturedBbSessionId.slice(0, 8)}... thread=${replyThreadId.slice(0, 20)}`);
+      }
       // Check for {{merge}} signal in BB output
       if (output.result) {
         const { signals, cleanText } = extractSignals(output.result);
@@ -2544,6 +2555,16 @@ async function spawnBranchBrain(
     activeBranchBrainProcs.delete(replyThreadId);
     if (bot) recordBranchBrainResult(bot, postedCount > 0);
     log(`branchBrain: done status=${result.status} posted=${postedCount}`);
+
+    // Fallback: persist session ID from final result if onOutput never fired with newSessionId.
+    if (result.newSessionId && !capturedBbSessionId) {
+      const tasks = readBranchTasks();
+      if (tasks[replyThreadId]) {
+        tasks[replyThreadId].sessionId = result.newSessionId;
+        writeBranchTask(replyThreadId, tasks[replyThreadId]);
+        log(`branchBrain: captured BB sessionId (final)=${result.newSessionId.slice(0, 8)}... thread=${replyThreadId.slice(0, 20)}`);
+      }
+    }
 
     if (postedCount === 0) {
       const errDetail = result.error ? `\n\n\`\`\`\n${result.error.slice(0, 500)}\n\`\`\`` : '';
