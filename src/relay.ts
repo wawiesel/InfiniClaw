@@ -2047,7 +2047,6 @@ interface BranchTaskEntry {
   awaitingMerge?: boolean;   // design doc 28: BB done, waiting for MB {{merge}}/{{abort}}
   mergeSummary?: string;     // BB's merge summary text, stored for squash post
   poolSlotInfo?: { bot: string; slot: number; index: string; userId: string; homeserver: string }; // pool slot to release on merge/abort
-  mbPostedInThread?: boolean; // WBS 52: MB posted a review reply before {{merge}} — required exchange gate
   nudged?: boolean;       // thread staleness: soft nudge posted
   staleClosed?: boolean;  // thread staleness: hard-closed due to age (spec 08-threading)
 }
@@ -2122,13 +2121,6 @@ async function handleBbMergeAbort(
   const task = tasks[threadId];
   if (!task?.awaitingMerge) {
     log(`bbMergeAbort: thread=${threadId.slice(0, 20)} not awaiting merge`);
-    return;
-  }
-
-  // WBS 52: Reject {{merge}} if no MB-BB exchange occurred (BB posted summary, MB must review first)
-  if (action === 'merge' && !task.mbPostedInThread) {
-    void threadReply(conn, threadId, `⚠️ merge rejected — no review reply found in this thread. Post a review message before sending {{merge}}.`);
-    log(`bbMergeAbort: merge blocked — no MB-BB exchange for thread=${threadId.slice(0, 20)}`);
     return;
   }
 
@@ -5384,11 +5376,6 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                   } else if (abortSig) {
                     log(`bbMergeAbort: {{abort}} from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
                     void handleBbMergeAbort(conn, relates.event_id, 'abort', conns);
-                  } else if (!awaitTask.mbPostedInThread) {
-                    // WBS 52: MB posted a review message (not merge/abort) — record exchange
-                    awaitTask.mbPostedInThread = true;
-                    writeBranchTask(relates.event_id, awaitTask);
-                    log(`bbMergeAbort: MB-BB exchange recorded for thread=${relates.event_id.slice(0, 20)}`);
                   }
                 }
 
