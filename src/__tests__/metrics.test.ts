@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock child_process so getPm2Info() returns [] — tests must not depend on real PM2 state
 vi.mock('child_process', () => ({
@@ -38,6 +38,7 @@ import {
   recordBotMessage,
   recordTaskCreated,
   recordTaskResolved,
+  syncTodosMetrics,
   checkAlerts,
   formatAlerts,
   recordVersionDeployed,
@@ -50,6 +51,7 @@ import {
 } from '../metrics.js';
 
 import { activityEmoji } from '../formatting.js';
+import * as shipConfig from '../ship-config.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -1076,5 +1078,83 @@ describe('recordVersionDeployed / getVersionAdoptionLatency', () => {
     recordVersionDeployed('Herc', '1.20.0');
     resetMetrics();
     expect(getVersionDeployEvents()).toHaveLength(0);
+  });
+});
+
+// ── syncTodosMetrics (WBS-40) ─────────────────────────────────────────
+
+import os from 'os';
+import fs from 'fs';
+import path from 'path';
+
+describe('syncTodosMetrics', () => {
+  let tmpRoot: string;
+  let todosDir: string;
+
+  function writeTodos(todos: Array<{ id?: string; content?: string; status: string }>): void {
+    fs.mkdirSync(todosDir, { recursive: true });
+    fs.writeFileSync(path.join(todosDir, 'session-agent-session.json'), JSON.stringify(todos));
+  }
+
+  beforeEach(() => {
+    setup();
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'metrics-test-'));
+    todosDir = path.join(tmpRoot, '_runtime', 'instances', 'cid', 'data', 'sessions', 'main', '.claude', 'todos');
+    vi.stubEnv('INFINICLAW_ROOT', tmpRoot);
+    vi.spyOn(shipConfig, 'loadShipConfig').mockReturnValue({ bots: ['cid'], secretsPath: '/tmp' } as ReturnType<typeof shipConfig.loadShipConfig>);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('establishes baseline on first call without recording events', () => {
+    writeTodos([{ id: 'a', status: 'pending' }, { id: 'b', status: 'in_progress' }]);
+    syncTodosMetrics('cid');
+    const m = computeMetrics();
+    const bot = m.bots.find(b => b.name === 'cid');
+    // No events recorded — -1 means no data
+    expect(bot?.taskCompletionRate.day1).toBe(-1);
+  });
+
+  it('detects new todos as created on second call', () => {
+    writeTodos([{ id: 'a', status: 'pending' }]);
+    syncTodosMetrics('cid'); // baseline
+    writeTodos([{ id: 'a', status: 'pending' }, { id: 'b', status: 'pending' }]);
+    syncTodosMetrics('cid'); // detect 'b' as created
+    const m = computeMetrics();
+    const bot = m.bots.find(b => b.name === 'cid');
+    // 1 created, 0 resolved → 0%
+    expect(bot?.taskCompletionRate.day1).toBe(0);
+  });
+
+  it('detects completed todos as resolved on second call', () => {
+    writeTodos([{ id: 'a', status: 'pending' }, { id: 'b', status: 'pending' }]);
+    syncTodosMetrics('cid'); // baseline
+    writeTodos([{ id: 'a', status: 'completed' }, { id: 'b', status: 'pending' }, { id: 'c', status: 'pending' }]);
+    syncTodosMetrics('cid'); // 'a' resolved, 'c' created
+    const m = computeMetrics();
+    const bot = m.bots.find(b => b.name === 'cid');
+    // 1 created (c), 1 resolved (a) → 100%
+    expect(bot?.taskCompletionRate.day1).toBe(100);
+  });
+
+  it('clears snapshot on resetMetrics', () => {
+    writeTodos([{ id: 'a', status: 'pending' }]);
+    syncTodosMetrics('cid'); // baseline established
+    resetMetrics();
+    initMetrics({ btcRoomId: BTC_ROOM, operatorUid: OPERATOR, captainUid: CAPTAIN });
+    // After reset, next call is treated as first call (no events)
+    writeTodos([{ id: 'a', status: 'completed' }]);
+    syncTodosMetrics('cid'); // snapshot cleared — re-establishes baseline
+    const m = computeMetrics();
+    const bot = m.bots.find(b => b.name === 'cid');
+    expect(bot?.taskCompletionRate.day1).toBe(-1);
+  });
+
+  it('does nothing when todos dir does not exist', () => {
+    expect(() => syncTodosMetrics('cid')).not.toThrow();
   });
 });

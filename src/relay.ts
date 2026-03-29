@@ -18,6 +18,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -57,6 +58,7 @@ import {
   recordMessageDelivery,
   recordBotReply,
   backfillOperatorEvents,
+  syncTodosMetrics,
   publishMetrics,
   computeMetrics,
   formatScopeMetrics,
@@ -85,15 +87,16 @@ import {
   syncDistToInstance,
   collectBotMatrixUserMap,
   readRoomStateStamp,
+  startNextRelay,
 } from './service.js';
 import { getLatestSemverTag, getStampedSemverTag, getLatestSemverTagOnRef, commitsAheadOfTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
-import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
+import { gitOpts, execErrOutput, gitSyncRepo, parseConventionalPrefix, bumpPackageJsonVersion, commitVersionBump } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
 import { runStaticAlignment } from './alignment.js';
 import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreatePrForBranch } from './gitea-wbs.js';
-import { pushAll, getClient as getS3Client } from './s3-sync.js';
+import { pushAll, getClient as getS3Client, downloadJson, uploadJson } from './s3-sync.js';
 // health-staleness.ts helpers used by healthWatchdogLoop inline
 
 // ── Config ─────────────────────────────────────────────────────────
@@ -109,6 +112,54 @@ const STARTUP_SYNC_DELAY = 3_000;
 function isTransientServerError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /Sync failed: 50[234]/.test(msg);
+}
+
+// ── Blue-green handoff (WBS-44) ─────────────────────────────────────
+
+/** True when this process was started as the "next" relay in a blue-green handoff. */
+const IS_BLUEGREEN_NEXT = process.env['INFINICLAW_BLUEGREEN_RELAY'] === '1';
+
+/** Unique ID for this relay instance (used in handoff key). */
+const RELAY_INSTANCE_ID = IS_BLUEGREEN_NEXT
+  ? `relay-next-${Date.now()}`
+  : (process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw-relay');
+
+/** S3 key pattern: relay-handoff/{ship}.json */
+const RELAY_HANDOFF_PREFIX = 'relay-handoff';
+
+/** Max time the old relay has to drain before the new relay takes over. */
+const RELAY_DRAIN_TIMEOUT_MS = envInt('RELAY_DRAIN_TIMEOUT_MS', 60_000);
+
+/** TTL for a handoff key — clean up stale keys after this. */
+const RELAY_HANDOFF_TTL_MS = envInt('RELAY_HANDOFF_TTL_MS', 5 * 60_000);
+
+interface HandoffState {
+  newRelayId: string;
+  status: 'warming' | 'ready' | 'draining' | 'drained';
+  timestamp: number;
+}
+
+/** Set to true when this relay has been asked to yield to a new relay. */
+let isDraining = false;
+
+function handoffKey(): string {
+  return `${RELAY_HANDOFF_PREFIX}/${thisShipName()}.json`;
+}
+
+async function readHandoff(): Promise<HandoffState | null> {
+  return downloadJson<HandoffState>(handoffKey());
+}
+
+async function writeHandoff(state: HandoffState): Promise<void> {
+  await uploadJson(handoffKey(), state);
+}
+
+async function clearHandoff(): Promise<void> {
+  const s3 = getS3Client();
+  if (!s3) return;
+  try {
+    await s3.client.send(new DeleteObjectCommand({ Bucket: s3.bucket, Key: handoffKey() }));
+  } catch { /* ok — key may already be gone */ }
 }
 
 // Configurable intervals (env vars in milliseconds, or use defaults)
@@ -367,8 +418,15 @@ async function resetOperatorSession(conn: RoomConn): Promise<void> {
 let fleetDirty = false;
 /** Active intercom connections — set in startRelay so lifecycle helpers can send messages. */
 let activeConns: RoomConn[] = [];
+/** Shutdown function — assigned in main() so module-level loops can trigger graceful shutdown. */
+// eslint-disable-next-line prefer-const
+let shutdown: () => Promise<void> = async () => { process.exit(0); };
 /** Cached speaker state — updated by electSpeaker() so reply() can include it in the tag synchronously. */
 let isSpeakerCached = false;
+/** Current operator mode — determines the icon shown in relay message prefixes. */
+let operatorMode: 'watch' | 'captain' | 'fix' = 'watch';
+const OPERATOR_MODE_ICONS: Record<'watch' | 'captain' | 'fix', string> = { watch: '📡', captain: '👑', fix: '🔧' };
+function operatorModeIcon(): string { return OPERATOR_MODE_ICONS[operatorMode]; }
 /** Map Matrix userId → bot name for resolving reaction targets. Built once at startup. */
 let botUserIdMap: Map<string, string> = new Map();
 /** Cache of recent Matrix event IDs → bot name for score reaction enrichment. Capped at 500. */
@@ -1152,6 +1210,18 @@ async function syncBotDisplayNames(): Promise<void> {
     } catch (err) {
       log(`syncBotDisplayNames ${bot}: ${errStr(err)}`);
     }
+  }
+}
+
+/** Set the loudspeaker Matrix account display name to 'relay'. */
+async function syncLoudspeakerDisplayName(): Promise<void> {
+  const ls = loadLoudspeakerConfig();
+  if (!ls) return;
+  try {
+    const { accessToken, userId } = await relayMatrixLogin(ls.homeserver, ls.username, ls.password);
+    await matrixSetDisplayName(ls.homeserver, accessToken, userId, 'relay');
+  } catch (err) {
+    log(`syncLoudspeakerDisplayName: ${errStr(err)}`);
   }
 }
 
@@ -2047,7 +2117,6 @@ interface BranchTaskEntry {
   awaitingMerge?: boolean;   // design doc 28: BB done, waiting for MB {{merge}}/{{abort}}
   mergeSummary?: string;     // BB's merge summary text, stored for squash post
   poolSlotInfo?: { bot: string; slot: number; index: string; userId: string; homeserver: string }; // pool slot to release on merge/abort
-  mbPostedInThread?: boolean; // WBS 52: MB posted a review reply before {{merge}} — required exchange gate
   nudged?: boolean;       // thread staleness: soft nudge posted
   staleClosed?: boolean;  // thread staleness: hard-closed due to age (spec 08-threading)
 }
@@ -2125,13 +2194,6 @@ async function handleBbMergeAbort(
     return;
   }
 
-  // WBS 52: Reject {{merge}} if no MB-BB exchange occurred (BB posted summary, MB must review first)
-  if (action === 'merge' && !task.mbPostedInThread) {
-    void threadReply(conn, threadId, `⚠️ merge rejected — no review reply found in this thread. Post a review message before sending {{merge}}.`);
-    log(`bbMergeAbort: merge blocked — no MB-BB exchange for thread=${threadId.slice(0, 20)}`);
-    return;
-  }
-
   const title = task.title || task.objective?.split('\n')[0]?.trim() || 'Branch Brain';
   const bot = task.bot;
   const poolInfo = task.poolSlotInfo;
@@ -2186,6 +2248,17 @@ async function handleBbMergeAbort(
         const taskFile = path.join(ipcTasksDir, `merge_request-${Date.now()}.json`);
         fs.writeFileSync(taskFile, JSON.stringify({ type: 'merge_request', thread_id: threadId, bot, summary }));
       } catch (err) { log(`bbMergeAbort: merge IPC failed: ${errStr(err)}`); }
+    }
+    // Auto-bump version based on conventional commit prefix in PR title
+    const convPrefix = parseConventionalPrefix(title);
+    if (convPrefix) {
+      try {
+        const newVer = bumpPackageJsonVersion(resolveRoot(), convPrefix);
+        if (newVer) {
+          commitVersionBump(resolveRoot(), newVer);
+          log(`bbMergeAbort: version bumped to v${newVer} (${convPrefix})`);
+        }
+      } catch (err) { log(`bbMergeAbort: version bump failed: ${errStr(err)}`); }
     }
     log(`bbMergeAbort: merged thread=${threadId.slice(0, 20)} title=${title}`);
   } else {
@@ -2323,10 +2396,10 @@ function findBotClaudeDir(bot: string, sessionId: string): string | null {
  * Streams assistant output into a visible Matrix thread in the triggering room.
  */
 async function spawnBranchBrain(
-  task: { thread_id: string; objective: string; chat_jid: string; bot?: string; title?: string },
+  task: { thread_id: string; objective: string; chat_jid: string; bot?: string; title?: string; model?: string },
   conns: RoomConn[],
 ): Promise<void> {
-  const { thread_id, objective, chat_jid, bot: rawBot, title: taskTitle } = task;
+  const { thread_id, objective, chat_jid, bot: rawBot, title: taskTitle, model: taskModel } = task;
   // Normalize bot name to lowercase — ASSISTANT_NAME is capitalized but env dirs and fleet keys are lowercase.
   const bot = rawBot?.toLowerCase();
   log(`branchBrain: spawning for thread=${thread_id.slice(0, 20)}`);
@@ -2472,6 +2545,7 @@ async function spawnBranchBrain(
       sessionId: mainSessionId ?? undefined,
       containerNameTag: bbTag,
       timeoutMs: BRANCH_BRAIN_TIMEOUT_MS,
+      model: taskModel,
     },
     (proc, containerName) => {
       // Register process for tracking
@@ -2609,6 +2683,18 @@ async function spawnBranchBrain(
     // Post merge marker in thread
     bbThreadReply(`🪾 ${announcedTitle} — ${mergeDescription}`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
 
+    // Auto-bump version based on conventional commit prefix in PR title
+    const nonPoolConvPrefix = parseConventionalPrefix(announcedTitle);
+    if (nonPoolConvPrefix) {
+      try {
+        const newVer = bumpPackageJsonVersion(resolveRoot(), nonPoolConvPrefix);
+        if (newVer) {
+          commitVersionBump(resolveRoot(), newVer);
+          log(`branchBrain: version bumped to v${newVer} (${nonPoolConvPrefix})`);
+        }
+      } catch (err) { log(`branchBrain: version bump failed: ${errStr(err)}`); }
+    }
+
     // Persist notes for context recovery
     if (bot) {
       try {
@@ -2738,6 +2824,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
               const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
               const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
               const title = typeof data['title'] === 'string' ? data['title'] : undefined;
+              const model = typeof data['model'] === 'string' && data['model'] ? data['model'] : undefined;
               // Cross-fleet isolation: only process BB tasks for bots in THIS relay's fleet.
               // If the bot isn't ours, put the file back so the correct relay can pick it up.
               const fleet = loadFleet();
@@ -2763,7 +2850,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                   }
                 } else {
                   activeBranchBrainCount.set(botKey, count + 1);
-                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot, title }, conns).finally(() => {
+                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot, title, model }, conns).finally(() => {
                     const n = activeBranchBrainCount.get(botKey) ?? 1;
                     if (n <= 1) activeBranchBrainCount.delete(botKey);
                     else activeBranchBrainCount.set(botKey, n - 1);
@@ -3083,6 +3170,24 @@ async function healthLoop(): Promise<void> {
     try { runSessionCleanup(); } catch { /* non-critical */ }
     try { removeStaleProcesses(); } catch { /* non-critical */ }
     try { await publishFleetReport(); } catch { /* non-critical */ }
+    // Poll handoff key — old relay yields to new relay when it reports "ready"
+    if (!IS_BLUEGREEN_NEXT && !isDraining) {
+      try {
+        const handoff = await readHandoff();
+        if (handoff) {
+          const age = Date.now() - handoff.timestamp;
+          if (handoff.status === 'ready') {
+            log(`handoff: new relay ${handoff.newRelayId} is ready — draining`);
+            isDraining = true;
+            await writeHandoff({ ...handoff, status: 'draining' }).catch(() => {});
+            setTimeout(() => { log('handoff: drain timeout — shutting down'); void shutdown(); }, RELAY_DRAIN_TIMEOUT_MS);
+          } else if (age > RELAY_HANDOFF_TTL_MS) {
+            log(`handoff: stale key (${Math.round(age / 60_000)}min) — cleaning up`);
+            await clearHandoff();
+          }
+        }
+      } catch (err) { log(`handoff poll error: ${errStr(err)}`); }
+    }
     // Cross-ship health staleness is handled by healthWatchdogLoop (fire-once alerts)
     await sleep(HEALTH_INTERVAL);
   }
@@ -3132,6 +3237,7 @@ async function metricsLoop(): Promise<void> {
   await sleep(90_000); // let startup stabilize
   while (true) {
     try {
+      for (const bot of loadShipConfig().bots) syncTodosMetrics(bot);
       await publishMetrics();
     } catch (err) {
       log(`metrics: publish error: ${errStr(err)}`);
@@ -4040,8 +4146,17 @@ function registerRelayCommands(): void {
         return;
       }
 
+      // !operator watch|captain|fix [ship] — switch operator mode
+      if (action === 'watch' || action === 'captain' || action === 'fix') {
+        if (targetShip && !isThisShip(targetShip)) return;
+        operatorMode = action;
+        log(`operator mode: ${action}`);
+        await reply(conn, `${OPERATOR_MODE_ICONS[action]} operator mode: ${action}`);
+        return;
+      }
+
       if (action !== 'on' && action !== 'off') {
-        if (await electSpeaker()) await helpReply(conn, `usage: !operator | !operator on [ship] | !operator off [ship] | !operator reset [ship]`);
+        if (await electSpeaker()) await helpReply(conn, `usage: !operator | !operator on|off|reset|watch|captain|fix [ship]`);
         return;
       }
       if (targetShip && !isThisShip(targetShip)) return;
@@ -4899,6 +5014,41 @@ function registerRelayCommands(): void {
         await reply(conn, `⛔ version failed — ${errStr(err)}`);
       }
     },
+
+    relay: async (cmd, conn) => {
+      const args = cmd.slice('!relay'.length).trim().split(/\s+/);
+      const action = args[0] || '';
+      const targetShip = args[1] || null;
+
+      if (action !== 'restart') {
+        await reply(conn, `📡 relay — unknown action: ${action}. Usage: !relay restart [ship]`);
+        return;
+      }
+
+      if (targetShip && !isThisShip(targetShip)) return;
+
+      const threadRoot = await reply(conn, `📡 relay restart`);
+      if (!threadRoot) return;
+      const send = (text: string) => threadReply(conn, threadRoot, text).catch(() => {});
+
+      // Guard: don't start a second handoff if one is already in progress
+      try {
+        const existing = await readHandoff();
+        if (existing && existing.status !== 'drained' &&
+            Date.now() - existing.timestamp < RELAY_HANDOFF_TTL_MS) {
+          await send(`⚠️ handoff already in progress (${existing.newRelayId}, status=${existing.status})`);
+          return;
+        }
+      } catch { /* proceed */ }
+
+      try {
+        await send('🔄 starting next relay for zero-downtime handoff...');
+        startNextRelay();
+        await send(`✅ relay-next started — handoff will complete in ~90s (drain timeout: ${Math.round(RELAY_DRAIN_TIMEOUT_MS / 1000)}s)`);
+      } catch (err) {
+        await send(`❌ failed to start relay-next: ${errStr(err)}`);
+      }
+    },
   });
 }
 
@@ -4980,9 +5130,10 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
   }
 }
 
-/** Build the ship tag for relay replies. ⭐ when speaker, otherwise shipTag default (/💤). */
+/** Build the ship tag for relay replies. Includes ship emoji, operator mode icon, and ship name. */
 function replyTag(): string {
-  return shipTag(undefined, isSpeakerCached ? '⭐' : undefined);
+  const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
+  return `${shipEmoji}${operatorModeIcon()} ${systemName()}`;
 }
 
 async function reply(conn: RoomConn, text: string, threadRootId?: string, opts?: { skipMirror?: boolean }): Promise<string | undefined> {
@@ -5168,7 +5319,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
 
           // Mention-wake: mention of a sleeping bot in any room wakes it.
           // Only process mentions from rooms this relay manages (cross-fleet isolation).
-          // Matches: <m>Name</m> in body, @Name in body, or mention pill in formatted_body.
+          // Matches: {{mention Name}} in body, @Name in body, or mention pill in formatted_body.
           if (knownRoomIds.has(rid)) {
           const formattedBody = event.content.formatted_body as string || '';
           for (const [bot, entry] of Object.entries(liveFleet)) {
@@ -5177,7 +5328,6 @@ async function curtainLoop(captainUserId: string): Promise<void> {
             const escaped = escapeRegex(name);
             const mentioned =
               new RegExp(`\\{\\{mention\\s+${escaped}\\}\\}`, 'i').test(body) ||
-              new RegExp(`<m>${escaped}</m>`, 'i').test(body) || // TODO: remove legacy <m>
               new RegExp(`@${escaped}\\b`, 'i').test(body) ||
               new RegExp(`matrix\\.to/#/@${bot}[^"]*">${escaped}`, 'i').test(formattedBody);
             if (mentioned) {
@@ -5196,7 +5346,8 @@ async function curtainLoop(captainUserId: string): Promise<void> {
           } // knownRoomIds guard for mention-wake
 
           // !/?  commands — only from rooms this relay manages (cross-fleet isolation)
-          if ((body.startsWith('!') || body.startsWith('?')) && knownRoomIds.has(rid) && isAuthorized(event.sender, captainUserId, userId) && markProcessed(event.event_id)) {
+          // Skip command processing when draining (yielding to new relay in blue-green handoff)
+          if (!isDraining && (body.startsWith('!') || body.startsWith('?')) && knownRoomIds.has(rid) && isAuthorized(event.sender, captainUserId, userId) && markProcessed(event.event_id)) {
             const cmdConn: RoomConn = {
               name: rid === roomId ? 'BehindTheCurtain' : (roomIdToName[rid] ?? `operator:${rid}`),
               roomId: rid, homeserver,
@@ -5342,9 +5493,10 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 if (sig.command === 'branch') {
                   const objective = sig.positional || sig.args['objective'] || '';
                   const title = sig.args['title'] || objective.slice(0, 60) || 'branch';
+                  const model = sig.args['model'] || undefined;
                   if (objective && !isRecentBBSpawn(senderBot, objective)) {
                     const chatJid = `matrix:${conn.roomId}`;
-                    log(`branchBrain: detected {{branch}} in Matrix from ${senderBot} — "${title.slice(0, 40)}"`);
+                    log(`branchBrain: detected {{branch}} in Matrix from ${senderBot} — "${title.slice(0, 40)}"${model ? ` model=${model}` : ''}`);
                     const botKey = senderBot;
                     const count = activeBranchBrainCount.get(botKey) ?? 0;
                     if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
@@ -5352,7 +5504,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                     } else {
                       activeBranchBrainCount.set(botKey, count + 1);
                       void spawnBranchBrain(
-                        { thread_id: '', objective, chat_jid: chatJid, bot: senderBot, title },
+                        { thread_id: '', objective, chat_jid: chatJid, bot: senderBot, title, model },
                         conns,
                       ).finally(() => {
                         const n = activeBranchBrainCount.get(botKey) ?? 1;
@@ -5384,11 +5536,6 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                   } else if (abortSig) {
                     log(`bbMergeAbort: {{abort}} from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
                     void handleBbMergeAbort(conn, relates.event_id, 'abort', conns);
-                  } else if (!awaitTask.mbPostedInThread) {
-                    // WBS 52: MB posted a review message (not merge/abort) — record exchange
-                    awaitTask.mbPostedInThread = true;
-                    writeBranchTask(relates.event_id, awaitTask);
-                    log(`bbMergeAbort: MB-BB exchange recorded for thread=${relates.event_id.slice(0, 20)}`);
                   }
                 }
 
@@ -5619,9 +5766,18 @@ async function main(): Promise<void> {
     try { liveFleet = loadFleet(); } catch { /* give up */ }
   }
 
-  // Persist fleet on shutdown — blocking S3 write before exit
-  const shutdown = async () => {
+  // Persist fleet on shutdown — blocking S3 write before exit.
+  // Reassigns the module-level `shutdown` so healthLoop can call it for drain timeout.
+  shutdown = async () => {
     log('shutting down — persisting fleet state');
+    // Blue-green handoff: write "drained" so the new relay knows it can take over
+    if (isDraining) {
+      log('handoff: writing drained status before exit');
+      try {
+        const handoff = await readHandoff();
+        if (handoff) await writeHandoff({ ...handoff, status: 'drained' });
+      } catch (err) { log(`handoff: drained write failed: ${errStr(err)}`); }
+    }
     await persistFleetSync();
     try { await pushAll(resolveRoot()); }
     catch (err) { log(`S3 push on shutdown failed: ${errStr(err)}`); }
@@ -5629,6 +5785,18 @@ async function main(): Promise<void> {
   };
   process.on('SIGTERM', () => { void shutdown(); });
   process.on('SIGINT', () => { void shutdown(); });
+
+  // ── Blue-green handoff startup (IS_BLUEGREEN_NEXT only) ───────────────────────────
+  if (IS_BLUEGREEN_NEXT) {
+    const existingHandoff = await readHandoff().catch(() => null);
+    if (existingHandoff && existingHandoff.status !== 'drained' &&
+        Date.now() - existingHandoff.timestamp < RELAY_HANDOFF_TTL_MS) {
+      log(`handoff: another relay-next already starting (${existingHandoff.newRelayId}, status=${existingHandoff.status}) — aborting`);
+      process.exit(1);
+    }
+    log(`handoff: registering as ${RELAY_INSTANCE_ID} (warming)`);
+    await writeHandoff({ newRelayId: RELAY_INSTANCE_ID, status: 'warming', timestamp: Date.now() }).catch(() => {});
+  }
 
   // Start Matrix sync loops immediately so we catch up on lifecycle messages
   const loops = conns.map((conn, i) =>
@@ -5638,6 +5806,25 @@ async function main(): Promise<void> {
   // Wait 30s for Matrix sync to catch up before bootstrapping bots
   log('warming up — syncing Matrix for 30s before bootstrap...');
   await sleep(30_000);
+
+  // ── Blue-green handoff: signal ready, wait for old relay to drain ──────────────────
+  if (IS_BLUEGREEN_NEXT) {
+    log(`handoff: warmup done — updating status to ready`);
+    await writeHandoff({ newRelayId: RELAY_INSTANCE_ID, status: 'ready', timestamp: Date.now() }).catch(() => {});
+    // Poll for old relay to drain (max RELAY_DRAIN_TIMEOUT_MS)
+    const drainDeadline = Date.now() + RELAY_DRAIN_TIMEOUT_MS;
+    while (Date.now() < drainDeadline) {
+      await sleep(5_000);
+      const h = await readHandoff().catch(() => null);
+      if (!h || h.status === 'drained') {
+        log('handoff: old relay drained — taking over');
+        break;
+      }
+      log(`handoff: waiting for old relay to drain (status=${h.status})...`);
+    }
+    await clearHandoff().catch(() => {});
+    log('handoff: complete — proceeding with normal operation');
+  }
 
   // Bootstrap bots — only start bots that aren't already running.
   // When the relay restarts (code update), bot pm2 processes survive — don't disrupt them.
@@ -5714,6 +5901,7 @@ async function main(): Promise<void> {
 
   // Sync all bot display names to current format
   syncBotDisplayNames().catch((err) => log(`syncBotDisplayNames failed: ${errStr(err)}`));
+  syncLoudspeakerDisplayName().catch((err) => log(`syncLoudspeakerDisplayName failed: ${errStr(err)}`));
 
   // Build userId → botName map for score reaction enrichment
   botUserIdMap = collectBotMatrixUserMap();

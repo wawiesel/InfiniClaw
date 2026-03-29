@@ -57,7 +57,7 @@ Host machine (macOS / Linux)
 ├── container-mounts.ts → WBS data at `/workspace/data` (fixes mount shadowing)
 ├── tool-call-breadcrumb.ts → Shared compact S3-linked tool call formatting (main brain + BB — DRY). Exports `hasDetailsBlock()` for catching all `<details>` variants. S3-or-nothing: throws on upload/presign failure so callers suppress.
 ├── metrics.ts → Fleet metrics: autonomy, MTBI, health grades, messages/day, task completion rate, version adoption latency (uses loadFleet() — no local fleet parsing)
-├── room-relay.ts → Cross-room messaging (TODO: migrate from intercom to operator account)
+├── room-relay.ts → Cross-room messaging via operator account ({{send}} signal path)
 ├── conversation-log.ts → Append conversation to disk logs
 ├── skill-sync.ts → Copy persona skills into container session
 ├── mcp-sync.ts → Sync MCP server config (persona → session)
@@ -192,4 +192,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Relay restart preserves bots** (`relay.ts`): On startup, the bootstrap checks which bots already have running pm2 processes and skips them — relay restarts (code updates) no longer disrupt running bots. `persistFleetSync()` writes fleet state to both disk and S3 synchronously before relay self-restart, preventing status loss when the new relay process loads fleet.json.
 
 <!-- WBS 12.1: wbs_complete git-log pre-check (2026-03-23) -->
-<!-- auto-updated: 2026-03-29T14:08:46Z -->
+<!-- auto-updated: 2026-03-29T06:50:50Z -->

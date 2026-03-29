@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { logger } from 'nanoclaw/logger.js';
+import { DATA_DIR } from 'nanoclaw/config.js';
 
 import { botBadge, capitalizeName, GRADE_EMOJI, formatDuration as formatDurationMs } from './formatting.js';
 import { matrixGetMessages } from './matrix-api.js';
@@ -183,6 +184,9 @@ const messageEvents: { ts: number; bot: string }[] = [];
 
 /** Accumulated task lifecycle events. Fed by relay from Claude Code session todos. */
 const taskEvents: { ts: number; bot: string; kind: 'created' | 'resolved' }[] = [];
+
+/** Previous todos snapshot per bot, used by syncTodosMetrics for change detection. */
+const todosSnapshot: Map<string, Map<string, string>> = new Map();
 
 /** Version deployment events — when a ship started running a new version. */
 const versionDeployEvents: { ts: number; ship: string; version: string }[] = [];
@@ -365,6 +369,48 @@ export function recordTaskResolved(bot: string, ts?: number): void {
 }
 
 /**
+ * Sync todo metrics for a bot by diffing the current todos file against the previous snapshot.
+ * Detects new todos (→ recordTaskCreated) and completions (→ recordTaskResolved).
+ * On first call per bot, establishes baseline without recording events.
+ * Call periodically (e.g., from metricsLoop) for each active bot.
+ */
+export function syncTodosMetrics(bot: string): void {
+  const todosDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude', 'todos');
+  if (!fs.existsSync(todosDir)) return;
+
+  let current: Map<string, string>;
+  try {
+    const files = fs.readdirSync(todosDir)
+      .map(f => ({ f, mtime: fs.statSync(path.join(todosDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    if (files.length === 0) return;
+    const raw = fs.readFileSync(path.join(todosDir, files[0].f), 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    current = new Map<string, string>();
+    for (const t of parsed as Array<{ id?: string; content?: string; status: string }>) {
+      const key = t.id ?? t.content;
+      if (key && t.status) current.set(key, t.status);
+    }
+  } catch { return; }
+
+  const prev = todosSnapshot.get(bot);
+  if (prev !== undefined) {
+    const now = Date.now();
+    for (const key of current.keys()) {
+      if (!prev.has(key)) recordTaskCreated(bot, now);
+    }
+    for (const [key, status] of current) {
+      const prevStatus = prev.get(key);
+      if (prevStatus !== undefined && prevStatus !== 'completed' && status === 'completed') {
+        recordTaskResolved(bot, now);
+      }
+    }
+  }
+  todosSnapshot.set(bot, current);
+}
+
+/**
  * Record when a ship starts running a new version.
  * Called by relay on startup after determining the running version.
  */
@@ -404,6 +450,7 @@ export function resetMetrics(): void {
   responseLatencyEvents.length = 0;
   messageEvents.length = 0;
   taskEvents.length = 0;
+  todosSnapshot.clear();
   versionDeployEvents.length = 0;
   pendingDeliveries.clear();
   behindTheCurtainRoomId = null;
@@ -673,7 +720,7 @@ export function computeMetrics(): MetricsSnapshot {
   };
 }
 
-/** Compute and publish metrics to S3. */
+/** Compute and publish metrics to S3, then write per-bot snapshots to their IPC dirs. */
 export async function publishMetrics(): Promise<MetricsSnapshot> {
   const snapshot = computeMetrics();
   try {
@@ -681,7 +728,53 @@ export async function publishMetrics(): Promise<MetricsSnapshot> {
   } catch (err) {
     logger.warn({ err: errStr(err) }, 'metrics: failed to publish to S3');
   }
+  writeMetricsToGroupIpc(snapshot);
   return snapshot;
+}
+
+/**
+ * Write per-bot metrics to each bot's duty-room IPC dir as metrics-snapshot.json.
+ * Bots read this file via the get_metrics MCP tool to access their own latency,
+ * score, and crash count alongside fleet-level context.
+ */
+export function writeMetricsToGroupIpc(snapshot: MetricsSnapshot): void {
+  try {
+    const fleet = loadFleet();
+    for (const botMetrics of snapshot.bots) {
+      const entry = fleet[botMetrics.name.toLowerCase()];
+      if (!entry) continue;
+      const room = ROLE_ROOMS[entry.role?.toLowerCase() ?? '']?.room;
+      if (!room) continue;
+      const ipcDir = path.join(DATA_DIR, 'ipc', room);
+      if (!fs.existsSync(ipcDir)) continue;
+      const fileData = {
+        ts: snapshot.ts,
+        bot: {
+          score: botMetrics.score,
+          crashes: botMetrics.crashes,
+          responseLatencyP50: botMetrics.responseLatencyP50,
+          responseLatencyP95: botMetrics.responseLatencyP95,
+        },
+        fleet: {
+          availability: snapshot.fleet.availability,
+          autonomyScore: snapshot.fleet.autonomyScore,
+        },
+        operator: {
+          interventions: snapshot.operator.interventions,
+          mtbi: snapshot.operator.mtbi,
+        },
+        shipMetrics: {
+          relayUptimeSeconds: snapshot.shipMetrics.relayUptimeSeconds,
+          relayRestarts: snapshot.shipMetrics.relayRestarts,
+        },
+      };
+      const tmpPath = path.join(ipcDir, 'metrics-snapshot.json.tmp');
+      fs.writeFileSync(tmpPath, JSON.stringify(fileData, null, 2));
+      fs.renameSync(tmpPath, path.join(ipcDir, 'metrics-snapshot.json'));
+    }
+  } catch (err) {
+    logger.warn({ err: errStr(err) }, 'metrics: failed to write per-bot IPC snapshots');
+  }
 }
 
 // ── Alerting ─────────────────────────────────────────────────────────

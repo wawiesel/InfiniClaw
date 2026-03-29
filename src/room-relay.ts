@@ -1,9 +1,13 @@
 /**
- * Intercom relay — sends messages to Matrix rooms via per-room intercom accounts.
- * Used for cross-room bot-to-bot messaging.
+ * Cross-room relay — sends messages to Matrix rooms via the operator account.
+ * Used for cross-room bot-to-bot messaging ({{send}} signal).
  */
+import fs from 'fs';
+import path from 'path';
+
 import { logger } from 'nanoclaw/logger.js';
-import { loadIntercomConfig, matrixLogin, matrixLogout, matrixSend } from './matrix-api.js';
+import { matrixSend } from './matrix-api.js';
+import { loadShipConfig } from './ship-config.js';
 
 /** Strip 'matrix:' prefix from a JID to get the raw Matrix room ID. */
 function jidToRoomId(jid: string): string {
@@ -11,52 +15,27 @@ function jidToRoomId(jid: string): string {
 }
 
 /**
- * Send a message to a Matrix room via the room's intercom account.
+ * Send a message to a Matrix room via the operator account.
  * Returns true on success.
  */
 export async function sendViaIntercom(targetJid: string, text: string): Promise<boolean> {
   const roomId = jidToRoomId(targetJid);
-  const config = loadIntercomConfig();
-  if (!config) {
-    logger.warn({ targetJid, roomId }, 'No intercom config found');
-    return false;
-  }
-
-  // Find the intercom room entry matching this room ID
-  let roomEntry: { username: string; password: string } | null = null;
-  for (const room of Object.values(config.rooms)) {
-    if (room.roomId === roomId) { roomEntry = room; break; }
-  }
-  if (!roomEntry) {
-    logger.warn({ targetJid, roomId }, 'No intercom account found for target room');
-    return false;
-  }
-
-  const { homeserver } = config;
-
   try {
-    const { accessToken } = await matrixLogin(homeserver, roomEntry.username, roomEntry.password);
-
-    const eventId = await matrixSend({
-      homeserver,
-      token: accessToken,
-      roomId,
-      text,
-      plain: true,
-    });
-
-    // Logout best-effort
-    matrixLogout(homeserver, accessToken);
-
-    if (!eventId) {
-      logger.error({ intercom: roomEntry.username }, 'Intercom send failed');
+    const opFile = path.join(loadShipConfig().secretsPath, 'operator', 'operator-matrix.json');
+    const opConf = JSON.parse(fs.readFileSync(opFile, 'utf-8'));
+    if (!opConf.homeserver || !opConf.accessToken) {
+      logger.warn({ targetJid, roomId }, 'No operator config for cross-room send');
       return false;
     }
-
-    logger.info({ targetJid, intercom: roomEntry.username }, 'Cross-room message sent via intercom');
+    const eventId = await matrixSend({ homeserver: opConf.homeserver, token: opConf.accessToken, roomId, text, plain: true });
+    if (!eventId) {
+      logger.error({ targetJid }, 'Cross-room send via operator failed');
+      return false;
+    }
+    logger.info({ targetJid }, 'Cross-room message sent via operator account');
     return true;
   } catch (err) {
-    logger.error({ err, targetJid }, 'Intercom relay error');
+    logger.error({ err, targetJid }, 'Cross-room send error');
     return false;
   }
 }
