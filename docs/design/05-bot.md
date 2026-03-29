@@ -275,7 +275,7 @@ Ships have a `type` field in `ships.json` with associated emoji:
 |------|-------|
 | cruiser | 🛳️ |
 
-> **Status:** Ship types are not yet implemented in `ships.json`. Currently all ships are implicitly cruisers.
+> **Status:** Implemented. The `type` and `typeEmoji` fields are parsed from `ships.json`; when absent, ships default to `cruiser` / `🛳️`.
 
 ### Location Emojis
 

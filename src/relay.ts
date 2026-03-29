@@ -1508,8 +1508,8 @@ function formatCombinedMetrics(
     const shipHeader = unifiedShipDisplay({
       name: s.ship,
       emoji: cfg?.emoji ?? '',
-      typeEmoji: cfg?.typeEmoji ?? '',
-      type: cfg?.type ?? '',
+      typeEmoji: cfg?.typeEmoji ?? '🛳️',
+      type: cfg?.type ?? 'cruiser',
       rank,
       isSpeaker: isThisShipSpeaker,
       commissioned,
@@ -4500,8 +4500,8 @@ function registerRelayCommands(): void {
             lines.push(unifiedShipDisplay({
               name: shipName,
               emoji: sConfig?.emoji ?? '',
-              typeEmoji: sConfig?.typeEmoji ?? '',
-              type: sConfig?.type ?? '',
+              typeEmoji: sConfig?.typeEmoji ?? '🛳️',
+              type: sConfig?.type ?? 'cruiser',
               rank,
               isSpeaker: isThisShipSpeaker,
               commissioned,
