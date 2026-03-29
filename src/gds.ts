@@ -225,6 +225,64 @@ export function formatPipelineStatus(state: GdsState): string {
   return lines.join('\n');
 }
 
+/** Approval reactions (💯, 👍) and rejection reactions (👎, ❌). */
+const APPROVE_REACTIONS = new Set(['+1', 'heart', 'hooray', 'laugh', 'rocket', '100']);
+const REJECT_REACTIONS = new Set(['-1']);
+
+/**
+ * Check Gitea reactions on a GDS issue and process approvals/rejections.
+ * - 💯/👍 from Captain on the issue → approve current gate
+ * - 👎 from Captain → mark gate as needing revision (add Captain's latest comment as feedback)
+ * Returns actions taken.
+ */
+export async function processGiteaReactions(
+  issueNumber: number,
+  captainUsername: string,
+): Promise<{ action: 'approved' | 'rejected' | 'none'; gate?: string }> {
+  // Lazy import to avoid circular deps
+  const { giteaGetIssueReactions, giteaRemoveIssueReaction, giteaUpdateIssueBody } = await import('./gitea-wbs.js');
+
+  const reactions = await giteaGetIssueReactions(issueNumber);
+  const captainReactions = reactions.filter(r => r.user === captainUsername);
+  if (captainReactions.length === 0) return { action: 'none' };
+
+  const state = await readGds(issueNumber);
+  if (!state) return { action: 'none' };
+
+  const hasApprove = captainReactions.some(r => APPROVE_REACTIONS.has(r.content));
+  const hasReject = captainReactions.some(r => REJECT_REACTIONS.has(r.content));
+
+  if (hasApprove) {
+    const result = approveGate(state, captainUsername, 'captain');
+    if (result.ok) {
+      await writeGds(state);
+      await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
+      // Remove the reaction so it doesn't re-trigger
+      for (const r of captainReactions) {
+        if (APPROVE_REACTIONS.has(r.content)) await giteaRemoveIssueReaction(issueNumber, r.content);
+      }
+      return { action: 'approved', gate: state.current_gate };
+    }
+  }
+
+  if (hasReject) {
+    // Mark current gate as needing revision — reset to pending
+    const gate = state.gates.find(g => g.name === state.current_gate);
+    if (gate && gate.status === 'inspector_approved') {
+      gate.status = 'pending'; // Back to pending for re-review
+      gate.inspector_approved_at = undefined;
+    }
+    await writeGds(state);
+    await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
+    for (const r of captainReactions) {
+      if (REJECT_REACTIONS.has(r.content)) await giteaRemoveIssueReaction(issueNumber, r.content);
+    }
+    return { action: 'rejected', gate: state.current_gate };
+  }
+
+  return { action: 'none' };
+}
+
 /** Check if a bot's active GDS allows pushing to main (demo gate must be approved). */
 export async function canPushToMain(bot: string): Promise<{ allowed: boolean; reason?: string }> {
   const active = await listActiveGds();

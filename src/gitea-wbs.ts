@@ -169,6 +169,37 @@ export async function giteaUpdateIssueBody(issueNumber: number, body: string): P
   }
 }
 
+/**
+ * Get reactions on a Gitea issue. Returns array of { user: login, content: emoji }.
+ */
+export async function giteaGetIssueReactions(issueNumber: number): Promise<{ user: string; content: string }[]> {
+  const gitea = loadGiteaAdminConfig();
+  if (!gitea) return [];
+  try {
+    const resp = await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues/${issueNumber}/reactions`, {
+      headers: giteaHeaders(gitea.token),
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json() as { user: { login: string }; content: string }[];
+    return data.map(r => ({ user: r.user.login, content: r.content }));
+  } catch { return []; }
+}
+
+/**
+ * Remove a reaction from a Gitea issue (so it doesn't re-trigger).
+ */
+export async function giteaRemoveIssueReaction(issueNumber: number, content: string): Promise<void> {
+  const gitea = loadGiteaAdminConfig();
+  if (!gitea) return;
+  try {
+    await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues/${issueNumber}/reactions`, {
+      method: 'DELETE',
+      headers: giteaHeaders(gitea.token),
+      body: JSON.stringify({ content }),
+    });
+  } catch { /* best effort */ }
+}
+
 // ── PR creation ───────────────────────────────────────────────────────────────
 
 /**
