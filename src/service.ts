@@ -830,6 +830,7 @@ export async function restartBotForRoom(root: string, bot: string, knownDutyRoom
 // ── Relay ────────────────────────────────────────────────────────────
 
 const RELAY_PM2_NAME = process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw-relay';
+export const RELAY_NEXT_PM2_NAME = process.env['INFINICLAW_PM2_NEXT_NAME'] || 'infiniclaw-relay-next';
 
 /**
  * Install: build project, start relay via pm2, set up pm2 startup.
@@ -909,6 +910,53 @@ export function startRelay(): void {
     },
   );
   console.log('relay: started');
+}
+
+/**
+ * Start a blue-green "next" relay for zero-downtime handoff.
+ * Sets INFINICLAW_BLUEGREEN_RELAY=1 so the new process initiates the handoff protocol.
+ */
+export function startNextRelay(): void {
+  const root = resolveRoot();
+  const logs = logDir(root);
+  fs.mkdirSync(logs, { recursive: true });
+
+  const distFile = path.join(root, 'dist', 'relay.js');
+  if (!fs.existsSync(distFile)) {
+    throw new Error('dist/relay.js not found — run `npm run build` first');
+  }
+
+  const outLog = path.join(logs, 'relay-next.log');
+  const errLog = path.join(logs, 'relay-next.error.log');
+
+  // Clear any stalled relay-next process from a previous handoff attempt
+  pm2Stop(RELAY_NEXT_PM2_NAME);
+
+  execFileSync(
+    PM2_BIN,
+    [
+      'start',
+      process.execPath,
+      '--name', RELAY_NEXT_PM2_NAME,
+      '--cwd', root,
+      '--output', outLog,
+      '--error', errLog,
+      '--restart-delay', '5000',
+      '--max-restarts', '5',
+      '--',
+      distFile,
+    ],
+    {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        INFINICLAW_ROOT: root,
+        INFINICLAW_BLUEGREEN_RELAY: '1',
+        HOME: os.homedir(),
+        PATH: `${path.dirname(process.execPath)}:${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`,
+      },
+    },
+  );
 }
 
 /**

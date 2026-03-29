@@ -76,6 +76,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'wbs',           usage: '!wbs [room] | !wbs x <id>',   description: 'show WBS; x <id> marks item done',     match: prefix('wbs') },
   { name: 'create',        usage: '!create bot <name> <role> [ship]', description: 'register new bot in fleet state (S3)',  match: startsWith('create') },
   { name: 'version',       usage: '?version [n]',                 description: 'list recent versions (default 10)',     match: qPrefix('version') },
+  { name: 'relay',         usage: '!relay restart [ship]',        description: 'zero-downtime rolling restart (blue-green)', match: prefix('relay') },
 ];
 
 /** Register a handler for a command by name. */
