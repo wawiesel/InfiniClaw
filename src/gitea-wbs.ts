@@ -149,6 +149,26 @@ export async function giteaCommentOnIssue(issueNumber: number, body: string): Pr
   }
 }
 
+/**
+ * Update a Gitea issue body (replace entire body content).
+ */
+export async function giteaUpdateIssueBody(issueNumber: number, body: string): Promise<void> {
+  const gitea = loadGiteaAdminConfig();
+  if (!gitea) return;
+  try {
+    const resp = await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues/${issueNumber}`, {
+      method: 'PATCH',
+      headers: giteaHeaders(gitea.token),
+      body: JSON.stringify({ body }),
+    });
+    if (!resp.ok) {
+      logger.warn({ status: resp.status, issueNumber }, 'gitea: failed to update issue body');
+    }
+  } catch (err) {
+    logger.warn({ err, issueNumber }, 'gitea: updateIssueBody threw');
+  }
+}
+
 // ── PR creation ───────────────────────────────────────────────────────────────
 
 /**

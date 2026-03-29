@@ -36,8 +36,8 @@ import type { RegisteredGroup } from 'nanoclaw/types.js';
 import { capitalizeName, statusMessage } from './formatting.js';
 import { readWbs, writeWbs, assignItem, completeItem } from './wbs.js';
 import { runAlignment, formatReport } from './alignment.js';
-import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreateIssue, giteaCommentOnIssue } from './gitea-wbs.js';
-import { readGds, writeGds, createGdsState, submitEvidence, approveGate, listActiveGds, canPushToMain } from './gds.js';
+import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreateIssue, giteaCommentOnIssue, giteaUpdateIssueBody } from './gitea-wbs.js';
+import { readGds, writeGds, createGdsState, submitEvidence, approveGate, listActiveGds, canPushToMain, formatPipelineStatus } from './gds.js';
 
 // ── Chief check ─────────────────────────────────────────────────────────
 
@@ -1135,14 +1135,17 @@ async function handleGdsCreate(data: CommandData, ctx: InfiniClawIpcContext): Pr
   if (!title) { await safeSend(ctx, chatJid, '⛔ gds_create: title required'); return; }
   if (!inspector) { await safeSend(ctx, chatJid, '⛔ gds_create: inspector required'); return; }
 
-  // Create Gitea issue
-  const issueBody = `# GDS: ${title}\n\n${description}\n\n---\n*Engineer*: ${ASSISTANT_NAME}\n*Inspector*: ${inspector}\n${wbsId ? `*WBS*: ${wbsId}` : ''}`;
-  const issueNumber = await giteaCreateIssue(`GDS: ${title}`, issueBody);
+  // Create GDS state first (need it for the pipeline template)
+  const tempState = createGdsState({ gitea_issue: 0, title, engineer: ASSISTANT_NAME, inspector, wbs_id: wbsId });
+  const pipelineBody = `${description ? description + '\n\n---\n\n' : ''}${formatPipelineStatus(tempState)}`;
+  const issueNumber = await giteaCreateIssue(`GDS: ${title}`, pipelineBody);
   if (!issueNumber) { await safeSend(ctx, chatJid, '⛔ gds_create: failed to create Gitea issue'); return; }
 
-  // Create GDS state in S3
+  // Create GDS state in S3 with real issue number
   const state = createGdsState({ gitea_issue: issueNumber, title, engineer: ASSISTANT_NAME, inspector, wbs_id: wbsId });
   await writeGds(state);
+  // Update issue body with correct issue number
+  await giteaUpdateIssueBody(issueNumber, `${description ? description + '\n\n---\n\n' : ''}${formatPipelineStatus(state)}`);
 
   await safeSend(ctx, chatJid, `✅ GDS #${issueNumber} created: ${title}\nGates: survey → estimate → artifacts → plan_approve → execute_30 → execute_60 → execute_90 → demo → done\nCurrent gate: survey (pending)`);
 }
@@ -1165,8 +1168,9 @@ async function handleGdsSubmitEvidence(data: CommandData, ctx: InfiniClawIpcCont
   const result = submitEvidence(state, gateName as any, evidence, tokensUsed, timeElapsedMin);
   if (!result.ok) { await safeSend(ctx, chatJid, `⛔ ${result.error}`); return; }
 
-  // Post evidence to Gitea
+  // Post evidence as Gitea comment (discussion) + update issue body (pipeline status)
   await giteaCommentOnIssue(issueNumber, `## Gate: ${gateName}\n\n${evidence}${tokensUsed != null ? `\n\n**Tokens used**: ${tokensUsed}` : ''}${timeElapsedMin != null ? `\n**Time elapsed**: ${timeElapsedMin} min` : ''}`);
+  await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
 
   await writeGds(state);
   await safeSend(ctx, chatJid, `✅ Evidence submitted for gate ${gateName} on GDS #${issueNumber}. Awaiting inspector approval.`);
@@ -1185,9 +1189,8 @@ async function handleGdsApproveGate(data: CommandData, ctx: InfiniClawIpcContext
   const result = approveGate(state, ASSISTANT_NAME, role);
   if (!result.ok) { await safeSend(ctx, chatJid, `⛔ ${result.error}`); return; }
 
-  // Post approval to Gitea
-  const approvalType = role === 'inspector' ? 'Inspector approved' : 'Captain/Operator approved';
-  await giteaCommentOnIssue(issueNumber, `## ✅ ${approvalType}: ${state.current_gate}\n\nApproved by: ${ASSISTANT_NAME} (${role})`);
+  // Update issue body with current pipeline status (not a comment — keeps it clean)
+  await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
 
   await writeGds(state);
   const advancedMsg = result.advanced ? ` → advanced to ${state.current_gate}` : ' (awaiting captain approval)';

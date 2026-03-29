@@ -77,6 +77,7 @@ export const COMMANDS: CommandDef[] = [
   { name: 'create',        usage: '!create bot <name> <role> [ship]', description: 'register new bot in fleet state (S3)',  match: startsWith('create') },
   { name: 'version',       usage: '?version [n]',                 description: 'list recent versions (default 10)',     match: qPrefix('version') },
   { name: 'relay',         usage: '!relay restart [ship]',        description: 'zero-downtime rolling restart (blue-green)', match: prefix('relay') },
+  { name: 'gds',           usage: '!gds [#issue] | !gds approve <#issue>', description: 'GDS pipeline status / captain gate approval', match: prefix('gds') },
 ];
 
 /** Register a handler for a command by name. */

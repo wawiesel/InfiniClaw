@@ -198,6 +198,33 @@ export function approveGate(
   return { ok: true, advanced: true };
 }
 
+/** Render pipeline status as markdown (for Gitea comments and Matrix). */
+export function formatPipelineStatus(state: GdsState): string {
+  const icon = (g: GdsGate) => {
+    if (g.status === 'approved') return '✅';
+    if (g.status === 'inspector_approved') return '🔍';
+    if (g.status === 'pending') return '⏳';
+    return '⬜';
+  };
+  const lines = [
+    `## GDS #${state.gitea_issue}: ${state.title}`,
+    `**Engineer**: ${state.engineer} | **Inspector**: ${state.inspector}`,
+    state.wbs_id ? `**WBS**: ${state.wbs_id}` : '',
+    '',
+    '### Pipeline',
+    ...state.gates.map(g => {
+      let line = `${icon(g)} **${g.name}**`;
+      if (g.tokens_used != null) line += ` · ${g.tokens_used} tokens`;
+      if (g.time_elapsed_min != null) line += ` · ${g.time_elapsed_min}min`;
+      if (g.evidence) line += ` · evidence submitted`;
+      return line;
+    }),
+    '',
+    `**Current gate**: ${state.current_gate}`,
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
 /** Check if a bot's active GDS allows pushing to main (demo gate must be approved). */
 export async function canPushToMain(bot: string): Promise<{ allowed: boolean; reason?: string }> {
   const active = await listActiveGds();
