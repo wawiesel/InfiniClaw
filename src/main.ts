@@ -1608,19 +1608,6 @@ function injectSystemNotice(chatJid: string, content: string): void {
   queue.enqueueMessageCheck(chatJid);
 }
 
-function handleMergeRequest(payload: { sourceGroup: string; threadId: string; bot: string; summary?: string }): void {
-  const mainJid = getMainChatJid();
-  if (!mainJid) {
-    logger.warn({ payload }, 'merge_request received but main group is not registered');
-    return;
-  }
-  injectSystemNotice(mainJid, `[System] Thread ${payload.threadId} merged. Update the Captain on the main timeline.`);
-  logger.info(
-    { sourceGroup: payload.sourceGroup, threadId: payload.threadId, bot: payload.bot, hasSummary: Boolean(payload.summary) },
-    'Injected merge_request notice into main timeline',
-  );
-}
-
 // ── Recovery & resume ──────────────────────────────────────────────────
 
 async function injectResumeMessage(): Promise<void> {
@@ -2196,7 +2183,6 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    // TODO: Keep merge_request routing here while IPC task parsing lives in src/ipc-watcher.ts.
     sendMessage: async (jid, rawText, threadId) => {
       const ch = findChannel(channels, jid);
       if (!ch) {
@@ -2273,7 +2259,8 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
     writeLastEventId: (sourceGroup, eventId) => updateEventIdFile(sourceGroup, 'lastSent', eventId),
-    onMergeRequest: handleMergeRequest,
+    getMainChatJid,
+    injectSystemNotice,
   });
   queue.setProcessMessagesFn(processGroupMessages);
 

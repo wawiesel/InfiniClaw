@@ -40,7 +40,8 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   writeLastEventId: (sourceGroup: string, eventId: string) => void;
-  onMergeRequest: (payload: { sourceGroup: string; threadId: string; bot: string; summary?: string }) => void;
+  getMainChatJid: () => string | undefined;
+  injectSystemNotice: (jid: string, text: string) => void;
 }
 
 let ipcWatcherRunning = false;
@@ -256,9 +257,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 if (!threadId || !bot) {
                   logger.warn({ sourceGroup, data }, 'Invalid merge_request payload');
                 } else {
-                  deps.onMergeRequest({ sourceGroup, threadId, bot, summary });
+                  const mainJid = deps.getMainChatJid();
+                  if (!mainJid) {
+                    logger.warn({ sourceGroup, threadId, bot }, 'merge_request received but main group is not registered');
+                  } else {
+                    deps.injectSystemNotice(mainJid, `[System] Thread ${threadId} merged. Update the Captain on the main timeline.`);
+                    logger.info({ sourceGroup, threadId, bot, hasSummary: Boolean(summary) }, 'IPC merge_request handled — delegate thread cleared');
+                  }
                   clearDelegateThread(sourceGroup);
-                  logger.info({ sourceGroup, threadId, bot }, 'IPC merge_request handled — delegate thread cleared');
                 }
                 fs.unlinkSync(processingPath);
                 continue;
