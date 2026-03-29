@@ -237,7 +237,7 @@ export function getFleetRoles(): Record<string, { rw?: string[] }> | null {
 /** Load fleet from disk only (fleet.json). Bypasses S3 cache.
  * Use when you need fresh disk state (e.g. after git pull of fleet.json). */
 export function loadFleetFromDisk(): Record<string, BotEntry> {
-  const raw = readJson<Record<string, unknown>>(FLEET_PATH);
+  const raw = readJson<Record<string, unknown>>(FLEET_PATH, {});
   const bots: Record<string, BotEntry> = (raw.bots as Record<string, BotEntry>) || {};
   // Migrate legacy statuses
   for (const entry of Object.values(bots)) {

@@ -72,7 +72,8 @@ beforeEach(() => {
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
     writeLastEventId: () => {},
-    onMergeRequest: () => {},
+    getMainChatJid: () => undefined,
+    injectSystemNotice: () => {},
   };
 });
 
