@@ -546,7 +546,6 @@ function isEventAuthError(err: unknown): boolean {
 
 /**
  * Convert {{mention Name}} signals in text/HTML to Matrix mention pills.
- * Also handles legacy <m>Name</m> markers for backward compatibility.
  * The nameCache maps userId → displayName; matching uses the base name.
  *
  * Unmatched mentions are stripped to just "Name".
@@ -555,7 +554,7 @@ export function pillifyMentions(
   text: string,
   nameCache: ReadonlyMap<string, string>,
 ): string {
-  if (!text.includes('{{mention ') && !text.includes('<m>')) return text;
+  if (!text.includes('{{mention ')) return text;
 
   // Build reverse map: lowercase base name → userId
   const nameToUser = new Map<string, { userId: string; displayName: string }>();
@@ -573,10 +572,7 @@ export function pillifyMentions(
     const safeName = escapeHtml(entry.displayName);
     return `<a href="https://matrix.to/#/${safeUserId}">${safeName}</a>`;
   };
-  // Handle both {{mention Name}} and legacy <m>Name</m>
-  let result = text.replace(/\{\{mention\s+([^}]+)\}\}/gi, resolve);
-  result = result.replace(/<m>([^<]+)<\/m>/gi, resolve); // TODO: remove legacy <m> support once all bots use {{mention}}
-  return result;
+  return text.replace(/\{\{mention\s+([^}]+)\}\}/gi, resolve);
 }
 
 export class MatrixChannel implements Channel {

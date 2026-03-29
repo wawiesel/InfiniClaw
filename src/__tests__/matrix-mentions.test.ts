@@ -111,12 +111,12 @@ describe('pillifyMentions', () => {
     expect(result).not.toContain('<m>');
   });
 
-  it('does not touch @Name patterns — only <m> markers', () => {
+  it('does not touch @Name patterns', () => {
     const result = pillifyMentions('@Cid hello', cache);
     expect(result).toBe('@Cid hello');
   });
 
-  it('returns text unchanged when no <m> marker present', () => {
+  it('returns text unchanged when no {{mention}} marker present', () => {
     const html = '<p>hello world</p>';
     expect(pillifyMentions(html, cache)).toBe(html);
   });

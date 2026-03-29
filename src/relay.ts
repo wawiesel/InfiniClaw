@@ -5168,7 +5168,7 @@ async function curtainLoop(captainUserId: string): Promise<void> {
 
           // Mention-wake: mention of a sleeping bot in any room wakes it.
           // Only process mentions from rooms this relay manages (cross-fleet isolation).
-          // Matches: <m>Name</m> in body, @Name in body, or mention pill in formatted_body.
+          // Matches: {{mention Name}} in body, @Name in body, or mention pill in formatted_body.
           if (knownRoomIds.has(rid)) {
           const formattedBody = event.content.formatted_body as string || '';
           for (const [bot, entry] of Object.entries(liveFleet)) {
@@ -5177,7 +5177,6 @@ async function curtainLoop(captainUserId: string): Promise<void> {
             const escaped = escapeRegex(name);
             const mentioned =
               new RegExp(`\\{\\{mention\\s+${escaped}\\}\\}`, 'i').test(body) ||
-              new RegExp(`<m>${escaped}</m>`, 'i').test(body) || // TODO: remove legacy <m>
               new RegExp(`@${escaped}\\b`, 'i').test(body) ||
               new RegExp(`matrix\\.to/#/@${bot}[^"]*">${escaped}`, 'i').test(formattedBody);
             if (mentioned) {
