@@ -54,6 +54,8 @@ export interface GdsState {
   gates: GdsGate[];
   created_at: string;
   execution_started_at?: string;
+  /** Accumulated issue body content (scope + completed gate results). Never overwritten, only appended. */
+  body_content?: string;
 }
 
 // ── S3 Read/Write ────────────────────────────────────────────────────────────
@@ -199,32 +201,26 @@ export function approveGate(
   return { ok: true, advanced: true };
 }
 
-/** Render pipeline status as markdown (for Gitea issue body). */
-export function formatPipelineStatus(state: GdsState): string {
-  const statusLabel = (g: GdsGate) => {
-    if (g.status === 'approved') return '✅ Approved';
-    if (g.status === 'inspector_approved') return '🔍 Inspector approved, awaiting Captain';
-    if (g.status === 'pending') return '⏳ Pending';
-    return '⬜ Blocked';
-  };
+/** Compact pipeline tracker (appended to issue body). */
+export function formatPipelineTracker(state: GdsState): string {
+  const icon = (g: GdsGate) =>
+    g.status === 'approved' ? '✅' : g.status === 'inspector_approved' ? '🔍' : g.status === 'pending' ? '⏳' : '⬜';
   const lines = [
-    `## Pipeline — GDS #${state.gitea_issue}`,
-    `**Engineer**: ${state.engineer} | **Inspector**: ${state.inspector}${state.wbs_id ? ` | **WBS**: ${state.wbs_id}` : ''}`,
-    '',
-    ...state.gates.map((g, i) => {
-      const num = i + 1;
-      let line = `### ${num}. ${g.name} — ${statusLabel(g)}`;
-      const details: string[] = [];
-      if (g.tokens_used != null) details.push(`Tokens: ${g.tokens_used}`);
-      if (g.time_elapsed_min != null) details.push(`Time: ${g.time_elapsed_min}min`);
-      if (g.inspector_approved_at) details.push(`Inspector: ${g.inspector_approved_at.slice(0, 16)}`);
-      if (g.captain_approved_at) details.push(`Captain: ${g.captain_approved_at.slice(0, 16)}`);
-      if (details.length) line += '\n' + details.join(' · ');
-      return line;
-    }),
+    '---',
+    `**Pipeline** · Engineer: ${state.engineer} · Inspector: ${state.inspector}`,
+    state.gates.map(g => `${icon(g)} ${g.name}`).join(' → '),
+    `**Current**: ${state.current_gate}`,
   ];
   return lines.join('\n');
 }
+
+/** Build full issue body: accumulated content sections + pipeline tracker. */
+export function buildIssueBody(state: GdsState): string {
+  return (state.body_content || '') + '\n\n' + formatPipelineTracker(state);
+}
+
+/** @deprecated Use buildIssueBody instead */
+export const formatPipelineStatus = buildIssueBody;
 
 /** Approval reactions (💯, 👍) and rejection reactions (👎, ❌). */
 const APPROVE_REACTIONS = new Set(['+1', 'heart', 'hooray', 'laugh', 'rocket', '100']);
