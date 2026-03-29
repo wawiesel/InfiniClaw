@@ -184,6 +184,9 @@ const messageEvents: { ts: number; bot: string }[] = [];
 /** Accumulated task lifecycle events. Fed by relay from Claude Code session todos. */
 const taskEvents: { ts: number; bot: string; kind: 'created' | 'resolved' }[] = [];
 
+/** Previous todos snapshot per bot, used by syncTodosMetrics for change detection. */
+const todosSnapshot: Map<string, Map<string, string>> = new Map();
+
 /** Version deployment events — when a ship started running a new version. */
 const versionDeployEvents: { ts: number; ship: string; version: string }[] = [];
 
@@ -365,6 +368,48 @@ export function recordTaskResolved(bot: string, ts?: number): void {
 }
 
 /**
+ * Sync todo metrics for a bot by diffing the current todos file against the previous snapshot.
+ * Detects new todos (→ recordTaskCreated) and completions (→ recordTaskResolved).
+ * On first call per bot, establishes baseline without recording events.
+ * Call periodically (e.g., from metricsLoop) for each active bot.
+ */
+export function syncTodosMetrics(bot: string): void {
+  const todosDir = path.join(resolveRoot(), '_runtime', 'instances', bot, 'data', 'sessions', 'main', '.claude', 'todos');
+  if (!fs.existsSync(todosDir)) return;
+
+  let current: Map<string, string>;
+  try {
+    const files = fs.readdirSync(todosDir)
+      .map(f => ({ f, mtime: fs.statSync(path.join(todosDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    if (files.length === 0) return;
+    const raw = fs.readFileSync(path.join(todosDir, files[0].f), 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    current = new Map<string, string>();
+    for (const t of parsed as Array<{ id?: string; content?: string; status: string }>) {
+      const key = t.id ?? t.content;
+      if (key && t.status) current.set(key, t.status);
+    }
+  } catch { return; }
+
+  const prev = todosSnapshot.get(bot);
+  if (prev !== undefined) {
+    const now = Date.now();
+    for (const key of current.keys()) {
+      if (!prev.has(key)) recordTaskCreated(bot, now);
+    }
+    for (const [key, status] of current) {
+      const prevStatus = prev.get(key);
+      if (prevStatus !== undefined && prevStatus !== 'completed' && status === 'completed') {
+        recordTaskResolved(bot, now);
+      }
+    }
+  }
+  todosSnapshot.set(bot, current);
+}
+
+/**
  * Record when a ship starts running a new version.
  * Called by relay on startup after determining the running version.
  */
@@ -404,6 +449,7 @@ export function resetMetrics(): void {
   responseLatencyEvents.length = 0;
   messageEvents.length = 0;
   taskEvents.length = 0;
+  todosSnapshot.clear();
   versionDeployEvents.length = 0;
   pendingDeliveries.clear();
   behindTheCurtainRoomId = null;

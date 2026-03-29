@@ -18,6 +18,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -57,6 +58,7 @@ import {
   recordMessageDelivery,
   recordBotReply,
   backfillOperatorEvents,
+  syncTodosMetrics,
   publishMetrics,
   computeMetrics,
   formatScopeMetrics,
@@ -85,6 +87,7 @@ import {
   syncDistToInstance,
   collectBotMatrixUserMap,
   readRoomStateStamp,
+  startNextRelay,
 } from './service.js';
 import { getLatestSemverTag, getStampedSemverTag, getLatestSemverTagOnRef, commitsAheadOfTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
@@ -93,7 +96,7 @@ import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
 import { runStaticAlignment } from './alignment.js';
 import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreatePrForBranch } from './gitea-wbs.js';
-import { pushAll, getClient as getS3Client } from './s3-sync.js';
+import { pushAll, getClient as getS3Client, downloadJson, uploadJson } from './s3-sync.js';
 // health-staleness.ts helpers used by healthWatchdogLoop inline
 
 // ── Config ─────────────────────────────────────────────────────────
@@ -3132,6 +3135,7 @@ async function metricsLoop(): Promise<void> {
   await sleep(90_000); // let startup stabilize
   while (true) {
     try {
+      for (const bot of loadShipConfig().bots) syncTodosMetrics(bot);
       await publishMetrics();
     } catch (err) {
       log(`metrics: publish error: ${errStr(err)}`);
