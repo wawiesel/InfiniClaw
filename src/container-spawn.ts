@@ -490,6 +490,7 @@ export async function runBranchBrainAgent(
   // Apply the same BRAIN_* → CLAUDE/ANTHROPIC mappings as service.ts
   if (botEnv.BRAIN_OAUTH_TOKEN) botEnv.CLAUDE_CODE_OAUTH_TOKEN = botEnv.BRAIN_OAUTH_TOKEN;
   if (botEnv.BRAIN_API_KEY) botEnv.ANTHROPIC_API_KEY = botEnv.BRAIN_API_KEY;
+  if (botEnv.BRAIN_BASE_URL) botEnv.ANTHROPIC_BASE_URL = botEnv.BRAIN_BASE_URL;
   if (botEnv.BRAIN_CA_CERT_FILE) botEnv.NODE_EXTRA_CA_CERTS = botEnv.BRAIN_CA_CERT_FILE;
 
   // Build secrets without mutating process.env to avoid a race condition when
