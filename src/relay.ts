@@ -89,7 +89,7 @@ import {
 import { getLatestSemverTag, getStampedSemverTag, getLatestSemverTagOnRef, commitsAheadOfTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
-import { gitOpts, execErrOutput, gitSyncRepo } from './git-utils.js';
+import { gitOpts, execErrOutput, gitSyncRepo, parseConventionalPrefix, bumpPackageJsonVersion, commitVersionBump } from './git-utils.js';
 import { readWbs, writeWbs, itemsForBot, reabsorbItems, autoAssign, completeItem } from './wbs.js';
 import { runStaticAlignment } from './alignment.js';
 import { giteaCreateIssueForWbs, giteaCloseIssue, giteaCreatePrForBranch } from './gitea-wbs.js';
@@ -2175,6 +2175,17 @@ async function handleBbMergeAbort(
         fs.writeFileSync(taskFile, JSON.stringify({ type: 'merge_request', thread_id: threadId, bot, summary }));
       } catch (err) { log(`bbMergeAbort: merge IPC failed: ${errStr(err)}`); }
     }
+    // Auto-bump version based on conventional commit prefix in PR title
+    const convPrefix = parseConventionalPrefix(title);
+    if (convPrefix) {
+      try {
+        const newVer = bumpPackageJsonVersion(resolveRoot(), convPrefix);
+        if (newVer) {
+          commitVersionBump(resolveRoot(), newVer);
+          log(`bbMergeAbort: version bumped to v${newVer} (${convPrefix})`);
+        }
+      } catch (err) { log(`bbMergeAbort: version bump failed: ${errStr(err)}`); }
+    }
     log(`bbMergeAbort: merged thread=${threadId.slice(0, 20)} title=${title}`);
   } else {
     // Abort: post cancellation notice
@@ -2575,6 +2586,18 @@ async function spawnBranchBrain(
 
     // Post merge marker in thread
     bbThreadReply(`🪾 ${announcedTitle} — ${mergeDescription}`).catch((err) => log(`branchBrain: merge marker failed: ${errStr(err)}`));
+
+    // Auto-bump version based on conventional commit prefix in PR title
+    const nonPoolConvPrefix = parseConventionalPrefix(announcedTitle);
+    if (nonPoolConvPrefix) {
+      try {
+        const newVer = bumpPackageJsonVersion(resolveRoot(), nonPoolConvPrefix);
+        if (newVer) {
+          commitVersionBump(resolveRoot(), newVer);
+          log(`branchBrain: version bumped to v${newVer} (${nonPoolConvPrefix})`);
+        }
+      } catch (err) { log(`branchBrain: version bump failed: ${errStr(err)}`); }
+    }
 
     // Persist notes for context recovery
     if (bot) {
