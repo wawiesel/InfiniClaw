@@ -37,6 +37,7 @@ export interface GdsGate {
   name: GateName;
   status: GateStatus;
   evidence?: string;
+  review_comment_id?: number;    // Gitea comment ID for the review request — react here to approve
   inspector_approved_at?: string;
   captain_approved_at?: string;
   tokens_used?: number;
@@ -230,54 +231,60 @@ const APPROVE_REACTIONS = new Set(['+1', 'heart', 'hooray', 'laugh', 'rocket', '
 const REJECT_REACTIONS = new Set(['-1']);
 
 /**
- * Check Gitea reactions on a GDS issue and process approvals/rejections.
- * - 💯/👍 from Captain on the issue → approve current gate
- * - 👎 from Captain → mark gate as needing revision (add Captain's latest comment as feedback)
- * Returns actions taken.
+ * Check Gitea reactions on the current gate's review comment.
+ * - 💯/👍 from reviewer → approve gate
+ * - 👎 from reviewer → reject, reset to pending
+ * Checks both inspector and captain reactions.
  */
 export async function processGiteaReactions(
   issueNumber: number,
   captainUsername: string,
 ): Promise<{ action: 'approved' | 'rejected' | 'none'; gate?: string }> {
-  // Lazy import to avoid circular deps
-  const { giteaGetIssueReactions, giteaRemoveIssueReaction, giteaUpdateIssueBody } = await import('./gitea-wbs.js');
-
-  const reactions = await giteaGetIssueReactions(issueNumber);
-  const captainReactions = reactions.filter(r => r.user === captainUsername);
-  if (captainReactions.length === 0) return { action: 'none' };
+  const { giteaGetCommentReactions, giteaUpdateIssueBody } = await import('./gitea-wbs.js');
 
   const state = await readGds(issueNumber);
   if (!state) return { action: 'none' };
 
-  const hasApprove = captainReactions.some(r => APPROVE_REACTIONS.has(r.content));
-  const hasReject = captainReactions.some(r => REJECT_REACTIONS.has(r.content));
+  const currentGate = state.gates.find(g => g.name === state.current_gate);
+  if (!currentGate?.review_comment_id) return { action: 'none' };
 
-  if (hasApprove) {
+  const reactions = await giteaGetCommentReactions(currentGate.review_comment_id);
+  if (reactions.length === 0) return { action: 'none' };
+
+  // Captain 💯 → captain approval (advances gate)
+  const captainApprove = reactions.some(r => r.user === captainUsername && APPROVE_REACTIONS.has(r.content));
+  const captainReject = reactions.some(r => r.user === captainUsername && REJECT_REACTIONS.has(r.content));
+
+  // Any non-captain reactor with inspector role → inspector approval
+  const inspectorApprove = reactions.some(r => r.user !== captainUsername && APPROVE_REACTIONS.has(r.content));
+
+  if (captainReject) {
+    // Reset gate to pending
+    if (currentGate.status === 'inspector_approved') {
+      currentGate.status = 'pending';
+      currentGate.inspector_approved_at = undefined;
+    }
+    await writeGds(state);
+    await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
+    return { action: 'rejected', gate: state.current_gate };
+  }
+
+  // Inspector approves first (if not already)
+  if (inspectorApprove && currentGate.status === 'pending') {
+    approveGate(state, 'inspector', 'inspector');
+    await writeGds(state);
+    await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
+    // Don't return yet — check if captain also approved in same pass
+  }
+
+  // Captain approves (advances gate)
+  if (captainApprove) {
     const result = approveGate(state, captainUsername, 'captain');
     if (result.ok) {
       await writeGds(state);
       await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
-      // Remove the reaction so it doesn't re-trigger
-      for (const r of captainReactions) {
-        if (APPROVE_REACTIONS.has(r.content)) await giteaRemoveIssueReaction(issueNumber, r.content);
-      }
       return { action: 'approved', gate: state.current_gate };
     }
-  }
-
-  if (hasReject) {
-    // Mark current gate as needing revision — reset to pending
-    const gate = state.gates.find(g => g.name === state.current_gate);
-    if (gate && gate.status === 'inspector_approved') {
-      gate.status = 'pending'; // Back to pending for re-review
-      gate.inspector_approved_at = undefined;
-    }
-    await writeGds(state);
-    await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
-    for (const r of captainReactions) {
-      if (REJECT_REACTIONS.has(r.content)) await giteaRemoveIssueReaction(issueNumber, r.content);
-    }
-    return { action: 'rejected', gate: state.current_gate };
   }
 
   return { action: 'none' };

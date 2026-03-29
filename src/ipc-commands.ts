@@ -1168,11 +1168,19 @@ async function handleGdsSubmitEvidence(data: CommandData, ctx: InfiniClawIpcCont
   const result = submitEvidence(state, gateName as any, evidence, tokensUsed, timeElapsedMin);
   if (!result.ok) { await safeSend(ctx, chatJid, `⛔ ${result.error}`); return; }
 
-  // Update issue body with pipeline status (evidence is part of the body, not a comment)
+  // Post review-request comment — reviewer reacts 💯 to approve, 👎 to reject
+  const reviewBody = `## 📋 Review requested: gate \`${gateName}\`\n\n${evidence}${tokensUsed != null ? `\n\n**Tokens**: ${tokensUsed}` : ''}${timeElapsedMin != null ? ` · **Time**: ${timeElapsedMin}min` : ''}\n\n---\n*React 💯 to approve · 👎 to reject*`;
+  const commentId = await giteaCommentOnIssue(issueNumber, reviewBody);
+  if (commentId) {
+    const gate = state.gates.find(g => g.name === gateName);
+    if (gate) gate.review_comment_id = commentId;
+  }
+
+  // Update issue body with pipeline status
   await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
 
   await writeGds(state);
-  await safeSend(ctx, chatJid, `✅ Evidence submitted for gate ${gateName} on GDS #${issueNumber}. Awaiting inspector approval.`);
+  await safeSend(ctx, chatJid, `✅ Evidence submitted for gate ${gateName} on GDS #${issueNumber}. Review requested — react 💯 on Gitea comment to approve.`);
 }
 
 async function handleGdsApproveGate(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {

@@ -256,3 +256,19 @@ export async function giteaCreatePrForBranch(opts: {
     logger.warn({ err, branch }, 'gitea-wbs: createPr threw');
   }
 }
+
+/**
+ * Get reactions on a specific Gitea comment.
+ */
+export async function giteaGetCommentReactions(commentId: number): Promise<{ user: string; content: string }[]> {
+  const gitea = operatorToken();
+  if (!gitea) return [];
+  try {
+    const resp = await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues/comments/${commentId}/reactions`, {
+      headers: giteaHeaders(gitea.token),
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json() as { user: { login: string }; content: string }[];
+    return data.map(r => ({ user: r.user.login, content: r.content }));
+  } catch { return []; }
+}
