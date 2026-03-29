@@ -24,7 +24,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { collectHealthData, sessionCleanup } from './health-check.js';
 import { isToolCallBlock, hasDetailsBlock, toolCallBreadcrumb, isToolCallMarker, parseToolCallMarker, toolCallBreadcrumbFromData } from './tool-call-breadcrumb.js';
 import { runBranchBrainAgent } from './container-spawn.js';
-import { acquireBbPoolSlot, initBbPool, leaveBbRoom, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
+import { acquireBbPoolSlot, getActiveBbCount, initBbPool, leaveBbRoom, releaseBbPoolSlot, resetBbDisplayName, sendBbMessage, type BbPoolSlot } from './bb-account-pool.js';
 import type { ContainerOutput } from './container-spawn.js';
 import { upsertEnvLine } from './env-utils.js';
 import {
@@ -1118,6 +1118,7 @@ function buildBotDisplayParams(
     rank: entry?.rank ?? 99,
     isChief: co,
     version: overrides?.version ?? botSemver(root, botName) ?? undefined,
+    activeBbCount: getActiveBbCount(botName),
   };
 }
 

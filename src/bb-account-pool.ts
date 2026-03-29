@@ -106,6 +106,13 @@ export function releaseBbPoolSlot(bot: string, slot: number): void {
   if (bp && slot >= 0 && slot < MAX_POOL_SIZE) bp.slotActive[slot] = false;
 }
 
+/** Return the number of currently active BB slots for a bot. Returns 0 if pool is uninitialised. */
+export function getActiveBbCount(bot: string): number {
+  const bp = _botPools.get(bot);
+  if (!bp) return 0;
+  return bp.slotActive.filter(Boolean).length;
+}
+
 // ── Matrix CS API helpers ────────────────────────────────────────────
 
 async function matrixFetch(
