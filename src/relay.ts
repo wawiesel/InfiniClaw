@@ -58,6 +58,7 @@ import {
   recordMessageDelivery,
   recordBotReply,
   backfillOperatorEvents,
+  syncTodosMetrics,
   publishMetrics,
   computeMetrics,
   formatScopeMetrics,
@@ -3236,6 +3237,7 @@ async function metricsLoop(): Promise<void> {
   await sleep(90_000); // let startup stabilize
   while (true) {
     try {
+      for (const bot of loadShipConfig().bots) syncTodosMetrics(bot);
       await publishMetrics();
     } catch (err) {
       log(`metrics: publish error: ${errStr(err)}`);
