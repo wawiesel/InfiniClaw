@@ -295,6 +295,30 @@ export async function matrixLeave(
   return true;
 }
 
+export async function matrixKick(
+  homeserver: string,
+  token: string,
+  roomId: string,
+  userId: string,
+  reason?: string,
+): Promise<boolean> {
+  const resp = await fetch(
+    `${homeserver}${MATRIX_API}/rooms/${encodeURIComponent(roomId)}/kick`,
+    {
+      method: 'POST',
+      headers: matrixHeaders(token),
+      body: JSON.stringify({ user_id: userId, ...(reason && { reason }) }),
+      signal: AbortSignal.timeout(MATRIX_OP_TIMEOUT_MS),
+    },
+  );
+  if (!resp.ok) {
+    const body = await resp.text();
+    if (resp.status === 403 || body.includes('not in room') || body.includes('not a member')) return true;
+    return false;
+  }
+  return true;
+}
+
 export async function matrixSetDisplayName(
   homeserver: string,
   token: string,

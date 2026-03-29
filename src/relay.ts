@@ -35,6 +35,7 @@ import {
   matrixInvite,
   matrixJoin,
   matrixLeave,
+  matrixKick,
   matrixSetDisplayName,
   matrixSetRoomName,
   matrixSendReaction,
@@ -2122,6 +2123,9 @@ async function handleBbMergeAbort(
   const bot = task.bot;
   const poolInfo = task.poolSlotInfo;
 
+  // Capture BB user info for post-marker kick
+  let bbKickUserId: string | undefined;
+
   // Release pool slot and reset display name
   if (poolInfo) {
     try {
@@ -2131,9 +2135,9 @@ async function handleBbMergeAbort(
       const tokenKey = `BB_POOL_TOKEN_${poolInfo.slot + 1}`;
       slot.accessToken = botEnv[tokenKey] || '';
       if (slot.accessToken) {
-        await leaveBbRoom(slot, conn.roomId).catch(() => {});
         await resetBbDisplayName(slot).catch(() => {});
       }
+      bbKickUserId = poolInfo.userId;
       releaseBbPoolSlot(poolInfo.bot, poolInfo.slot);
       log(`bbMergeAbort: pool slot ${poolInfo.slot} released for ${poolInfo.bot}`);
     } catch (err) { log(`bbMergeAbort: pool release failed: ${errStr(err)}`); }
@@ -2186,6 +2190,17 @@ async function handleBbMergeAbort(
       await relaySend(conn.homeserver, conn.accessToken, conn.roomId, abortText).catch((err) => log(`bbMergeAbort: abort post (no ls): ${errStr(err)}`));
     }
     log(`bbMergeAbort: aborted thread=${threadId.slice(0, 20)} title=${title}`);
+  }
+
+  // Kick BB pool account from room after marker is posted
+  if (bbKickUserId) {
+    try {
+      const { accessToken: opToken } = resolveOperatorConfig();
+      if (opToken) {
+        const kicked = await matrixKick(conn.homeserver, opToken, conn.roomId, bbKickUserId, `BB ${action}`);
+        log(`bbMergeAbort: kick ${bbKickUserId} ${kicked ? 'ok' : 'failed'}`);
+      }
+    } catch (err) { log(`bbMergeAbort: kick failed: ${errStr(err)}`); }
   }
 }
 
