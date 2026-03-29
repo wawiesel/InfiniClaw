@@ -422,6 +422,10 @@ let activeConns: RoomConn[] = [];
 let shutdown: () => Promise<void> = async () => { process.exit(0); };
 /** Cached speaker state — updated by electSpeaker() so reply() can include it in the tag synchronously. */
 let isSpeakerCached = false;
+/** Current operator mode — determines the icon shown in relay message prefixes. */
+let operatorMode: 'watch' | 'captain' | 'fix' = 'watch';
+const OPERATOR_MODE_ICONS: Record<typeof operatorMode, string> = { watch: '📡', captain: '👑', fix: '🔧' };
+function operatorModeIcon(): string { return OPERATOR_MODE_ICONS[operatorMode]; }
 /** Map Matrix userId → bot name for resolving reaction targets. Built once at startup. */
 let botUserIdMap: Map<string, string> = new Map();
 /** Cache of recent Matrix event IDs → bot name for score reaction enrichment. Capped at 500. */
@@ -4138,8 +4142,17 @@ function registerRelayCommands(): void {
         return;
       }
 
+      // !operator watch|captain|fix [ship] — switch operator mode
+      if (action === 'watch' || action === 'captain' || action === 'fix') {
+        if (targetShip && !isThisShip(targetShip)) return;
+        operatorMode = action;
+        log(`operator mode: ${action}`);
+        await reply(conn, `${OPERATOR_MODE_ICONS[action]} operator mode: ${action}`);
+        return;
+      }
+
       if (action !== 'on' && action !== 'off') {
-        if (await electSpeaker()) await helpReply(conn, `usage: !operator | !operator on [ship] | !operator off [ship] | !operator reset [ship]`);
+        if (await electSpeaker()) await helpReply(conn, `usage: !operator | !operator on|off|reset|watch|captain|fix [ship]`);
         return;
       }
       if (targetShip && !isThisShip(targetShip)) return;
@@ -5113,9 +5126,10 @@ async function handleCommand(cmd: string, conn: RoomConn, allConns?: RoomConn[])
   }
 }
 
-/** Build the ship tag for relay replies. ⭐ when speaker, otherwise shipTag default (/💤). */
+/** Build the ship tag for relay replies. Includes ship emoji, operator mode icon, and ship name. */
 function replyTag(): string {
-  return shipTag(undefined, isSpeakerCached ? '⭐' : undefined);
+  const shipEmoji = findShipByHostname()?.[1]?.emoji ?? '';
+  return `${shipEmoji}${operatorModeIcon()} ${systemName()}`;
 }
 
 async function reply(conn: RoomConn, text: string, threadRootId?: string, opts?: { skipMirror?: boolean }): Promise<string | undefined> {
