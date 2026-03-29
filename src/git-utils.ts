@@ -36,6 +36,65 @@ export function packageJsonVersion(dir: string): string | null {
 }
 
 /**
+ * Parse a conventional commit prefix from a PR title.
+ * Returns 'breaking', 'feat', or 'fix', or null if no conventional prefix is found.
+ * Matches: "breaking:", "breaking change:", "feat:", "feat(scope):", "fix:", "fix(scope):"
+ */
+export function parseConventionalPrefix(title: string): 'fix' | 'feat' | 'breaking' | null {
+  const lower = title.toLowerCase().trimStart();
+  if (/^breaking(\s+change)?[!:]/.test(lower)) return 'breaking';
+  if (/^feat(\([^)]*\))?!?:/.test(lower)) return 'feat';
+  if (/^fix(\([^)]*\))?!?:/.test(lower)) return 'fix';
+  return null;
+}
+
+/**
+ * Bump the version in package.json according to the bump type.
+ * breaking → major bump (minor and patch reset to 0)
+ * feat     → minor bump (patch reset to 0)
+ * fix      → patch bump
+ * Returns the new version string (without 'v' prefix), or null on failure.
+ */
+export function bumpPackageJsonVersion(dir: string, bumpType: 'fix' | 'feat' | 'breaking'): string | null {
+  try {
+    const pkgPath = path.join(dir, 'package.json');
+    const raw = fs.readFileSync(pkgPath, 'utf-8');
+    const pkg = JSON.parse(raw) as Record<string, unknown>;
+    const current = typeof pkg.version === 'string' && pkg.version ? pkg.version : '0.0.0';
+    const [majorStr = '0', minorStr = '0', patchStr = '0'] = current.split('.');
+    let major = parseInt(majorStr, 10) || 0;
+    let minor = parseInt(minorStr, 10) || 0;
+    let patch = parseInt(patchStr, 10) || 0;
+    if (bumpType === 'breaking') { major++; minor = 0; patch = 0; }
+    else if (bumpType === 'feat') { minor++; patch = 0; }
+    else { patch++; }
+    const newVersion = `${major}.${minor}.${patch}`;
+    pkg.version = newVersion;
+    // Preserve trailing newline if original had one
+    const trailing = raw.endsWith('\n') ? '\n' : '';
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + trailing);
+    return newVersion;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Commit a version bump to package.json, create an annotated semver tag, and push both to origin main.
+ * Caller is responsible for ensuring the working tree is on main and package.json is already bumped.
+ * Throws on git failure — wrap in try/catch for best-effort behavior.
+ */
+export function commitVersionBump(dir: string, newVersion: string): void {
+  const opts = gitOpts(dir, 30_000);
+  const tag = `v${newVersion}`;
+  execSync('git add package.json', opts);
+  execSync(`git commit -m "chore: bump version to ${tag}"`, opts);
+  execSync(`git tag -a ${tag} -m "Release ${tag}"`, opts);
+  execSync('git push origin HEAD:main', opts);
+  try { execSync(`git push origin ${tag}`, opts); } catch { /* best effort tag push */ }
+}
+
+/**
  * If the version tag from package.json doesn't exist locally, create an annotated tag and push it.
  * Returns the tag name if a new tag was created, null if tag already exists or no version found.
  */
