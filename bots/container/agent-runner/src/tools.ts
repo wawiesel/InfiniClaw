@@ -278,21 +278,47 @@ Use this after making code changes that require a process restart.`,
             content: [{ type: 'text' as const, text: `From: ${sender}\nTime: ${ts}\nContent: ${content}` }],
           };
         } else {
-          // Time-range lookup: fetch backwards from now, filter by age
+          // Time-range lookup: paginate backwards using Matrix `end` token until cutoff is reached
           const minutes = args.minutes ?? 30;
           const limit = args.limit ?? 50;
           const cutoff = Date.now() - minutes * 60 * 1000;
-          const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?dir=b&limit=${limit}`;
-          const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-          if (!res.ok) {
-            const body = await res.text();
-            return { content: [{ type: 'text' as const, text: `Matrix API error (${res.status}): ${body}` }], isError: true };
-          }
           type MsgEvent = { type?: string; sender?: string; origin_server_ts?: number; content?: { body?: string; msgtype?: string } };
-          const data = await res.json() as { chunk?: MsgEvent[] };
-          const events = (data.chunk ?? [])
-            .filter((e) => e.type === 'm.room.message' && e.content?.msgtype === 'm.text' && (e.origin_server_ts ?? 0) >= cutoff)
-            .reverse(); // oldest first
+          const collected: MsgEvent[] = [];
+          const pageSize = 100;
+          let fromToken: string | undefined;
+          let reachedCutoff = false;
+
+          while (!reachedCutoff) {
+            const qs = fromToken
+              ? `dir=b&limit=${pageSize}&from=${encodeURIComponent(fromToken)}`
+              : `dir=b&limit=${pageSize}`;
+            const url = `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?${qs}`;
+            const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+            if (!res.ok) {
+              const body = await res.text();
+              return { content: [{ type: 'text' as const, text: `Matrix API error (${res.status}): ${body}` }], isError: true };
+            }
+            const data = await res.json() as { chunk?: MsgEvent[]; end?: string };
+            const chunk = data.chunk ?? [];
+
+            for (const e of chunk) {
+              if ((e.origin_server_ts ?? 0) < cutoff) {
+                reachedCutoff = true;
+                break;
+              }
+              if (e.type === 'm.room.message' && e.content?.msgtype === 'm.text') {
+                collected.push(e);
+              }
+            }
+
+            // Stop if no more pages or we already have enough messages
+            if (!data.end || chunk.length === 0 || collected.length >= limit) {
+              break;
+            }
+            fromToken = data.end;
+          }
+
+          const events = collected.slice(0, limit).reverse(); // oldest first
           if (events.length === 0) {
             return { content: [{ type: 'text' as const, text: `No messages in the last ${minutes} minute(s).` }] };
           }
