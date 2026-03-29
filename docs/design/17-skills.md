@@ -41,15 +41,14 @@ description: When and how to use this skill.
 
 ### pm (Project Management)
 
-> **Status:** Not yet implemented.
+> **Status:** Implemented. See `bots/skills/pm/SKILL.md`.
 
-The `pm` skill is planned for engineer-role bots. Capabilities:
+The `pm` skill is available for engineer-role bots. Capabilities:
 
-- Maintain a WBS (Work Breakdown Structure) JSON at `_runtime/data/wbs-{bot}.json`
-- Render GANTT as HTML and upload to S3 presigned URL for the Captain
-- Track task dependencies
-- Predict time-to-completion from task complexity and historical branch brain durations
-- Generate weekly summaries for the Captain
+- Chief-only WBS mutations: triage directives into items, assign to crew, mark done
+- Dependency tracking: blocked items transition `backlog → ready` when dependencies complete
+- Status summaries: counts by status, blocked items, in-progress owners — posted to room or uploaded to S3
+- Weekly summaries for the Captain with completed, carried-over, and next-week focus sections
 
 ### retrospective
 
