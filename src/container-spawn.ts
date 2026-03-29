@@ -446,6 +446,8 @@ export interface BranchBrainInput {
   sessionId?: string;
   containerNameTag: string;
   timeoutMs?: number;
+  /** Per-task model override — when set, takes precedence over the bot's BRAIN_MODEL env var. */
+  model?: string;
 }
 
 /**
@@ -504,6 +506,10 @@ export async function runBranchBrainAgent(
   // PERSONA_NAME is a computed var set in MB's start script, never written to the
   // bot's env file. Set it explicitly so BB mounts the correct persona and CLAUDE.md.
   mergedSecrets['PERSONA_NAME'] = input.bot;
+
+  // Per-task model override: when the bot specifies a model in {{branch model="..."}} or
+  // via IPC task data, it takes precedence over the bot's static BRAIN_MODEL env var.
+  if (input.model) mergedSecrets['ANTHROPIC_MODEL'] = input.model;
 
   // Route BB IPC files to the parent bot's instance data dir so the bot's
   // IPC watcher (running in the bot's pm2 process) processes them.

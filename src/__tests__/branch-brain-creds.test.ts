@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mapBrainEnv } from '../relay.js';
+import { extractSignals } from '../signals.js';
 
 // ── mapBrainEnv ────────────────────────────────────────────────────
 
@@ -90,5 +91,28 @@ describe('mapBrainEnv', () => {
     const result = mapBrainEnv({ BRAIN_API_KEY: 'key' }, { PATH: '/usr/bin', HOME: '/root' });
     expect(result['PATH']).toBe('/usr/bin');
     expect(result['HOME']).toBe('/root');
+  });
+});
+
+// ── Per-task model selection (WBS-37) ──────────────────────────────
+
+describe('{{branch}} model arg extraction', () => {
+  it('parses model from {{branch model="claude-sonnet-4-6" Fix the bug}}', () => {
+    const { signals } = extractSignals('{{branch model="claude-sonnet-4-6" Fix the bug}}');
+    expect(signals).toHaveLength(1);
+    expect(signals[0].command).toBe('branch');
+    expect(signals[0].args['model']).toBe('claude-sonnet-4-6');
+    expect(signals[0].positional).toBe('Fix the bug');
+  });
+
+  it('parses model with title arg', () => {
+    const { signals } = extractSignals('{{branch title="Fix bug" model="claude-haiku-4-5" Fix the crash in relay.ts}}');
+    expect(signals[0].args['model']).toBe('claude-haiku-4-5');
+    expect(signals[0].args['title']).toBe('Fix bug');
+  });
+
+  it('does not set model when arg is absent', () => {
+    const { signals } = extractSignals('{{branch Fix the bug}}');
+    expect(signals[0].args['model']).toBeUndefined();
   });
 });

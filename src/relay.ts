@@ -2395,10 +2395,10 @@ function findBotClaudeDir(bot: string, sessionId: string): string | null {
  * Streams assistant output into a visible Matrix thread in the triggering room.
  */
 async function spawnBranchBrain(
-  task: { thread_id: string; objective: string; chat_jid: string; bot?: string; title?: string },
+  task: { thread_id: string; objective: string; chat_jid: string; bot?: string; title?: string; model?: string },
   conns: RoomConn[],
 ): Promise<void> {
-  const { thread_id, objective, chat_jid, bot: rawBot, title: taskTitle } = task;
+  const { thread_id, objective, chat_jid, bot: rawBot, title: taskTitle, model: taskModel } = task;
   // Normalize bot name to lowercase — ASSISTANT_NAME is capitalized but env dirs and fleet keys are lowercase.
   const bot = rawBot?.toLowerCase();
   log(`branchBrain: spawning for thread=${thread_id.slice(0, 20)}`);
@@ -2544,6 +2544,7 @@ async function spawnBranchBrain(
       sessionId: mainSessionId ?? undefined,
       containerNameTag: bbTag,
       timeoutMs: BRANCH_BRAIN_TIMEOUT_MS,
+      model: taskModel,
     },
     (proc, containerName) => {
       // Register process for tracking
@@ -2822,6 +2823,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
               const chat_jid = typeof data['chat_jid'] === 'string' ? data['chat_jid'] : '';
               const bot = typeof data['bot'] === 'string' ? data['bot'] : undefined;
               const title = typeof data['title'] === 'string' ? data['title'] : undefined;
+              const model = typeof data['model'] === 'string' && data['model'] ? data['model'] : undefined;
               // Cross-fleet isolation: only process BB tasks for bots in THIS relay's fleet.
               // If the bot isn't ours, put the file back so the correct relay can pick it up.
               const fleet = loadFleet();
@@ -2847,7 +2849,7 @@ async function relayTasksLoop(conns: RoomConn[]): Promise<void> {
                   }
                 } else {
                   activeBranchBrainCount.set(botKey, count + 1);
-                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot, title }, conns).finally(() => {
+                  void spawnBranchBrain({ thread_id, objective, chat_jid, bot, title, model }, conns).finally(() => {
                     const n = activeBranchBrainCount.get(botKey) ?? 1;
                     if (n <= 1) activeBranchBrainCount.delete(botKey);
                     else activeBranchBrainCount.set(botKey, n - 1);
@@ -5489,9 +5491,10 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                 if (sig.command === 'branch') {
                   const objective = sig.positional || sig.args['objective'] || '';
                   const title = sig.args['title'] || objective.slice(0, 60) || 'branch';
+                  const model = sig.args['model'] || undefined;
                   if (objective && !isRecentBBSpawn(senderBot, objective)) {
                     const chatJid = `matrix:${conn.roomId}`;
-                    log(`branchBrain: detected {{branch}} in Matrix from ${senderBot} — "${title.slice(0, 40)}"`);
+                    log(`branchBrain: detected {{branch}} in Matrix from ${senderBot} — "${title.slice(0, 40)}"${model ? ` model=${model}` : ''}`);
                     const botKey = senderBot;
                     const count = activeBranchBrainCount.get(botKey) ?? 0;
                     if (count >= MAX_BRANCH_BRAINS_PER_BOT) {
@@ -5499,7 +5502,7 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                     } else {
                       activeBranchBrainCount.set(botKey, count + 1);
                       void spawnBranchBrain(
-                        { thread_id: '', objective, chat_jid: chatJid, bot: senderBot, title },
+                        { thread_id: '', objective, chat_jid: chatJid, bot: senderBot, title, model },
                         conns,
                       ).finally(() => {
                         const n = activeBranchBrainCount.get(botKey) ?? 1;

@@ -50,7 +50,7 @@ The bot can use Matrix navigation tools (see [02-matrix](02-matrix.md)) to fetch
 
 ## Configuration
 
-> **Status:** Per-task model selection from persona/memory is not yet implemented. Branch brains receive the bot's `BRAIN_MODEL` forwarded as `ANTHROPIC_MODEL` via `mapBrainEnv()` (issue #24 fixed). Dynamic model selection per task is still planned.
+> **Status:** Implemented (WBS-37). The bot specifies a model per branch task via `{{branch model="claude-sonnet-4-6" objective}}` or as a `model` field in IPC `branch_brain` task data. The relay extracts it and passes it to `runBranchBrainAgent`, which overrides `ANTHROPIC_MODEL` for that BB container only — leaving the bot's static `BRAIN_MODEL` unchanged for other tasks.
 
 Brain preferences live in the bot's **persona and memory** — not in fleet state or env files. The bot chooses its branch model at branch time based on the task. Over time, the bot develops guidance on which models work best for which tasks.
 
