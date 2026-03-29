@@ -839,23 +839,57 @@ Item fields for upsert:
         lines.push('Token usage: no session data found.');
       }
 
-      // Fleet metrics from relay-published S3 snapshot (if available)
+      // Per-bot and fleet metrics from relay-written snapshot (if available)
       const metricsSnapshotPath = path.join(ipcDir, 'metrics-snapshot.json');
       try {
         const snapshotRaw = fs.readFileSync(metricsSnapshotPath, 'utf-8');
         const snapshot = JSON.parse(snapshotRaw) as {
           ts?: number;
+          bot?: {
+            score?: { day1?: number; day7?: number };
+            crashes?: { day1?: number; day7?: number };
+            responseLatencyP50?: number;
+            responseLatencyP95?: number;
+          };
           fleet?: { availability?: number; autonomyScore?: { day1?: number; day7?: number } };
           operator?: { interventions?: { day1?: number; day7?: number }; mtbi?: number | null };
           shipMetrics?: { relayUptimeSeconds?: number; relayRestarts?: { day1?: number; day7?: number } };
         };
-        lines.push('');
-        lines.push('**Fleet metrics (relay snapshot)**');
         if (snapshot.ts) {
           const ageMin = Math.round((Date.now() - snapshot.ts) / 60_000);
-          lines.push(`Snapshot age: ${ageMin}m`);
+          lines.push('');
+          lines.push(`**Bot metrics (relay snapshot, ${ageMin}m ago)**`);
+        } else {
+          lines.push('');
+          lines.push('**Bot metrics (relay snapshot)**');
+        }
+        if (snapshot.bot) {
+          const b = snapshot.bot;
+          const score1d = b.score?.day1 ?? null;
+          const score7d = b.score?.day7 ?? null;
+          const scoreStr = score1d != null
+            ? `${score1d >= 0 ? '+' : ''}${score1d} (1d) / ${score7d != null ? (score7d >= 0 ? '+' : '') + score7d : '?'} (7d)`
+            : 'no data';
+          lines.push(`Score: ${scoreStr}`);
+          const crashes1d = b.crashes?.day1 ?? null;
+          const crashes7d = b.crashes?.day7 ?? null;
+          const crashStr = crashes1d != null
+            ? `${crashes1d} (1d) / ${crashes7d ?? '?'} (7d)`
+            : 'no data';
+          lines.push(`Crashes: ${crashStr}`);
+          const p50 = b.responseLatencyP50;
+          const p95 = b.responseLatencyP95;
+          if (p50 != null || p95 != null) {
+            lines.push(`Latency p50/p95: ${p50 != null ? p50 + 's' : '?'} / ${p95 != null ? p95 + 's' : '?'}`);
+          } else {
+            lines.push('Latency: no data');
+          }
+        } else {
+          lines.push('Bot metrics: not yet available from relay.');
         }
         if (snapshot.fleet) {
+          lines.push('');
+          lines.push('**Fleet metrics**');
           lines.push(`Availability: ${snapshot.fleet.availability ?? '?'}%`);
           lines.push(`Autonomy: ${snapshot.fleet.autonomyScore?.day1 ?? '?'}% (1d) / ${snapshot.fleet.autonomyScore?.day7 ?? '?'}% (7d)`);
         }

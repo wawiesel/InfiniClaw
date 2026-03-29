@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { logger } from 'nanoclaw/logger.js';
+import { DATA_DIR } from 'nanoclaw/config.js';
 
 import { botBadge, capitalizeName, GRADE_EMOJI, formatDuration as formatDurationMs } from './formatting.js';
 import { matrixGetMessages } from './matrix-api.js';
@@ -673,7 +674,7 @@ export function computeMetrics(): MetricsSnapshot {
   };
 }
 
-/** Compute and publish metrics to S3. */
+/** Compute and publish metrics to S3, then write per-bot snapshots to their IPC dirs. */
 export async function publishMetrics(): Promise<MetricsSnapshot> {
   const snapshot = computeMetrics();
   try {
@@ -681,7 +682,53 @@ export async function publishMetrics(): Promise<MetricsSnapshot> {
   } catch (err) {
     logger.warn({ err: errStr(err) }, 'metrics: failed to publish to S3');
   }
+  writeMetricsToGroupIpc(snapshot);
   return snapshot;
+}
+
+/**
+ * Write per-bot metrics to each bot's duty-room IPC dir as metrics-snapshot.json.
+ * Bots read this file via the get_metrics MCP tool to access their own latency,
+ * score, and crash count alongside fleet-level context.
+ */
+export function writeMetricsToGroupIpc(snapshot: MetricsSnapshot): void {
+  try {
+    const fleet = loadFleet();
+    for (const botMetrics of snapshot.bots) {
+      const entry = fleet[botMetrics.name.toLowerCase()];
+      if (!entry) continue;
+      const room = ROLE_ROOMS[entry.role?.toLowerCase() ?? '']?.room;
+      if (!room) continue;
+      const ipcDir = path.join(DATA_DIR, 'ipc', room);
+      if (!fs.existsSync(ipcDir)) continue;
+      const fileData = {
+        ts: snapshot.ts,
+        bot: {
+          score: botMetrics.score,
+          crashes: botMetrics.crashes,
+          responseLatencyP50: botMetrics.responseLatencyP50,
+          responseLatencyP95: botMetrics.responseLatencyP95,
+        },
+        fleet: {
+          availability: snapshot.fleet.availability,
+          autonomyScore: snapshot.fleet.autonomyScore,
+        },
+        operator: {
+          interventions: snapshot.operator.interventions,
+          mtbi: snapshot.operator.mtbi,
+        },
+        shipMetrics: {
+          relayUptimeSeconds: snapshot.shipMetrics.relayUptimeSeconds,
+          relayRestarts: snapshot.shipMetrics.relayRestarts,
+        },
+      };
+      const tmpPath = path.join(ipcDir, 'metrics-snapshot.json.tmp');
+      fs.writeFileSync(tmpPath, JSON.stringify(fileData, null, 2));
+      fs.renameSync(tmpPath, path.join(ipcDir, 'metrics-snapshot.json'));
+    }
+  } catch (err) {
+    logger.warn({ err: errStr(err) }, 'metrics: failed to write per-bot IPC snapshots');
+  }
 }
 
 // ── Alerting ─────────────────────────────────────────────────────────

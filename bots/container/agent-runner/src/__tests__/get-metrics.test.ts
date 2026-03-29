@@ -226,4 +226,74 @@ describe('get_metrics', () => {
     const text = await callGetMetrics(handlers);
     expect(text).toContain(ts);
   });
+
+  it('shows bot score and crash count from metrics-snapshot.json', async () => {
+    fs.writeFileSync(path.join(ipcDir, 'metrics-snapshot.json'), JSON.stringify({
+      ts: Date.now(),
+      bot: {
+        score: { day1: 3, day7: 12 },
+        crashes: { day1: 0, day7: 1 },
+        responseLatencyP50: 15,
+        responseLatencyP95: 45,
+      },
+    }));
+    const handlers = setupTools(ipcDir, sessionDir);
+    const text = await callGetMetrics(handlers);
+    expect(text).toContain('Score: +3 (1d)');
+    expect(text).toContain('+12 (7d)');
+    expect(text).toContain('Crashes: 0 (1d)');
+    expect(text).toContain('1 (7d)');
+    expect(text).toContain('Latency p50/p95: 15s / 45s');
+  });
+
+  it('shows negative score with minus sign', async () => {
+    fs.writeFileSync(path.join(ipcDir, 'metrics-snapshot.json'), JSON.stringify({
+      ts: Date.now(),
+      bot: { score: { day1: -2, day7: -5 }, crashes: { day1: 1, day7: 3 } },
+    }));
+    const handlers = setupTools(ipcDir, sessionDir);
+    const text = await callGetMetrics(handlers);
+    expect(text).toContain('Score: -2 (1d)');
+    expect(text).toContain('-5 (7d)');
+  });
+
+  it('shows latency unavailable when bot has no latency data', async () => {
+    fs.writeFileSync(path.join(ipcDir, 'metrics-snapshot.json'), JSON.stringify({
+      ts: Date.now(),
+      bot: {
+        score: { day1: 0, day7: 0 },
+        crashes: { day1: 0, day7: 0 },
+      },
+    }));
+    const handlers = setupTools(ipcDir, sessionDir);
+    const text = await callGetMetrics(handlers);
+    expect(text).toContain('Latency: no data');
+  });
+
+  it('shows fleet metrics when present in metrics-snapshot.json', async () => {
+    fs.writeFileSync(path.join(ipcDir, 'metrics-snapshot.json'), JSON.stringify({
+      ts: Date.now(),
+      bot: { score: { day1: 1, day7: 2 }, crashes: { day1: 0, day7: 0 } },
+      fleet: { availability: 100, autonomyScore: { day1: 90, day7: 85 } },
+      operator: { interventions: { day1: 0, day7: 1 }, mtbi: 48 },
+      shipMetrics: { relayRestarts: { day1: 0, day7: 2 } },
+    }));
+    const handlers = setupTools(ipcDir, sessionDir);
+    const text = await callGetMetrics(handlers);
+    expect(text).toContain('Availability: 100%');
+    expect(text).toContain('Autonomy: 90% (1d)');
+    expect(text).toContain('Interventions: 0/day (1d)');
+    expect(text).toContain('MTBI: 48h');
+    expect(text).toContain('Relay restarts: 0/day (1d)');
+  });
+
+  it('shows bot metrics not available when bot field missing from snapshot', async () => {
+    fs.writeFileSync(path.join(ipcDir, 'metrics-snapshot.json'), JSON.stringify({
+      ts: Date.now(),
+      fleet: { availability: 100, autonomyScore: { day1: 100, day7: 100 } },
+    }));
+    const handlers = setupTools(ipcDir, sessionDir);
+    const text = await callGetMetrics(handlers);
+    expect(text).toContain('Bot metrics: not yet available from relay.');
+  });
 });
