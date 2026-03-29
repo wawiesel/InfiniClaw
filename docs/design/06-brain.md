@@ -29,7 +29,8 @@ An interactive `claude` process that forks from the main brain's session and wor
 - **Model selection** — the bot chooses from its configured branch models (e.g. main=haiku, branch=[haiku, sonnet]).
 - **No nested branching** — a branch brain should not branch again (enforced by prompt instruction; see issue #25 for programmatic enforcement).
 - **Delayed main assimilation** — the main brain does not receive thread context while the branch is running.
-- **Merge closes thread** — when work completes, the branch posts a merge marker (`🪾`) at thread end, injects its final summary into main brain history, and the thread becomes closed. New posts in that thread receive a loudspeaker "thread is closed" response.
+- **Completion signals MB** — when work completes, BB posts a summary callout to MB in the thread. The thread stays open; the branch does **not** auto-merge. BB has a dedicated Matrix account (distinct from MB) precisely so MB can read and converse with it in the thread — identity separation makes the exchange natural and unambiguous.
+- **MB review gate** — MB reviews the thread, can ask questions, and request changes. BB stays live and can respond. Once satisfied, MB posts `{{merge}}` and the relay posts the `🪾` squash summary to the main timeline, injecting the final summary into MB's history and closing the thread. If MB posts `{{abort}}`, the relay posts a cancellation notice and discards the results. New posts in a closed thread receive a loudspeaker "thread is closed" response.
 - **Streaming output** — assistant output is posted into the thread as it arrives, so the Captain can follow progress in real-time.
 
 See [08-threading](08-threading.md) for the branching protocol and implementation.
@@ -80,8 +81,11 @@ The container never sees the raw `BRAIN_*` names — the host maps them in the p
 4. **Branch works** — Give the bot a complex task.
    *Check:* Thread appears in current room, branch brain streams output, main brain stays responsive.
 
-5. **Lobe works** — Bot delegates to a lobe.
+5. **MB review gate** — Let BB finish a task.
+   *Check:* BB posts summary in thread; thread remains open; no `🪾` marker appears until MB sends `{{merge}}`.
+
+6. **Lobe works** — Bot delegates to a lobe.
    *Check:* Thread appears in quarters. Summary posted to quarters timeline on completion.
 
-6. **No nested branching** — Branch brain attempts to branch.
+7. **No nested branching** — Branch brain attempts to branch.
    *Check:* Branch is rejected or not offered.
