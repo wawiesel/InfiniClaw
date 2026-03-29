@@ -942,6 +942,10 @@ async function relayMatrixLogin(homeserver: string, username: string, password: 
 
 /** Send a message to a room (plain or threaded). */
 async function relaySend(homeserver: string, token: string, roomId: string, text: string, threadRootId?: string): Promise<string | undefined> {
+  if (text.trim().toLowerCase() === 'no response needed.') {
+    log(`relaySend: suppressed "No response needed." message to ${roomId}`);
+    return undefined;
+  }
   return matrixSend({ homeserver, token, roomId, text, threadRootId, log });
 }
 
