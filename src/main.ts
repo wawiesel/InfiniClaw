@@ -757,7 +757,7 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
     }
   }
   const now = Date.now();
-  const inThread = Boolean(progressToolCallThreadIds[ctx.chatJid] ?? activeReplyThreadIds[ctx.chatJid]);
+  const inThread = Boolean(activeReplyThreadIds[ctx.chatJid]);
   if (isToolCall || inThread || !lastProgressChatAt[ctx.chatJid] || now - lastProgressChatAt[ctx.chatJid] >= PROGRESS_CHAT_COOLDOWN_MS) {
     if (!isToolCall && !inThread) lastProgressChatAt[ctx.chatJid] = now;
     const ch = findChannel(channels, ctx.chatJid);
@@ -836,8 +836,8 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
         const stripped = progressSendText.replace(/<[^>]+>/g, '').trim().slice(0, 80);
         if (stripped) lastProgressText[ctx.chatJid] = stripped;
         const formatted = `<small><em>${esc(progressSendText)}</em></small>`;
-        // Route discussion into the tool call thread if one is open; otherwise to reply thread
-        const textThread = progressToolCallThreadIds[ctx.chatJid] ?? activeReplyThreadIds[ctx.chatJid];
+        // Final text always routes to main reply thread — never into the tool call thread
+        const textThread = activeReplyThreadIds[ctx.chatJid];
         threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
         void ch.sendMessage(ctx.chatJid, formatted, textThread).then(() => {
           threadMapLastSeen[`r:${ctx.chatJid}`] = Date.now();
