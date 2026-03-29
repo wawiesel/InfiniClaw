@@ -1208,6 +1208,18 @@ async function syncBotDisplayNames(): Promise<void> {
   }
 }
 
+/** Set the loudspeaker Matrix account display name to 'relay'. */
+async function syncLoudspeakerDisplayName(): Promise<void> {
+  const ls = loadLoudspeakerConfig();
+  if (!ls) return;
+  try {
+    const { accessToken, userId } = await relayMatrixLogin(ls.homeserver, ls.username, ls.password);
+    await matrixSetDisplayName(ls.homeserver, accessToken, userId, 'relay');
+  } catch (err) {
+    log(`syncLoudspeakerDisplayName: ${errStr(err)}`);
+  }
+}
+
 /**
  * Restart all running bots on this ship, preserving their current status.
  * Onduty bots stay onduty, quarters bots stay in quarters. Sleeping bots are skipped.
@@ -5870,6 +5882,7 @@ async function main(): Promise<void> {
 
   // Sync all bot display names to current format
   syncBotDisplayNames().catch((err) => log(`syncBotDisplayNames failed: ${errStr(err)}`));
+  syncLoudspeakerDisplayName().catch((err) => log(`syncLoudspeakerDisplayName failed: ${errStr(err)}`));
 
   // Build userId → botName map for score reaction enrichment
   botUserIdMap = collectBotMatrixUserMap();
