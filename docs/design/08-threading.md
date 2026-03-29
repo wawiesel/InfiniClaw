@@ -82,7 +82,7 @@ Branch brains run as interactive sessions with full context from the main brain:
 - **Forked context** — uses `--continue --fork-session` to inherit the main brain's full conversation history. The BB starts already knowing everything the main brain knows.
 - **Interactive** — stdin stays open. The relay can inject context (main timeline messages) during execution.
 - **Time-limited** — `BRANCH_BRAIN_TIMEOUT_MS` (default 10 min); relay sends interrupt when expired, BB gets ~30s (`BRANCH_BRAIN_FINALIZE_MS`) to finalize before SIGKILL.
-- **Resumable** — session ID stored in `branch-tasks.json` for relay restart recovery.
+- **Resumable** — the BB's actual Claude Code session ID (from `ContainerOutput.newSessionId`) is captured as soon as the BB reports it and stored in the `sessionId` field of the per-thread `BranchTaskEntry` in `_runtime/data/branch-tasks.json` (keyed by thread event ID). Any BB can be resumed after a relay restart via `--resume <sessionId>`.
 
 ### Context Injection
 
