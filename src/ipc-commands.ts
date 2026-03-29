@@ -1168,8 +1168,7 @@ async function handleGdsSubmitEvidence(data: CommandData, ctx: InfiniClawIpcCont
   const result = submitEvidence(state, gateName as any, evidence, tokensUsed, timeElapsedMin);
   if (!result.ok) { await safeSend(ctx, chatJid, `⛔ ${result.error}`); return; }
 
-  // Post evidence as Gitea comment (discussion) + update issue body (pipeline status)
-  await giteaCommentOnIssue(issueNumber, `## Gate: ${gateName}\n\n${evidence}${tokensUsed != null ? `\n\n**Tokens used**: ${tokensUsed}` : ''}${timeElapsedMin != null ? `\n**Time elapsed**: ${timeElapsedMin} min` : ''}`);
+  // Update issue body with pipeline status (evidence is part of the body, not a comment)
   await giteaUpdateIssueBody(issueNumber, formatPipelineStatus(state));
 
   await writeGds(state);

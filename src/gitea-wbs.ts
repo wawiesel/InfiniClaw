@@ -20,16 +20,27 @@ const GITEA_REPO = 'wawiesel/infiniclaw';
 // ── Config ────────────────────────────────────────────────────────────────────
 
 /** Load Gitea admin config from secrets repo. Returns null if not configured. */
-export function loadGiteaAdminConfig(): { url: string; token: string } | null {
+export function loadGiteaAdminConfig(): { url: string; token: string; operatorToken?: string } | null {
   try {
     const secretsPath = loadShipConfig().secretsPath;
     const p = path.join(secretsPath, 'operator', 'gitea.json');
     const data = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>;
     if (typeof data.url === 'string' && typeof data.api_token === 'string' && data.url && data.api_token) {
-      return { url: data.url, token: data.api_token };
+      return {
+        url: data.url,
+        token: data.api_token,
+        operatorToken: typeof data.operator_token === 'string' ? data.operator_token : undefined,
+      };
     }
     return null;
   } catch { return null; }
+}
+
+/** Get the operator token (for issue/comment operations), falling back to admin token. */
+function operatorToken(): { url: string; token: string } | null {
+  const cfg = loadGiteaAdminConfig();
+  if (!cfg) return null;
+  return { url: cfg.url, token: cfg.operatorToken || cfg.token };
 }
 
 function giteaHeaders(token: string): Record<string, string> {
@@ -103,7 +114,7 @@ export async function giteaCloseIssue(issueNumber: number): Promise<void> {
  * Returns the new issue number, or null on failure.
  */
 export async function giteaCreateIssue(title: string, body: string): Promise<number | null> {
-  const gitea = loadGiteaAdminConfig();
+  const gitea = operatorToken();
   if (!gitea) return null;
   try {
     const resp = await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues`, {
@@ -128,7 +139,7 @@ export async function giteaCreateIssue(title: string, body: string): Promise<num
  * Post a comment on a Gitea issue. Returns comment ID or null on failure.
  */
 export async function giteaCommentOnIssue(issueNumber: number, body: string): Promise<number | null> {
-  const gitea = loadGiteaAdminConfig();
+  const gitea = operatorToken();
   if (!gitea) return null;
   try {
     const resp = await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues/${issueNumber}/comments`, {
@@ -153,7 +164,7 @@ export async function giteaCommentOnIssue(issueNumber: number, body: string): Pr
  * Update a Gitea issue body (replace entire body content).
  */
 export async function giteaUpdateIssueBody(issueNumber: number, body: string): Promise<void> {
-  const gitea = loadGiteaAdminConfig();
+  const gitea = operatorToken();
   if (!gitea) return;
   try {
     const resp = await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues/${issueNumber}`, {
@@ -173,7 +184,7 @@ export async function giteaUpdateIssueBody(issueNumber: number, body: string): P
  * Get reactions on a Gitea issue. Returns array of { user: login, content: emoji }.
  */
 export async function giteaGetIssueReactions(issueNumber: number): Promise<{ user: string; content: string }[]> {
-  const gitea = loadGiteaAdminConfig();
+  const gitea = operatorToken();
   if (!gitea) return [];
   try {
     const resp = await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues/${issueNumber}/reactions`, {
@@ -189,7 +200,7 @@ export async function giteaGetIssueReactions(issueNumber: number): Promise<{ use
  * Remove a reaction from a Gitea issue (so it doesn't re-trigger).
  */
 export async function giteaRemoveIssueReaction(issueNumber: number, content: string): Promise<void> {
-  const gitea = loadGiteaAdminConfig();
+  const gitea = operatorToken();
   if (!gitea) return;
   try {
     await fetch(`${gitea.url}/api/v1/repos/${GITEA_REPO}/issues/${issueNumber}/reactions`, {

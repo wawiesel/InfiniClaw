@@ -198,30 +198,30 @@ export function approveGate(
   return { ok: true, advanced: true };
 }
 
-/** Render pipeline status as markdown (for Gitea comments and Matrix). */
+/** Render pipeline status as markdown (for Gitea issue body). */
 export function formatPipelineStatus(state: GdsState): string {
-  const icon = (g: GdsGate) => {
-    if (g.status === 'approved') return '✅';
-    if (g.status === 'inspector_approved') return '🔍';
-    if (g.status === 'pending') return '⏳';
-    return '⬜';
+  const statusLabel = (g: GdsGate) => {
+    if (g.status === 'approved') return '✅ Approved';
+    if (g.status === 'inspector_approved') return '🔍 Inspector approved, awaiting Captain';
+    if (g.status === 'pending') return '⏳ Pending';
+    return '⬜ Blocked';
   };
   const lines = [
-    `## GDS #${state.gitea_issue}: ${state.title}`,
-    `**Engineer**: ${state.engineer} | **Inspector**: ${state.inspector}`,
-    state.wbs_id ? `**WBS**: ${state.wbs_id}` : '',
+    `## Pipeline — GDS #${state.gitea_issue}`,
+    `**Engineer**: ${state.engineer} | **Inspector**: ${state.inspector}${state.wbs_id ? ` | **WBS**: ${state.wbs_id}` : ''}`,
     '',
-    '### Pipeline',
-    ...state.gates.map(g => {
-      let line = `${icon(g)} **${g.name}**`;
-      if (g.tokens_used != null) line += ` · ${g.tokens_used} tokens`;
-      if (g.time_elapsed_min != null) line += ` · ${g.time_elapsed_min}min`;
-      if (g.evidence) line += ` · evidence submitted`;
+    ...state.gates.map((g, i) => {
+      const num = i + 1;
+      let line = `### ${num}. ${g.name} — ${statusLabel(g)}`;
+      const details: string[] = [];
+      if (g.tokens_used != null) details.push(`Tokens: ${g.tokens_used}`);
+      if (g.time_elapsed_min != null) details.push(`Time: ${g.time_elapsed_min}min`);
+      if (g.inspector_approved_at) details.push(`Inspector: ${g.inspector_approved_at.slice(0, 16)}`);
+      if (g.captain_approved_at) details.push(`Captain: ${g.captain_approved_at.slice(0, 16)}`);
+      if (details.length) line += '\n' + details.join(' · ');
       return line;
     }),
-    '',
-    `**Current gate**: ${state.current_gate}`,
-  ].filter(Boolean);
+  ];
   return lines.join('\n');
 }
 
