@@ -21,7 +21,7 @@ async function getS3() {
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export const GATE_NAMES = [
-  'survey', 'estimate', 'artifacts', 'plan_approve',
+  'survey', 'artifacts', 'milestones', 'estimate', 'plan_approve',
   'execute_30', 'execute_60', 'execute_90',
   'demo', 'done',
 ] as const;
