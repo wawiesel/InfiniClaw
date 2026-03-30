@@ -135,9 +135,9 @@ async function withTimeout<T>(
  * display name ("Nora") but in `formatted_body` as an HTML link:
  *   <a href="https://matrix.to/#/@nora-bot:matrix.org">Nora</a>
  *
- * This function wraps mentioned display names in `<m>Name</m>` markers so that
- * the trigger pattern `^<m>Name</m>` can match them, and bots see a consistent
- * mention format in their context.
+ * This function wraps mentioned display names in `{{mention Name}}` signals so
+ * that trigger patterns can match them, and bots see a consistent mention
+ * format in their context.
  */
 export function restoreMentionPrefixes(body: string, formattedBody: string): string {
   // Extract display names from Matrix mention pill links
@@ -151,7 +151,7 @@ export function restoreMentionPrefixes(body: string, formattedBody: string): str
 
   let result = body;
   for (const name of displayNames) {
-    // Wrap bare name or @name in <m> markers. The pill confirms it's an
+    // Wrap bare name or @name in {{mention}} signal. The pill confirms it's an
     // intentional mention, so consume the optional @ prefix. Case-insensitive
     // because body may have lowercase while pill display name is capitalized.
     const escaped = escapeRegex(name);
@@ -162,7 +162,7 @@ export function restoreMentionPrefixes(body: string, formattedBody: string): str
 }
 
 /**
- * Convert raw `@Name` mentions in text to `<m>Name</m>` markers using a
+ * Convert raw `@Name` mentions in text to `{{mention Name}}` signals using a
  * cache of known Matrix display names. This catches mentions typed without
  * a Matrix mention pill (e.g. plain "@Cid" in body text). The match is
  * case-insensitive and uses word boundaries to avoid false matches on
@@ -990,12 +990,12 @@ export class MatrixChannel implements Channel {
       if (msgtype === 'm.text') {
         messageContent = content.body as string;
         // Matrix mention pills appear as bare names in body text.
-        // Wrap them in <m>Name</m> markers using formatted_body so trigger patterns match.
+        // Wrap them in {{mention Name}} signals using formatted_body so trigger patterns match.
         const formattedBody = content.formatted_body as string | undefined;
         if (formattedBody) {
           messageContent = restoreMentionPrefixes(messageContent, formattedBody);
         }
-        // Convert raw @Name mentions to <m>Name</m> — captain and operator only.
+        // Convert raw @Name mentions to {{mention Name}} — captain and operator only.
         // Bots may emit raw @Name in code output; rewriting those would corrupt content.
         if ((CAPTAIN_USER_ID && event.sender === CAPTAIN_USER_ID) ||
             (OPERATOR_USER_ID && event.sender === OPERATOR_USER_ID)) {
@@ -1097,7 +1097,7 @@ export class MatrixChannel implements Channel {
     html = this.pillifyMentions(html);
 
     // Strip mention markers from plaintext body (pills are in formatted_body)
-    const plainBody = normalizedText.replace(/\{\{mention\s+([^}]+)\}\}/gi, '$1').replace(/<m>([^<]+)<\/m>/gi, '$1');
+    const plainBody = normalizedText.replace(/\{\{mention\s+([^}]+)\}\}/gi, '$1');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const msgContent: Record<string, any> = {

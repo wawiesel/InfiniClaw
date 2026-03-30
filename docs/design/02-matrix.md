@@ -185,15 +185,13 @@ Bot outgoing messages are converted from Markdown to Matrix HTML before sending.
 
 ### Mention Pill Symmetry
 
-`<m>Name</m>` is the canonical internal mention format. Conversions are symmetric:
+`{{mention Name}}` is the canonical internal mention format. Conversions are symmetric:
 
-- **Inbound (pill → marker):** Matrix mention pills (`<a href=".../@cid:...">Cid</a>` in `formatted_body`) appear as bare `Cid` in `body`. The host wraps them in `<m>Cid</m>` markers via `restoreMentionPrefixes` so the trigger pattern can match.
-- **Inbound (raw @ → marker, Captain and operator only):** When the Captain or operator types `@Cid` without TAB-completing to a pill, the host converts it via `convertRawMentions` using `\b@name\b` (case-insensitive). Raw `@Name` from bots is NOT converted — it passes through as literal text.
-- **Outbound (marker → pill):** Bots emit `<m>Cid</m>` to request a mention pill. The send pipeline converts it to `<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a>` in `formatted_body` via `pillifyMentions`. Unknown names are stripped to plain text. Raw `@Name` in bot output is left as-is.
+- **Inbound (pill → signal):** Matrix mention pills (`<a href=".../@cid:...">Cid</a>` in `formatted_body`) appear as bare `Cid` in `body`. The host wraps them in `{{mention Cid}}` signals via `restoreMentionPrefixes` so the trigger pattern can match.
+- **Inbound (raw @ → signal, Captain and operator only):** When the Captain or operator types `@Cid` without TAB-completing to a pill, the host converts it via `convertRawMentions` using `\b@name\b` (case-insensitive). Raw `@Name` from bots is NOT converted — it passes through as literal text.
+- **Outbound (signal → pill):** Bots emit `{{mention Cid}}` to request a mention pill. The send pipeline converts it to `<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a>` in `formatted_body` via `pillifyMentions`. Unknown names are stripped to plain text. Raw `@Name` in bot output is left as-is.
 
 Full conversion rules are in [05-bot](05-bot.md#mentions-and-callouts).
-
-> **Migration:** The `<m>Name</m>` syntax is being replaced by the Signals protocol `{{m Name}}` (see [22-signals](22-signals.md)). Double-brace syntax survives Matrix HTML rendering, unlike raw `<m>` tags. The relay will support both during transition.
 
 ## Reactions
 
@@ -228,9 +226,9 @@ Certain `@` mentions trigger system-level behaviors handled by the relay, not by
 
 ### @operator
 
-Mentioning `@operator` requests operator assistance. Currently, only the Captain or operator can trigger tmux routing — by prefixing any message with `@` (e.g. `@some note`). Bots cannot use `<m>operator</m>` to trigger this; no relay scanning for that pattern exists yet.
+Mentioning `@operator` requests operator assistance. Currently, only the Captain or operator can trigger tmux routing — by prefixing any message with `@` (e.g. `@some note`). Bots cannot use `{{mention operator}}` to trigger this; no relay scanning for that pattern exists yet.
 
-> **Planned:** Bot-triggered operator routing — the relay will scan outgoing bot messages for `<m>operator</m>` and deliver the full message context (bot name, room, content) to the operator's tmux session, with ship-scoped routing so bots on HERACLES only wake the HERACLES operator.
+> **Planned:** Bot-triggered operator routing — the relay will scan outgoing bot messages for `{{mention operator}}` and deliver the full message context (bot name, room, content) to the operator's tmux session, with ship-scoped routing so bots on HERACLES only wake the HERACLES operator.
 
 ### @loudspeaker
 
@@ -348,12 +346,12 @@ Chief-only write tools and crew read tools for the room WBS. See [12-co](12-co.m
    - `GET /_matrix/client/v3/rooms/$CHILD_ID/state/m.space.parent/$SPACE_ID` → `{"via": [...], "canonical": true}`
 6. **Power levels** — `GET /_matrix/client/v3/rooms/$ROOM_ID/state/m.room.power_levels/` → captain and operator at 100
 7. **Message round-trip** — Operator posts to a room, reads back via `/messages` → posted message appears
-8. **Inbound pill restoration** — Send a mention pill (`@BotName`) in Matrix. Bot log shows the message with `<m>Name</m>` markers in body.
-   *Check:* Trigger pattern matches via `<m>Name</m>` markers.
-9. **Outbound pill conversion** — Bot sends a message containing `<m>Name</m>` for a known room member. Matrix client shows it as a clickable mention pill.
+8. **Inbound pill restoration** — Send a mention pill (`@BotName`) in Matrix. Bot log shows the message with `{{mention Name}}` signals in body.
+   *Check:* Trigger pattern matches via `{{mention Name}}` signals.
+9. **Outbound pill conversion** — Bot sends a message containing `{{mention Name}}` for a known room member. Matrix client shows it as a clickable mention pill.
    *Check:* `formatted_body` contains `<a href="https://matrix.to/#/@...">Name</a>`.
 10. **@operator wakes operator** — Captain prefixes a message with `@` in any room. Operator tmux session receives the request with context.
-    *Check:* Operator session shows the message; only the bot's ship's operator responds. Note: bot-triggered `<m>operator</m>` routing is not yet implemented (see Special Mentions).
+    *Check:* Operator session shows the message; only the bot's ship's operator responds. Note: bot-triggered `{{mention operator}}` routing is not yet implemented (see Special Mentions).
 11. **@loudspeaker fleet status** — On-duty bot mentions `@loudspeaker` in a room.
     *Check:* Relay responds with fleet status in the same room.
 12. **@loudspeaker broadcast** — On-duty bot sends `@loudspeaker: test message` in Engineering.

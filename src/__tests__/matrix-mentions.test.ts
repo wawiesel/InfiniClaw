@@ -5,7 +5,7 @@ import { restoreMentionPrefixes, pillifyMentions, convertRawMentions } from '../
 // --- restoreMentionPrefixes (inbound: pill → {{mention Name}}) ---
 
 describe('restoreMentionPrefixes', () => {
-  it('wraps mentioned name in <m> markers from a single pill', () => {
+  it('wraps mentioned name in {{mention}} signal from a single pill', () => {
     const body = 'Cid hello';
     const html = '<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a> hello';
     expect(restoreMentionPrefixes(body, html)).toBe('{{mention Cid}} hello');
@@ -19,7 +19,7 @@ describe('restoreMentionPrefixes', () => {
     expect(restoreMentionPrefixes(body, html)).toBe('{{mention Cid}} and {{mention Nora}} please review');
   });
 
-  it('does not double-wrap names already in <m> markers', () => {
+  it('does not double-wrap names already in {{mention}} signals', () => {
     const body = '{{mention Cid}} hello';
     const html = '<a href="https://matrix.to/#/@cid:a-gis.org">Cid</a> hello';
     expect(restoreMentionPrefixes(body, html)).toBe('{{mention Cid}} hello');
@@ -111,12 +111,12 @@ describe('pillifyMentions', () => {
     expect(result).not.toContain('<m>');
   });
 
-  it('does not touch @Name patterns', () => {
+  it('does not touch @Name patterns — only {{mention}} signals', () => {
     const result = pillifyMentions('@Cid hello', cache);
     expect(result).toBe('@Cid hello');
   });
 
-  it('returns text unchanged when no {{mention}} marker present', () => {
+  it('returns text unchanged when no {{mention}} signal present', () => {
     const html = '<p>hello world</p>';
     expect(pillifyMentions(html, cache)).toBe(html);
   });
@@ -212,7 +212,7 @@ describe('convertRawMentions', () => {
     expect(convertRawMentions('email cid@example.com', cache)).toBe('email cid@example.com');
   });
 
-  it('does not double-convert names already in <m> markers', () => {
+  it('does not double-convert names already in {{mention}} signals', () => {
     expect(convertRawMentions('{{mention Cid}} hello', cache)).toBe('{{mention Cid}} hello');
   });
 
