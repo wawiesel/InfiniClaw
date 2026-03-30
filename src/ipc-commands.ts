@@ -1098,6 +1098,29 @@ async function handleAlignmentRun(data: CommandData, ctx: InfiniClawIpcContext):
   }
 }
 
+// ── Token breakdown handler ──────────────────────────────────────────────────
+
+async function handleGetTokenBreakdown(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
+  const chatJid = data.chat_jid as string;
+  const bot = data.bot as string || ASSISTANT_NAME;
+  try {
+    const { aggregateByModel } = await import('./token-log.js');
+    const breakdown = await aggregateByModel(bot, 7 * 86_400_000);
+    if (Object.keys(breakdown).length === 0) {
+      await safeSend(ctx, chatJid, `No token log data for ${bot}.`);
+      return;
+    }
+    const lines = [`**${bot} — token breakdown (7d)**`, ''];
+    for (const [model, v] of Object.entries(breakdown) as [string, {input:number;output:number;cache:number;total:number}][]) {
+      const rate = Math.round(v.total / (7 * 24));
+      lines.push(`**${model}**: ${v.total.toLocaleString()} total (${v.input.toLocaleString()} in / ${v.output.toLocaleString()} out / ${v.cache.toLocaleString()} cache) · ${rate} tok/hr`);
+    }
+    await safeSend(ctx, chatJid, lines.join('\n'));
+  } catch (err) {
+    await safeSend(ctx, chatJid, `Token breakdown failed: ${errStr(err)}`);
+  }
+}
+
 // ── GDS (Gitea Dev System) handlers ──────────────────────────────────────────
 
 async function handleGiteaCreateIssue(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
@@ -1257,6 +1280,9 @@ const COMMAND_HANDLERS: Record<string, CommandHandler> = {
 
   podman_exec: handlePodmanExec,
   alignment_run: handleAlignmentRun,
+
+  // Token log
+  get_token_breakdown: handleGetTokenBreakdown,
 
   // GDS (Gitea Dev System)
   gitea_create_issue: handleGiteaCreateIssue,
