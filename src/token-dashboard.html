@@ -222,8 +222,8 @@ function switchTab(secId,field,mode,btn){
   makePlot(plotDiv.id,plotDiv.dataset.title,JSON.parse(plotDiv.dataset.series),field,mode);
 }
 
-async function load(){
-  const DATA=await fetch(BASE+'/tokens/data.json'+location.search).then(r=>r.json());
+async function load(preloaded){
+  const DATA=preloaded||await fetch(BASE+'/tokens/data.json'+location.search).then(r=>r.json());
   const allKeys=Object.keys(DATA).filter(k=>!k.startsWith('_'));
   const botKeys=allKeys.filter(k=>!k.startsWith('operator/'));
   const opKeys=allKeys.filter(k=>k.startsWith('operator/'));
@@ -371,12 +371,20 @@ async function load(){
   sections.forEach(s=>obs.observe(s));
 }
 load();
-// Auto-refresh: re-fetch data, preserve scroll and tab state
+// Auto-refresh: only re-render if data changed
 const REFRESH_MS=__REFRESH_MS__;
-if(REFRESH_MS>0)setInterval(()=>{
-  const m=document.getElementById('main');
-  const scrollTop=m?m.scrollTop:0;
-  load().then(()=>{if(m)m.scrollTop=scrollTop;});
+let _lastDataHash='';
+if(REFRESH_MS>0)setInterval(async()=>{
+  try{
+    const resp=await fetch(BASE+'/tokens/data.json'+location.search);
+    const text=await resp.text();
+    if(text===_lastDataHash)return;
+    _lastDataHash=text;
+    const m=document.getElementById('main');
+    const scrollTop=m?m.scrollTop:0;
+    await load(JSON.parse(text));
+    if(m)m.scrollTop=scrollTop;
+  }catch{}
 },REFRESH_MS);
 </script>
 </body>
