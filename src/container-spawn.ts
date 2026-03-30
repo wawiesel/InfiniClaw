@@ -412,7 +412,7 @@ export async function runContainerAgent(
   const model = secrets['ANTHROPIC_MODEL'] || secrets['BRAIN_MODEL'] || 'unknown';
   const provider = secrets['ANTHROPIC_BASE_URL'] ? 'ollama' : 'anthropic';
   let lastFlushed = { input: 0, output: 0, cache: 0 };
-  const sessionDir = path.join(GROUPS_DIR.replace('/groups', '/data'), 'sessions', group.folder, '.claude', 'projects');
+  const sessionDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'projects');
   const flushUsage = async () => {
     try {
       if (!fs.existsSync(sessionDir)) return;
