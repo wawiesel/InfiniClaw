@@ -440,7 +440,7 @@ export async function runContainerAgent(
         const { appendTokenUsage } = await import('./token-log.js');
         void appendTokenUsage({ provider, model, bot: botName, input_tokens: di, output_tokens: doo, cache_tokens: dc, timestamp: new Date().toISOString(), group: group.folder });
       }
-    } catch { /* best-effort */ }
+    } catch (err) { logger.warn({ err, sessionDir, botName }, 'token-flush: error'); }
   };
   const usageTimer = setInterval(flushUsage, 30_000);
 
