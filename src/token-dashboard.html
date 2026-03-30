@@ -201,7 +201,9 @@ function makeTable(rows){
   return h+'</table>';
 }
 
+const _tabState={};
 function switchTab(secId,field,mode,btn){
+  _tabState[secId]={field,mode};
   btn.parentElement.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   const sec=document.getElementById(secId);
@@ -331,9 +333,21 @@ async function load(){
   document.getElementById('sidebar').innerHTML=nav;
   document.getElementById('ts').textContent=new Date().toISOString();
 
-  // Render all plots
+  // Render all plots, restoring active tab state from previous render
   document.querySelectorAll('.plot-div').forEach(div=>{
-    makePlot(div.id,div.dataset.title,JSON.parse(div.dataset.series),'total','rate');
+    const sec=div.closest('.section');
+    const state=sec&&_tabState[sec.id];
+    const field=state?state.field:'total';
+    const mode=state?state.mode:'rate';
+    makePlot(div.id,div.dataset.title,JSON.parse(div.dataset.series),field,mode);
+    // Highlight the correct tab button
+    if(state&&sec){
+      const btns=sec.querySelectorAll('.tab-btn');
+      btns.forEach(b=>b.classList.remove('active'));
+      const labels={'total_rate':'Rate','total_cum':'Cumulative','input_rate':'Input','output_rate':'Output','cache_rate':'Cache','cost_rate':'$/hr','cost_cum':'$ Total'};
+      const target=labels[field+'_'+mode];
+      btns.forEach(b=>{if(b.textContent===target)b.classList.add('active');});
+    }
   });
 
   // Sidebar active state on scroll via IntersectionObserver
@@ -351,9 +365,13 @@ async function load(){
   sections.forEach(s=>obs.observe(s));
 }
 load();
-// Auto-refresh: re-fetch data and re-render without losing scroll position
+// Auto-refresh: re-fetch data, preserve scroll and tab state
 const REFRESH_MS=__REFRESH_MS__;
-if(REFRESH_MS>0)setInterval(load,REFRESH_MS);
+if(REFRESH_MS>0)setInterval(()=>{
+  const m=document.getElementById('main');
+  const scrollTop=m?m.scrollTop:0;
+  load().then(()=>{if(m)m.scrollTop=scrollTop;});
+},REFRESH_MS);
 </script>
 </body>
 </html>
