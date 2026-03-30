@@ -5572,6 +5572,20 @@ async function dialtone(conn: RoomConn, captainUserId: string, operatorUserId: s
                     log(`dialtone: closed BB thread reply from ${event.sender} in thread=${relates.event_id.slice(0, 20)}`);
                     void threadReply(conn, relates.event_id, `📢 Thread closed${label} [${relates.event_id}] — branch merged. Start a new branch for follow-up.`);
                   }
+                } else if (!task?.completed && !isRelaySender) {
+                  // Active BB thread: forward non-relay messages to the BB's Claude session.
+                  // This allows Captain/crew to converse with the BB mid-task.
+                  const proc = activeBranchBrainProcs.get(relates.event_id);
+                  if (proc?.stdin && !proc.stdin.destroyed) {
+                    const senderName = senderLocal ? capitalizeName(senderLocal) : event.sender;
+                    const injected = formatContextInjectionMessage(proc.title, `[Thread reply from ${senderName}]: ${body}`);
+                    try {
+                      proc.stdin.write(injected);
+                      log(`bbThreadInject: injected thread reply from ${event.sender} into BB ${proc.title}`);
+                    } catch (e) {
+                      log(`bbThreadInject: failed to inject thread reply: ${errStr(e)}`);
+                    }
+                  }
                 }
               } else if (!isThreadReply) {
                 // Main-timeline message from ANY sender — fan out to all active branch brains.
