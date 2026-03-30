@@ -2287,10 +2287,15 @@ async function handleBbMergeAbort(
     try {
       const { accessToken: opToken } = resolveOperatorConfig();
       if (opToken) {
+        log(`bbMergeAbort: kicking ${bbKickUserId} from ${conn.roomId} (action=${action})`);
         const kicked = await matrixKick(conn.homeserver, opToken, conn.roomId, bbKickUserId, `BB ${action}`);
-        log(`bbMergeAbort: kick ${bbKickUserId} ${kicked ? 'ok' : 'failed'}`);
+        log(`bbMergeAbort: kick ${bbKickUserId} ${kicked ? 'ok' : 'FAILED'}`);
+      } else {
+        log(`bbMergeAbort: no operator token — cannot kick ${bbKickUserId}`);
       }
     } catch (err) { log(`bbMergeAbort: kick failed: ${errStr(err)}`); }
+  } else {
+    log(`bbMergeAbort: no bbKickUserId — poolSlotInfo missing for thread, BB will remain in room`);
   }
 }
 
@@ -3420,16 +3425,21 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
           if (task.poolSlotInfo) {
             try {
               const pi = task.poolSlotInfo;
+              log(`threadStale: leaving room for BB ${pi.userId} slot=${pi.slot} bot=${pi.bot}`);
               const botEnv = loadProfileEnv(resolveRoot(), pi.bot);
               const token = botEnv[`BB_POOL_TOKEN_${pi.slot + 1}`] || '';
               if (token) {
                 const slot: BbPoolSlot = { bot: pi.bot, slot: pi.slot, index: pi.index, userId: pi.userId, accessToken: token, homeserver: pi.homeserver };
-                await leaveBbRoom(slot, roomId).catch(() => {});
-                await resetBbDisplayName(slot).catch(() => {});
+                await leaveBbRoom(slot, roomId).catch((e) => log(`threadStale: leaveBbRoom failed: ${errStr(e)}`));
+                await resetBbDisplayName(slot).catch((e) => log(`threadStale: resetDisplayName failed: ${errStr(e)}`));
+              } else {
+                log(`threadStale: no token for BB_POOL_TOKEN_${pi.slot + 1} — cannot leave room`);
               }
               releaseBbPoolSlot(pi.bot, pi.slot);
               log(`threadStale: pool slot ${pi.slot} released for ${pi.bot}`);
             } catch (err) { log(`threadStale: pool release failed: ${errStr(err)}`); }
+          } else {
+            log(`threadStale: no poolSlotInfo for thread ${threadId.slice(0, 20)} — BB will remain in room`);
           }
           task.completed = true;
           task.staleClosed = true;
