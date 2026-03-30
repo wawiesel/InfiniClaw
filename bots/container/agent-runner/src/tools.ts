@@ -865,13 +865,6 @@ Item fields for upsert:
         lines.push('Token usage: no session data found.');
       }
 
-      // Per-model breakdown from S3 token log
-      try {
-        writeIpcFile(tasksDir, { type: 'get_token_breakdown', bot: botName, chatJid, groupFolder, timestamp: new Date().toISOString() });
-        // Token breakdown is async via IPC — result comes back as a Matrix message
-        lines.push('(Per-model breakdown requested — check next message)');
-      } catch { /* token log not available */ }
-
       // Per-bot and fleet metrics from relay-written snapshot (if available)
       const metricsSnapshotPath = path.join(ipcDir, 'metrics-snapshot.json');
       try {
