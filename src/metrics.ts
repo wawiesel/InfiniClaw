@@ -77,8 +77,8 @@ export interface BotMetrics {
 
 export interface ShipMetrics {
   name: string;
-  /** Relay pm2 uptime in seconds */
-  relayUptimeSeconds: number;
+  /** Relay uptime % from recorded start/stop timestamps (rolling 1d/7d). */
+  relayUptimePct: RollingMetric;
   /** Relay pm2 restart count (rolling 1d/7d) */
   relayRestarts: RollingMetric;
   /** Infra sync/build failures (1d and 7d rolling) */
@@ -191,6 +191,13 @@ const todosSnapshot: Map<string, Map<string, string>> = new Map();
 /** Version deployment events — when a ship started running a new version. */
 const versionDeployEvents: { ts: number; ship: string; version: string }[] = [];
 
+/**
+ * Relay uptime intervals: each entry is a period the relay was running.
+ * Loaded from disk on startup; updated by recordRelayStart/Stop.
+ * `end: null` means the relay is currently running (open interval).
+ */
+const relayUptimeIntervals: { start: number; end: number | null }[] = [];
+
 /** Pending message deliveries — tracks when a message was delivered to a bot's room. */
 const pendingDeliveries: Map<string, number> = new Map();
 
@@ -214,6 +221,111 @@ export function initMetrics(opts: {
   behindTheCurtainRoomId = opts.btcRoomId;
   operatorUserId = opts.operatorUid;
   captainUserId = opts.captainUid;
+}
+
+// ── Relay uptime timestamp tracking ──────────────────────────────────
+
+const UPTIME_FILE_NAME = 'relay-uptime.jsonl';
+
+function relayUptimeFile(): string {
+  return path.join(resolveRoot(), '_runtime', 'data', UPTIME_FILE_NAME);
+}
+
+const UPTIME_RETENTION_MS = 8 * 86_400_000;
+
+/**
+ * Load relay uptime intervals from disk.
+ * Called once on relay startup, before recordRelayStart().
+ * Closes any unclosed interval (relay crashed without a clean stop) by capping
+ * it at the file's mtime — a reasonable proxy for the last time the relay ran.
+ */
+export function loadRelayUptimeHistory(): void {
+  const file = relayUptimeFile();
+  if (!fs.existsSync(file)) return;
+
+  const cutoff = Date.now() - UPTIME_RETENTION_MS;
+  let fileMtime: number;
+  try { fileMtime = fs.statSync(file).mtimeMs; } catch { fileMtime = Date.now(); }
+
+  try {
+    const lines = fs.readFileSync(file, 'utf-8').trim().split('\n').filter(Boolean);
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as { start: number; end: number | null };
+        if (typeof entry.start !== 'number') continue;
+        if (entry.start < cutoff) continue; // too old, skip
+        // Close any unclosed interval using the file's mtime as a best-effort stop time
+        const end = entry.end ?? fileMtime;
+        relayUptimeIntervals.push({ start: entry.start, end });
+      } catch { /* skip malformed lines */ }
+    }
+  } catch (err) {
+    logger.warn({ err: errStr(err) }, 'metrics: failed to load relay uptime history');
+  }
+}
+
+/**
+ * Record that the relay has started.
+ * Opens a new uptime interval and appends it to the persistent log.
+ * Called once after loadRelayUptimeHistory() on relay startup.
+ */
+export function recordRelayStart(ts?: number): void {
+  const start = ts ?? Date.now();
+  relayUptimeIntervals.push({ start, end: null });
+  try {
+    const file = relayUptimeFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify({ start, end: null }) + '\n', 'utf-8');
+  } catch (err) {
+    logger.warn({ err: errStr(err) }, 'metrics: failed to write relay start event');
+  }
+}
+
+/**
+ * Record that the relay is stopping.
+ * Closes the current open interval and rewrites the log with the closed entry.
+ * Called in the relay shutdown handler before process.exit().
+ */
+export function recordRelayStop(ts?: number): void {
+  const end = ts ?? Date.now();
+  let open = -1;
+  for (let i = relayUptimeIntervals.length - 1; i >= 0; i--) {
+    if (relayUptimeIntervals[i].end === null) { open = i; break; }
+  }
+  if (open >= 0) relayUptimeIntervals[open] = { ...relayUptimeIntervals[open], end };
+  persistRelayUptimeIntervals();
+}
+
+function persistRelayUptimeIntervals(): void {
+  try {
+    const file = relayUptimeFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const cutoff = Date.now() - UPTIME_RETENTION_MS;
+    const lines = relayUptimeIntervals
+      .filter(i => i.start >= cutoff)
+      .map(i => JSON.stringify(i))
+      .join('\n');
+    fs.writeFileSync(file, lines ? lines + '\n' : '', 'utf-8');
+  } catch (err) {
+    logger.warn({ err: errStr(err) }, 'metrics: failed to persist relay uptime intervals');
+  }
+}
+
+/**
+ * Compute relay uptime % over a rolling window.
+ * Uses recorded start/stop intervals. Returns 0 if no history.
+ */
+export function computeRelayUptimePct(windowDays: number): number {
+  const now = Date.now();
+  const windowMs = windowDays * 86_400_000;
+  const windowStart = now - windowMs;
+  let uptimeMs = 0;
+  for (const interval of relayUptimeIntervals) {
+    const start = Math.max(interval.start, windowStart);
+    const end = Math.min(interval.end ?? now, now);
+    if (end > start) uptimeMs += end - start;
+  }
+  return Math.min(Math.round((uptimeMs / windowMs) * 100), 100);
 }
 
 /**
@@ -452,6 +564,7 @@ export function resetMetrics(): void {
   taskEvents.length = 0;
   todosSnapshot.clear();
   versionDeployEvents.length = 0;
+  relayUptimeIntervals.length = 0;
   pendingDeliveries.clear();
   behindTheCurtainRoomId = null;
   operatorUserId = null;
@@ -672,7 +785,10 @@ function computeShipMetrics(): ShipMetrics {
     : null;
   return {
     name: thisShipName(),
-    relayUptimeSeconds: relay?.uptimeMs ? Math.round(relay.uptimeMs / 1000) : 0,
+    relayUptimePct: {
+      day1: computeRelayUptimePct(1),
+      day7: computeRelayUptimePct(7),
+    },
     relayRestarts: {
       day1: relay?.restartsSince(1) ?? 0,
       day7: relay?.restartsSince(7) ?? 0,
@@ -901,13 +1017,12 @@ export function formatBotMetrics(b: BotMetrics): string {
 }
 
 export function formatShipMetrics(m: ShipMetrics): string {
-  const uptime = formatDurationMs(m.relayUptimeSeconds * 1000);
   const ships = safeLoadShips();
   const entry = ships[m.name];
   const tag = entry?.emoji ? `${entry.emoji} ${m.name}` : m.name;
   const lines = [
     `**${tag}**`,
-    `  Relay uptime: ${uptime}`,
+    `  Relay uptime: ${fmtRolling(m.relayUptimePct, '%')}`,
     `  Relay restarts: ${fmtRolling(m.relayRestarts)}`,
     `  Sync/build failures: ${fmtRolling(m.infraFailures)}`,
   ];
