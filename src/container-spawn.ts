@@ -8,6 +8,7 @@
  */
 import { ChildProcess } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { parseEnvFile, parseEnvLine } from './env-utils.js';
@@ -411,14 +412,18 @@ export async function runContainerAgent(
   // Reads session JSONL files for usage events. Only reports INCREMENTAL usage
   // by snapshotting current totals before the container starts.
   const botName = (secrets['PERSONA_NAME'] || secrets['ASSISTANT_NAME'] || group.name).toLowerCase();
-  // Read model from bot env file (authoritative) or fall back to secrets/env vars
-  let model = secrets['ANTHROPIC_MODEL'] || secrets['BRAIN_MODEL'] || process.env['ANTHROPIC_MODEL'] || process.env['BRAIN_MODEL'] || 'unknown';
-  try {
-    const { loadShipConfig } = await import('./ship-config.js');
-    const envFile = path.join(loadShipConfig().secretsPath, 'bots', botName, 'env');
-    const m = fs.readFileSync(envFile, 'utf-8').match(/^BRAIN_MODEL=(.+)$/m);
-    if (m) model = m[1].trim();
-  } catch { /* use fallback */ }
+  // Read model: process.env (set by service.ts startup), secrets dict, or bot env file
+  let model = process.env['ANTHROPIC_MODEL'] || secrets['ANTHROPIC_MODEL'] || secrets['BRAIN_MODEL'] || 'unknown';
+  if (model === 'unknown') {
+    // Last resort: read directly from env file
+    for (const base of [process.env['INFINICLAW_SECRETS_PATH'], path.join(os.homedir(), '.config', 'infiniclaw', 'secrets')]) {
+      if (!base) continue;
+      try {
+        const m = fs.readFileSync(path.join(base, 'bots', botName, 'env'), 'utf-8').match(/^BRAIN_MODEL=(.+)$/m);
+        if (m) { model = m[1].trim(); break; }
+      } catch { /* try next */ }
+    }
+  }
   const provider = model.startsWith('qwen') || model.startsWith('parker-') ? 'ollama' : 'anthropic';
   const sessionDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'projects');
   // Snapshot current totals so first flush only reports new usage from this run
