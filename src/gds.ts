@@ -222,13 +222,13 @@ export function buildIssueBody(state: GdsState): string {
 /** @deprecated Use buildIssueBody instead */
 export const formatPipelineStatus = buildIssueBody;
 
-/** Approval reactions (💯, 👍) and rejection reactions (👎, ❌). */
-const APPROVE_REACTIONS = new Set(['+1', 'heart', 'hooray', 'laugh', 'rocket', '100']);
+/** Approval = 👍, rejection = 👎. */
+const APPROVE_REACTIONS = new Set(['+1']);
 const REJECT_REACTIONS = new Set(['-1']);
 
 /**
  * Check Gitea reactions on the current gate's review comment.
- * - 💯/👍 from reviewer → approve gate
+ * - 👍 from reviewer → approve gate
  * - 👎 from reviewer → reject, reset to pending
  * Checks both inspector and captain reactions.
  */

@@ -537,6 +537,8 @@ function computeBotMetrics(): BotMetrics[] {
         day1: readTokenThroughput(botId, 1),
         day7: readTokenThroughput(botId, 7),
       },
+      // Per-model breakdown populated async from token log (see readTokenBreakdownAsync)
+      tokenBreakdown: undefined as Record<string, { input: number; output: number; cache: number; total: number }> | undefined,
       messagesPerDay: rolling(botMessages),
       taskCompletionRate: {
         day1: taskCompletionRateFor(botId, 1),
@@ -1008,4 +1010,12 @@ function getPm2Info(): Pm2Process[] {
 
 function loadFleetBots(): Record<string, BotEntry> {
   try { return loadFleet(); } catch { return {}; }
+}
+
+/** Async per-model token breakdown from the S3 token log. Used by get_metrics MCP and dashboard. */
+export async function readTokenBreakdownAsync(bot: string, windowDays: number): Promise<Record<string, { input: number; output: number; cache: number; total: number }>> {
+  try {
+    const { aggregateByModel } = await import('./token-log.js');
+    return await aggregateByModel(bot, windowDays * 86_400_000);
+  } catch { return {}; }
 }
