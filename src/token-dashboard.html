@@ -339,22 +339,30 @@ async function load(preloaded){
   document.getElementById('sidebar').innerHTML=nav;
   document.getElementById('ts').textContent=new Date().toISOString();
 
-  // Render all plots, restoring active tab state from previous render
-  document.querySelectorAll('.plot-div').forEach(div=>{
+  // Lazy render: only build plots when they scroll into view
+  const renderPlot=(div)=>{
+    if(div.dataset.rendered)return;
+    div.dataset.rendered='1';
     const sec=div.closest('.section');
     const state=sec&&_tabState[sec.id];
     const field=state?state.field:'total';
     const mode=state?state.mode:'rate';
     makePlot(div.id,div.dataset.title,JSON.parse(div.dataset.series),field,mode);
-    // Highlight the correct tab button
     if(state&&sec){
       const btns=sec.querySelectorAll('.tab-btn');
       btns.forEach(b=>b.classList.remove('active'));
-      const labels={'total_rate':'Rate','total_cum':'Cumulative','input_rate':'Input','output_rate':'Output','cache_rate':'Cache','cost_rate':'$/hr','cost_cum':'$ Total'};
+      const labels={'total_rate':'Rate','total_cum':'Cumulative','input_rate':'Input','output_rate':'Output','cache_write_rate':'Cache Write','cache_read_rate':'Cache Read'};
       const target=labels[field+'_'+mode];
       btns.forEach(b=>{if(b.textContent===target)b.classList.add('active');});
     }
-  });
+  };
+  const plotObs=new IntersectionObserver(entries=>{
+    for(const e of entries)if(e.isIntersecting)renderPlot(e.target);
+  },{root:document.getElementById('main'),rootMargin:'200px'});
+  document.querySelectorAll('.plot-div').forEach(div=>plotObs.observe(div));
+  // Render first plot immediately (Fleet)
+  const first=document.querySelector('.plot-div');
+  if(first)renderPlot(first);
 
   // Sidebar active state on scroll via IntersectionObserver
   const sections=document.querySelectorAll('.section');
