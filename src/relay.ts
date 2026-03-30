@@ -3252,10 +3252,11 @@ async function metricsLoop(): Promise<void> {
 
 // ── Token usage flush — scans bot session files, writes incremental usage to S3 ──
 
-// Token flush state: per-file byte offset. Only new bytes are read.
-const TOKEN_STATE_FILE = path.join(process.cwd(), '_runtime', 'data', 'token-flush-offsets.json');
-let _fileOffsets: Record<string, number> = {};
-try { _fileOffsets = JSON.parse(fs.readFileSync(TOKEN_STATE_FILE, 'utf-8')); } catch { /* first run */ }
+// ── Token data collector — watches session files, appends new usage to S3 ──
+//
+// On startup: for each bot, find latest timestamp in S3 store.
+// Read session JSONL files for usage entries newer than that.
+// Append to S3. Then watch files for changes and append new data.
 
 function startTokenFlushWatcher(): void {
   const runtimeDir = path.join(process.cwd(), '_runtime', 'instances');
@@ -3264,7 +3265,7 @@ function startTokenFlushWatcher(): void {
   const debouncedFlush = () => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      flushAllTokenUsage().catch((err) => log(`token-flush: error: ${errStr(err)}`));
+      flushNewTokenData().catch((err) => log(`token-flush: error: ${errStr(err)}`));
     }, 5_000);
   };
   for (const bot of fs.readdirSync(runtimeDir)) {
@@ -3277,24 +3278,40 @@ function startTokenFlushWatcher(): void {
       log(`token-flush: watching ${bot} sessions`);
     } catch { /* skip */ }
   }
+  // Initial sync on startup
   debouncedFlush();
 }
 
-async function flushAllTokenUsage(): Promise<void> {
+/** For each bot: find latest S3 timestamp, extract newer usage from session files, append to S3. */
+async function flushNewTokenData(): Promise<void> {
   const runtimeDir = path.join(process.cwd(), '_runtime', 'instances');
   if (!fs.existsSync(runtimeDir)) return;
-  const { appendTokenUsage } = await import('./token-log.js');
+  const { readTokenUsage, appendTokenUsage } = await import('./token-log.js');
   const fleet = loadFleet();
+
   for (const bot of Object.keys(fleet)) {
     const sessionsDir = path.join(runtimeDir, bot, 'data', 'sessions');
     if (!fs.existsSync(sessionsDir)) continue;
+
+    // 1. Find latest timestamp already in S3
+    let latestS3 = 0;
+    try {
+      const existing = await readTokenUsage(bot, 0);
+      for (const e of existing) {
+        const t = new Date(e.timestamp).getTime();
+        if (t > latestS3) latestS3 = t;
+      }
+    } catch { /* no existing data */ }
+
+    // 2. Read model from env file
     let currentModel = 'unknown';
     try {
       const m = fs.readFileSync(path.join(secretsRepoPath(), 'bots', bot, 'env'), 'utf-8').match(/^BRAIN_MODEL=(.+)$/m);
       if (m) currentModel = m[1].trim();
     } catch { /* */ }
-    // Scan all JSONL files, read only NEW bytes since last offset
-    let ti = 0, to = 0, cw = 0, cr = 0;
+
+    // 3. Scan session files for usage entries with timestamp > latestS3
+    const newEntries: { ts: string; input: number; output: number; cw: number; cr: number; model: string }[] = [];
     for (const group of fs.readdirSync(sessionsDir)) {
       const projDir = path.join(sessionsDir, group, '.claude', 'projects');
       if (!fs.existsSync(projDir)) continue;
@@ -3303,27 +3320,25 @@ async function flushAllTokenUsage(): Promise<void> {
         try { if (!fs.statSync(pp).isDirectory()) continue; } catch { continue; }
         for (const f of fs.readdirSync(pp)) {
           if (!f.endsWith('.jsonl')) continue;
-          const fp = path.join(pp, f);
           try {
-            const stat = fs.statSync(fp);
-            const prevOffset = _fileOffsets[fp] ?? stat.size; // NEW files: start from current size (don't replay history)
-            if (stat.size <= prevOffset) { _fileOffsets[fp] = stat.size; continue; }
-            // Read only new bytes
-            const fd = fs.openSync(fp, 'r');
-            const buf = Buffer.alloc(stat.size - prevOffset);
-            fs.readSync(fd, buf, 0, buf.length, prevOffset);
-            fs.closeSync(fd);
-            _fileOffsets[fp] = stat.size;
-            for (const line of buf.toString('utf-8').split('\n')) {
-              if (!line.trim()) continue;
+            const lines = fs.readFileSync(path.join(pp, f), 'utf-8').split('\n');
+            // Read backwards — stop when we find data older than latestS3
+            for (let i = lines.length - 1; i >= 0; i--) {
+              if (!lines[i].trim()) continue;
               try {
-                const d = JSON.parse(line);
+                const d = JSON.parse(lines[i]);
+                const ts = d.timestamp;
+                if (ts && new Date(ts).getTime() <= latestS3) break; // older data — stop
                 const u = d.message?.usage;
                 if (u) {
-                  ti += u.input_tokens ?? 0;
-                  to += u.output_tokens ?? 0;
-                  cw += u.cache_creation_input_tokens ?? 0;
-                  cr += u.cache_read_input_tokens ?? 0;
+                  const model = d.message?.model || currentModel;
+                  newEntries.push({
+                    ts, model,
+                    input: u.input_tokens ?? 0,
+                    output: u.output_tokens ?? 0,
+                    cw: u.cache_creation_input_tokens ?? 0,
+                    cr: u.cache_read_input_tokens ?? 0,
+                  });
                 }
               } catch { /* skip */ }
             }
@@ -3331,12 +3346,22 @@ async function flushAllTokenUsage(): Promise<void> {
         }
       }
     }
-    if (ti + to + cw + cr > 0) {
-      const provider = currentModel.startsWith('qwen') || currentModel.startsWith('parker-') ? 'ollama' : 'anthropic';
-      await appendTokenUsage({ provider, model: currentModel, bot, input_tokens: ti, output_tokens: to, cache_write_tokens: cw, cache_read_tokens: cr, timestamp: new Date().toISOString(), group: 'all' });
+
+    // 4. Append new entries to S3 (sorted by timestamp)
+    if (newEntries.length > 0) {
+      newEntries.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+      for (const e of newEntries) {
+        const provider = e.model.startsWith('qwen') || e.model.startsWith('parker-') ? 'ollama' : 'anthropic';
+        await appendTokenUsage({
+          provider, model: e.model, bot,
+          input_tokens: e.input, output_tokens: e.output,
+          cache_write_tokens: e.cw, cache_read_tokens: e.cr,
+          timestamp: e.ts, group: 'all',
+        });
+      }
+      log(`token-flush: ${bot} +${newEntries.length} entries (model=${currentModel})`);
     }
   }
-  try { fs.mkdirSync(path.dirname(TOKEN_STATE_FILE), { recursive: true }); fs.writeFileSync(TOKEN_STATE_FILE, JSON.stringify(_fileOffsets)); } catch { /* */ }
 }
 
 
