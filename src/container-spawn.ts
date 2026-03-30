@@ -8,6 +8,7 @@
  */
 import { ChildProcess } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { parseEnvFile, parseEnvLine } from './env-utils.js';
@@ -407,12 +408,49 @@ export async function runContainerAgent(
     group: group.name, containerName, runtime: 'podman', mountCount: mounts.length, isMain: input.isMain,
   }, 'Spawning container agent');
 
-  // Live token usage: flush to S3 every 30s during the container run
+  // Live token usage: flush to S3 every 30s during the container run.
+  // Reads session JSONL files for usage events. Only reports INCREMENTAL usage
+  // by snapshotting current totals before the container starts.
   const botName = (secrets['PERSONA_NAME'] || secrets['ASSISTANT_NAME'] || group.name).toLowerCase();
-  const model = secrets['ANTHROPIC_MODEL'] || secrets['BRAIN_MODEL'] || 'unknown';
-  const provider = secrets['ANTHROPIC_BASE_URL'] ? 'ollama' : 'anthropic';
-  let lastFlushed = { input: 0, output: 0, cache: 0 };
+  // Read model: process.env (set by service.ts startup), secrets dict, or bot env file
+  let model = process.env['ANTHROPIC_MODEL'] || secrets['ANTHROPIC_MODEL'] || secrets['BRAIN_MODEL'] || 'unknown';
+  if (model === 'unknown') {
+    // Last resort: read directly from env file
+    for (const base of [process.env['INFINICLAW_SECRETS_PATH'], path.join(os.homedir(), '.config', 'infiniclaw', 'secrets')]) {
+      if (!base) continue;
+      try {
+        const m = fs.readFileSync(path.join(base, 'bots', botName, 'env'), 'utf-8').match(/^BRAIN_MODEL=(.+)$/m);
+        if (m) { model = m[1].trim(); break; }
+      } catch { /* try next */ }
+    }
+  }
+  const provider = model.startsWith('qwen') || model.startsWith('parker-') ? 'ollama' : 'anthropic';
   const sessionDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'projects');
+  // Snapshot current totals so first flush only reports new usage from this run
+  const lastFlushed = { input: 0, output: 0, cache: 0 };
+  try {
+    if (fs.existsSync(sessionDir)) {
+      for (const pd of fs.readdirSync(sessionDir)) {
+        const pp = path.join(sessionDir, pd);
+        try { if (!fs.statSync(pp).isDirectory()) continue; } catch { continue; }
+        for (const f of fs.readdirSync(pp)) {
+          if (!f.endsWith('.jsonl')) continue;
+          try {
+            for (const line of fs.readFileSync(path.join(pp, f), 'utf-8').split('\n')) {
+              if (!line.trim()) continue;
+              try {
+                const d = JSON.parse(line) as { message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } } };
+                const u = d.message?.usage; if (!u) continue;
+                lastFlushed.input += u.input_tokens ?? 0;
+                lastFlushed.output += u.output_tokens ?? 0;
+                lastFlushed.cache += (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+              } catch { /* skip */ }
+            }
+          } catch { /* skip */ }
+        }
+      }
+    }
+  } catch { /* best-effort */ }
   const flushUsage = async () => {
     try {
       if (!fs.existsSync(sessionDir)) return;
@@ -436,7 +474,7 @@ export async function runContainerAgent(
       }
       const di = ti - lastFlushed.input, doo = to - lastFlushed.output, dc = tc - lastFlushed.cache;
       if (di + doo + dc > 0) {
-        lastFlushed = { input: ti, output: to, cache: tc };
+        lastFlushed.input = ti; lastFlushed.output = to; lastFlushed.cache = tc;
         const { appendTokenUsage } = await import('./token-log.js');
         void appendTokenUsage({ provider, model, bot: botName, input_tokens: di, output_tokens: doo, cache_tokens: dc, timestamp: new Date().toISOString(), group: group.folder });
       }
