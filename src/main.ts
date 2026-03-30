@@ -1344,6 +1344,55 @@ async function runAgent(
     }, MAIN_BRAIN_TURN_TIMEOUT_MS);
   }
 
+  // Live token usage reporting: flush usage to S3 every 30s during container run
+  let usageFlushTimer: ReturnType<typeof setInterval> | null = null;
+  let lastFlushedUsage = { input: 0, output: 0, cache: 0 };
+  const flushUsage = () => {
+    try {
+      const model = process.env.ANTHROPIC_MODEL || process.env.BRAIN_MODEL || 'unknown';
+      const baseUrl = process.env.ANTHROPIC_BASE_URL || '';
+      const provider = baseUrl ? 'ollama' : 'anthropic';
+      const projectsBase = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'projects');
+      if (!fs.existsSync(projectsBase)) return;
+      let totalInput = 0, totalOutput = 0, totalCache = 0;
+      for (const projDir of fs.readdirSync(projectsBase)) {
+        const projPath = path.join(projectsBase, projDir);
+        try { if (!fs.statSync(projPath).isDirectory()) continue; } catch { continue; }
+        for (const file of fs.readdirSync(projPath)) {
+          if (!file.endsWith('.jsonl')) continue;
+          try {
+            const content = fs.readFileSync(path.join(projPath, file), 'utf-8');
+            for (const line of content.split('\n')) {
+              if (!line.trim()) continue;
+              try {
+                const d = JSON.parse(line) as { message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } } };
+                const u = d.message?.usage;
+                if (!u) continue;
+                totalInput += u.input_tokens ?? 0;
+                totalOutput += u.output_tokens ?? 0;
+                totalCache += (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+              } catch { /* skip */ }
+            }
+          } catch { /* skip */ }
+        }
+      }
+      // Only write if usage increased since last flush
+      const deltaInput = totalInput - lastFlushedUsage.input;
+      const deltaOutput = totalOutput - lastFlushedUsage.output;
+      const deltaCache = totalCache - lastFlushedUsage.cache;
+      if (deltaInput + deltaOutput + deltaCache > 0) {
+        lastFlushedUsage = { input: totalInput, output: totalOutput, cache: totalCache };
+        void appendTokenUsage({
+          provider, model, bot: ASSISTANT_NAME,
+          input_tokens: deltaInput, output_tokens: deltaOutput, cache_tokens: deltaCache,
+          timestamp: new Date().toISOString(), group: group.folder,
+        });
+        logger.debug({ deltaInput, deltaOutput, deltaCache }, 'token-log: live usage flush');
+      }
+    } catch { /* best-effort */ }
+  };
+  usageFlushTimer = setInterval(flushUsage, 30_000);
+
   try {
     const output = await runContainerAgent(
       group,
@@ -1368,6 +1417,7 @@ async function runAgent(
       wrappedOnOutput,
     );
     if (turnKillTimer) clearTimeout(turnKillTimer);
+    if (usageFlushTimer) { clearInterval(usageFlushTimer); flushUsage(); } // Final flush
 
     if (output.newSessionId && output.status !== 'error') {
       sessions[group.folder] = output.newSessionId;
@@ -1434,6 +1484,7 @@ async function runAgent(
     return { status: 'success' };
   } catch (err) {
     if (turnKillTimer) clearTimeout(turnKillTimer);
+    if (usageFlushTimer) { clearInterval(usageFlushTimer); flushUsage(); }
     logger.error({ group: group.name, err }, 'Agent error');
     return { status: 'error', error: errStr(err) };
   }
