@@ -93,7 +93,7 @@ function splineRate(cumSeries){
   return cumSeries.map(p=>({
     ha:Math.max(0.01,(now-p.t)/3600000),
     cum:sp.eval(p.t),
-    rate:sp.deriv(p.t)*3600000,
+    rate:Math.max(0,sp.deriv(p.t)*3600000),
     model:p.model||'?',
     dt:new Date(p.t)
   }));
