@@ -3278,8 +3278,8 @@ function startTokenFlushWatcher(): void {
       log(`token-flush: watching ${bot} sessions`);
     } catch { /* skip unreadable dirs */ }
   }
-  // Also flush once on startup after a delay
-  setTimeout(debouncedFlush, 30_000);
+  // Flush once on startup
+  debouncedFlush();
 }
 
 async function flushAllTokenUsage(): Promise<void> {
