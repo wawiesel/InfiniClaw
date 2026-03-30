@@ -14,6 +14,7 @@ import { resolveRoot } from './service.js';
 import { loadKpiConfig, computeBotKpi, kpiBadge } from './kpi.js';
 
 const PORT = parseInt(process.env['FLEET_DASHBOARD_PORT'] || '3080', 10);
+const tokenDataCache = new Map<string, { ts: number; data: string }>();
 const REFRESH_MS = parseInt(process.env['FLEET_DASHBOARD_REFRESH_MS'] || '7000', 10);
 const BASE = '/infiniclaw/fleet/ic01';
 const SIGNAL_DIR = path.join(resolveRoot(), 'bots/trader/parker/signal');
@@ -550,6 +551,14 @@ const server = http.createServer((req, res) => {
   }
 
   if (url === `${BASE}/tokens/data.json`) {
+    // Cache response for 10s to avoid hammering S3 on 7s auto-refresh
+    const cacheKey = req.url || '';
+    const cached = tokenDataCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < 10_000) {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+      res.end(cached.data);
+      return;
+    }
     const isTest = (req.url || '').includes('test=1') || (req.url || '').includes('test=verify');
     const isVerify = (req.url || '').includes('test=verify');
     void (async () => {
@@ -635,7 +644,9 @@ const server = http.createServer((req, res) => {
         }
         (result as Record<string, unknown>)._pricing = MODEL_PRICING;
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
-        res.end(JSON.stringify(result));
+        const json = JSON.stringify(result);
+        tokenDataCache.set(cacheKey, { ts: Date.now(), data: json });
+        res.end(json);
       } catch (err) {
         res.writeHead(500);
         res.end(JSON.stringify({ error: String(err) }));

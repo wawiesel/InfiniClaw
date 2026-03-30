@@ -3282,6 +3282,10 @@ function startTokenFlushWatcher(): void {
   debouncedFlush();
 }
 
+// Per-bot latest S3 timestamp — loaded once on startup, updated on each flush
+const _latestS3: Record<string, number> = {};
+let _latestS3Loaded = false;
+
 /** For each bot: find latest S3 timestamp, extract newer usage from session files, append to S3. */
 async function flushNewTokenData(): Promise<void> {
   const runtimeDir = path.join(process.cwd(), '_runtime', 'instances');
@@ -3289,19 +3293,24 @@ async function flushNewTokenData(): Promise<void> {
   const { readTokenUsage, appendTokenUsage } = await import('./token-log.js');
   const fleet = loadFleet();
 
+  // Load latest S3 timestamps once on first run
+  if (!_latestS3Loaded) {
+    _latestS3Loaded = true;
+    for (const bot of Object.keys(fleet)) {
+      try {
+        const existing = await readTokenUsage(bot, 0);
+        for (const e of existing) {
+          const t = new Date(e.timestamp).getTime();
+          if (t > (_latestS3[bot] || 0)) _latestS3[bot] = t;
+        }
+      } catch { /* */ }
+    }
+  }
+
   for (const bot of Object.keys(fleet)) {
     const sessionsDir = path.join(runtimeDir, bot, 'data', 'sessions');
     if (!fs.existsSync(sessionsDir)) continue;
-
-    // 1. Find latest timestamp already in S3
-    let latestS3 = 0;
-    try {
-      const existing = await readTokenUsage(bot, 0);
-      for (const e of existing) {
-        const t = new Date(e.timestamp).getTime();
-        if (t > latestS3) latestS3 = t;
-      }
-    } catch { /* no existing data */ }
+    const latestS3 = _latestS3[bot] || 0;
 
     // 2. Read model from env file
     let currentModel = 'unknown';
@@ -3347,7 +3356,7 @@ async function flushNewTokenData(): Promise<void> {
       }
     }
 
-    // 4. Append new entries to S3 (sorted by timestamp)
+    // 4. Append new entries to S3 (one per usage event, with event's own timestamp)
     if (newEntries.length > 0) {
       newEntries.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
       for (const e of newEntries) {
@@ -3358,6 +3367,8 @@ async function flushNewTokenData(): Promise<void> {
           cache_write_tokens: e.cw, cache_read_tokens: e.cr,
           timestamp: e.ts, group: 'all',
         });
+        const t = new Date(e.ts).getTime();
+        if (t > (_latestS3[bot] || 0)) _latestS3[bot] = t;
       }
       log(`token-flush: ${bot} +${newEntries.length} entries (model=${currentModel})`);
     }
