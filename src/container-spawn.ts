@@ -407,12 +407,49 @@ export async function runContainerAgent(
     group: group.name, containerName, runtime: 'podman', mountCount: mounts.length, isMain: input.isMain,
   }, 'Spawning container agent');
 
+  // Live token usage: flush to S3 every 30s during the container run
+  const botName = (secrets['PERSONA_NAME'] || secrets['ASSISTANT_NAME'] || group.name).toLowerCase();
+  const model = secrets['ANTHROPIC_MODEL'] || secrets['BRAIN_MODEL'] || 'unknown';
+  const provider = secrets['ANTHROPIC_BASE_URL'] ? 'ollama' : 'anthropic';
+  let lastFlushed = { input: 0, output: 0, cache: 0 };
+  const sessionDir = path.join(GROUPS_DIR.replace('/groups', '/data'), 'sessions', group.folder, '.claude', 'projects');
+  const flushUsage = async () => {
+    try {
+      if (!fs.existsSync(sessionDir)) return;
+      let ti = 0, to = 0, tc = 0;
+      for (const pd of fs.readdirSync(sessionDir)) {
+        const pp = path.join(sessionDir, pd);
+        try { if (!fs.statSync(pp).isDirectory()) continue; } catch { continue; }
+        for (const f of fs.readdirSync(pp)) {
+          if (!f.endsWith('.jsonl')) continue;
+          try {
+            for (const line of fs.readFileSync(path.join(pp, f), 'utf-8').split('\n')) {
+              if (!line.trim()) continue;
+              try {
+                const d = JSON.parse(line) as { message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } } };
+                const u = d.message?.usage; if (!u) continue;
+                ti += u.input_tokens ?? 0; to += u.output_tokens ?? 0; tc += (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+              } catch { /* skip */ }
+            }
+          } catch { /* skip */ }
+        }
+      }
+      const di = ti - lastFlushed.input, doo = to - lastFlushed.output, dc = tc - lastFlushed.cache;
+      if (di + doo + dc > 0) {
+        lastFlushed = { input: ti, output: to, cache: tc };
+        const { appendTokenUsage } = await import('./token-log.js');
+        void appendTokenUsage({ provider, model, bot: botName, input_tokens: di, output_tokens: doo, cache_tokens: dc, timestamp: new Date().toISOString(), group: group.folder });
+      }
+    } catch { /* best-effort */ }
+  };
+  const usageTimer = setInterval(flushUsage, 30_000);
+
   // Delegate to run loop
   const mountFmt = (detail: boolean) => mounts.map(
     (m) => detail ? `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}` : `${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
   );
 
-  return runContainer({
+  const result = await runContainer({
     runtime: 'podman',
     args: containerArgs,
     stdinData: effectiveInput,
@@ -434,6 +471,9 @@ export async function runContainerAgent(
     maxErrorStderrChars: 0,
     firstOutputDeadlineMs: 300_000,
   });
+  clearInterval(usageTimer);
+  await flushUsage(); // Final flush on exit
+  return result;
 }
 
 // ── Branch Brain spawn ───────────────────────────────────────────────

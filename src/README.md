@@ -198,4 +198,4 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 >>>>>>> 81ed2749 (feat: token burn rate via cumulative derivative, spline-smoothed, model-colored segments)
 =======
 >>>>>>> fb54a021 (feat: per-model token breakdown in get_metrics MCP + readTokenBreakdownAsync)
-<!-- auto-updated: 2026-03-30T04:50:32Z -->
+<!-- auto-updated: 2026-03-30T04:53:23Z -->
