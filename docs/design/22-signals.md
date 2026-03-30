@@ -150,7 +150,7 @@ The bot sees this in its room context, learns the signal was bad, and can retry 
 
 | Old | New |
 |-----|-----|
-| `<m>Tali</m>` | `{{m Tali}}` |
+| `<m>Tali</m>` (removed) | `{{mention Tali}}` |
 | `set_thread(id)` | `{{send thread="id"}}` |
 | `send_message(text, recipient)` | `{{send room="recipient"}} text` |
 | No audit trail | `{{1 2}}` S3-linked audit |

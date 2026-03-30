@@ -45,7 +45,7 @@ A bot in its quarters room is a **primary** — it owns the room. Trigger behavi
 | Status | triggerType | Responds to |
 |--------|------------|-------------|
 | `quarters` (awake) | `always` | Anyone — every message triggers |
-| `onduty` | `callout` | Explicit `<m>Name</m>`, participating thread, or Chief fallback |
+| `onduty` | `callout` | Explicit `{{mention Name}}`, participating thread, or Chief fallback |
 | `sleep` | `never` | Nothing — but captain/operator mentions auto-wake |
 
 When a sleeping bot receives a captain/operator mention, the relay auto-wakes it (transitions `sleep` → `quarters`, `triggerType` → `always`), delivers the message, then the bot stays awake until explicitly put back to sleep.

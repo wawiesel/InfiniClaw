@@ -95,47 +95,47 @@ After `ready`, the Captain issues `!report` to send the bot back on duty, resett
 
 ## Mentions and Callouts
 
-`<m>Name</m>` is the canonical mention format inside the system. Bots read and write it. The trigger pattern matches `<m>name</m>` case-insensitively anywhere in the message.
+`{{mention Name}}` is the canonical mention format inside the system. Bots read and write it. The trigger pattern matches `{{mention name}}` case-insensitively anywhere in the message.
 
 ### How mentions flow
 
 ```
 Matrix user types @Cid (TAB-completes to a mention pill)
   → Matrix sends: body="Cid", formatted_body="<a href='.../@cid:...'>Cid</a>"
-  → Host parses formatted_body, wraps bare name in body → "<m>Cid</m>"
-  → Bot sees: "<m>Cid</m> can you look at this?"
+  → Host parses formatted_body, wraps bare name in body → "{{mention Cid}}"
+  → Bot sees: "{{mention Cid}} can you look at this?"
   → Trigger pattern matches → bot responds
 
-Bot emits: "<m>Norm</m> what do you think?"
-  → Host converts <m>Norm</m> → Matrix mention pill in formatted_body
-  → Host strips <m> markers from plaintext body → "Norm what do you think?"
+Bot emits: "{{mention Norm}} what do you think?"
+  → Host converts {{mention Norm}} → Matrix mention pill in formatted_body
+  → Host strips mention signals from plaintext body → "Norm what do you think?"
   → Matrix client shows: clickable "Norm" pill
 
 Captain types raw @cid (no pill, no TAB)
   → Host detects @cid via \b@name\b (case-insensitive)
-  → Converts in-place to <m>Cid</m>
+  → Converts in-place to {{mention Cid}}
   → Bot sees it the same as a pill mention
 
-Bot emits: @someone (raw, no <m> markers)
+Bot emits: @someone (raw, no {{mention}} signal)
   → NOT converted — passes through as literal text
-  → Use <m>Name</m> to create a pill
+  → Use {{mention Name}} to create a pill
 ```
 
 ### Conversion rules
 
 | Source | Input | Conversion | Output |
 |--------|-------|------------|--------|
-| Matrix pill (any user) | `<a href=".../@cid:...">Cid</a>` | `restoreMentionPrefixes` | `<m>Cid</m>` |
-| Raw `@Name` (Captain/operator) | `@Cid` in body | `convertRawMentions` | `<m>Cid</m>` |
+| Matrix pill (any user) | `<a href=".../@cid:...">Cid</a>` | `restoreMentionPrefixes` | `{{mention Cid}}` |
+| Raw `@Name` (Captain/operator) | `@Cid` in body | `convertRawMentions` | `{{mention Cid}}` |
 | Raw `@Name` (bot or other) | `@Cid` in body | no conversion | `@Cid` (literal) |
-| Bot output `<m>Name</m>` | `<m>Cid</m>` | `pillifyMentions` | Matrix mention pill |
+| Bot output `{{mention Name}}` | `{{mention Cid}}` | `pillifyMentions` | Matrix mention pill |
 | Bot output `@Name` | `@Cid` | no conversion | `@Cid` (literal) |
 
-`convertRawMentions` uses `\b@name\b` (case-insensitive) against all known display names. It skips text already inside `<m>` markers. It only runs on Captain and operator messages — bots that emit raw `@Name` (e.g. in code output) should not have it rewritten.
+`convertRawMentions` uses `\b@name\b` (case-insensitive) against all known display names. It skips text already inside `{{mention}}` signals. It only runs on Captain and operator messages — bots that emit raw `@Name` (e.g. in code output) should not have it rewritten.
 
 ### Resume context
 
-In **resume context** (bot restart), `<m>Name</m>` markers are replaced with `[callout]` to prevent the resume message from falsely re-triggering the bot.
+In **resume context** (bot restart), `{{mention Name}}` signals are replaced with `[callout]` to prevent the resume message from falsely re-triggering the bot.
 
 ## Response Rules
 
@@ -275,7 +275,7 @@ Ships have a `type` field in `ships.json` with associated emoji:
 |------|-------|
 | cruiser | 🛳️ |
 
-> **Status:** Implemented. The `type` and `typeEmoji` fields are parsed from `ships.json`; when absent, ships default to `cruiser` / `🛳️`.
+> **Status:** Ship types are not yet implemented in `ships.json`. Currently all ships are implicitly cruisers.
 
 ### Location Emojis
 
@@ -384,7 +384,7 @@ Response latency is the primary bot metric — it measures whether the main brai
 3. **Hears messages** — Send a message in the room, bot's log shows it received.
    *Check:* Log contains the message content.
 
-4. **Trigger works** — Send `<m>Cid</m> hello` (via mention pill) in the room.
+4. **Trigger works** — Send `{{mention Cid}} hello` (via mention pill) in the room.
    *Check:* Bot processes the message and responds.
 
 5. **Non-trigger adds context** — Send a message without the bot's name.
@@ -402,11 +402,11 @@ Response latency is the primary bot metric — it measures whether the main brai
 9. **Reaction: context delivery** — Send a message the bot hears.
    *Check:* Bot reacts with 👀 (message entered context window).
 
-10. **Reaction: trigger** — Send a `<m>Name</m>` callout.
+10. **Reaction: trigger** — Send a `{{mention Name}}` callout.
     *Check:* Bot reacts with both 👀 and 🔔 (triggered response).
 
 11. **No reactions when asleep** — `!sleep` the bot, send messages.
     *Check:* No 👀 or 🔔 reactions appear on messages sent while sleeping.
 
-12. **Mention-wake** — With bot sleeping, send `<m>Name</m>` callout.
+12. **Mention-wake** — With bot sleeping, send `{{mention Name}}` callout.
     *Check:* Bot wakes, 👀 propagates retroactively to missed messages, 🔔 on the callout message.
