@@ -17,7 +17,7 @@
   .sidebar a{display:block;padding:3px 14px;color:var(--text);text-decoration:none;font-size:11px;border-left:2px solid transparent;cursor:pointer}
   .sidebar a:hover{background:var(--bg);color:var(--blue)}
   .sidebar a.active{color:var(--blue);border-left-color:var(--blue);background:var(--bg)}
-  .main{flex:1;padding:20px;overflow-y:auto;scroll-behavior:smooth}
+  .main{flex:1;padding:20px;overflow-y:auto;scroll-behavior:smooth;scroll-padding-top:20px}
   h1{font-size:16px;color:var(--blue);margin-bottom:16px}
   .section{margin-bottom:32px;scroll-margin-top:12px}
   .section h2{font-size:14px;color:var(--text);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)}
@@ -137,7 +137,7 @@ function procAggregated(botEntryLists,field){
 function fmtAgo(h){return h<1?~~(h*60)+'m':h<24?~~h+'h':(h/24).toFixed(1)+'d';}
 function fmtNum(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':n.toLocaleString();}
 
-const TICKS=[0.05,0.1,0.25,0.5,1,2,4,8,12,24,48];
+const TICKS=[0.05,0.1,0.25,0.5,1,2,4,8,12,24,48,96,168];
 
 function makePlot(divId,title,seriesMap,field,mode){
   const traces=[];
@@ -183,12 +183,12 @@ function makePlot(divId,title,seriesMap,field,mode){
   Plotly.newPlot(divId,traces,{
     title:{text:title,font:{color:'#e6edf3',size:13},x:0.02,xanchor:'left',y:0.95,yanchor:'top'},
     paper_bgcolor:'#161b22',plot_bgcolor:'#0d1117',font:{color:'#8b949e',size:10},
-    xaxis:{type:'log',autorange:'reversed',gridcolor:'#21262d',linecolor:'#30363d',tickvals:TICKS,ticktext:TICKS.map(fmtAgo),title:{text:'\u2190 past \u00b7 now \u2192',font:{size:9}}},
+    xaxis:{type:'log',range:[Math.log10(168),Math.log10(0.01)],gridcolor:'#21262d',linecolor:'#30363d',tickvals:TICKS,ticktext:TICKS.map(fmtAgo),title:{text:'\u2190 past \u00b7 now \u2192',font:{size:9}}},
     yaxis:{gridcolor:'#21262d',linecolor:'#30363d',title:{text:yTitle},rangemode:'tozero',side:'left'},
     yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent',title:{text:y2Title},rangemode:'tozero',tickprefix:'$',showgrid:false},
     height:240,margin:{t:35,b:55,l:65,r:65},hovermode:'x unified',
     legend:{orientation:'h',y:-0.3,font:{size:9}},annotations:ann
-  },{responsive:true,scrollZoom:true,displayModeBar:true,modeBarButtonsToRemove:['lasso2d','select2d']});
+  },{responsive:true,scrollZoom:true,displayModeBar:true,modeBarButtonsToRemove:['lasso2d','select2d','toImage']});
 }
 
 function makeTable(rows){
@@ -319,10 +319,8 @@ async function load(){
     const d=DATA[bot];
     const id='sec-bot-'+bot;
     nav+=`<a href="#${id}" data-sec="${id}">${bot}</a>`;
-    const byModel={};
-    for(const e of d.entries){const m=e.model||'?';if(!byModel[m])byModel[m]=[];byModel[m].push(e);}
     const series={};
-    for(const[m,entries]of Object.entries(byModel))series[m]={entries,color:MC[m]||DC};
+    series[bot]={entries:d.entries,color:MC[d.entries[0]?.model]||DC};
     const tbl=Object.entries(d.aggregate).map(([m,v])=>({n:m,i:v.input,o:v.output,c:v.cache,t:v.total,cost:v.cost||0}));
     html+=`<div class="section" id="${id}"><h2>${bot} <span class="muted">${d.ship||''} · ${d.role||''}</span></h2>${tabsHtml(id)}
       <div class="card"><div id="plot-${id}" class="plot-div" data-title="${bot}" data-series='${JSON.stringify(series)}'></div></div>

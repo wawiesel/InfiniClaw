@@ -76,6 +76,9 @@ export async function readTokenUsage(bot: string, windowMs: number): Promise<Tok
       try {
         const entry = JSON.parse(line) as TokenUsageEntry;
         if (new Date(entry.timestamp).getTime() >= cutoff) {
+          // Skip corrupt entries from relay restart flush (entire cumulative dumped as delta)
+          const total = (entry.input_tokens || 0) + (entry.output_tokens || 0) + (entry.cache_tokens || 0);
+          if (total > 5_000_000) continue;
           entries.push(entry);
         }
       } catch { /* skip bad lines */ }
