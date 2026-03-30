@@ -2287,15 +2287,10 @@ async function handleBbMergeAbort(
     try {
       const { accessToken: opToken } = resolveOperatorConfig();
       if (opToken) {
-        log(`bbMergeAbort: kicking ${bbKickUserId} from ${conn.roomId} (action=${action})`);
         const kicked = await matrixKick(conn.homeserver, opToken, conn.roomId, bbKickUserId, `BB ${action}`);
-        log(`bbMergeAbort: kick ${bbKickUserId} ${kicked ? 'ok' : 'FAILED'}`);
-      } else {
-        log(`bbMergeAbort: no operator token — cannot kick ${bbKickUserId}`);
+        log(`bbMergeAbort: kick ${bbKickUserId} ${kicked ? 'ok' : 'failed'}`);
       }
     } catch (err) { log(`bbMergeAbort: kick failed: ${errStr(err)}`); }
-  } else {
-    log(`bbMergeAbort: no bbKickUserId — poolSlotInfo missing for thread, BB will remain in room`);
   }
 }
 
@@ -3248,12 +3243,97 @@ async function metricsLoop(): Promise<void> {
     try {
       for (const bot of loadShipConfig().bots) syncTodosMetrics(bot);
       await publishMetrics();
-      // Token usage flushed by container-spawn.ts (every 30s) — no relay-side flush needed
     } catch (err) {
       log(`metrics: publish error: ${errStr(err)}`);
     }
     await sleep(METRICS_INTERVAL);
   }
+}
+
+// ── Token usage flush — scans bot session files, writes incremental usage to S3 ──
+
+const TOKEN_STATE_FILE = path.join(process.cwd(), '_runtime', 'data', 'token-flush-state.json');
+let _tokenState: Record<string, { input: number; output: number; cw: number; cr: number }> = {};
+try { _tokenState = JSON.parse(fs.readFileSync(TOKEN_STATE_FILE, 'utf-8')); } catch { /* first run */ }
+
+/** Watch bot session dirs for changes and flush token usage on write events. */
+function startTokenFlushWatcher(): void {
+  const runtimeDir = path.join(process.cwd(), '_runtime', 'instances');
+  if (!fs.existsSync(runtimeDir)) return;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  const debouncedFlush = () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      flushAllTokenUsage().catch((err) => log(`token-flush: error: ${errStr(err)}`));
+    }, 5_000); // 5s debounce — coalesce rapid writes
+  };
+  // Watch each bot's session dir
+  for (const bot of fs.readdirSync(runtimeDir)) {
+    const sessionsDir = path.join(runtimeDir, bot, 'data', 'sessions');
+    if (!fs.existsSync(sessionsDir)) continue;
+    try {
+      fs.watch(sessionsDir, { recursive: true }, (event) => {
+        if (event === 'change') debouncedFlush();
+      });
+      log(`token-flush: watching ${bot} sessions`);
+    } catch { /* skip unreadable dirs */ }
+  }
+  // Also flush once on startup after a delay
+  setTimeout(debouncedFlush, 30_000);
+}
+
+async function flushAllTokenUsage(): Promise<void> {
+  const runtimeDir = path.join(process.cwd(), '_runtime', 'instances');
+  if (!fs.existsSync(runtimeDir)) return;
+  const { appendTokenUsage } = await import('./token-log.js');
+  const fleet = loadFleet();
+  for (const bot of Object.keys(fleet)) {
+    const sessionsDir = path.join(runtimeDir, bot, 'data', 'sessions');
+    if (!fs.existsSync(sessionsDir)) continue;
+    // Read model from bot env file
+    let currentModel = 'unknown';
+    try {
+      const envFile = path.join(secretsRepoPath(), 'bots', bot, 'env');
+      const m = fs.readFileSync(envFile, 'utf-8').match(/^BRAIN_MODEL=(.+)$/m);
+      if (m) currentModel = m[1].trim();
+    } catch { /* use default */ }
+    let ti = 0, to = 0, cw = 0, cr = 0;
+    for (const group of fs.readdirSync(sessionsDir)) {
+      const projDir = path.join(sessionsDir, group, '.claude', 'projects');
+      if (!fs.existsSync(projDir)) continue;
+      for (const pd of fs.readdirSync(projDir)) {
+        const pp = path.join(projDir, pd);
+        try { if (!fs.statSync(pp).isDirectory()) continue; } catch { continue; }
+        for (const f of fs.readdirSync(pp)) {
+          if (!f.endsWith('.jsonl')) continue;
+          try {
+            for (const line of fs.readFileSync(path.join(pp, f), 'utf-8').split('\n')) {
+              if (!line.trim()) continue;
+              try {
+                const d = JSON.parse(line);
+                const u = d.message?.usage;
+                if (u) {
+                  ti += u.input_tokens ?? 0;
+                  to += u.output_tokens ?? 0;
+                  cw += u.cache_creation_input_tokens ?? 0;
+                  cr += u.cache_read_input_tokens ?? 0;
+                }
+              } catch { /* skip */ }
+            }
+          } catch { /* skip */ }
+        }
+      }
+    }
+    const prev = _tokenState[bot] || { input: 0, output: 0, cw: 0, cr: 0 };
+    const di = ti - prev.input, doo = to - prev.output, dcw = cw - prev.cw, dcr = cr - prev.cr;
+    if (di + doo + dcw + dcr > 0) {
+      _tokenState[bot] = { input: ti, output: to, cw, cr };
+      const provider = currentModel.startsWith('qwen') || currentModel.startsWith('parker-') ? 'ollama' : 'anthropic';
+      await appendTokenUsage({ provider, model: currentModel, bot, input_tokens: di, output_tokens: doo, cache_write_tokens: dcw, cache_read_tokens: dcr, timestamp: new Date().toISOString(), group: 'all' });
+    }
+  }
+  // Persist state to disk so restarts don't re-dump
+  try { fs.mkdirSync(path.dirname(TOKEN_STATE_FILE), { recursive: true }); fs.writeFileSync(TOKEN_STATE_FILE, JSON.stringify(_tokenState)); } catch { /* best-effort */ }
 }
 
 
@@ -3425,21 +3505,16 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
           if (task.poolSlotInfo) {
             try {
               const pi = task.poolSlotInfo;
-              log(`threadStale: leaving room for BB ${pi.userId} slot=${pi.slot} bot=${pi.bot}`);
               const botEnv = loadProfileEnv(resolveRoot(), pi.bot);
               const token = botEnv[`BB_POOL_TOKEN_${pi.slot + 1}`] || '';
               if (token) {
                 const slot: BbPoolSlot = { bot: pi.bot, slot: pi.slot, index: pi.index, userId: pi.userId, accessToken: token, homeserver: pi.homeserver };
-                await leaveBbRoom(slot, roomId).catch((e) => log(`threadStale: leaveBbRoom failed: ${errStr(e)}`));
-                await resetBbDisplayName(slot).catch((e) => log(`threadStale: resetDisplayName failed: ${errStr(e)}`));
-              } else {
-                log(`threadStale: no token for BB_POOL_TOKEN_${pi.slot + 1} — cannot leave room`);
+                await leaveBbRoom(slot, roomId).catch(() => {});
+                await resetBbDisplayName(slot).catch(() => {});
               }
               releaseBbPoolSlot(pi.bot, pi.slot);
               log(`threadStale: pool slot ${pi.slot} released for ${pi.bot}`);
             } catch (err) { log(`threadStale: pool release failed: ${errStr(err)}`); }
-          } else {
-            log(`threadStale: no poolSlotInfo for thread ${threadId.slice(0, 20)} — BB will remain in room`);
           }
           task.completed = true;
           task.staleClosed = true;
@@ -5964,6 +6039,7 @@ async function main(): Promise<void> {
   dutyCycleLoop(conns).catch((err) => log(`duty cycle loop fatal: ${errStr(err)}`));
   curtainLoop(captainUserId).catch((err) => log(`curtain loop fatal: ${errStr(err)}`));
   metricsLoop().catch((err) => log(`metrics loop fatal: ${errStr(err)}`));
+  startTokenFlushWatcher();
   healthWatchdogLoop().catch((err) => log(`health watchdog fatal: ${errStr(err)}`));
 
   await Promise.all(loops);

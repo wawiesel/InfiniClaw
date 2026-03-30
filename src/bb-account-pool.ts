@@ -241,7 +241,6 @@ export async function acquireBbPoolSlot(
 export async function leaveBbRoom(slot: BbPoolSlot, roomId: string): Promise<void> {
   try {
     const encoded = encodeURIComponent(roomId);
-    logger.info({ bot: slot.bot, slot: slot.slot + 1, userId: slot.userId, roomId, hasToken: !!slot.accessToken }, 'BB pool: leaving room');
     await matrixFetch(
       slot.homeserver,
       'POST',
@@ -249,7 +248,7 @@ export async function leaveBbRoom(slot: BbPoolSlot, roomId: string): Promise<voi
       {},
       slot.accessToken,
     );
-    logger.info({ bot: slot.bot, slot: slot.slot + 1, userId: slot.userId, roomId }, 'BB pool: left room OK');
+    logger.info({ bot: slot.bot, slot: slot.slot + 1, userId: slot.userId, roomId }, 'BB pool: left room');
   } catch (err) {
     logger.warn({ err, userId: slot.userId, roomId }, 'BB pool: failed to leave room');
   }

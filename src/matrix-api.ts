@@ -289,7 +289,6 @@ export async function matrixLeave(
   );
   if (!resp.ok) {
     const body = await resp.text();
-    if (process.env['DEBUG_BB_POOL']) console.error(`[matrixLeave] ${resp.status} room=${roomId}: ${body}`);
     if (resp.status === 403 || body.includes('not in room') || body.includes('not a member')) return true;
     return false;
   }
@@ -314,7 +313,6 @@ export async function matrixKick(
   );
   if (!resp.ok) {
     const body = await resp.text();
-    if (process.env['DEBUG_BB_POOL']) console.error(`[matrixKick] ${resp.status} user=${userId} room=${roomId}: ${body}`);
     if (resp.status === 403 || body.includes('not in room') || body.includes('not a member')) return true;
     return false;
   }

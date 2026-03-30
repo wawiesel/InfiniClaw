@@ -618,9 +618,9 @@ const server = http.createServer((req, res) => {
               aggregateByModel(bot, 7 * 86_400_000),
             ]);
             {
-              const entriesWithCost = entries.map((e: { provider: string; model: string; input_tokens: number; output_tokens: number; cache_tokens: number }) => ({
+              const entriesWithCost = entries.map((e) => ({
                 ...e,
-                cost: computeCost(`${e.provider}/${e.model}`, e.input_tokens, e.output_tokens, e.cache_tokens),
+                cost: computeCost(`${e.provider}/${e.model}`, e.input_tokens, e.output_tokens, (e.cache_write_tokens ?? 0) + (e.cache_read_tokens ?? 0) + (e.cache_tokens ?? 0)),
               }));
               const aggWithCost: Record<string, unknown> = {};
               for (const [k, v] of Object.entries(agg)) {

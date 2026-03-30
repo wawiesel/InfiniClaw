@@ -21,7 +21,9 @@ export interface TokenUsageEntry {
   model: string;          // 'claude-sonnet-4-6' | 'qwen3:14b'
   input_tokens: number;
   output_tokens: number;
-  cache_tokens: number;   // cache_creation + cache_read
+  cache_write_tokens: number;  // cache_creation_input_tokens
+  cache_read_tokens: number;   // cache_read_input_tokens
+  cache_tokens?: number;       // legacy: cache_write + cache_read combined
   timestamp: string;      // ISO
   bot: string;
   group?: string;         // 'bazaar' | 'engineering' | 'main'
@@ -98,8 +100,8 @@ export async function aggregateByModel(bot: string, windowMs: number): Promise<R
     if (!result[key]) result[key] = { input: 0, output: 0, cache: 0, total: 0 };
     result[key].input += e.input_tokens;
     result[key].output += e.output_tokens;
-    result[key].cache += e.cache_tokens;
-    result[key].total += e.input_tokens + e.output_tokens + e.cache_tokens;
+    result[key].cache += (e.cache_write_tokens ?? 0) + (e.cache_read_tokens ?? 0) + (e.cache_tokens ?? 0);
+    result[key].total += e.input_tokens + e.output_tokens + (e.cache_write_tokens ?? 0) + (e.cache_read_tokens ?? 0) + (e.cache_tokens ?? 0);
   }
   return result;
 }
@@ -122,7 +124,7 @@ export async function hourlyTokens(bot: string, hours: number): Promise<{ hour: 
   for (const e of entries) {
     const d = new Date(e.timestamp);
     const hourKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}:00Z`;
-    buckets.set(hourKey, (buckets.get(hourKey) ?? 0) + e.input_tokens + e.output_tokens + e.cache_tokens);
+    buckets.set(hourKey, (buckets.get(hourKey) ?? 0) + e.input_tokens + e.output_tokens + (e.cache_write_tokens ?? 0) + (e.cache_read_tokens ?? 0) + (e.cache_tokens ?? 0));
   }
 
   return Array.from(buckets.entries())
