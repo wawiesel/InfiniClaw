@@ -614,7 +614,7 @@ const server = http.createServer((req, res) => {
           // Real data from S3 — always include all bots so page structure renders
           for (const bot of bots) {
             const [entries, agg] = await Promise.all([
-              readTokenUsage(bot, 48 * 3600_000),
+              readTokenUsage(bot, 0), // 0 = all time — never discard data
               aggregateByModel(bot, 7 * 86_400_000),
             ]);
             {
