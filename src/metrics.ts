@@ -882,7 +882,7 @@ export function writeMetricsToGroupIpc(snapshot: MetricsSnapshot): void {
           mtbi: snapshot.operator.mtbi,
         },
         shipMetrics: {
-          relayUptimeSeconds: snapshot.shipMetrics.relayUptimeSeconds,
+          relayUptimePct: snapshot.shipMetrics.relayUptimePct,
           relayRestarts: snapshot.shipMetrics.relayRestarts,
         },
       };

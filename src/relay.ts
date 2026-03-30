@@ -3243,7 +3243,7 @@ async function metricsLoop(): Promise<void> {
     try {
       for (const bot of loadShipConfig().bots) syncTodosMetrics(bot);
       await publishMetrics();
-      await flushAllTokenUsage();
+      // Token usage flushed by container-spawn.ts (every 30s) — no relay-side flush needed
     } catch (err) {
       log(`metrics: publish error: ${errStr(err)}`);
     }
@@ -3251,62 +3251,6 @@ async function metricsLoop(): Promise<void> {
   }
 }
 
-/** Scan all bot session files for token usage and flush incremental data to S3. */
-const _tokenFlushState: Record<string, { input: number; output: number; cache: number }> = {};
-async function flushAllTokenUsage(): Promise<void> {
-  const runtimeDir = path.join(process.cwd(), '_runtime', 'instances');
-  if (!fs.existsSync(runtimeDir)) return;
-  const { appendTokenUsage } = await import('./token-log.js');
-  const fleet = loadFleet();
-  for (const bot of Object.keys(fleet)) {
-    const sessionsDir = path.join(runtimeDir, bot, 'data', 'sessions');
-    if (!fs.existsSync(sessionsDir)) continue;
-    const botEntry = fleet[bot] as { role?: string; activeBrainModel?: string } | undefined;
-    // Read current model from bot's env file (authoritative), not from session data
-    let currentModel = botEntry?.activeBrainModel || 'unknown';
-    try {
-      const envFile = path.join(secretsRepoPath(), 'bots', bot, 'env');
-      const envContent = fs.readFileSync(envFile, 'utf-8');
-      const m = envContent.match(/^BRAIN_MODEL=(.+)$/m);
-      if (m) currentModel = m[1].trim();
-    } catch { /* use fleet default */ }
-    let ti = 0, to = 0, tc = 0, lastTs = '';
-    for (const group of fs.readdirSync(sessionsDir)) {
-      const projDir = path.join(sessionsDir, group, '.claude', 'projects');
-      if (!fs.existsSync(projDir)) continue;
-      for (const pd of fs.readdirSync(projDir)) {
-        const pp = path.join(projDir, pd);
-        try { if (!fs.statSync(pp).isDirectory()) continue; } catch { continue; }
-        for (const f of fs.readdirSync(pp)) {
-          if (!f.endsWith('.jsonl')) continue;
-          try {
-            for (const line of fs.readFileSync(path.join(pp, f), 'utf-8').split('\n')) {
-              if (!line.trim()) continue;
-              try {
-                const d = JSON.parse(line);
-                const u = d.message?.usage;
-                if (u) {
-                  ti += u.input_tokens ?? 0;
-                  to += u.output_tokens ?? 0;
-                  tc += (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
-                }
-                if (d.timestamp) lastTs = d.timestamp;
-              } catch { /* skip */ }
-            }
-          } catch { /* skip */ }
-        }
-      }
-    }
-    const prev = _tokenFlushState[bot] || { input: 0, output: 0, cache: 0 };
-    const di = ti - prev.input, doo = to - prev.output, dc = tc - prev.cache;
-    if (di + doo + dc > 0 && lastTs) {
-      _tokenFlushState[bot] = { input: ti, output: to, cache: tc };
-      const provider = currentModel.startsWith('qwen') || currentModel.startsWith('parker-') ? 'ollama' : 'anthropic';
-      await appendTokenUsage({ provider, model: currentModel, bot, input_tokens: di, output_tokens: doo, cache_tokens: dc, timestamp: new Date().toISOString(), group: 'all' });
-      log(`token-flush: ${bot} +${di}in +${doo}out +${dc}cache (model=${currentModel})`);
-    }
-  }
-}
 
 // ── Heartbeat — nudge idle bots to do autonomous work ──────────────
 
