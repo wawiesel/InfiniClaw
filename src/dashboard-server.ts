@@ -12,8 +12,6 @@ import path from 'path';
 import { getSystemStatus } from './status.js';
 import { resolveRoot } from './service.js';
 import { loadKpiConfig, computeBotKpi, kpiBadge } from './kpi.js';
-import { readTokenUsage, aggregateByModel, hourlyTokens } from './token-log.js';
-import { loadFleet } from './ship-config.js';
 
 const PORT = parseInt(process.env['FLEET_DASHBOARD_PORT'] || '3080', 10);
 const BASE = '/infiniclaw/fleet/ic01';
@@ -81,67 +79,6 @@ function relTime(iso: string | undefined): string {
   if (ms < 60000) return `${Math.floor(ms / 1000)}s ago`;
   if (ms < 3600000) return `${Math.floor(ms / 60000)}m ago`;
   return `${Math.floor(ms / 3600000)}h ago`;
-}
-
-function tokenDashboardHtml(): string {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Token Usage</title>
-<meta http-equiv="refresh" content="60">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{background:#0d1117;color:#c9d1d9;font:14px/1.6 -apple-system,sans-serif;padding:20px}
-  h1{color:#58a6ff;margin-bottom:16px} h2{color:#e6edf3;margin:20px 0 8px}
-  table{border-collapse:collapse;width:100%;margin:8px 0}
-  th,td{border:1px solid #30363d;padding:6px 12px;text-align:right}
-  th{background:#161b22;color:#58a6ff;text-align:left}
-  td:first-child{text-align:left;font-weight:bold}
-  .chart-container{max-width:900px;margin:16px 0}
-  a{color:#58a6ff}
-</style></head><body>
-<h1>Token Usage Dashboard</h1>
-<p><a href="${BASE}">← Fleet Home</a></p>
-<div id="content">Loading...</div>
-<script>
-async function load() {
-  const resp = await fetch('${BASE}/tokens/data.json');
-  const data = await resp.json();
-  const bots = Object.keys(data);
-  if (!bots.length) { document.getElementById('content').innerHTML = '<p>No token data yet.</p>'; return; }
-
-  let html = '<h2>Per-Bot Per-Model (7d)</h2><table><tr><th>Bot</th><th>Provider/Model</th><th>Input</th><th>Output</th><th>Cache</th><th>Total</th></tr>';
-  for (const bot of bots) {
-    for (const [model, v] of Object.entries(data[bot].aggregate)) {
-      html += '<tr><td>'+bot+'</td><td>'+model+'</td><td>'+v.input.toLocaleString()+'</td><td>'+v.output.toLocaleString()+'</td><td>'+v.cache.toLocaleString()+'</td><td>'+v.total.toLocaleString()+'</td></tr>';
-    }
-  }
-  html += '</table>';
-
-  html += '<h2>Tokens/Hour (24h)</h2>';
-  for (const bot of bots) {
-    if (!data[bot].hourly.length) continue;
-    html += '<div class="chart-container"><canvas id="chart-'+bot+'"></canvas></div>';
-  }
-  document.getElementById('content').innerHTML = html;
-
-  for (const bot of bots) {
-    if (!data[bot].hourly.length) continue;
-    new Chart(document.getElementById('chart-'+bot), {
-      type: 'bar',
-      data: {
-        labels: data[bot].hourly.map(h => h.hour.slice(11,16)),
-        datasets: [{label: bot+' tokens/hr', data: data[bot].hourly.map(h => h.tokens),
-          backgroundColor: '#58a6ff80', borderColor: '#58a6ff', borderWidth:1}]
-      },
-      options: {
-        responsive: true,
-        plugins: {title:{display:true,text:bot+' — tokens per hour (24h)',color:'#c9d1d9'}},
-        scales: {y:{beginAtZero:true,ticks:{color:'#8b949e'}},x:{ticks:{color:'#8b949e'}}}
-      }
-    });
-  }
-}
-load();
-</script></body></html>`;
 }
 
 // ── Pages ──────────────────────────────────────────────────────────
@@ -588,38 +525,6 @@ const server = http.createServer((req, res) => {
       res.writeHead(404);
       res.end('chart not found');
     }
-    return;
-  }
-
-  // Token usage dashboard
-  if (url === `${BASE}/tokens`) {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
-    res.end(tokenDashboardHtml());
-    return;
-  }
-
-  if (url === `${BASE}/tokens/data.json`) {
-    void (async () => {
-      try {
-        const fleet = loadFleet();
-        const bots = Object.keys(fleet);
-        const data: Record<string, { aggregate: Record<string, { input: number; output: number; cache: number; total: number }>; hourly: { hour: string; tokens: number }[] }> = {};
-        for (const bot of bots) {
-          const [agg, hourly] = await Promise.all([
-            aggregateByModel(bot, 7 * 86_400_000),
-            hourlyTokens(bot, 24),
-          ]);
-          if (Object.keys(agg).length > 0 || hourly.length > 0) {
-            data[bot] = { aggregate: agg, hourly };
-          }
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
-        res.end(JSON.stringify(data));
-      } catch (err) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: String(err) }));
-      }
-    })();
     return;
   }
 
