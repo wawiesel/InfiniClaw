@@ -14,6 +14,7 @@ import { resolveRoot } from './service.js';
 import { loadKpiConfig, computeBotKpi, kpiBadge } from './kpi.js';
 
 const PORT = parseInt(process.env['FLEET_DASHBOARD_PORT'] || '3080', 10);
+const REFRESH_MS = parseInt(process.env['FLEET_DASHBOARD_REFRESH_MS'] || '7000', 10);
 const BASE = '/infiniclaw/fleet/ic01';
 const SIGNAL_DIR = path.join(resolveRoot(), 'bots/trader/parker/signal');
 
@@ -528,12 +529,338 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Token usage dashboard — served from HTML file with template substitution
+  if (url === `${BASE}/tokens`) {
+    const testMode = (req.url || '').includes('test=');
+    const htmlPath = path.join(path.dirname(new URL(import.meta.url).pathname), 'token-dashboard.html');
+    try {
+      let html = fs.readFileSync(htmlPath, 'utf-8');
+      html = html.replace(/__BASE__/g, BASE);
+      html = html.replace(/__TEST_MODE__/g, String(testMode));
+      html = html.replace(/__TITLE_SUFFIX__/g, testMode ? '(TEST)' : '');
+      html = html.replace(/__REFRESH_MS__/g, String(REFRESH_MS));
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+      res.end(html);
+    } catch {
+      // Fallback to old inline version if HTML file not found
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(tokenDashboardPage(testMode));
+    }
+    return;
+  }
+
+  if (url === `${BASE}/tokens/data.json`) {
+    const isTest = (req.url || '').includes('test=1') || (req.url || '').includes('test=verify');
+    const isVerify = (req.url || '').includes('test=verify');
+    void (async () => {
+      try {
+        const { readTokenUsage, aggregateByModel } = await import('./token-log.js');
+        const { computeCost, MODEL_PRICING } = await import('./token-pricing.js');
+        const { loadFleet, loadShips } = await import('./ship-config.js');
+        const fleet = loadFleet();
+        const ships = loadShips();
+        // Map hostname → ship abbreviation (skip non-ship entries like testbeds)
+        const hostToShip: Record<string, string> = {};
+        for (const [abbr, info] of Object.entries(ships)) {
+          const s = info as { hostname?: string; type?: string; commissioned?: boolean };
+          // Only map commissioned ships or cruiser/destroyer types, not testbeds
+          if (s.hostname && s.type !== 'testbed') hostToShip[s.hostname] = abbr;
+        }
+        const bots = Object.keys(fleet);
+        const result: Record<string, unknown> = {};
+
+        if (isTest) {
+          // Generate synthetic data from actual fleet structure
+          const now = Date.now();
+          const models = ['claude-sonnet-4-6', 'qwen3:14b', 'claude-opus-4-6'];
+          const prices = [[3, 15], [0, 0], [15, 75]];
+          for (const bot of bots) {
+            const botInfo = fleet[bot] as { ship?: string; role?: string; status?: string };
+            const shipAbbr = hostToShip[botInfo?.ship || ''] || botInfo?.ship || 'Unknown';
+            if (isVerify) {
+              // Verify mode: constant rate for all bots
+              const entries = [];
+              for (let i = 0; i < 50; i++) {
+                const h = i * 0.96;
+                entries.push({ timestamp: new Date(now - h * 3600000).toISOString(), model: 'claude-sonnet-4-6', provider: 'anthropic',
+                  input_tokens: 600, output_tokens: 300, cache_tokens: 100, cost: 600 * 3 / 1e6 + 300 * 15 / 1e6, bot, ship: shipAbbr, role: botInfo?.role || 'unknown' });
+              }
+              const agg: Record<string, unknown> = { 'anthropic/claude-sonnet-4-6': { input: 30000, output: 15000, cache: 5000, total: 50000, cost: entries.reduce((s, e) => s + (e.cost || 0), 0) } };
+              result[bot] = { entries, aggregate: agg, ship: shipAbbr, role: botInfo?.role || 'unknown' };
+            } else {
+              // Random test data
+              const entries = [];
+              for (let i = 0; i < 60; i++) {
+                const h = i * 0.8;
+                const mi = h > 30 ? 2 : h > 15 ? 1 : 0;
+                const base = 200 + Math.random() * 1500;
+                const inp = Math.floor(base * 0.6), out = Math.floor(base * 0.3), cch = Math.floor(base * 0.1);
+                const cost = (inp * prices[mi][0] + out * prices[mi][1] + cch * 0.375) / 1e6;
+                entries.push({ timestamp: new Date(now - h * 3600000).toISOString(), model: models[mi], provider: mi === 1 ? 'ollama' : 'anthropic',
+                  input_tokens: inp, output_tokens: out, cache_tokens: cch, cost, bot, ship: shipAbbr, role: botInfo?.role || 'unknown' });
+              }
+              const agg: Record<string, unknown> = {};
+              for (const e of entries) {
+                const k = `${e.provider}/${e.model}`;
+                const a = (agg[k] || { input: 0, output: 0, cache: 0, total: 0, cost: 0 }) as { input: number; output: number; cache: number; total: number; cost: number };
+                a.input += e.input_tokens; a.output += e.output_tokens; a.cache += e.cache_tokens;
+                a.total += e.input_tokens + e.output_tokens + e.cache_tokens; a.cost += e.cost;
+                agg[k] = a;
+              }
+              result[bot] = { entries, aggregate: agg, ship: shipAbbr, role: botInfo?.role || 'unknown' };
+            }
+          }
+        } else {
+          // Real data from S3
+          for (const bot of bots) {
+            const [entries, agg] = await Promise.all([
+              readTokenUsage(bot, 48 * 3600_000),
+              aggregateByModel(bot, 7 * 86_400_000),
+            ]);
+            if (entries.length > 0 || Object.keys(agg).length > 0) {
+              const entriesWithCost = entries.map((e: { provider: string; model: string; input_tokens: number; output_tokens: number; cache_tokens: number }) => ({
+                ...e,
+                cost: computeCost(`${e.provider}/${e.model}`, e.input_tokens, e.output_tokens, e.cache_tokens),
+              }));
+              const aggWithCost: Record<string, unknown> = {};
+              for (const [k, v] of Object.entries(agg)) {
+                const a = v as { input: number; output: number; cache: number; total: number };
+                aggWithCost[k] = { ...a, cost: computeCost(k, a.input, a.output, a.cache) };
+              }
+              const botInfo = fleet[bot] as { ship?: string; role?: string };
+              const shipAbbr = hostToShip[botInfo?.ship || ''] || botInfo?.ship || 'Unknown';
+              result[bot] = { entries: entriesWithCost, aggregate: aggWithCost, ship: shipAbbr, role: botInfo?.role || 'unknown' };
+            }
+          }
+        }
+        (result as Record<string, unknown>)._pricing = MODEL_PRICING;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: String(err) }));
+      }
+    })();
+    return;
+  }
+
   res.writeHead(302, { Location: BASE });
   res.end();
 });
+
+// ── Token Dashboard ──────────────────────────────────────────────────
+
+function tokenDashboardPage(testMode: boolean): string {
+  // NEW hierarchical dashboard — replaces previous implementation
+  const script = `
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+  .tab-bar { display:flex; gap:0; margin-bottom:-1px; position:relative; z-index:1; }
+  .tab-btn { padding:6px 16px; background:var(--bg); border:1px solid var(--border); border-bottom:none;
+    color:var(--muted); cursor:pointer; font:12px/1.5 inherit; border-radius:6px 6px 0 0; }
+  .tab-btn.active { background:var(--surface); color:var(--blue); border-bottom:1px solid var(--surface); }
+</style>
+<script>
+const MC = {'claude-sonnet-4-6':'#58a6ff','claude-opus-4-6':'#bc8cff','qwen3:14b':'#3fb950','qwen3:30b':'#2ea043'};
+const DC = '#8b949e';
+const TEST = ${testMode};
+
+function testData() {
+  const now = Date.now(), entries = [];
+  const M = [{m:'claude-sonnet-4-6',p:'anthropic'},{m:'qwen3:14b',p:'ollama'},{m:'claude-opus-4-6',p:'anthropic'}];
+  for (let i=0;i<120;i++) {
+    const h=i*0.4, mi=h>32?0:h>16?1:2;
+    const b=200+Math.random()*800+(mi===2?400:0);
+    const inp=Math.floor(b*.6),out=Math.floor(b*.3),cch=Math.floor(b*.1);
+    // Pricing: sonnet=$3/$15, qwen=free, opus=$15/$75 per M tokens
+    const prices = {0:[3,15],1:[0,0],2:[15,75]};
+    const cost = (inp*prices[mi][0]+out*prices[mi][1]+cch*0.375)/1e6;
+    entries.push({timestamp:new Date(now-h*3600000).toISOString(),model:M[mi].m,provider:M[mi].p,
+      input_tokens:inp,output_tokens:out,cache_tokens:cch,cost});
+  }
+  return {parker:{entries,aggregate:{'anthropic/claude-sonnet-4-6':{input:28000,output:14000,cache:4000,total:46000,cost:0.30},
+    'ollama/qwen3:14b':{input:12000,output:6000,cache:0,total:18000,cost:0},'anthropic/claude-opus-4-6':{input:20000,output:10000,cache:5000,total:35000,cost:1.05}}}};
+}
+
+function process(entries, field) {
+  // field: 'total'|'input'|'output'|'cache'|'cost'
+  const now = Date.now();
+  const sorted = entries.slice().sort((a,b) => new Date(a.timestamp)-new Date(b.timestamp));
+  if (sorted.length<2) return {cum:[],rate:[]};
+  let cumSum=0;
+  const pts = sorted.map(e => {
+    let v;
+    if (field==='cost') v=e.cost||0;
+    else if (field==='input') v=e.input_tokens||0;
+    else if (field==='output') v=e.output_tokens||0;
+    else if (field==='cache') v=e.cache_tokens||0;
+    else v=(e.input_tokens||0)+(e.output_tokens||0)+(e.cache_tokens||0);
+    cumSum+=v;
+    const hoursAgo = Math.max(0.01, (now-new Date(e.timestamp).getTime())/3600000);
+    return {hoursAgo, cum:cumSum, model:e.model||'unknown', date:new Date(e.timestamp)};
+  });
+  const rate = pts.map((p,i) => {
+    const prev=pts[Math.max(0,i-1)], next=pts[Math.min(pts.length-1,i+1)];
+    const dt=(next.date-prev.date)/3600000;
+    const dy=next.cum-prev.cum;
+    return {...p, rate:dt>0?dy/dt:0};
+  });
+  return {cum:pts, rate};
+}
+
+// Midnight markers for date labels on x-axis
+function midnightAnnotations(maxHoursAgo) {
+  const now = new Date();
+  const annotations = [];
+  // EST offset (-5 or -4 for EDT)
+  const estOff = -5;
+  for (let d=0; d<Math.ceil(maxHoursAgo/24)+1; d++) {
+    const midnight = new Date(now);
+    midnight.setUTCHours(-estOff, 0, 0, 0); // midnight EST in UTC
+    midnight.setUTCDate(midnight.getUTCDate() - d);
+    const hAgo = (now - midnight) / 3600000;
+    if (hAgo > 0 && hAgo < maxHoursAgo) {
+      const label = midnight.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'America/New_York'});
+      annotations.push({x:Math.log10(hAgo),y:0,xref:'x',yref:'paper',text:label,showarrow:false,
+        font:{size:9,color:'#6e7681'},yanchor:'top',yshift:8});
+    }
+  }
+  return annotations;
+}
+
+// Build model-colored segments for a single continuous line
+function modelSegments(pts, yKey) {
+  const traces=[];
+  let s=0;
+  for (let i=1;i<=pts.length;i++) {
+    if (i===pts.length||pts[i].model!==pts[s].model) {
+      const seg=pts.slice(s, Math.min(i+1,pts.length));
+      traces.push({
+        x:seg.map(p=>p.hoursAgo), y:seg.map(p=>Math.round(p[yKey])),
+        customdata:seg.map(p=>p.date.toISOString().slice(0,16).replace('T',' ')),
+        type:'scatter', mode:'lines+markers',
+        line:{color:MC[pts[s].model]||DC, width:2.5, shape:'spline'},
+        marker:{size:4, color:MC[pts[s].model]||DC},
+        name:pts[s].model, showlegend:false,
+        hovertemplate:'%{customdata}<br>'+pts[s].model+': %{y:,.0f}<extra></extra>'
+      });
+      s=i;
+    }
+  }
+  return traces;
+}
+
+function fmtAgo(h) {
+  if (h<1) return Math.round(h*60)+'m ago';
+  if (h<24) return Math.round(h)+'h ago';
+  return (h/24).toFixed(1)+'d ago';
+}
+
+async function load() {
+  const data = TEST ? testData() : await fetch('${BASE}/tokens/data.json').then(r=>r.json());
+  const bots = Object.keys(data);
+  if (!bots.length) { document.getElementById('content').innerHTML='<p>No data.</p>'; return; }
+
+  let html='';
+  const VIEWS = ['total','input','output','cache'];
+  for (const bot of bots) {
+    // Tabs: Rate/Cumulative × Total/Input/Output/Cache
+    html+='<div class="tab-bar">';
+    html+='<button class="tab-btn active" onclick="switchView(\\''+bot+'\\',\\'rate\\',\\'total\\',this)">Total Rate</button>';
+    html+='<button class="tab-btn" onclick="switchView(\\''+bot+'\\',\\'cum\\',\\'total\\',this)">Total Cumulative</button>';
+    html+='<button class="tab-btn" onclick="switchView(\\''+bot+'\\',\\'rate\\',\\'input\\',this)">Input</button>';
+    html+='<button class="tab-btn" onclick="switchView(\\''+bot+'\\',\\'rate\\',\\'output\\',this)">Output</button>';
+    html+='<button class="tab-btn" onclick="switchView(\\''+bot+'\\',\\'rate\\',\\'cache\\',this)">Cache</button>';
+    html+='<button class="tab-btn" onclick="switchView(\\''+bot+'\\',\\'rate\\',\\'cost\\',this)">$/hr</button>';
+    html+='<button class="tab-btn" onclick="switchView(\\''+bot+'\\',\\'cum\\',\\'cost\\',this)">$ Cumulative</button>';
+    html+='</div>';
+    html+='<div id="plot-'+bot+'" class="card" style="margin-top:0;border-top-left-radius:0"></div>';
+    // Table BELOW chart
+    const d=data[bot];
+    if (d.aggregate && Object.keys(d.aggregate).length) {
+      html+='<h2>'+bot+' — 7d totals</h2><table style="width:auto"><tr><th>Model</th><th>Input</th><th>Output</th><th>Cache</th><th>Total</th><th>tok/hr</th><th>Cost (7d)</th><th>$/hr</th></tr>';
+      for (const [m,v] of Object.entries(d.aggregate)) {
+        const rate = Math.round(v.total / (7*24));
+        const cost = v.cost != null ? '$'+v.cost.toFixed(2) : '—';
+        const costRate = v.cost != null ? '$'+(v.cost/(7*24)).toFixed(4) : '—';
+        html+='<tr><td>'+m+'</td><td>'+v.input.toLocaleString()+'</td><td>'+v.output.toLocaleString()+'</td><td>'+v.cache.toLocaleString()+'</td><td>'+v.total.toLocaleString()+'</td><td>'+rate.toLocaleString()+'</td><td>'+cost+'</td><td>'+costRate+'</td></tr>';
+      }
+      html+='</table>';
+    }
+  }
+  // Legend
+  html+='<div style="margin:12px 0;display:flex;gap:16px;flex-wrap:wrap">';
+  for (const [m,c] of Object.entries(MC))
+    html+='<span style="display:flex;align-items:center;gap:4px"><span style="width:14px;height:3px;background:'+c+'"></span><span class="muted">'+m+'</span></span>';
+  html+='</div>';
+  document.getElementById('content').innerHTML=html;
+
+  // Log tick values for the x-axis
+  const ticks=[0.05,0.1,0.25,0.5,1,2,4,8,12,24,48];
+  const tickTexts=ticks.map(fmtAgo);
+
+  for (const bot of bots) {
+    const entries=data[bot].entries||[];
+    if (!entries.length) continue;
+
+    // Store entries on div for view switching
+    const div=document.getElementById('plot-'+bot);
+    div._entries=entries;
+    div._allData=data[bot];
+    renderPlot(bot,'rate','total');
+  }
+}
+
+function renderPlot(bot, mode, field) {
+  const div=document.getElementById('plot-'+bot);
+  if (!div||!div._entries) return;
+  const {cum,rate}=process(div._entries, field);
+  if (!rate.length) return;
+
+  const ticks=[0.05,0.1,0.25,0.5,1,2,4,8,12,24,48];
+  const tickTexts=ticks.map(fmtAgo);
+  const pts = mode==='cum' ? cum : rate;
+  const yKey = mode==='cum' ? 'cum' : 'rate';
+  const isCost = field==='cost';
+  const unit = isCost ? '$' : 'tokens';
+  const yTitle = mode==='cum' ? (isCost?'$ cumulative':field+' tokens (cumulative)') : (isCost?'$/hr':field+' tokens/hr');
+  const traces = modelSegments(pts, yKey);
+  const maxH = pts.length ? Math.max(...pts.map(p=>p.hoursAgo)) : 48;
+  const annots = midnightAnnotations(maxH);
+
+  const layout = {
+    paper_bgcolor:'#161b22', plot_bgcolor:'#0d1117',
+    font:{color:'#8b949e',size:11},
+    xaxis:{type:'log',autorange:'reversed',gridcolor:'#21262d',linecolor:'#30363d',
+      tickvals:ticks,ticktext:tickTexts,title:{text:'\\u2190 past \\u00b7 now \\u2192'}},
+    yaxis:{gridcolor:'#21262d',linecolor:'#30363d',title:{text:yTitle},rangemode:'tozero'},
+    height:250,margin:{t:10,b:60,l:70,r:20},hovermode:'x unified',showlegend:false,
+    annotations:annots
+  };
+
+  // Preserve x zoom if re-rendering
+  const xRange = div.layout?.xaxis?.range;
+  Plotly.react(div,traces,layout,{responsive:true,scrollZoom:true,displayModeBar:true,modeBarButtonsToRemove:['lasso2d','select2d']});
+  if (xRange) Plotly.relayout(div,{'xaxis.range':xRange});
+}
+
+function switchView(bot, mode, field, btn) {
+  btn.parentElement.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderPlot(bot, mode, field);
+  const yTitle=view==='cum'?'total tokens':'tokens/hr';
+  Plotly.react(div,traces,{...div.layout,yaxis:{...div.layout.yaxis,title:{text:yTitle}}});
+  if (xRange) Plotly.relayout(div,{'xaxis.range':xRange});
+}
+
+load();
+</script>`;
+  return page('Token Usage' + (testMode ? ' (TEST)' : ''), '<div id="content">Loading...</div>' + script);
+}
 
 server.listen(PORT, () => {
   console.log(`Fleet dashboard listening on :${PORT}`);
   console.log(`  ${BASE}`);
   console.log(`  ${BASE}/bazaar`);
+  console.log(`  ${BASE}/tokens`);
 });

@@ -192,4 +192,10 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **Relay restart preserves bots** (`relay.ts`): On startup, the bootstrap checks which bots already have running pm2 processes and skips them — relay restarts (code updates) no longer disrupt running bots. `persistFleetSync()` writes fleet state to both disk and S3 synchronously before relay self-restart, preventing status loss when the new relay process loads fleet.json.
 
 <!-- WBS 12.1: wbs_complete git-log pre-check (2026-03-23) -->
-<!-- auto-updated: 2026-03-29T16:36:24Z -->
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 81ed2749 (feat: token burn rate via cumulative derivative, spline-smoothed, model-colored segments)
+=======
+>>>>>>> fb54a021 (feat: per-model token breakdown in get_metrics MCP + readTokenBreakdownAsync)
+<!-- auto-updated: 2026-03-30T04:21:42Z -->

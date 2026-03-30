@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Token Usage __TITLE_SUFFIX__</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script>var module={};var exports={};</script>
+<script src="https://cdn.jsdelivr.net/npm/cubic-spline@3.0.3/index.min.js"></script>
+<script>var CubicSpline=module.exports;</script>
+<style>
+  :root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#e6edf3;--muted:#8b949e;--blue:#58a6ff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:13px/1.5 'SF Mono',monospace;display:flex;height:100vh}
+  .sidebar{width:170px;min-width:170px;background:var(--surface);border-right:1px solid var(--border);padding:12px 0;overflow-y:auto;position:sticky;top:0;height:100vh}
+  .sidebar h3{padding:8px 14px 2px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .sidebar a{display:block;padding:3px 14px;color:var(--text);text-decoration:none;font-size:11px;border-left:2px solid transparent;cursor:pointer}
+  .sidebar a:hover{background:var(--bg);color:var(--blue)}
+  .sidebar a.active{color:var(--blue);border-left-color:var(--blue);background:var(--bg)}
+  .main{flex:1;padding:20px;overflow-y:auto;scroll-behavior:smooth}
+  h1{font-size:16px;color:var(--blue);margin-bottom:16px}
+  .section{margin-bottom:32px;scroll-margin-top:12px}
+  .section h2{font-size:14px;color:var(--text);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:8px}
+  .tab-bar{display:flex;gap:0;margin-bottom:-1px;position:relative;z-index:1;flex-wrap:wrap}
+  .tab-btn{padding:4px 10px;background:var(--bg);border:1px solid var(--border);border-bottom:none;color:var(--muted);cursor:pointer;font:11px/1.5 inherit;border-radius:4px 4px 0 0}
+  .tab-btn.active{background:var(--surface);color:var(--blue);border-bottom-color:var(--surface)}
+  table{border-collapse:collapse;width:auto;margin-top:8px}
+  th{text-align:left;color:var(--muted);font-size:10px;padding:2px 8px;border-bottom:1px solid var(--border)}
+  td{padding:3px 8px;border-bottom:1px solid var(--border);font-size:11px}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}
+  .muted{color:var(--muted);font-size:10px}
+  footer{margin-top:24px;color:var(--muted);font-size:10px}
+</style>
+</head>
+<body>
+<nav class="sidebar" id="sidebar"></nav>
+<div class="main" id="main">
+  <h1>Fleet Token Usage __TITLE_SUFFIX__</h1>
+  <div id="content">Loading...</div>
+  <footer id="ts"></footer>
+</div>
+
+<script>
+const BASE='__BASE__';
+const MC={'claude-sonnet-4-6':'#58a6ff','claude-opus-4-6':'#bc8cff','qwen3:14b':'#3fb950','qwen3:30b':'#2ea043','claude-haiku-4-5':'#f0883e'};
+const DC='#8b949e';
+const SHIP_PALETTE=['#58a6ff','#f0883e','#bc8cff','#3fb950','#da3633','#d29922'];
+const _shipColorMap={};let _shipColorIdx=0;
+function shipColor(name){if(!_shipColorMap[name])_shipColorMap[name]=SHIP_PALETTE[_shipColorIdx++%SHIP_PALETTE.length];return _shipColorMap[name];}
+
+// Extract field value from entry
+function fieldVal(e,field){
+  if(field==='cost')return e.cost||0;
+  if(field==='input')return e.input_tokens||0;
+  if(field==='output')return e.output_tokens||0;
+  if(field==='cache')return e.cache_tokens||0;
+  return(e.input_tokens||0)+(e.output_tokens||0)+(e.cache_tokens||0);
+}
+
+// Spline wrapper using cubic-spline package (CDN)
+// Provides eval(t) for interpolation and deriv(t) via numerical differentiation
+function makeSpline(xs,ys){
+  const n=xs.length;
+  if(n<2)return{eval:()=>ys[0]||0,deriv:()=>0};
+  const sp=new CubicSpline(xs,ys);
+  const h=Math.max(1,(xs[n-1]-xs[0])/n/100);
+  const lo=xs[0],hi=xs[n-1];
+  return{
+    eval(t){return sp.at(Math.max(lo,Math.min(hi,t)));},
+    deriv(t){
+      const tl=Math.max(lo,t-h),tr=Math.min(hi,t+h),dt=tr-tl;
+      return dt>0?(sp.at(tr)-sp.at(tl))/dt:0;
+    }
+  };
+}
+
+// Per-bot cumulative timeseries: sort by time, running sum, implied point at now
+function botCumulative(entries,field){
+  const s=entries.slice().sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+  let cum=0;
+  const pts=s.map(e=>{cum+=fieldVal(e,field);return{t:new Date(e.timestamp).getTime(),cum,model:e.model||'?'};});
+  // Cumulative always has an implied data point at now (no new usage since last entry)
+  if(pts.length>0)pts.push({t:Date.now(),cum:pts[pts.length-1].cum,model:pts[pts.length-1].model});
+  return pts;
+}
+
+// Build spline from cumulative series, return points with rate from spline derivative
+function splineRate(cumSeries){
+  const now=Date.now();
+  const xs=cumSeries.map(p=>p.t),ys=cumSeries.map(p=>p.cum);
+  const sp=makeSpline(xs,ys);
+  return cumSeries.map(p=>({
+    ha:Math.max(0.01,(now-p.t)/3600000),
+    cum:sp.eval(p.t),
+    rate:sp.deriv(p.t)*3600000,
+    model:p.model||'?',
+    dt:new Date(p.t)
+  }));
+}
+
+// Process single-source entries (one bot or one model): cumulative → spline → derivative
+function proc(entries,field){
+  const cum=botCumulative(entries,field);
+  if(cum.length<2)return[];
+  return splineRate(cum);
+}
+
+// Process aggregated entries from multiple bots: per-bot spline → union grid → sum → spline → derivative
+function procAggregated(botEntryLists,field){
+  const cumLists=botEntryLists.map(e=>botCumulative(e,field)).filter(c=>c.length>0);
+  if(!cumLists.length)return[];
+  // Build spline for each bot
+  const splines=cumLists.map(c=>{const xs=c.map(p=>p.t),ys=c.map(p=>p.cum);return makeSpline(xs,ys);});
+  // Union grid of all time points
+  const tSet=new Set();
+  for(const c of cumLists)for(const p of c)tSet.add(p.t);
+  const grid=[...tSet].sort((a,b)=>a-b);
+  if(grid.length<2)return[];
+  // Sum spline-interpolated cumulatives at each grid point
+  const summed=grid.map(t=>{let total=0;for(const sp of splines)total+=sp.eval(t);return{t,cum:total,model:'agg'};});
+  // Fit spline to summed cumulative, take derivative
+  return splineRate(summed);
+}
+
+function fmtAgo(h){return h<1?~~(h*60)+'m':h<24?~~h+'h':(h/24).toFixed(1)+'d';}
+function fmtNum(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':n.toLocaleString();}
+
+const TICKS=[0.05,0.1,0.25,0.5,1,2,4,8,12,24,48];
+
+function makePlot(divId,title,seriesMap,field,mode){
+  const traces=[];
+  for(const[name,s]of Object.entries(seriesMap)){
+    // Use union-grid aggregation for multi-bot series, simple proc for single-source
+    const pts=s.botEntries?procAggregated(s.botEntries,field):proc(s.entries,field);
+    if(!pts.length)continue;
+    const yKey=mode==='cum'?'cum':'rate';
+    traces.push({x:pts.map(p=>p.ha),y:pts.map(p=>+(p[yKey]).toFixed(4)),
+      customdata:pts.map(p=>p.dt.toISOString().slice(0,16).replace('T',' ')),
+      type:'scatter',mode:'lines+markers',name,
+      line:{color:s.color||DC,width:2,shape:'linear'},marker:{size:3},
+      hovertemplate:'%{customdata}<br>'+name+': %{y:,.1f}<extra></extra>'});
+    // Cost on right y-axis (not for cost-only tabs)
+    if(field!=='cost'){
+      const costPts=s.botEntries?procAggregated(s.botEntries,'cost'):proc(s.entries,'cost');
+      if(costPts.length){
+        traces.push({x:costPts.map(p=>p.ha),y:costPts.map(p=>+(p[mode==='cum'?'cum':'rate']).toFixed(6)),
+          type:'scatter',mode:'lines',name:name+' $',
+          line:{color:s.color||DC,width:1,dash:'dot',shape:'linear'},
+          hovertemplate:name+': $%{y:.4f}<extra></extra>',yaxis:'y2',showlegend:false});
+      }
+    }
+  }
+  const u=field==='cost'?'$':'tokens';
+  const yTitle=mode==='cum'?u+' cumulative':u+'/hr';
+  const y2Title=field==='cost'?'':mode==='cum'?'$ cumulative':'$/hr';
+  // Midnight markers (EST) + "now" marker with full datetime
+  const now=new Date(),ann=[];
+  // Now marker at rightmost edge
+  ann.push({x:Math.log10(0.01),y:1,xref:'x',yref:'paper',
+    text:now.toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}),
+    showarrow:false,font:{size:8,color:'#58a6ff'},xanchor:'right',yanchor:'bottom',yshift:-2});
+  // Midnight markers
+  for(let d=0;d<3;d++){
+    const m=new Date(now.getTime()-5*3600000);m.setUTCHours(5,0,0,0);m.setUTCDate(m.getUTCDate()-d);
+    const h=(now-m)/3600000;
+    if(h>0&&h<48)ann.push({x:Math.log10(h),y:0,xref:'x',yref:'paper',
+      text:m.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'America/New_York'}),
+      showarrow:false,font:{size:9,color:'#6e7681'},yanchor:'top',yshift:8});
+  }
+
+  Plotly.newPlot(divId,traces,{
+    title:{text:title,font:{color:'#e6edf3',size:13},x:0.02,xanchor:'left',y:0.95,yanchor:'top'},
+    paper_bgcolor:'#161b22',plot_bgcolor:'#0d1117',font:{color:'#8b949e',size:10},
+    xaxis:{type:'log',autorange:'reversed',gridcolor:'#21262d',linecolor:'#30363d',tickvals:TICKS,ticktext:TICKS.map(fmtAgo),title:{text:'\u2190 past \u00b7 now \u2192',font:{size:9}}},
+    yaxis:{gridcolor:'#21262d',linecolor:'#30363d',title:{text:yTitle},rangemode:'tozero',side:'left'},
+    yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent',title:{text:y2Title},rangemode:'tozero',tickprefix:'$',showgrid:false},
+    height:240,margin:{t:35,b:55,l:65,r:65},hovermode:'x unified',
+    legend:{orientation:'h',y:-0.3,font:{size:9}},annotations:ann
+  },{responsive:true,scrollZoom:true,displayModeBar:false});
+}
+
+function makeTable(rows){
+  const hrs=7*24;
+  let h='<table><tr><th>Name</th><th>Input</th><th>Output</th><th>Cache</th><th>Total</th><th>tok/hr</th><th>Cost</th><th>$/hr</th></tr>';
+  for(const r of rows){
+    const tokHr=~~(r.t/hrs);
+    h+=`<tr><td>${r.n}</td><td class=n>${fmtNum(r.i)}</td><td class=n>${fmtNum(r.o)}</td><td class=n>${fmtNum(r.c)}</td><td class=n>${fmtNum(r.t)}</td><td class=n>${fmtNum(tokHr)}</td><td class=n>$${r.cost.toFixed(2)}</td><td class=n>$${(r.cost/hrs).toFixed(4)}</td></tr>`;
+  }
+  return h+'</table>';
+}
+
+function switchTab(secId,field,mode,btn){
+  btn.parentElement.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const sec=document.getElementById(secId);
+  if(!sec)return;
+  const plotDiv=sec.querySelector('.plot-div');
+  if(!plotDiv)return;
+  makePlot(plotDiv.id,plotDiv.dataset.title,JSON.parse(plotDiv.dataset.series),field,mode);
+}
+
+async function load(){
+  const DATA=await fetch(BASE+'/tokens/data.json'+location.search).then(r=>r.json());
+  const allKeys=Object.keys(DATA).filter(k=>!k.startsWith('_'));
+  const botKeys=allKeys.filter(k=>!k.startsWith('operator/'));
+  const opKeys=allKeys.filter(k=>k.startsWith('operator/'));
+  if(!allKeys.length){document.getElementById('content').innerHTML='<p>No token data yet. Data appears after bots run containers.</p>';return;}
+
+  // Group by ship and role
+  const ships={},roles={};
+  for(const[bot,d]of Object.entries(DATA)){
+    if(bot.startsWith('_'))continue;
+    const sh=d.ship||'Unknown',ro=d.role||'unknown';
+    if(!ships[sh])ships[sh]={entries:[],agg:{i:0,o:0,c:0,t:0,cost:0},bots:[],opBots:[]};
+    if(!roles[ro])roles[ro]={entries:[],agg:{i:0,o:0,c:0,t:0,cost:0},bots:[]};
+    ships[sh].entries.push(...d.entries);
+    if(bot.startsWith('operator/'))ships[sh].opBots.push(bot); else ships[sh].bots.push(bot);
+    roles[ro].entries.push(...d.entries);roles[ro].bots.push(bot);
+    for(const v of Object.values(d.aggregate)){
+      ships[sh].agg.i+=v.input;ships[sh].agg.o+=v.output;ships[sh].agg.c+=v.cache;ships[sh].agg.t+=v.total;ships[sh].agg.cost+=(v.cost||0);
+      roles[ro].agg.i+=v.input;roles[ro].agg.o+=v.output;roles[ro].agg.c+=v.cache;roles[ro].agg.t+=v.total;roles[ro].agg.cost+=(v.cost||0);
+    }
+  }
+
+  let html='';
+  let nav='<h3>Navigation</h3><a href="#sec-fleet" data-sec="sec-fleet">Fleet</a>';
+  if(opKeys.length)nav+='<a href="#sec-operator" data-sec="sec-operator">Operator</a>';
+
+  function tabsHtml(secId){
+    return `<div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('${secId}','total','rate',this)">Rate</button>
+      <button class="tab-btn" onclick="switchTab('${secId}','total','cum',this)">Cumulative</button>
+      <button class="tab-btn" onclick="switchTab('${secId}','input','rate',this)">Input</button>
+      <button class="tab-btn" onclick="switchTab('${secId}','output','rate',this)">Output</button>
+      <button class="tab-btn" onclick="switchTab('${secId}','cache','rate',this)">Cache</button>
+      <button class="tab-btn" onclick="switchTab('${secId}','cost','rate',this)">$/hr</button>
+      <button class="tab-btn" onclick="switchTab('${secId}','cost','cum',this)">$ Total</button>
+    </div>`;
+  }
+
+  function aggForBot(bot){
+    let a={i:0,o:0,c:0,t:0,cost:0};
+    for(const v of Object.values(DATA[bot].aggregate)){a.i+=v.input;a.o+=v.output;a.c+=v.cache;a.t+=v.total;a.cost+=(v.cost||0);}
+    return a;
+  }
+
+  // Fleet section — one trace per ship, aggregated via union grid
+  const fleetSeries={};
+  for(const[sh,d]of Object.entries(ships)){
+    const allBots=[...d.bots,...d.opBots];
+    fleetSeries[sh]={botEntries:allBots.map(b=>DATA[b].entries),color:shipColor(sh)};
+  }
+  const fleetTbl=Object.entries(ships).map(([n,d])=>({n,...d.agg}));
+  html+=`<div class="section" id="sec-fleet"><h2>Fleet Overview</h2>${tabsHtml('sec-fleet')}
+    <div class="card"><div id="plot-fleet" class="plot-div" data-title="Fleet — All Ships" data-series='${JSON.stringify(fleetSeries)}'></div></div>
+    ${makeTable(fleetTbl)}</div>`;
+
+  // Operator section — breakdown per system
+  if(opKeys.length){
+    const opSeries={};
+    for(const k of opKeys){
+      const label=k.replace('operator/','');
+      opSeries[label]={entries:DATA[k].entries,color:shipColor(label)};
+    }
+    const opTbl=opKeys.map(k=>{const a=aggForBot(k);return{n:k.replace('operator/',''),...a};});
+    html+=`<div class="section" id="sec-operator"><h2>Operator</h2>${tabsHtml('sec-operator')}
+      <div class="card"><div id="plot-operator" class="plot-div" data-title="Operator — Per System" data-series='${JSON.stringify(opSeries)}'></div></div>
+      ${makeTable(opTbl)}</div>`;
+  }
+
+  // Ship sections
+  nav+='<h3>Ships</h3>';
+  for(const[sh,d]of Object.entries(ships)){
+    const id='sec-ship-'+sh.replace(/\W/g,'');
+    nav+=`<a href="#${id}" data-sec="${id}">${sh}</a>`;
+    const series={};
+    for(const bot of d.bots)series[bot]={entries:DATA[bot].entries,color:MC[DATA[bot].entries[0]?.model]||DC};
+    if(d.opBots.length)for(const ob of d.opBots)series['operator']={entries:DATA[ob].entries,color:'#da3633'};
+    const tbl=d.bots.map(bot=>({n:bot,...aggForBot(bot)}));
+    html+=`<div class="section" id="${id}"><h2>${sh}</h2>${tabsHtml(id)}
+      <div class="card"><div id="plot-${id}" class="plot-div" data-title="${sh}" data-series='${JSON.stringify(series)}'></div></div>
+      ${makeTable(tbl)}</div>`;
+  }
+
+  // Role sections (exclude operator role)
+  nav+='<h3>Roles</h3>';
+  for(const[ro,d]of Object.entries(roles)){
+    if(ro==='operator')continue;
+    const id='sec-role-'+ro;
+    nav+=`<a href="#${id}" data-sec="${id}">${ro}</a>`;
+    const series={};
+    for(const bot of d.bots){
+      if(bot.startsWith('operator/'))continue;
+      series[bot]={entries:DATA[bot].entries,color:MC[DATA[bot].entries[0]?.model]||DC};
+    }
+    const tbl=d.bots.filter(b=>!b.startsWith('operator/')).map(bot=>({n:bot,...aggForBot(bot)}));
+    html+=`<div class="section" id="${id}"><h2>Role: ${ro}</h2>${tabsHtml(id)}
+      <div class="card"><div id="plot-${id}" class="plot-div" data-title="Role: ${ro}" data-series='${JSON.stringify(series)}'></div></div>
+      ${makeTable(tbl)}</div>`;
+  }
+
+  // Bot sections (exclude operator pseudo-bots)
+  nav+='<h3>Bots</h3>';
+  for(const bot of botKeys.sort()){
+    const d=DATA[bot];
+    const id='sec-bot-'+bot;
+    nav+=`<a href="#${id}" data-sec="${id}">${bot}</a>`;
+    const byModel={};
+    for(const e of d.entries){const m=e.model||'?';if(!byModel[m])byModel[m]=[];byModel[m].push(e);}
+    const series={};
+    for(const[m,entries]of Object.entries(byModel))series[m]={entries,color:MC[m]||DC};
+    const tbl=Object.entries(d.aggregate).map(([m,v])=>({n:m,i:v.input,o:v.output,c:v.cache,t:v.total,cost:v.cost||0}));
+    html+=`<div class="section" id="${id}"><h2>${bot} <span class="muted">${d.ship||''} · ${d.role||''}</span></h2>${tabsHtml(id)}
+      <div class="card"><div id="plot-${id}" class="plot-div" data-title="${bot}" data-series='${JSON.stringify(series)}'></div></div>
+      ${makeTable(tbl)}</div>`;
+  }
+
+  document.getElementById('content').innerHTML=html;
+  document.getElementById('sidebar').innerHTML=nav;
+  document.getElementById('ts').textContent=new Date().toISOString();
+
+  // Render all plots
+  document.querySelectorAll('.plot-div').forEach(div=>{
+    makePlot(div.id,div.dataset.title,JSON.parse(div.dataset.series),'total','rate');
+  });
+
+  // Sidebar active state on scroll via IntersectionObserver
+  const sections=document.querySelectorAll('.section');
+  const navLinks=document.querySelectorAll('.sidebar a[data-sec]');
+  const obs=new IntersectionObserver(entries=>{
+    for(const e of entries){
+      if(e.isIntersecting){
+        navLinks.forEach(a=>a.classList.remove('active'));
+        const link=document.querySelector(`.sidebar a[data-sec="${e.target.id}"]`);
+        if(link)link.classList.add('active');
+      }
+    }
+  },{root:document.getElementById('main'),threshold:0.3});
+  sections.forEach(s=>obs.observe(s));
+}
+load();
+// Auto-refresh: re-fetch data and re-render without losing scroll position
+const REFRESH_MS=__REFRESH_MS__;
+if(REFRESH_MS>0)setInterval(load,REFRESH_MS);
+</script>
+</body>
+</html>
