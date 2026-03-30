@@ -3356,20 +3356,16 @@ async function flushNewTokenData(): Promise<void> {
       }
     }
 
-    // 4. Append new entries to S3 (one per usage event, with event's own timestamp)
+    // 4. Batch-write new entries to S3 (sorted by timestamp, one S3 round-trip)
     if (newEntries.length > 0) {
       newEntries.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
-      for (const e of newEntries) {
+      const batch = newEntries.map(e => {
         const provider = e.model.startsWith('qwen') || e.model.startsWith('parker-') ? 'ollama' : 'anthropic';
-        await appendTokenUsage({
-          provider, model: e.model, bot,
-          input_tokens: e.input, output_tokens: e.output,
-          cache_write_tokens: e.cw, cache_read_tokens: e.cr,
-          timestamp: e.ts, group: 'all',
-        });
-        const t = new Date(e.ts).getTime();
-        if (t > (_latestS3[bot] || 0)) _latestS3[bot] = t;
-      }
+        return { provider, model: e.model, bot, input_tokens: e.input, output_tokens: e.output, cache_write_tokens: e.cw, cache_read_tokens: e.cr, timestamp: e.ts, group: 'all' } as import('./token-log.js').TokenUsageEntry;
+      });
+      await appendTokenUsage(batch);
+      const lastTs = new Date(newEntries[newEntries.length - 1].ts).getTime();
+      if (lastTs > (_latestS3[bot] || 0)) _latestS3[bot] = lastTs;
       log(`token-flush: ${bot} +${newEntries.length} entries (model=${currentModel})`);
     }
   }

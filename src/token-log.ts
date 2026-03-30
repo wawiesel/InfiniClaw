@@ -35,13 +35,15 @@ function s3Key(bot: string): string {
   return `tokens/${bot}.jsonl`;
 }
 
-/** Append a token usage entry to the bot's log in S3. */
-export async function appendTokenUsage(entry: TokenUsageEntry): Promise<void> {
+/** Append token usage entries to the bot's log in S3. Batch write — one S3 round-trip. */
+export async function appendTokenUsage(entry: TokenUsageEntry | TokenUsageEntry[]): Promise<void> {
+  const entries = Array.isArray(entry) ? entry : [entry];
+  if (entries.length === 0) return;
+  const bot = entries[0].bot;
   try {
     const s3mod = await getS3();
-    const key = s3Key(entry.bot);
+    const key = s3Key(bot);
 
-    // Read existing content, append new line
     let existing = '';
     try {
       const client = s3mod.getClient();
@@ -50,13 +52,13 @@ export async function appendTokenUsage(entry: TokenUsageEntry): Promise<void> {
         const resp = await client.client.send(new GetObjectCommand({ Bucket: client.bucket, Key: key }));
         existing = await resp.Body?.transformToString() ?? '';
       }
-    } catch { /* file doesn't exist yet — start fresh */ }
+    } catch { /* file doesn't exist yet */ }
 
-    const line = JSON.stringify(entry);
-    const content = existing ? `${existing.trimEnd()}\n${line}\n` : `${line}\n`;
+    const newLines = entries.map(e => JSON.stringify(e)).join('\n');
+    const content = existing ? `${existing.trimEnd()}\n${newLines}\n` : `${newLines}\n`;
     await s3mod.uploadContent(key, content);
   } catch (err) {
-    logger.warn({ err, bot: entry.bot }, 'token-log: failed to append');
+    logger.warn({ err, bot }, 'token-log: failed to append');
   }
 }
 
