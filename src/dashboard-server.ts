@@ -611,13 +611,13 @@ const server = http.createServer((req, res) => {
             }
           }
         } else {
-          // Real data from S3
+          // Real data from S3 — always include all bots so page structure renders
           for (const bot of bots) {
             const [entries, agg] = await Promise.all([
               readTokenUsage(bot, 48 * 3600_000),
               aggregateByModel(bot, 7 * 86_400_000),
             ]);
-            if (entries.length > 0 || Object.keys(agg).length > 0) {
+            {
               const entriesWithCost = entries.map((e: { provider: string; model: string; input_tokens: number; output_tokens: number; cache_tokens: number }) => ({
                 ...e,
                 cost: computeCost(`${e.provider}/${e.model}`, e.input_tokens, e.output_tokens, e.cache_tokens),
