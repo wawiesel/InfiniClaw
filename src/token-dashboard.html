@@ -75,11 +75,16 @@ function makeSpline(xs,ys){
   };
 }
 
-// Per-bot cumulative timeseries: sort by time, running sum
+// Per-bot cumulative timeseries: sort by time, running sum, zero-based from 7d ago
 function botCumulative(entries,field){
   const s=entries.slice().sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+  const sevenDaysAgo=Date.now()-7*24*3600000;
   let cum=0;
-  return s.map(e=>{cum+=fieldVal(e,field);return{t:new Date(e.timestamp).getTime(),cum,model:e.model||'?'};});
+  // Sum everything before 7d window to establish baseline
+  let baseline=0;
+  for(const e of s){if(new Date(e.timestamp).getTime()<sevenDaysAgo)baseline+=fieldVal(e,field);}
+  // Build cumulative starting at 0 from 7d ago
+  return s.filter(e=>new Date(e.timestamp).getTime()>=sevenDaysAgo).map(e=>{cum+=fieldVal(e,field);return{t:new Date(e.timestamp).getTime(),cum,model:e.model||'?'};});
 }
 
 // Build spline from cumulative series, evaluate at ~200 points from first data to now
