@@ -89,16 +89,17 @@ export async function readTokenUsage(bot: string, windowMs: number): Promise<Tok
 }
 
 /** Aggregate token usage by model for a bot within a time window. */
-export async function aggregateByModel(bot: string, windowMs: number): Promise<Record<string, { input: number; output: number; cache: number; total: number }>> {
+export async function aggregateByModel(bot: string, windowMs: number): Promise<Record<string, { input: number; output: number; cache_write: number; cache_read: number; total: number }>> {
   const entries = await readTokenUsage(bot, windowMs);
-  const result: Record<string, { input: number; output: number; cache: number; total: number }> = {};
+  const result: Record<string, { input: number; output: number; cache_write: number; cache_read: number; total: number }> = {};
   for (const e of entries) {
     const key = `${e.provider}/${e.model}`;
-    if (!result[key]) result[key] = { input: 0, output: 0, cache: 0, total: 0 };
+    if (!result[key]) result[key] = { input: 0, output: 0, cache_write: 0, cache_read: 0, total: 0 };
     result[key].input += e.input_tokens;
     result[key].output += e.output_tokens;
-    result[key].cache += (e.cache_write_tokens ?? 0) + (e.cache_read_tokens ?? 0) + (e.cache_tokens ?? 0);
-    result[key].total += e.input_tokens + e.output_tokens + (e.cache_write_tokens ?? 0) + (e.cache_read_tokens ?? 0) + (e.cache_tokens ?? 0);
+    result[key].cache_write += e.cache_write_tokens ?? 0;
+    result[key].cache_read += e.cache_read_tokens ?? 0;
+    result[key].total += e.input_tokens + e.output_tokens + (e.cache_write_tokens ?? 0);
   }
   return result;
 }

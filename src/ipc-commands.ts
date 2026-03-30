@@ -1111,9 +1111,9 @@ async function handleGetTokenBreakdown(data: CommandData, ctx: InfiniClawIpcCont
       return;
     }
     const lines = [`**${bot} — token breakdown (7d)**`, ''];
-    for (const [model, v] of Object.entries(breakdown) as [string, {input:number;output:number;cache:number;total:number}][]) {
+    for (const [model, v] of Object.entries(breakdown) as [string, {input:number;output:number;cache_write:number;cache_read:number;total:number}][]) {
       const rate = Math.round(v.total / (7 * 24));
-      lines.push(`**${model}**: ${v.total.toLocaleString()} total (${v.input.toLocaleString()} in / ${v.output.toLocaleString()} out / ${v.cache.toLocaleString()} cache) · ${rate} tok/hr`);
+      lines.push(`**${model}**: ${v.total.toLocaleString()} total (${v.input.toLocaleString()} in / ${v.output.toLocaleString()} out / ${v.cache_write.toLocaleString()} cw / ${v.cache_read.toLocaleString()} cr) · ${rate} tok/hr`);
     }
     await safeSend(ctx, chatJid, lines.join('\n'));
   } catch (err) {

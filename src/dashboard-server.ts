@@ -624,8 +624,8 @@ const server = http.createServer((req, res) => {
               }));
               const aggWithCost: Record<string, unknown> = {};
               for (const [k, v] of Object.entries(agg)) {
-                const a = v as { input: number; output: number; cache: number; total: number };
-                aggWithCost[k] = { ...a, cost: computeCost(k, a.input, a.output, a.cache) };
+                const a = v as { input: number; output: number; cache_write: number; cache_read: number; total: number };
+                aggWithCost[k] = { ...a, cost: computeCost(k, a.input, a.output, a.cache_write) };
               }
               const botInfo = fleet[bot] as { ship?: string; role?: string };
               const shipAbbr = hostToShip[botInfo?.ship || ''] || botInfo?.ship || 'Unknown';

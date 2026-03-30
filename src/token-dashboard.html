@@ -201,10 +201,11 @@ function makePlot(divId,title,seriesMap,field,mode){
 
 function makeTable(rows){
   const hrs=7*24;
-  let h='<table><tr><th>Name</th><th>Input</th><th>Output</th><th>Cache</th><th>Total</th><th>tok/hr</th><th>Cost</th><th>$/hr</th></tr>';
+  let h='<table><tr><th>Name</th><th>Input</th><th>Output</th><th>Cache Write</th><th>Cache Read</th><th>Total</th><th>tok/hr</th><th>Cost</th><th>$/hr</th></tr>';
   for(const r of rows){
-    const tokHr=~~(r.t/hrs);
-    h+=`<tr><td>${r.n}</td><td class=n>${fmtNum(r.i)}</td><td class=n>${fmtNum(r.o)}</td><td class=n>${fmtNum(r.c)}</td><td class=n>${fmtNum(r.t)}</td><td class=n>${fmtNum(tokHr)}</td><td class=n>$${r.cost.toFixed(2)}</td><td class=n>$${(r.cost/hrs).toFixed(4)}</td></tr>`;
+    const total=r.i+r.o+r.cw;
+    const tokHr=~~(total/hrs);
+    h+=`<tr><td>${r.n}</td><td class=n>${fmtNum(r.i)}</td><td class=n>${fmtNum(r.o)}</td><td class=n>${fmtNum(r.cw)}</td><td class=n>${fmtNum(r.cr)}</td><td class=n>${fmtNum(total)}</td><td class=n>${fmtNum(tokHr)}</td><td class=n>$${r.cost.toFixed(2)}</td><td class=n>$${(r.cost/hrs).toFixed(4)}</td></tr>`;
   }
   return h+'</table>';
 }
@@ -233,14 +234,14 @@ async function load(){
   for(const[bot,d]of Object.entries(DATA)){
     if(bot.startsWith('_'))continue;
     const sh=d.ship||'Unknown',ro=d.role||'unknown';
-    if(!ships[sh])ships[sh]={entries:[],agg:{i:0,o:0,c:0,t:0,cost:0},bots:[],opBots:[]};
-    if(!roles[ro])roles[ro]={entries:[],agg:{i:0,o:0,c:0,t:0,cost:0},bots:[]};
+    if(!ships[sh])ships[sh]={entries:[],agg:{i:0,o:0,cw:0,cr:0,cost:0},bots:[],opBots:[]};
+    if(!roles[ro])roles[ro]={entries:[],agg:{i:0,o:0,cw:0,cr:0,cost:0},bots:[]};
     ships[sh].entries.push(...d.entries);
     if(bot.startsWith('operator/'))ships[sh].opBots.push(bot); else ships[sh].bots.push(bot);
     roles[ro].entries.push(...d.entries);roles[ro].bots.push(bot);
     for(const v of Object.values(d.aggregate)){
-      ships[sh].agg.i+=v.input;ships[sh].agg.o+=v.output;ships[sh].agg.c+=v.cache;ships[sh].agg.t+=v.total;ships[sh].agg.cost+=(v.cost||0);
-      roles[ro].agg.i+=v.input;roles[ro].agg.o+=v.output;roles[ro].agg.c+=v.cache;roles[ro].agg.t+=v.total;roles[ro].agg.cost+=(v.cost||0);
+      ships[sh].agg.i+=v.input;ships[sh].agg.o+=v.output;ships[sh].agg.cw+=(v.cache_write||0);ships[sh].agg.cr+=(v.cache_read||0);ships[sh].agg.cost+=(v.cost||0);
+      roles[ro].agg.i+=v.input;roles[ro].agg.o+=v.output;roles[ro].agg.cw+=(v.cache_write||0);roles[ro].agg.cr+=(v.cache_read||0);roles[ro].agg.cost+=(v.cost||0);
     }
   }
 
@@ -260,8 +261,8 @@ async function load(){
   }
 
   function aggForBot(bot){
-    let a={i:0,o:0,c:0,t:0,cost:0};
-    for(const v of Object.values(DATA[bot].aggregate)){a.i+=v.input;a.o+=v.output;a.c+=v.cache;a.t+=v.total;a.cost+=(v.cost||0);}
+    let a={i:0,o:0,cw:0,cr:0,cost:0};
+    for(const v of Object.values(DATA[bot].aggregate)){a.i+=v.input;a.o+=v.output;a.cw+=(v.cache_write||0);a.cr+=(v.cache_read||0);a.cost+=(v.cost||0);}
     return a;
   }
 
@@ -328,7 +329,7 @@ async function load(){
     nav+=`<a href="#${id}" data-sec="${id}">${bot}</a>`;
     const series={};
     series[bot]={entries:d.entries,color:MC[d.entries[0]?.model]||DC};
-    const tbl=Object.entries(d.aggregate).map(([m,v])=>({n:m,i:v.input,o:v.output,c:v.cache,t:v.total,cost:v.cost||0}));
+    const tbl=Object.entries(d.aggregate).map(([m,v])=>({n:m,i:v.input,o:v.output,cw:v.cache_write||0,cr:v.cache_read||0,cost:v.cost||0}));
     html+=`<div class="section" id="${id}"><h2>${bot} <span class="muted">${d.ship||''} · ${d.role||''}</span></h2>${tabsHtml(id)}
       <div class="card"><div id="plot-${id}" class="plot-div" data-title="${bot}" data-series='${JSON.stringify(series)}'></div></div>
       ${makeTable(tbl)}</div>`;
