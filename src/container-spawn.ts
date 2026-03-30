@@ -411,8 +411,15 @@ export async function runContainerAgent(
   // Reads session JSONL files for usage events. Only reports INCREMENTAL usage
   // by snapshotting current totals before the container starts.
   const botName = (secrets['PERSONA_NAME'] || secrets['ASSISTANT_NAME'] || group.name).toLowerCase();
-  const model = secrets['ANTHROPIC_MODEL'] || secrets['BRAIN_MODEL'] || 'unknown';
-  const provider = secrets['ANTHROPIC_BASE_URL'] ? 'ollama' : 'anthropic';
+  // Read model from bot env file (authoritative) or fall back to secrets/env vars
+  let model = secrets['ANTHROPIC_MODEL'] || secrets['BRAIN_MODEL'] || process.env['ANTHROPIC_MODEL'] || process.env['BRAIN_MODEL'] || 'unknown';
+  try {
+    const { loadShipConfig } = await import('./ship-config.js');
+    const envFile = path.join(loadShipConfig().secretsPath, 'bots', botName, 'env');
+    const m = fs.readFileSync(envFile, 'utf-8').match(/^BRAIN_MODEL=(.+)$/m);
+    if (m) model = m[1].trim();
+  } catch { /* use fallback */ }
+  const provider = model.startsWith('qwen') || model.startsWith('parker-') ? 'ollama' : 'anthropic';
   const sessionDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude', 'projects');
   // Snapshot current totals so first flush only reports new usage from this run
   const lastFlushed = { input: 0, output: 0, cache: 0 };
