@@ -49,13 +49,16 @@ const SHIP_PALETTE=['#58a6ff','#f0883e','#bc8cff','#3fb950','#da3633','#d29922']
 const _shipColorMap={};let _shipColorIdx=0;
 function shipColor(name){if(!_shipColorMap[name])_shipColorMap[name]=SHIP_PALETTE[_shipColorIdx++%SHIP_PALETTE.length];return _shipColorMap[name];}
 
-// Extract field value from entry
+// Extract field value from entry. cache_read is never included in total.
+function cacheWrite(e){return e.cache_write_tokens||0;}
+function cacheRead(e){return e.cache_read_tokens||0;}
 function fieldVal(e,field){
   if(field==='cost')return e.cost||0;
   if(field==='input')return e.input_tokens||0;
   if(field==='output')return e.output_tokens||0;
-  if(field==='cache')return e.cache_tokens||0;
-  return(e.input_tokens||0)+(e.output_tokens||0)+(e.cache_tokens||0);
+  if(field==='cache_write')return cacheWrite(e);
+  if(field==='cache_read')return cacheRead(e);
+  return(e.input_tokens||0)+(e.output_tokens||0)+cacheWrite(e); // total = input + output + cache_write
 }
 
 // Spline wrapper using cubic-spline package (CDN)
@@ -251,7 +254,8 @@ async function load(){
       <button class="tab-btn" onclick="switchTab('${secId}','total','cum',this)">Cumulative</button>
       <button class="tab-btn" onclick="switchTab('${secId}','input','rate',this)">Input</button>
       <button class="tab-btn" onclick="switchTab('${secId}','output','rate',this)">Output</button>
-      <button class="tab-btn" onclick="switchTab('${secId}','cache','rate',this)">Cache</button>
+      <button class="tab-btn" onclick="switchTab('${secId}','cache_write','rate',this)">Cache Write</button>
+      <button class="tab-btn" onclick="switchTab('${secId}','cache_read','rate',this)">Cache Read</button>
     </div>`;
   }
 
