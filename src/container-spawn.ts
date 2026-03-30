@@ -443,7 +443,7 @@ export async function runContainerAgent(
                 const u = d.message?.usage; if (!u) continue;
                 lastFlushed.input += u.input_tokens ?? 0;
                 lastFlushed.output += u.output_tokens ?? 0;
-                lastFlushed.cache += (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+                lastFlushed.cache += u.cache_creation_input_tokens ?? 0;
               } catch { /* skip */ }
             }
           } catch { /* skip */ }
@@ -466,7 +466,7 @@ export async function runContainerAgent(
               try {
                 const d = JSON.parse(line) as { message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } } };
                 const u = d.message?.usage; if (!u) continue;
-                ti += u.input_tokens ?? 0; to += u.output_tokens ?? 0; tc += (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
+                ti += u.input_tokens ?? 0; to += u.output_tokens ?? 0; tc += u.cache_creation_input_tokens ?? 0;
               } catch { /* skip */ }
             }
           } catch { /* skip */ }
