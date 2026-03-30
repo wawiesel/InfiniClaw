@@ -188,7 +188,7 @@ function makePlot(divId,title,seriesMap,field,mode){
     yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent',title:{text:y2Title},rangemode:'tozero',tickprefix:'$',showgrid:false},
     height:240,margin:{t:35,b:55,l:65,r:65},hovermode:'x unified',
     legend:{orientation:'h',y:-0.3,font:{size:9}},annotations:ann
-  },{responsive:true,scrollZoom:true,displayModeBar:false});
+  },{responsive:true,scrollZoom:true,displayModeBar:true,modeBarButtonsToRemove:['lasso2d','select2d']});
 }
 
 function makeTable(rows){
