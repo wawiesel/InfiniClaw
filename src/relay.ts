@@ -3280,7 +3280,9 @@ function startTokenFlushWatcher(): void {
   }
   // Initial sync on startup + periodic fallback (fs.watch may miss deep nested changes on Linux)
   debouncedFlush();
-  setInterval(debouncedFlush, 5_000); // 5s for near-real-time token updates (R4)
+  setInterval(() => {
+    flushNewTokenData().catch((err) => log(`token-flush: error: ${errStr(err)}`));
+  }, 30_000); // 30s periodic fallback — debouncedFlush handles fast updates from fs.watch
 }
 
 // Per-bot latest flushed timestamp — persisted to disk
@@ -3369,6 +3371,7 @@ async function flushNewTokenData(): Promise<void> {
       }
     }
 
+    log(`token-flush: ${bot} found ${completedTurns.length} turns (offset=${latestFlushed})`);
     // POST to ingest endpoint (sorted by timestamp)
     if (completedTurns.length > 0) {
       completedTurns.sort((a, b) => new Date(a.t_end).getTime() - new Date(b.t_end).getTime());
