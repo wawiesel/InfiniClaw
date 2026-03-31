@@ -686,24 +686,7 @@ async function main(): Promise<void> {
   // Write MCP config before first claude spawn
   writeMcpConfig(containerInput, env);
 
-  // Write credentials file so interactive claude sessions (e.g. tmux /compact) can auth.
-  // --print mode uses CLAUDE_CODE_OAUTH_TOKEN env var directly, but interactive mode
-  // reads ~/.claude/.credentials.json. Write it once here so both paths work.
-  const credFile = path.join(process.env.HOME || '/home/node', '.claude', '.credentials.json');
-  const oauthToken = env.CLAUDE_CODE_OAUTH_TOKEN;
-  if (oauthToken && !fs.existsSync(credFile)) {
-    try {
-      fs.writeFileSync(credFile, JSON.stringify({
-        claudeAiOauth: {
-          accessToken: oauthToken,
-          refreshToken: '',
-          expiresAt: Date.now() + 7 * 86400000,
-          scopes: ['user:inference', 'user:profile', 'user:sessions:claude_code', 'user:mcp_servers', 'user:file_upload'],
-        }
-      }));
-      log('Wrote .credentials.json from CLAUDE_CODE_OAUTH_TOKEN');
-    } catch { /* best effort */ }
-  }
+
 
   const model = getRequestedMainModel(env);
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
