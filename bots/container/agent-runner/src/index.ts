@@ -53,13 +53,16 @@ async function runSlashCommand(
   const cwd = '/workspace/persona/temp';
 
   try {
-    // Ensure theme is set so Claude Code doesn't show the theme picker in tmux
+    // Ensure credentials file exists so interactive Claude Code doesn't prompt for login
     const claudeDir = path.join(env.HOME || '/home/node', '.claude');
-    const localSettings = path.join(claudeDir, 'settings.local.json');
-    if (!fs.existsSync(localSettings)) {
+    const credFile = path.join(claudeDir, '.credentials.json');
+    const oauthToken = env.CLAUDE_CODE_OAUTH_TOKEN;
+    if (oauthToken && !fs.existsSync(credFile)) {
       try {
         fs.mkdirSync(claudeDir, { recursive: true });
-        fs.writeFileSync(localSettings, JSON.stringify({ theme: 'dark' }));
+        fs.writeFileSync(credFile, JSON.stringify({
+          claudeAiOauth: { accessToken: oauthToken, refreshToken: '', expiresAt: Date.now() + 86400000, scopes: ['user:inference', 'user:profile', 'user:sessions:claude_code'] }
+        }));
       } catch { /* best effort */ }
     }
 
