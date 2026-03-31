@@ -223,6 +223,22 @@ server.tool(
   },
 );
 
+server.tool(
+  'compact_self',
+  'Compact your own conversation context to reduce token usage. Triggers /compact via tmux — shrinks context window, reduces cache_write cost on subsequent turns. Use when context_tokens is high.',
+  {},
+  async () => {
+    // Write /compact as an IPC message — the agent-runner intercepts it and runs via tmux
+    const inputDir = path.join(IPC_DIR, groupFolder, 'input');
+    fs.mkdirSync(inputDir, { recursive: true });
+    const filename = `message-${Date.now()}.json`;
+    const tempPath = path.join(inputDir, `${filename}.tmp`);
+    fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text: '/compact' }));
+    fs.renameSync(tempPath, path.join(inputDir, filename));
+    return { content: [{ type: 'text' as const, text: 'Compaction requested. Context will be shrunk on the next turn.' }] };
+  },
+);
+
 // [InfiniClaw] register extended tools
 registerInfiniClawTools({
   server,
