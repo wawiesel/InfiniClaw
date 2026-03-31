@@ -93,8 +93,10 @@ async function runSlashCommand(
           if (/❯\s*$/m.test(pane)) return true;
           // Auto-accept onboarding dialogs by navigating to "Yes" and pressing Enter
           if (pane.includes('I accept') || pane.includes('I trust this folder')) {
-            // Move to "Yes" option (it's always option 2) and confirm
-            execSync(`tmux send-keys -t ${tmuxSession} Down Enter`, { env: env as Record<string, string>, timeout: 3_000 });
+            // Move to "Yes" option (it's always option 2) and confirm — separate keys with a delay
+            execSync(`tmux send-keys -t ${tmuxSession} Down`, { env: env as Record<string, string>, timeout: 3_000 });
+            await new Promise(r => setTimeout(r, 500));
+            execSync(`tmux send-keys -t ${tmuxSession} Enter`, { env: env as Record<string, string>, timeout: 3_000 });
             await new Promise(r => setTimeout(r, 3_000));
             continue;
           }
