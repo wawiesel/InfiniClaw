@@ -97,9 +97,10 @@ async function runSlashCommand(
             timeout: 5_000,
           }).toString();
           // If we see the actual claude prompt, we're ready
-          if (pane.includes('❯') && !pane.includes('Choose the text style') && !pane.includes('Select login method')) return true;
+          // Exclude onboarding screens: theme picker has "Dark mode", login has "login method"
+          if (pane.includes('❯') && !pane.includes('Dark mode') && !pane.includes('login method')) return true;
           // Dismiss onboarding screens (theme picker, login prompt) by pressing Enter
-          if (pane.includes('Choose the text style') || pane.includes('Select login method')) {
+          if (pane.includes('Dark mode') || pane.includes('login method') || pane.includes('Choose the text style') || pane.includes('Select login method')) {
             try { execSync(`tmux send-keys -t ${tmuxSession} Enter`, { env: env as Record<string, string>, timeout: 3_000 }); } catch { /* */ }
             await new Promise(r => setTimeout(r, 2_000));
             continue;
