@@ -234,11 +234,41 @@ function fmtNum(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1
 const TICKS=[HA_MIN,10/3600,30/3600,1/60,5/60,15/60,0.5,1,2,4,8,12,24,48,96,HA_MAX];
 
 function makePlot(divId,title,seriesMap,field,mode){
-  const plot=new StackedPlot(seriesMap,field,mode);
-  const traces=plot.traces();
-  const u=field==='cost'?'$':'tokens';
-  const yTitle=mode==='cum'?u+' cumulative':u+'/hr';
-  const y2Title=field==='cost'?'':mode==='cum'?'$ cumulative':'$/hr';
+  let traces,yTitle,y2Title;
+  if(mode==='ctx'){
+    // Context tab: scatter plot of context_tokens per turn, one line per session_id, colored by model
+    traces=[];
+    const now=Date.now();
+    for(const[name,s]of Object.entries(seriesMap)){
+      const entries=s.botEntries?[].concat(...s.botEntries):(s.entries||[]);
+      // Group by session_id
+      const bySess={};
+      for(const e of entries){
+        const sid=(e.session_id||'').slice(0,8);
+        if(!bySess[sid])bySess[sid]=[];
+        bySess[sid].push(e);
+      }
+      for(const[sid,sess]of Object.entries(bySess)){
+        const pts=sess.filter(e=>e.context_tokens>0).sort((a,b)=>(a.t_end||a.t_start).localeCompare(b.t_end||b.t_start));
+        if(!pts.length)continue;
+        const model=pts[0].model||'?';
+        traces.push({
+          x:pts.map(e=>Math.max(HA_MIN,(now-new Date(e.t_end||e.t_start).getTime())/3600000)),
+          y:pts.map(e=>e.context_tokens),
+          type:'scatter',mode:'lines+markers',name:sid+' ('+model+')',
+          line:{color:MC[model]||s.color||DC,width:1.5},marker:{size:4},
+          hovertemplate:sid+': %{y:,.0f} tokens<extra></extra>'
+        });
+      }
+    }
+    yTitle='context tokens';y2Title='';
+  } else {
+    const plot=new StackedPlot(seriesMap,field,mode);
+    traces=plot.traces();
+    const u=field==='cost'?'$':'tokens';
+    yTitle=mode==='cum'?u+' cumulative':u+'/hr';
+    y2Title=field==='cost'?'':mode==='cum'?'$ cumulative':'$/hr';
+  }
   const now=new Date(),ann=[];
   // Date annotations — all in blue, top of plot
   // "Now" — vertical line + boxed label. Two annotations: line and label separately.
@@ -303,7 +333,7 @@ function makePlot(divId,title,seriesMap,field,mode){
       return[0,mx*1.1];
     })(),tickprefix:'$',tickformat:'.2f',tickfont:{color:'#ffffff',size:9},showgrid:false,ticksuffix:'  '},
     height:240,margin:{t:35,b:55,l:65,r:65},hovermode:'x unified',
-    showlegend:false,annotations:ann
+    showlegend:mode==='ctx',legend:{font:{size:9,color:'#8b949e'},orientation:'h',y:-0.25},annotations:ann
   };
   Plotly.react(divId,traces,layout,{responsive:true,scrollZoom:true,displayModeBar:true,modeBarButtonsToRemove:['lasso2d','select2d']});
   // Auto-fit y-axis to visible x-range on zoom/pan
@@ -408,7 +438,8 @@ async function load(preloaded){
 
   function tabsHtml(secId){
     return `<div class="tab-bar">
-      <button class="tab-btn active" onclick="switchTab('${secId}','total','rate',this)">Rate</button>
+      <button class="tab-btn active" onclick="switchTab('${secId}','context','ctx',this)">Context</button>
+      <button class="tab-btn" onclick="switchTab('${secId}','total','rate',this)">Rate</button>
       <button class="tab-btn" onclick="switchTab('${secId}','total','cum',this)">Total</button>
       <button class="tab-btn" onclick="switchTab('${secId}','input','cum',this)">Input</button>
       <button class="tab-btn" onclick="switchTab('${secId}','output','cum',this)">Output</button>
@@ -584,35 +615,38 @@ const evtSrc=new EventSource(BASE+'/tokens/stream');
 evtSrc.onmessage=function(e){
   try{
     const rows=JSON.parse(e.data);
-    let lastDate='';
+    // Clear placeholder
+    if(stream.textContent==='Waiting for data...')stream.innerHTML='';
+    const tz={timeZone:'__TIMEZONE__',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:1};
+    const fmtTs=s=>s?new Date(s).toLocaleTimeString('en-US',tz):'';
+    const dateFmt={timeZone:'__TIMEZONE__',month:'short',day:'numeric'};
     for(const r of rows){
       const isStart=!r.t_end;
       const m=r.model||'?';
-      const tz={timeZone:'__TIMEZONE__',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:1};
-      const fmtTs=s=>s?new Date(s).toLocaleTimeString('en-US',tz):'';
       const rawEnd=r.t_end||r.t_start||'';
-      const dateStr=rawEnd?new Date(rawEnd).toLocaleDateString('en-US',{timeZone:'__TIMEZONE__',month:'short',day:'numeric'}):'';
-      // Date separator when day changes
-      if(dateStr&&dateStr!==lastDate){
-        lastDate=dateStr;
+      const dateStr=rawEnd?new Date(rawEnd).toLocaleDateString('en-US',dateFmt):'';
+      // Date separator only when date differs from the entry just BELOW in the stream
+      const belowDate=stream.firstChild?.dataset?.date||'';
+      if(dateStr&&belowDate&&dateStr!==belowDate){
         const sep=document.createElement('div');
-        sep.style.cssText='color:var(--blue);font-size:10px;border-bottom:1px solid var(--border);padding:2px 0;margin:2px 0';
+        sep.style.cssText='color:var(--blue);font-size:10px;border-top:1px solid var(--border);padding:2px 0;margin:2px 0';
         sep.textContent='\u2500\u2500 '+dateStr+' \u2500\u2500';
-        stream.appendChild(sep);
+        sep.dataset.date=dateStr;
+        stream.prepend(sep);
       }
       const tS=fmtTs(r.t_start);
       const tE=fmtTs(r.t_end);
       const sid=(r.session_id||'').slice(0,8);
       const tid=(r.turn_id||'').slice(0,8);
       const line=document.createElement('div');
+      line.dataset.date=dateStr;
       line.style.cssText='white-space:nowrap;color:'+(isStart?'var(--muted)':'var(--text)');
       line.textContent=isStart
         ?`${tS}  ${(r.bot||'?').padEnd(8)} ${m} ${sid}/${tid} \u25B6 turn started`
-        :`${tS}\u2192${tE}  ${(r.bot||'?').padEnd(8)} ${m} ${sid}/${tid} in=${String(r.input_tokens||0).padStart(6)} out=${String(r.output_tokens||0).padStart(6)} cw=${fmtNum(r.cache_write_tokens||0).padStart(6)} cr=${fmtNum(r.cache_read_tokens||0).padStart(6)}`;
-      stream.appendChild(line);
-      while(stream.children.length>__MAX_STREAM_ROWS__)stream.firstChild.remove();
+        :`${tS}\u2192${tE}  ${(r.bot||'?').padEnd(8)} ${m} ${sid}/${tid} ctx=${fmtNum(r.context_tokens||0).padStart(6)} in=${String(r.input_tokens||0).padStart(6)} out=${String(r.output_tokens||0).padStart(6)} cw=${fmtNum(r.cache_write_tokens||0).padStart(6)} cr=${fmtNum(r.cache_read_tokens||0).padStart(6)}`;
+      stream.prepend(line);
+      while(stream.children.length>__MAX_STREAM_ROWS__)stream.lastChild.remove();
     }
-    if(stream.lastChild?.textContent==='Waiting for data...')stream.lastChild.remove();
   }catch{}
 };
 evtSrc.onerror=function(){/* reconnects automatically */};

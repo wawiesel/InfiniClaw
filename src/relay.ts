@@ -3310,7 +3310,7 @@ async function flushNewTokenData(): Promise<void> {
     // Scan session files — aggregate usage per TURN (user message → end_turn)
     // A turn = user msg starts it, assistant with stop_reason=end_turn ends it.
     // Sum all usage within the turn. t_start = user timestamp, t_end = end_turn timestamp.
-    interface TurnEntry { t_start: string; t_end: string; input: number; output: number; cw: number; cr: number; model: string; session_id: string; turn_id: string }
+    interface TurnEntry { t_start: string; t_end: string; input: number; output: number; cw: number; cr: number; context: number; model: string; session_id: string; turn_id: string }
     const completedTurns: TurnEntry[] = [];
     for (const group of fs.readdirSync(sessionsDir)) {
       const projDir = path.join(sessionsDir, group, '.claude', 'projects');
@@ -3327,7 +3327,7 @@ async function flushNewTokenData(): Promise<void> {
             let turnId = '';
             let turnModel = currentModel;
             let turnSessionId = '';
-            let accum = { input: 0, output: 0, cw: 0, cr: 0 };
+            let accum = { input: 0, output: 0, cw: 0, cr: 0, lastCtx: 0 };
             for (const line of lines) {
               if (!line.trim()) continue;
               try {
@@ -3339,7 +3339,7 @@ async function flushNewTokenData(): Promise<void> {
                   turnStart = ts;
                   turnId = d.uuid || '';
                   turnSessionId = d.sessionId || f.replace('.jsonl', '');
-                  accum = { input: 0, output: 0, cw: 0, cr: 0 };
+                  accum = { input: 0, output: 0, cw: 0, cr: 0, lastCtx: 0 };
                 }
                 const u = d.message?.usage;
                 if (u) {
@@ -3347,6 +3347,8 @@ async function flushNewTokenData(): Promise<void> {
                   accum.output += u.output_tokens ?? 0;
                   accum.cw += u.cache_creation_input_tokens ?? 0;
                   accum.cr += u.cache_read_input_tokens ?? 0;
+                  // Context = total prompt tokens for THIS API call (not summed)
+                  accum.lastCtx = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0);
                   if (d.message?.model) turnModel = d.message.model;
                 }
                 if (d.message?.stop_reason === 'end_turn' && turnStart) {
@@ -3354,7 +3356,7 @@ async function flushNewTokenData(): Promise<void> {
                   if (new Date(ts).getTime() > latestFlushed && (accum.input + accum.output + accum.cw) > 0) {
                     completedTurns.push({
                       t_start: turnStart, t_end: ts,
-                      ...accum, model: turnModel,
+                      ...accum, context: accum.lastCtx, model: turnModel,
                       session_id: turnSessionId, turn_id: turnId,
                     });
                   }
@@ -3379,7 +3381,7 @@ async function flushNewTokenData(): Promise<void> {
           provider, model: e.model, bot, session_id: e.session_id, turn_id: e.turn_id,
           t_start: e.t_start, t_end: e.t_end,
           input_tokens: e.input, output_tokens: e.output,
-          cache_write_tokens: e.cw, cache_read_tokens: e.cr,
+          cache_write_tokens: e.cw, cache_read_tokens: e.cr, context_tokens: e.context,
           input_price_per_token: pricing.input / 1_000_000,
           output_price_per_token: pricing.output / 1_000_000,
           cache_write_price_per_token: pricing.cache_write / 1_000_000,
