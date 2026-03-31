@@ -56,6 +56,16 @@ async function runSlashCommand(
   const claudeCmd = `cd ${cwd} && claude --resume ${sessionId} --dangerously-skip-permissions`;
 
   try {
+    // Ensure theme is set so Claude Code doesn't show the theme picker in tmux
+    const claudeDir = path.join(env.HOME || '/home/node', '.claude');
+    const localSettings = path.join(claudeDir, 'settings.local.json');
+    if (!fs.existsSync(localSettings)) {
+      try {
+        fs.mkdirSync(claudeDir, { recursive: true });
+        fs.writeFileSync(localSettings, JSON.stringify({ theme: 'dark' }));
+      } catch { /* best effort */ }
+    }
+
     // Kill any leftover session
     try { execSync(`tmux kill-session -t ${tmuxSession} 2>/dev/null`, { env: env as Record<string, string> }); } catch { /* */ }
 
