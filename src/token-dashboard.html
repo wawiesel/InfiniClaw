@@ -241,15 +241,42 @@ function makePlot(divId,title,seriesMap,field,mode){
   const y2Title=field==='cost'?'':mode==='cum'?'$ cumulative':'$/hr';
   const now=new Date(),ann=[];
   // Date annotations — all in blue, top of plot
-  ann.push({x:Math.log10(HA_MIN),y:1,xref:'x',yref:'paper',
+  // "Now" — vertical line + boxed label. Two annotations: line and label separately.
+  const nowLx=Math.log10(HA_MIN);
+  // Vertical line
+  ann.push({x:nowLx,y:0,xref:'x',yref:'paper',ax:nowLx,ay:1,axref:'x',ayref:'paper',
+    showarrow:true,arrowhead:0,arrowwidth:1.5,arrowcolor:'#58a6ff'});
+  // Boxed label
+  ann.push({x:nowLx,y:0.95,xref:'x',yref:'paper',
     text:now.toLocaleString('en-US',{timeZone:'__TIMEZONE__',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}),
-    showarrow:false,font:{size:9,color:'#58a6ff'},xanchor:'right',yanchor:'bottom'});
-  for(const d of [1,4]){
-    const m=new Date(now.getTime()-5*3600000);m.setUTCHours(5,0,0,0);m.setUTCDate(m.getUTCDate()-(d-1));
+    showarrow:false,
+    font:{size:9,color:'#ffffff'},bgcolor:'#161b22',bordercolor:'#58a6ff',borderwidth:1,borderpad:2,
+    xanchor:'right',yanchor:'bottom'});
+  // Vertical lines at midnight boundaries with date labels
+  // Compute local midnight using timezone-aware formatting to find the UTC offset
+  const localDateStr=now.toLocaleDateString('en-CA',{timeZone:'__TIMEZONE__'}); // YYYY-MM-DD
+  const localMidnight=new Date(localDateStr+'T00:00:00');
+  // Adjust: find actual UTC time of local midnight by comparing formatted date
+  const tzOffset=now.getTime()-localMidnight.getTime(); // rough; refine by finding exact midnight
+  // More reliable: format hour to get timezone offset
+  const localHour=parseInt(now.toLocaleString('en-US',{timeZone:'__TIMEZONE__',hour:'numeric',hour12:false}));
+  const localMin=parseInt(now.toLocaleString('en-US',{timeZone:'__TIMEZONE__',minute:'numeric'}));
+  const msSinceMidnight=(localHour*60+localMin)*60000+now.getSeconds()*1000+now.getMilliseconds();
+  const todayMidnight=new Date(now.getTime()-msSinceMidnight);
+  for(const d of [1,3,7]){
+    const m=new Date(todayMidnight.getTime()-(d-1)*86400000);
     const h=(now-m)/3600000;
-    if(h>0&&h<HA_MAX)ann.push({x:Math.log10(h),y:1,xref:'x',yref:'paper',
+    if(h<=0||h>=HA_MAX)continue;
+    const lx=Math.log10(h);
+    // Vertical line
+    ann.push({x:lx,y:0,xref:'x',yref:'paper',ax:lx,ay:1,axref:'x',ayref:'paper',
+      showarrow:true,arrowhead:0,arrowwidth:1,arrowcolor:'#58a6ff60'});
+    // Boxed date label — same height as "now" label
+    ann.push({x:lx,y:0.95,xref:'x',yref:'paper',
       text:m.toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'__TIMEZONE__'}),
-      showarrow:false,font:{size:9,color:'#58a6ff'},yanchor:'bottom'});
+      showarrow:false,
+      font:{size:9,color:'#58a6ff'},bgcolor:'#161b22',bordercolor:'#58a6ff60',borderwidth:1,borderpad:2,
+      yanchor:'bottom'});
   }
   const el=document.getElementById(divId);
   const prevX=el&&el.layout&&el.layout.xaxis?el.layout.xaxis.range:null;
@@ -261,12 +288,20 @@ function makePlot(divId,title,seriesMap,field,mode){
     paper_bgcolor:'#161b22',plot_bgcolor:'#0d1117',font:{color:'#8b949e',size:10},
     xaxis:{type:'log',range:xRange,gridcolor:'#21262d',linecolor:'#30363d',tickvals:TICKS,ticktext:TICKS.map(fmtAgo),title:{text:'\u2190 past \u00b7 now \u2192',font:{size:11}}},
     yaxis:{gridcolor:'#21262d',linecolor:'#30363d',title:{text:yTitle},range:prevY||(()=>{
-      // Sum stacked traces per x-index to find true visual max
+      // Sum stacked traces per x-index in visible range to find true visual max
       const stk=traces.filter(t=>t.stackgroup==='tokens');
-      let mx=1;if(stk.length&&stk[0].x){for(let i=0;i<stk[0].x.length;i++){let s=0;for(const t of stk)s+=(t.y[i]||0);if(s>mx)mx=s;}}
+      const xLo=Math.min(...xRange),xHi=Math.max(...xRange);
+      let mx=1;if(stk.length&&stk[0].x){for(let i=0;i<stk[0].x.length;i++){
+        const lx=Math.log10(stk[0].x[i]);if(lx<xLo||lx>xHi)continue;
+        let s=0;for(const t of stk)s+=(t.y[i]||0);if(s>mx)mx=s;}}
       return[0,mx*1.1];
     })(),side:'left'},
-    yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent',title:{text:y2Title,font:{color:'#ffffff'}},range:prevY2||[0,Math.max(0.01,...traces.filter(t=>t.yaxis==='y2').flatMap(t=>t.y))],tickprefix:'$',tickfont:{color:'#ffffff'},showgrid:false},
+    yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent',title:{text:y2Title,font:{color:'#ffffff'}},range:prevY2||(()=>{
+      const xLo=Math.min(...xRange),xHi=Math.max(...xRange);
+      let mx=0.01;for(const t of traces){if(t.yaxis!=='y2')continue;for(let i=0;i<t.x.length;i++){
+        const lx=Math.log10(t.x[i]);if(lx>=xLo&&lx<=xHi)mx=Math.max(mx,t.y[i]);}}
+      return[0,mx*1.1];
+    })(),tickprefix:'$',tickformat:'.2f',tickfont:{color:'#ffffff',size:9},showgrid:false,ticksuffix:'  '},
     height:240,margin:{t:35,b:55,l:65,r:65},hovermode:'x unified',
     showlegend:false,annotations:ann
   };
@@ -549,11 +584,22 @@ const evtSrc=new EventSource(BASE+'/tokens/stream');
 evtSrc.onmessage=function(e){
   try{
     const rows=JSON.parse(e.data);
+    let lastDate='';
     for(const r of rows){
       const isStart=!r.t_end;
       const m=r.model||'?';
       const tz={timeZone:'__TIMEZONE__',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:1};
       const fmtTs=s=>s?new Date(s).toLocaleTimeString('en-US',tz):'';
+      const rawEnd=r.t_end||r.t_start||'';
+      const dateStr=rawEnd?new Date(rawEnd).toLocaleDateString('en-US',{timeZone:'__TIMEZONE__',month:'short',day:'numeric'}):'';
+      // Date separator when day changes
+      if(dateStr&&dateStr!==lastDate){
+        lastDate=dateStr;
+        const sep=document.createElement('div');
+        sep.style.cssText='color:var(--blue);font-size:10px;border-bottom:1px solid var(--border);padding:2px 0;margin:2px 0';
+        sep.textContent='\u2500\u2500 '+dateStr+' \u2500\u2500';
+        stream.appendChild(sep);
+      }
       const tS=fmtTs(r.t_start);
       const tE=fmtTs(r.t_end);
       const sid=(r.session_id||'').slice(0,8);
@@ -563,8 +609,8 @@ evtSrc.onmessage=function(e){
       line.textContent=isStart
         ?`${tS}  ${(r.bot||'?').padEnd(8)} ${m} ${sid}/${tid} \u25B6 turn started`
         :`${tS}\u2192${tE}  ${(r.bot||'?').padEnd(8)} ${m} ${sid}/${tid} in=${String(r.input_tokens||0).padStart(6)} out=${String(r.output_tokens||0).padStart(6)} cw=${fmtNum(r.cache_write_tokens||0).padStart(6)} cr=${fmtNum(r.cache_read_tokens||0).padStart(6)}`;
-      stream.prepend(line);
-      while(stream.children.length>__MAX_STREAM_ROWS__)stream.lastChild.remove();
+      stream.appendChild(line);
+      while(stream.children.length>__MAX_STREAM_ROWS__)stream.firstChild.remove();
     }
     if(stream.lastChild?.textContent==='Waiting for data...')stream.lastChild.remove();
   }catch{}

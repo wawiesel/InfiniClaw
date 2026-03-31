@@ -617,7 +617,10 @@ const server = http.createServer((req, res) => {
     });
     res.write(':ok\n\n');
     // Send all events since server start
-    if (sseHistory.length > 0) res.write(`data: ${JSON.stringify(sseHistory)}\n\n`);
+    if (sseHistory.length > 0) {
+      const sorted = [...sseHistory].sort((a, b) => (a.t_end || a.t_start || '').localeCompare(b.t_end || b.t_start || ''));
+      res.write(`data: ${JSON.stringify(sorted)}\n\n`);
+    }
     sseClients.add(res);
     req.on('close', () => sseClients.delete(res));
     return;
@@ -660,8 +663,8 @@ const server = http.createServer((req, res) => {
         if (s.hostname && s.type !== 'testbed') hostToShip[s.hostname] = abbr;
       }
       try { openTokenDb(TOKEN_DB_DIR); } catch { /* */ }
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
-      const allRows = queryAllUsage(sevenDaysAgo);
+      const allRows = queryAllUsage();
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).getTime();
       const result: Record<string, unknown> = {};
       // Group rows by bot
       const byBot: Record<string, typeof allRows> = {};
@@ -676,9 +679,10 @@ const server = http.createServer((req, res) => {
           ...r,
           cost: r.input_tokens * r.input_price_per_token + r.output_tokens * r.output_price_per_token + r.cache_write_tokens * r.cache_write_price_per_token + r.cache_read_tokens * r.cache_read_price_per_token,
         }));
-        // Aggregate by model
+        // Aggregate by model — 7-day rolling totals for tables
         const agg: Record<string, { input: number; output: number; cache_write: number; cache_read: number; total: number; cost: number }> = {};
         for (const e of entries) {
+          if (new Date(e.t_end || e.t_start).getTime() < sevenDaysAgo) continue;
           const k = `${e.provider}/${e.model}`;
           if (!agg[k]) agg[k] = { input: 0, output: 0, cache_write: 0, cache_read: 0, total: 0, cost: 0 };
           agg[k].input += e.input_tokens; agg[k].output += e.output_tokens;
