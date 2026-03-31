@@ -238,7 +238,15 @@ function runClaude(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
+    // If prompt is a slash command (e.g. /compact, /clear), write it and give
+    // claude a moment to process before closing stdin. Otherwise write normally.
+    const isSlashCmd = prompt.startsWith('/');
     proc.stdin!.write(prompt);
+    if (isSlashCmd) {
+      proc.stdin!.write('\n');
+      // Brief delay so claude CLI processes the slash command before stdin EOF
+      await new Promise(r => setTimeout(r, 500));
+    }
     proc.stdin!.end();
 
     let newSessionId: string | undefined;

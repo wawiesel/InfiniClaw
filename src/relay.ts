@@ -5208,6 +5208,26 @@ function registerRelayCommands(): void {
         await send(`❌ failed to start relay-next: ${errStr(err)}`);
       }
     },
+
+    compact: async (cmd, conn) => {
+      const bot = cmd.slice('!compact'.length).trim().toLowerCase();
+      if (!bot) { await helpReply(conn, 'Usage: !compact <bot>'); return; }
+      if (!liveFleet[bot]) { await helpReply(conn, `Unknown bot: ${bot}`); return; }
+      // Write /compact as IPC message to the bot's active container
+      const root = resolveRoot();
+      const groupFolder = 'main'; // bots run in 'main' group by default
+      const inputDir = path.join(root, '_runtime', 'instances', bot, 'data', 'ipc', groupFolder, 'input');
+      try {
+        fs.mkdirSync(inputDir, { recursive: true });
+        const filename = `message-${Date.now()}.json`;
+        const tempPath = path.join(inputDir, `${filename}.tmp`);
+        fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text: '/compact' }));
+        fs.renameSync(tempPath, path.join(inputDir, filename));
+        await reply(conn, `📦 sent /compact to ${bot}`);
+      } catch (err) {
+        await reply(conn, `❌ failed: ${errStr(err)}`);
+      }
+    },
   });
 }
 
