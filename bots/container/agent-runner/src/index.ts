@@ -17,13 +17,105 @@
  *   Final marker after loop ends signals completion.
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execSync, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { formatToolCallWithOutput, GENERAL_PROGRESS_DEDUPE_MS } from './progress.js';
 import { getRequestedMainModel } from './model-selection.js';
+
+const ALLOWED_SLASH_COMMANDS = new Set(['/compact', '/clear']);
+
+/**
+ * Run a slash command via tmux. Claude Code only processes slash commands
+ * from an interactive TTY — tmux provides the pseudo-TTY.
+ *
+ * 1. Start tmux session with `claude --resume`
+ * 2. Wait for the interactive prompt (❯)
+ * 3. send-keys the slash command
+ * 4. Wait for completion (prompt reappears)
+ * 5. Kill the tmux session
+ */
+async function runSlashCommand(
+  command: string,
+  sessionId: string | undefined,
+  env: Record<string, string | undefined>,
+): Promise<{ ok: boolean; output: string }> {
+  if (!ALLOWED_SLASH_COMMANDS.has(command)) {
+    return { ok: false, output: `rejected: ${command} not in allowlist` };
+  }
+  if (!sessionId) {
+    return { ok: false, output: 'no session to compact' };
+  }
+
+  const tmuxSession = 'slash-cmd';
+  const cwd = '/workspace/persona/temp';
+
+  // Build claude command — interactive mode (no --print), with resume
+  const claudeCmd = `cd ${cwd} && claude --resume ${sessionId} --dangerously-skip-permissions`;
+
+  try {
+    // Kill any leftover session
+    try { execSync(`tmux kill-session -t ${tmuxSession} 2>/dev/null`, { env: env as Record<string, string> }); } catch { /* */ }
+
+    // Start tmux with claude
+    execSync(`tmux new-session -d -s ${tmuxSession} '${claudeCmd}'`, {
+      env: env as Record<string, string>,
+      timeout: 10_000,
+    });
+
+    // Wait for interactive prompt (poll tmux pane for ❯)
+    const waitForPrompt = async (timeoutMs: number): Promise<boolean> => {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        try {
+          const pane = execSync(`tmux capture-pane -t ${tmuxSession} -p`, {
+            env: env as Record<string, string>,
+            timeout: 5_000,
+          }).toString();
+          if (pane.includes('❯')) return true;
+        } catch { /* tmux not ready */ }
+        await new Promise(r => setTimeout(r, 500));
+      }
+      return false;
+    };
+
+    // Wait for claude to load and show prompt
+    const ready = await waitForPrompt(30_000);
+    if (!ready) {
+      try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
+      return { ok: false, output: 'timeout waiting for claude prompt' };
+    }
+
+    // Send the slash command
+    execSync(`tmux send-keys -t ${tmuxSession} '${command}' Enter`, {
+      env: env as Record<string, string>,
+      timeout: 5_000,
+    });
+
+    // Wait for completion — prompt reappears after compaction
+    await new Promise(r => setTimeout(r, 2_000)); // give it a moment
+    const done = await waitForPrompt(60_000);
+
+    // Capture output
+    let output = '';
+    try {
+      output = execSync(`tmux capture-pane -t ${tmuxSession} -p`, {
+        env: env as Record<string, string>,
+        timeout: 5_000,
+      }).toString();
+    } catch { /* */ }
+
+    // Kill session
+    try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
+
+    return { ok: done, output: output.slice(-500) }; // last 500 chars
+  } catch (err) {
+    try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
+    return { ok: false, output: String(err) };
+  }
+}
 
 interface ContainerInput {
   prompt: string;
@@ -238,15 +330,7 @@ function runClaude(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    // If prompt is a slash command (e.g. /compact, /clear), write it and give
-    // claude a moment to process before closing stdin. Otherwise write normally.
-    const isSlashCmd = prompt.startsWith('/');
     proc.stdin!.write(prompt);
-    if (isSlashCmd) {
-      proc.stdin!.write('\n');
-      // Brief delay so claude CLI processes the slash command before stdin EOF
-      await new Promise(r => setTimeout(r, 500));
-    }
     proc.stdin!.end();
 
     let newSessionId: string | undefined;
@@ -675,9 +759,20 @@ async function main(): Promise<void> {
       // Drain any queued messages
       const queued = drainIpcInput();
       if (queued.length > 0) {
-        log(`Found ${queued.length} queued messages, resuming`);
-        prompt = queued.join('\n');
-        continue;
+        // Check for slash commands — handle via tmux, not regular spawn
+        const slashCmds = queued.filter(m => ALLOWED_SLASH_COMMANDS.has(m.trim()));
+        const regularMsgs = queued.filter(m => !ALLOWED_SLASH_COMMANDS.has(m.trim()));
+        for (const cmd of slashCmds) {
+          log(`Running slash command via tmux: ${cmd}`);
+          const result = await runSlashCommand(cmd.trim(), sessionId, env);
+          log(`Slash command result: ok=${result.ok} output=${result.output.slice(0, 200)}`);
+        }
+        if (regularMsgs.length > 0) {
+          log(`Found ${regularMsgs.length} queued messages, resuming`);
+          prompt = regularMsgs.join('\n');
+          continue;
+        }
+        // Only slash commands were queued — wait for more
       }
 
       // Wait for the next message or _close sentinel
@@ -685,6 +780,14 @@ async function main(): Promise<void> {
       if (nextMessage === null) {
         log('Close sentinel received, exiting');
         break;
+      }
+
+      // Check if it's a slash command
+      if (ALLOWED_SLASH_COMMANDS.has(nextMessage.trim())) {
+        log(`Running slash command via tmux: ${nextMessage}`);
+        const result = await runSlashCommand(nextMessage.trim(), sessionId, env);
+        log(`Slash command result: ok=${result.ok} output=${result.output.slice(0, 200)}`);
+        continue; // back to waiting
       }
 
       log(`Got new message (${nextMessage.length} chars), resuming`);
