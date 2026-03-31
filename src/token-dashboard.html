@@ -171,13 +171,22 @@ class UnionGrid{
     return y;
   }
   yRate(turns){return this.yRateFromRates(this.rates(turns));}
-  // Cumulative from rates array
+  // Cumulative from rates array, with 7-day $0 setpoint.
+  // Cost at 7d ago = $0; older costs are negative; final value = 7-day total.
   yCumFromRates(r){
     const y=[0];let c=0;
     for(let j=0;j<=this.n;j++){
       y.push(c);
       if(j<this.n){y.push(c);c+=r[j]*(this.g[j+1]-this.g[j])/3600000;}
     }
+    // Offset so that 7 days ago = 0
+    const t7d=this.now-7*24*3600000;
+    let offset=0;
+    for(let j=0;j<this.g.length;j++){
+      if(this.g[j]<=t7d)offset=y[2*j+1];
+      else break;
+    }
+    for(let i=0;i<y.length;i++)y[i]-=offset;
     return y;
   }
   yCum(turns){return this.yCumFromRates(this.rates(turns));}
@@ -325,49 +334,58 @@ function makePlot(divId,title,seriesMap,field,mode){
           const lx=Math.log10(t.x[i]);if(lx>=xLo&&lx<=xHi&&t.y[i]>mx)mx=t.y[i];}
         return[0,mx*1.1];
       }
-      // Stacked: sum per x-index
+      // Stacked: sum per x-index, track min for cumulative negative values
       const stk=traces.filter(t=>t.stackgroup==='tokens');
-      let mx=1;if(stk.length&&stk[0].x){for(let i=0;i<stk[0].x.length;i++){
+      let mn=0,mx=1;if(stk.length&&stk[0].x){for(let i=0;i<stk[0].x.length;i++){
         const lx=Math.log10(stk[0].x[i]);if(lx<xLo||lx>xHi)continue;
-        let s=0;for(const t of stk)s+=(t.y[i]||0);if(s>mx)mx=s;}}
-      return[0,mx*1.1];
+        let s=0;for(const t of stk)s+=(t.y[i]||0);if(s>mx)mx=s;if(s<mn)mn=s;}}
+      return[mn<0?mn*1.1:0,mx*1.1];
     })(),side:'left'},
     yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent',visible:mode!=='ctx',title:{text:y2Title,font:{color:'#ffffff'}},range:prevY2||(()=>{
       const xLo=Math.min(...xRange),xHi=Math.max(...xRange);
-      let mx=0.01;for(const t of traces){if(t.yaxis!=='y2')continue;for(let i=0;i<t.x.length;i++){
-        const lx=Math.log10(t.x[i]);if(lx>=xLo&&lx<=xHi)mx=Math.max(mx,t.y[i]);}}
-      return[0,mx*1.1];
+      let mn=0,mx=0.01;for(const t of traces){if(t.yaxis!=='y2')continue;for(let i=0;i<t.x.length;i++){
+        const lx=Math.log10(t.x[i]);if(lx>=xLo&&lx<=xHi){mx=Math.max(mx,t.y[i]);mn=Math.min(mn,t.y[i]);}}}
+      return[mn<0?mn*1.1:0,mx*1.1];
     })(),tickprefix:'$',tickformat:'.2f',tickfont:{color:'#ffffff',size:9},showgrid:false,ticksuffix:'  '},
     height:240,margin:{t:35,b:55,l:65,r:65},hovermode:'x unified',
     showlegend:mode==='ctx',legend:{font:{size:9,color:'#8b949e'},orientation:'h',y:-0.25},annotations:ann
   };
   Plotly.react(divId,traces,layout,{responsive:true,scrollZoom:true,displayModeBar:true,modeBarButtonsToRemove:['lasso2d','select2d']});
-  // Auto-fit y-axis to visible x-range on zoom/pan
+  // Auto-fit y-axis to visible x-range on zoom/pan/home
   const plotEl=document.getElementById(divId);
   if(plotEl&&!plotEl._hasRelayout){
     plotEl._hasRelayout=true;
     plotEl.on('plotly_relayout',function(ev){
-      if(!ev['xaxis.range[0]']&&!ev['xaxis.range[1]'])return;
-      const xlo=ev['xaxis.range[0]']??layout.xaxis.range[0];
-      const xhi=ev['xaxis.range[1]']??layout.xaxis.range[1];
-      // Sum stacked traces per x-index in visible range to find true visual max
+      // React to explicit range changes AND home/autoscale resets
+      const isRange=ev['xaxis.range[0]']||ev['xaxis.range[1]'];
+      const isReset=ev['xaxis.autorange']||ev['autosize'];
+      if(!isRange&&!isReset)return;
+      const xlo=isReset?layout.xaxis.range[0]:(ev['xaxis.range[0]']??layout.xaxis.range[0]);
+      const xhi=isReset?layout.xaxis.range[1]:(ev['xaxis.range[1]']??layout.xaxis.range[1]);
+      // Sum stacked traces per x-index in visible range to find true visual min/max
       const stk=plotEl.data.filter(t=>t.stackgroup==='tokens');
       const xMin=Math.min(xlo,xhi),xMax=Math.max(xlo,xhi);
-      let ymax=0,y2max=0;
+      let ymin=0,ymax=0,y2min=0,y2max=0;
       if(stk.length&&stk[0].x){
         for(let i=0;i<stk[0].x.length;i++){
           const lx=Math.log10(stk[0].x[i]);
-          if(lx>=xMin&&lx<=xMax){let s=0;for(const t of stk)s+=(t.y[i]||0);if(s>ymax)ymax=s;}
+          if(lx>=xMin&&lx<=xMax){let s=0;for(const t of stk)s+=(t.y[i]||0);if(s>ymax)ymax=s;if(s<ymin)ymin=s;}
         }
       }
       for(const tr of plotEl.data){
         if(tr.yaxis!=='y2')continue;
         for(let i=0;i<tr.x.length;i++){
           const lx=Math.log10(tr.x[i]);
-          if(lx>=xMin&&lx<=xMax)y2max=Math.max(y2max,tr.y[i]);
+          if(lx>=xMin&&lx<=xMax){y2max=Math.max(y2max,tr.y[i]);y2min=Math.min(y2min,tr.y[i]);}
         }
       }
-      if(ymax>0)Plotly.relayout(divId,{'yaxis.range':[0,ymax*1.1],'yaxis2.range':[0,Math.max(0.01,y2max*1.1)]});
+      const pad=0.1;
+      if(ymax>ymin)Plotly.relayout(divId,{
+        'xaxis.range':isReset?layout.xaxis.range:undefined,
+        'xaxis.autorange':false,
+        'yaxis.range':[ymin<0?ymin*1.1:0,ymax*1.1],
+        'yaxis2.range':[y2min<0?y2min*1.1:0,Math.max(0.01,y2max*1.1)]
+      });
     });
   }
 }
