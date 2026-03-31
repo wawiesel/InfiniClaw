@@ -26,13 +26,13 @@ export let MODEL_PRICING: Record<string, ModelPricing> = {};
 
 /** Load pricing from S3, falling back to local config/token-prices.json. */
 export async function loadPricing(): Promise<Record<string, ModelPricing>> {
-  // Try S3 first
+  // Try S3 first (5s timeout to avoid blocking tests/startup)
   try {
     const s3 = await import('./s3-sync.js');
     const client = s3.getClient();
     if (client) {
       const { GetObjectCommand } = await import('@aws-sdk/client-s3');
-      const resp = await client.client.send(new GetObjectCommand({ Bucket: client.bucket, Key: S3_KEY }));
+      const resp = await client.client.send(new GetObjectCommand({ Bucket: client.bucket, Key: S3_KEY }), { abortSignal: AbortSignal.timeout(5000) });
       const content = await resp.Body?.transformToString() ?? '';
       if (content) {
         MODEL_PRICING = JSON.parse(content);
@@ -40,7 +40,7 @@ export async function loadPricing(): Promise<Record<string, ModelPricing>> {
         return MODEL_PRICING;
       }
     }
-  } catch { /* S3 unavailable — fall through to local */ }
+  } catch { /* S3 unavailable or timeout — fall through to local */ }
   // Fall back to local file
   try {
     const f = path.join(resolveRoot(), 'config', 'token-prices.json');
