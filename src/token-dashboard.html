@@ -436,10 +436,12 @@ async function load(preloaded){
   nav+='<a href="#sec-fleet" data-sec="sec-fleet">Fleet</a>';
   if(opKeys.length)nav+='<a href="#sec-operator" data-sec="sec-operator">Operator</a>';
 
-  function tabsHtml(secId){
+  function tabsHtml(secId,isBot){
+    const ctx=isBot?`<button class="tab-btn active" onclick="switchTab('${secId}','context','ctx',this)">Context</button>`:'';
+    const rateActive=isBot?'':'active';
     return `<div class="tab-bar">
-      <button class="tab-btn active" onclick="switchTab('${secId}','context','ctx',this)">Context</button>
-      <button class="tab-btn" onclick="switchTab('${secId}','total','rate',this)">Rate</button>
+      ${ctx}
+      <button class="tab-btn ${rateActive}" onclick="switchTab('${secId}','total','rate',this)">Rate</button>
       <button class="tab-btn" onclick="switchTab('${secId}','total','cum',this)">Total</button>
       <button class="tab-btn" onclick="switchTab('${secId}','input','cum',this)">Input</button>
       <button class="tab-btn" onclick="switchTab('${secId}','output','cum',this)">Output</button>
@@ -521,7 +523,7 @@ async function load(preloaded){
     for(const e of d.entries){const m=e.model||'?';if(!byModel[m])byModel[m]=[];byModel[m].push(e);}
     for(const[m,entries]of Object.entries(byModel))series[m]={entries,color:MC[m]||DC};
     const tbl=Object.entries(d.aggregate).map(([m,v])=>{const model=m.split('/')[1]||m;return{n:m,i:v.input,o:v.output,cw:v.cache_write||0,cr:v.cache_read||0,cost:v.cost||0,color:MC[model]||DC};});
-    html+=`<div class="section" id="${id}"><h2>${cap(bot)} <span class="muted">${d.ship||''} · ${cap(d.role||'')}</span></h2>${tabsHtml(id)}
+    html+=`<div class="section" id="${id}"><h2>${cap(bot)} <span class="muted">${d.ship||''} · ${cap(d.role||'')}</span></h2>${tabsHtml(id,true)}
       <div class="card"><div id="plot-${id}" class="plot-div" data-title="${cap(bot)}" data-series='${JSON.stringify(series)}'></div></div>
       ${makeTable(tbl,'7-Day Rolling Totals — '+cap(bot),'Model')}</div>`;
   }
@@ -614,7 +616,7 @@ const stream=document.getElementById('livestream');
 const evtSrc=new EventSource(BASE+'/tokens/stream');
 evtSrc.onmessage=function(e){
   try{
-    const rows=JSON.parse(e.data);
+    const rows=JSON.parse(e.data); // sorted oldest→newest; prepend makes newest on top
     // Clear placeholder
     if(stream.textContent==='Waiting for data...')stream.innerHTML='';
     const tz={timeZone:'__TIMEZONE__',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:1};
@@ -625,19 +627,19 @@ evtSrc.onmessage=function(e){
       const m=r.model||'?';
       const rawEnd=r.t_end||r.t_start||'';
       const dateStr=rawEnd?new Date(rawEnd).toLocaleDateString('en-US',dateFmt):'';
-      // Date separator only when date differs from the entry just BELOW in the stream
-      const belowDate=stream.firstChild?.dataset?.date||'';
-      if(dateStr&&belowDate&&dateStr!==belowDate){
-        const sep=document.createElement('div');
-        sep.style.cssText='color:var(--blue);font-size:10px;border-top:1px solid var(--border);padding:2px 0;margin:2px 0';
-        sep.textContent='\u2500\u2500 '+dateStr+' \u2500\u2500';
-        sep.dataset.date=dateStr;
-        stream.prepend(sep);
-      }
       const tS=fmtTs(r.t_start);
       const tE=fmtTs(r.t_end);
       const sid=(r.session_id||'').slice(0,8);
       const tid=(r.turn_id||'').slice(0,8);
+      // Date separator: when this entry's date differs from current top, prepend separator THEN entry
+      const belowDate=stream.firstChild?.dataset?.date||'';
+      if(dateStr&&belowDate&&dateStr!==belowDate){
+        const sep=document.createElement('div');
+        sep.style.cssText='color:var(--blue);font-size:10px;border-bottom:1px solid var(--border);padding:2px 0;margin:2px 0';
+        sep.textContent='\u2500\u2500 '+dateStr+' \u2500\u2500';
+        sep.dataset.date=dateStr;
+        stream.prepend(sep);
+      }
       const line=document.createElement('div');
       line.dataset.date=dateStr;
       line.style.cssText='white-space:nowrap;color:'+(isStart?'var(--muted)':'var(--text)');
