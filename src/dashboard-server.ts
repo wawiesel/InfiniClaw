@@ -22,6 +22,8 @@ const TIMEZONE = process.env['FLEET_DASHBOARD_TIMEZONE'] || 'America/New_York';
 const MAX_STREAM_ROWS = parseInt(process.env['FLEET_DASHBOARD_MAX_STREAM_ROWS'] || '100', 10);
 const FORCE_RENDER_MS = parseInt(process.env['FLEET_DASHBOARD_FORCE_RENDER_MS'] || '60000', 10);
 const PLOT_GRANULARITY_S = parseInt(process.env['FLEET_DASHBOARD_GRANULARITY_S'] || '3', 10); // grn = uf/2, default 3s (uf=6s)
+const BACKUP_INTERVAL_MS = parseInt(process.env['FLEET_DASHBOARD_BACKUP_INTERVAL_MS'] || String(24 * 3600_000), 10); // daily
+const BACKUP_RETAIN = parseInt(process.env['FLEET_DASHBOARD_BACKUP_RETAIN'] || '30', 10);
 const BASE = '/infiniclaw/fleet/ic01';
 
 // ── Token livestream (SSE) ──────────────────────────────────────────
@@ -914,6 +916,44 @@ load();
 loadPricing().then(() => {
   setInterval(() => { loadPricing(); }, 5 * 60_000);
 });
+
+// ── S3 backup of tokens.db (R17) ──────────────────────────────────────
+async function backupTokenDb(): Promise<void> {
+  const dbPath = path.join(TOKEN_DB_DIR, 'tokens.db');
+  if (!fs.existsSync(dbPath)) return;
+  try {
+    const s3 = await import('./s3-sync.js');
+    const client = s3.getClient();
+    if (!client) { console.log('token-backup: S3 not configured, skipping'); return; }
+    const { PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+    const zlib = await import('zlib');
+    const { promisify } = await import('util');
+    const gzip = promisify(zlib.gzip);
+
+    // Compress and upload
+    const date = new Date().toISOString().slice(0, 10);
+    const key = `tokens/tokens.db.${date}.gz`;
+    const raw = fs.readFileSync(dbPath);
+    const compressed = await gzip(raw);
+    await client.client.send(new PutObjectCommand({ Bucket: client.bucket, Key: key, Body: compressed }));
+    console.log(`token-backup: uploaded ${key} (${(compressed.length / 1024).toFixed(0)} KB)`);
+
+    // Prune old backups beyond BACKUP_RETAIN
+    const list = await client.client.send(new ListObjectsV2Command({ Bucket: client.bucket, Prefix: 'tokens/tokens.db.' }));
+    const keys = (list.Contents || []).map(o => o.Key!).sort();
+    if (keys.length > BACKUP_RETAIN) {
+      for (const old of keys.slice(0, keys.length - BACKUP_RETAIN)) {
+        await client.client.send(new DeleteObjectCommand({ Bucket: client.bucket, Key: old }));
+        console.log(`token-backup: pruned ${old}`);
+      }
+    }
+  } catch (err) {
+    console.log(`token-backup: failed: ${err}`);
+  }
+}
+// Backup on startup + daily
+backupTokenDb();
+setInterval(backupTokenDb, BACKUP_INTERVAL_MS);
 
 server.listen(PORT, () => {
   console.log(`Fleet dashboard listening on :${PORT}`);
