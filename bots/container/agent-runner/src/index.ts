@@ -674,15 +674,25 @@ async function main(): Promise<void> {
     }
   }
 
-  // Mark onboarding complete — interactive mode (tmux slash commands) shows the
-  // theme picker if this is missing. --print mode skips onboarding but doesn't set the flag.
+  // Mark onboarding complete and trust the working directory — interactive mode
+  // (tmux slash commands) shows prompts for these if missing. --print mode skips
+  // them but doesn't persist the flags, so we set them here for both paths.
   try {
     const cj = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf-8'));
+    let changed = false;
     if (!cj.hasCompletedOnboarding) {
       cj.hasCompletedOnboarding = true;
       cj.lastOnboardingVersion = '2.1.76';
-      fs.writeFileSync(claudeJsonPath, JSON.stringify(cj));
+      changed = true;
     }
+    // Pre-approve the working directory so interactive mode doesn't prompt
+    const cwd = '/workspace/persona/temp';
+    if (!cj.projects?.[cwd]) {
+      if (!cj.projects) cj.projects = {};
+      cj.projects[cwd] = { allowedTools: [], hasTrustDialogAccepted: true };
+      changed = true;
+    }
+    if (changed) fs.writeFileSync(claudeJsonPath, JSON.stringify(cj));
   } catch { /* best effort */ }
 
   // Write MCP config before first claude spawn
