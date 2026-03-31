@@ -73,15 +73,16 @@ async function runSlashCommand(
     }
     fs.writeFileSync(envFile, envLines.join('\n'));
 
-    // Build claude command — interactive mode (no --print), with resume
-    // Wrap in bash -c to ensure source works (tmux default shell may be sh)
-    const innerCmd = `source ${envFile} && cd ${cwd} && claude --resume ${sessionId} --dangerously-skip-permissions`;
+    // Build a launch script for tmux — avoids quoting issues with inline commands
+    const launchScript = '/tmp/slash-cmd-launch.sh';
+    fs.writeFileSync(launchScript, `#!/bin/bash\nsource ${envFile}\ncd ${cwd}\nexec claude --resume ${sessionId} --dangerously-skip-permissions\n`);
+    fs.chmodSync(launchScript, 0o755);
 
     // Kill any leftover session
     try { execSync(`tmux kill-session -t ${tmuxSession} 2>/dev/null`, { env: env as Record<string, string> }); } catch { /* */ }
 
-    // Start tmux with bash explicitly
-    execSync(`tmux new-session -d -s ${tmuxSession} "bash -c '${innerCmd}'"`, {
+    // Start tmux with the launch script
+    execSync(`tmux new-session -d -s ${tmuxSession} ${launchScript}`, {
       env: env as Record<string, string>,
       timeout: 10_000,
     });
@@ -610,6 +611,8 @@ function writeMcpConfig(containerInput: ContainerInput, env: Record<string, stri
   } catch { /* start fresh */ }
 
   settings.mcpServers = mcpServers;
+  // Set theme to prevent onboarding theme picker in tmux /compact sessions
+  if (!settings.theme) settings.theme = 'dark';
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
