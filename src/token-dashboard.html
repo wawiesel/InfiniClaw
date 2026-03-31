@@ -318,21 +318,15 @@ function makePlot(divId,title,seriesMap,field,mode){
     paper_bgcolor:'#161b22',plot_bgcolor:'#0d1117',font:{color:'#8b949e',size:10},
     xaxis:{type:'log',range:xRange,gridcolor:'#21262d',linecolor:'#30363d',tickvals:TICKS,ticktext:TICKS.map(fmtAgo),title:{text:'\u2190 past \u00b7 now \u2192',font:{size:11}}},
     yaxis:{gridcolor:'#21262d',linecolor:'#30363d',title:{text:yTitle},range:prevY||(()=>{
-      const xLo=Math.min(...xRange),xHi=Math.max(...xRange);
-      if(mode==='ctx'){
-        // Context: simple max of all traces in visible range
-        let mx=1;for(const t of traces)for(let i=0;i<t.x.length;i++){
-          const lx=Math.log10(t.x[i]);if(lx>=xLo&&lx<=xHi&&t.y[i]>mx)mx=t.y[i];}
-        return[0,mx*1.1];
-      }
-      // Stacked: sum per x-index
+      // Sum stacked traces per x-index in visible range to find true visual max
       const stk=traces.filter(t=>t.stackgroup==='tokens');
+      const xLo=Math.min(...xRange),xHi=Math.max(...xRange);
       let mx=1;if(stk.length&&stk[0].x){for(let i=0;i<stk[0].x.length;i++){
         const lx=Math.log10(stk[0].x[i]);if(lx<xLo||lx>xHi)continue;
         let s=0;for(const t of stk)s+=(t.y[i]||0);if(s>mx)mx=s;}}
       return[0,mx*1.1];
     })(),side:'left'},
-    yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent',visible:mode!=='ctx',title:{text:y2Title,font:{color:'#ffffff'}},range:prevY2||(()=>{
+    yaxis2:{overlaying:'y',side:'right',gridcolor:'transparent',title:{text:y2Title,font:{color:'#ffffff'}},range:prevY2||(()=>{
       const xLo=Math.min(...xRange),xHi=Math.max(...xRange);
       let mx=0.01;for(const t of traces){if(t.yaxis!=='y2')continue;for(let i=0;i<t.x.length;i++){
         const lx=Math.log10(t.x[i]);if(lx>=xLo&&lx<=xHi)mx=Math.max(mx,t.y[i]);}}
@@ -551,9 +545,8 @@ async function load(preloaded){
     div.dataset.rendered='1';
     const sec=div.closest('.section');
     const state=sec&&_tabState[sec.id];
-    const isBot=sec&&sec.id.startsWith('sec-bot-');
-    const field=state?state.field:(isBot?'context':'total');
-    const mode=state?state.mode:(isBot?'ctx':'rate');
+    const field=state?state.field:'total';
+    const mode=state?state.mode:'rate';
     makePlot(div.id,div.dataset.title,JSON.parse(div.dataset.series),field,mode);
     if(state&&sec){
       const btns=sec.querySelectorAll('.tab-btn');
@@ -609,9 +602,8 @@ if(REFRESH_MS>0)setInterval(async()=>{
         if(!div.dataset.rendered)return;
         const sec=div.closest('.section');
         const state=sec&&_tabState[sec.id];
-        const isBot=sec&&sec.id.startsWith('sec-bot-');
-        const field=state?state.field:(isBot?'context':'total');
-        const mode=state?state.mode:(isBot?'ctx':'rate');
+        const field=state?state.field:'total';
+        const mode=state?state.mode:'rate';
         makePlot(div.id,div.dataset.title,JSON.parse(div.dataset.series),field,mode);
       });
     }
