@@ -94,23 +94,51 @@ async function runSlashCommand(
       timeout: 5_000,
     });
 
-    // Wait for completion — prompt reappears after compaction
-    await new Promise(r => setTimeout(r, 2_000)); // give it a moment
-    const done = await waitForPrompt(60_000);
+    // Wait for command to process, then ask for confirmation
+    await new Promise(r => setTimeout(r, 3_000));
 
-    // Capture output
-    let output = '';
-    try {
-      output = execSync(`tmux capture-pane -t ${tmuxSession} -p`, {
-        env: env as Record<string, string>,
-        timeout: 5_000,
-      }).toString();
-    } catch { /* */ }
+    // Wait for prompt to return after slash command
+    const promptBack = await waitForPrompt(120_000);
+    if (!promptBack) {
+      try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
+      return { ok: false, output: 'timeout waiting for slash command to finish' };
+    }
+
+    // Send confirmation request
+    const confirmMsg = 'When you are finished compacting, reply with "DONE COMPACTING"';
+    execSync(`tmux send-keys -t ${tmuxSession} '${confirmMsg}' Enter`, {
+      env: env as Record<string, string>,
+      timeout: 5_000,
+    });
+
+    // Poll for DONE COMPACTING in pane output (5 min timeout)
+    const waitForConfirmation = async (timeoutMs: number): Promise<{ done: boolean; output: string }> => {
+      const start = Date.now();
+      let lastOutput = '';
+      while (Date.now() - start < timeoutMs) {
+        try {
+          const pane = execSync(`tmux capture-pane -t ${tmuxSession} -p -S -100`, {
+            env: env as Record<string, string>,
+            timeout: 5_000,
+          }).toString();
+          lastOutput = pane;
+          if (pane.includes('DONE COMPACTING')) return { done: true, output: pane };
+        } catch { /* tmux not ready */ }
+        await new Promise(r => setTimeout(r, 2_000));
+      }
+      return { done: false, output: lastOutput };
+    };
+
+    const result = await waitForConfirmation(300_000); // 5 min timeout
+
+    // Capture final output
+    let output = result.output.slice(-1000);
 
     // Kill session
     try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
 
-    return { ok: done, output: output.slice(-500) }; // last 500 chars
+    const verified = output.includes('DONE COMPACTING');
+    return { ok: result.done && verified, output: output.slice(-500) };
   } catch (err) {
     try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
     return { ok: false, output: String(err) };
