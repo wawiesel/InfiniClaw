@@ -17,13 +17,157 @@
  *   Final marker after loop ends signals completion.
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execSync, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { formatToolCallWithOutput, GENERAL_PROGRESS_DEDUPE_MS } from './progress.js';
 import { getRequestedMainModel } from './model-selection.js';
+
+const ALLOWED_SLASH_COMMANDS = new Set(['/compact', '/clear', '/status']);
+
+/**
+ * Run a slash command via tmux. Claude Code only processes slash commands
+ * from an interactive TTY — tmux provides the pseudo-TTY.
+ *
+ * 1. Start tmux session with `claude --resume`
+ * 2. Wait for the interactive prompt (❯)
+ * 3. send-keys the slash command
+ * 4. Wait for completion (prompt reappears)
+ * 5. Kill the tmux session
+ */
+async function runSlashCommand(
+  command: string,
+  sessionId: string | undefined,
+  env: Record<string, string | undefined>,
+): Promise<{ ok: boolean; output: string }> {
+  if (!ALLOWED_SLASH_COMMANDS.has(command)) {
+    return { ok: false, output: `rejected: ${command} not in allowlist` };
+  }
+  if (!sessionId) {
+    return { ok: false, output: 'no session to compact' };
+  }
+
+  const tmuxSession = 'slash-cmd';
+  const cwd = '/workspace/persona/temp';
+
+  try {
+    // Write env to a file so the tmux shell can source it (tmux can't inherit Node process env).
+    // All auth, config, and credentials are already set up by the main startup code.
+    const envFile = '/tmp/slash-cmd-env.sh';
+    const envLines: string[] = [];
+    for (const [k, v] of Object.entries(env)) {
+      if (v !== undefined && k.match(/^[A-Z_][A-Z0-9_]*$/)) {
+        envLines.push(`export ${k}=${JSON.stringify(v)}`);
+      }
+    }
+    fs.writeFileSync(envFile, envLines.join('\n'));
+
+    // Launch script: source env, then call claude the same way the main process does
+    const launchScript = '/tmp/slash-cmd-launch.sh';
+    fs.writeFileSync(launchScript, `#!/bin/bash\nsource ${envFile}\ncd ${cwd}\nexec claude --resume ${sessionId} --dangerously-skip-permissions\n`);
+    fs.chmodSync(launchScript, 0o755);
+
+    // Kill any leftover session
+    try { execSync(`tmux kill-session -t ${tmuxSession} 2>/dev/null`, { env: env as Record<string, string> }); } catch { /* */ }
+
+    // Start tmux with the launch script
+    execSync(`tmux new-session -d -s ${tmuxSession} ${launchScript}`, {
+      env: env as Record<string, string>,
+      timeout: 10_000,
+    });
+
+    // Wait for interactive prompt. The real prompt is "❯ " on its own line (possibly
+    // with trailing spaces). Menu items show "❯ 1." or "❯ 2." — exclude those.
+    // Also detect and auto-accept onboarding prompts (trust dialog, bypass permissions).
+    const waitForPrompt = async (timeoutMs: number): Promise<boolean> => {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        try {
+          const pane = execSync(`tmux capture-pane -t ${tmuxSession} -p`, {
+            env: env as Record<string, string>,
+            timeout: 5_000,
+          }).toString();
+          // Real prompt: line starting with ❯ NOT followed by a digit (menu item)
+          if (/❯\s*$/m.test(pane)) return true;
+          // Auto-accept onboarding dialogs by navigating to "Yes" and pressing Enter
+          if (pane.includes('I accept') || pane.includes('I trust this folder')) {
+            // Move to "Yes" option (it's always option 2) and confirm — separate keys with a delay
+            execSync(`tmux send-keys -t ${tmuxSession} Down`, { env: env as Record<string, string>, timeout: 3_000 });
+            await new Promise(r => setTimeout(r, 500));
+            execSync(`tmux send-keys -t ${tmuxSession} Enter`, { env: env as Record<string, string>, timeout: 3_000 });
+            await new Promise(r => setTimeout(r, 3_000));
+            continue;
+          }
+        } catch { /* tmux not ready */ }
+        await new Promise(r => setTimeout(r, 500));
+      }
+      return false;
+    };
+
+    const ready = await waitForPrompt(60_000);
+    if (!ready) {
+      try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
+      return { ok: false, output: 'timeout waiting for claude prompt' };
+    }
+
+    // Send the slash command
+    execSync(`tmux send-keys -t ${tmuxSession} '${command}' Enter`, {
+      env: env as Record<string, string>,
+      timeout: 5_000,
+    });
+
+    // Wait for command to process, then ask for confirmation
+    await new Promise(r => setTimeout(r, 3_000));
+
+    // Wait for prompt to return after slash command
+    const promptBack = await waitForPrompt(120_000);
+    if (!promptBack) {
+      try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
+      return { ok: false, output: 'timeout waiting for slash command to finish' };
+    }
+
+    // Send confirmation request
+    const confirmMsg = 'When you are finished compacting, reply with "DONE COMPACTING"';
+    execSync(`tmux send-keys -t ${tmuxSession} '${confirmMsg}' Enter`, {
+      env: env as Record<string, string>,
+      timeout: 5_000,
+    });
+
+    // Poll for DONE COMPACTING in pane output (5 min timeout)
+    const waitForConfirmation = async (timeoutMs: number): Promise<{ done: boolean; output: string }> => {
+      const start = Date.now();
+      let lastOutput = '';
+      while (Date.now() - start < timeoutMs) {
+        try {
+          const pane = execSync(`tmux capture-pane -t ${tmuxSession} -p -S -100`, {
+            env: env as Record<string, string>,
+            timeout: 5_000,
+          }).toString();
+          lastOutput = pane;
+          if (pane.includes('DONE COMPACTING')) return { done: true, output: pane };
+        } catch { /* tmux not ready */ }
+        await new Promise(r => setTimeout(r, 2_000));
+      }
+      return { done: false, output: lastOutput };
+    };
+
+    const result = await waitForConfirmation(300_000); // 5 min timeout
+
+    // Capture final output
+    let output = result.output.slice(-1000);
+
+    // Kill session
+    try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
+
+    const verified = output.includes('DONE COMPACTING');
+    return { ok: result.done && verified, output: output.slice(-500) };
+  } catch (err) {
+    try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
+    return { ok: false, output: String(err) };
+  }
+}
 
 interface ContainerInput {
   prompt: string;
@@ -469,6 +613,8 @@ function writeMcpConfig(containerInput: ContainerInput, env: Record<string, stri
   } catch { /* start fresh */ }
 
   settings.mcpServers = mcpServers;
+  // Set theme to prevent onboarding theme picker in tmux /compact sessions
+  if (!settings.theme) settings.theme = 'dark';
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
@@ -540,8 +686,31 @@ async function main(): Promise<void> {
     }
   }
 
+  // Mark onboarding complete and trust the working directory — interactive mode
+  // (tmux slash commands) shows prompts for these if missing. --print mode skips
+  // them but doesn't persist the flags, so we set them here for both paths.
+  try {
+    const cj = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf-8'));
+    let changed = false;
+    if (!cj.hasCompletedOnboarding) {
+      cj.hasCompletedOnboarding = true;
+      cj.lastOnboardingVersion = '2.1.76';
+      changed = true;
+    }
+    // Pre-approve the working directory so interactive mode doesn't prompt
+    const cwd = '/workspace/persona/temp';
+    if (!cj.projects?.[cwd]) {
+      if (!cj.projects) cj.projects = {};
+      cj.projects[cwd] = { allowedTools: [], hasTrustDialogAccepted: true };
+      changed = true;
+    }
+    if (changed) fs.writeFileSync(claudeJsonPath, JSON.stringify(cj));
+  } catch { /* best effort */ }
+
   // Write MCP config before first claude spawn
   writeMcpConfig(containerInput, env);
+
+
 
   const model = getRequestedMainModel(env);
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -667,9 +836,20 @@ async function main(): Promise<void> {
       // Drain any queued messages
       const queued = drainIpcInput();
       if (queued.length > 0) {
-        log(`Found ${queued.length} queued messages, resuming`);
-        prompt = queued.join('\n');
-        continue;
+        // Check for slash commands — handle via tmux, not regular spawn
+        const slashCmds = queued.filter(m => ALLOWED_SLASH_COMMANDS.has(m.trim()));
+        const regularMsgs = queued.filter(m => !ALLOWED_SLASH_COMMANDS.has(m.trim()));
+        for (const cmd of slashCmds) {
+          log(`Running slash command via tmux: ${cmd}`);
+          const result = await runSlashCommand(cmd.trim(), sessionId, env);
+          log(`Slash command result: ok=${result.ok} output=${result.output.slice(0, 200)}`);
+        }
+        if (regularMsgs.length > 0) {
+          log(`Found ${regularMsgs.length} queued messages, resuming`);
+          prompt = regularMsgs.join('\n');
+          continue;
+        }
+        // Only slash commands were queued — wait for more
       }
 
       // Wait for the next message or _close sentinel
@@ -677,6 +857,14 @@ async function main(): Promise<void> {
       if (nextMessage === null) {
         log('Close sentinel received, exiting');
         break;
+      }
+
+      // Check if it's a slash command
+      if (ALLOWED_SLASH_COMMANDS.has(nextMessage.trim())) {
+        log(`Running slash command via tmux: ${nextMessage}`);
+        const result = await runSlashCommand(nextMessage.trim(), sessionId, env);
+        log(`Slash command result: ok=${result.ok} output=${result.output.slice(0, 200)}`);
+        continue; // back to waiting
       }
 
       log(`Got new message (${nextMessage.length} chars), resuming`);

@@ -3280,7 +3280,9 @@ function startTokenFlushWatcher(): void {
   }
   // Initial sync on startup + periodic fallback (fs.watch may miss deep nested changes on Linux)
   debouncedFlush();
-  setInterval(debouncedFlush, 5_000); // 5s for near-real-time token updates (R4)
+  setInterval(() => {
+    flushNewTokenData().catch((err) => log(`token-flush: error: ${errStr(err)}`));
+  }, 30_000); // 30s periodic fallback — debouncedFlush handles fast updates from fs.watch
 }
 
 // Per-bot latest flushed timestamp — persisted to disk
@@ -3369,6 +3371,7 @@ async function flushNewTokenData(): Promise<void> {
       }
     }
 
+    log(`token-flush: ${bot} found ${completedTurns.length} turns (offset=${latestFlushed})`);
     // POST to ingest endpoint (sorted by timestamp)
     if (completedTurns.length > 0) {
       completedTurns.sort((a, b) => new Date(a.t_end).getTime() - new Date(b.t_end).getTime());
@@ -5208,6 +5211,26 @@ function registerRelayCommands(): void {
         await send(`✅ relay-next started — handoff will complete in ~90s (drain timeout: ${Math.round(RELAY_DRAIN_TIMEOUT_MS / 1000)}s)`);
       } catch (err) {
         await send(`❌ failed to start relay-next: ${errStr(err)}`);
+      }
+    },
+
+    compact: async (cmd, conn) => {
+      const bot = cmd.slice('!compact'.length).trim().toLowerCase();
+      if (!bot) { await helpReply(conn, 'Usage: !compact <bot>'); return; }
+      if (!liveFleet[bot]) { await helpReply(conn, `Unknown bot: ${bot}`); return; }
+      // Write /compact as IPC message to the bot's active container
+      const root = resolveRoot();
+      const groupFolder = 'main'; // bots run in 'main' group by default
+      const inputDir = path.join(root, '_runtime', 'instances', bot, 'data', 'ipc', groupFolder, 'input');
+      try {
+        fs.mkdirSync(inputDir, { recursive: true });
+        const filename = `message-${Date.now()}.json`;
+        const tempPath = path.join(inputDir, `${filename}.tmp`);
+        fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text: '/compact' }));
+        fs.renameSync(tempPath, path.join(inputDir, filename));
+        await reply(conn, `📦 sent /compact to ${bot}`);
+      } catch (err) {
+        await reply(conn, `❌ failed: ${errStr(err)}`);
       }
     },
   });
