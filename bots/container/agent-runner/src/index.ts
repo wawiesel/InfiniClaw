@@ -87,7 +87,7 @@ async function runSlashCommand(
       timeout: 10_000,
     });
 
-    // Wait for interactive prompt (poll tmux pane for ❯)
+    // Wait for interactive prompt, dismissing onboarding screens along the way
     const waitForPrompt = async (timeoutMs: number): Promise<boolean> => {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
@@ -96,15 +96,22 @@ async function runSlashCommand(
             env: env as Record<string, string>,
             timeout: 5_000,
           }).toString();
-          if (pane.includes('❯')) return true;
+          // If we see the actual claude prompt, we're ready
+          if (pane.includes('❯') && !pane.includes('Choose the text style') && !pane.includes('Select login method')) return true;
+          // Dismiss onboarding screens (theme picker, login prompt) by pressing Enter
+          if (pane.includes('Choose the text style') || pane.includes('Select login method')) {
+            try { execSync(`tmux send-keys -t ${tmuxSession} Enter`, { env: env as Record<string, string>, timeout: 3_000 }); } catch { /* */ }
+            await new Promise(r => setTimeout(r, 2_000));
+            continue;
+          }
         } catch { /* tmux not ready */ }
         await new Promise(r => setTimeout(r, 500));
       }
       return false;
     };
 
-    // Wait for claude to load and show prompt
-    const ready = await waitForPrompt(30_000);
+    // Wait for claude to load and show prompt (dismiss onboarding automatically)
+    const ready = await waitForPrompt(60_000);
     if (!ready) {
       try { execSync(`tmux kill-session -t ${tmuxSession}`, { env: env as Record<string, string> }); } catch { /* */ }
       return { ok: false, output: 'timeout waiting for claude prompt' };
