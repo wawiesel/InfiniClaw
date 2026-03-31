@@ -1,0 +1,8 @@
+{
+  "anthropic/claude-opus-4-6":   { "input": 15.00, "output": 75.00, "cache_write": 18.75, "cache_read": 1.50, "updated": "2026-03-30" },
+  "anthropic/claude-sonnet-4-6": { "input": 3.00,  "output": 15.00, "cache_write": 3.75,  "cache_read": 0.30, "updated": "2026-03-30" },
+  "anthropic/claude-haiku-4-5":  { "input": 0.80,  "output": 4.00,  "cache_write": 1.00,  "cache_read": 0.08, "updated": "2026-03-30" },
+  "ollama/qwen3:14b":           { "input": 0, "output": 0, "cache_write": 0, "cache_read": 0, "updated": "2026-03-30" },
+  "ollama/qwen3:30b":           { "input": 0, "output": 0, "cache_write": 0, "cache_read": 0, "updated": "2026-03-30" },
+  "ollama/parker-qwen30b":      { "input": 0, "output": 0, "cache_write": 0, "cache_read": 0, "updated": "2026-03-30" }
+}

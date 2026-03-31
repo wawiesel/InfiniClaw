@@ -3278,49 +3278,40 @@ function startTokenFlushWatcher(): void {
       log(`token-flush: watching ${bot} sessions`);
     } catch { /* skip */ }
   }
-  // Initial sync on startup
+  // Initial sync on startup + periodic fallback (fs.watch may miss deep nested changes on Linux)
   debouncedFlush();
+  setInterval(debouncedFlush, 5_000); // 5s for near-real-time token updates (R4)
 }
 
-// Per-bot latest S3 timestamp — loaded once on startup, updated on each flush
-const _latestS3: Record<string, number> = {};
-let _latestS3Loaded = false;
+// Per-bot latest flushed timestamp — persisted to disk
+const TOKEN_OFFSET_FILE = path.join(process.cwd(), '_runtime', 'data', 'token-flush-offsets.json');
+const INGEST_URL = process.env['TOKEN_INGEST_URL'] || `http://localhost:${process.env['FLEET_DASHBOARD_PORT'] || '3080'}/infiniclaw/fleet/ic01/tokens/ingest`;
+let _latestFlushed: Record<string, number> = {};
+try { _latestFlushed = JSON.parse(fs.readFileSync(TOKEN_OFFSET_FILE, 'utf-8')); } catch { /* first run */ }
 
-/** For each bot: find latest S3 timestamp, extract newer usage from session files, append to S3. */
+/** For each bot: extract new usage from session files, POST to dashboard ingest endpoint. */
 async function flushNewTokenData(): Promise<void> {
   const runtimeDir = path.join(process.cwd(), '_runtime', 'instances');
   if (!fs.existsSync(runtimeDir)) return;
-  const { readTokenUsage, appendTokenUsage } = await import('./token-log.js');
   const fleet = loadFleet();
-
-  // Load latest S3 timestamps once on first run
-  if (!_latestS3Loaded) {
-    _latestS3Loaded = true;
-    for (const bot of Object.keys(fleet)) {
-      try {
-        const existing = await readTokenUsage(bot, 0);
-        for (const e of existing) {
-          const t = new Date(e.timestamp).getTime();
-          if (t > (_latestS3[bot] || 0)) _latestS3[bot] = t;
-        }
-      } catch { /* */ }
-    }
-  }
 
   for (const bot of Object.keys(fleet)) {
     const sessionsDir = path.join(runtimeDir, bot, 'data', 'sessions');
     if (!fs.existsSync(sessionsDir)) continue;
-    const latestS3 = _latestS3[bot] || 0;
+    const latestFlushed = _latestFlushed[bot] || 0;
 
-    // 2. Read model from env file
+    // Read model from env file
     let currentModel = 'unknown';
     try {
       const m = fs.readFileSync(path.join(secretsRepoPath(), 'bots', bot, 'env'), 'utf-8').match(/^BRAIN_MODEL=(.+)$/m);
       if (m) currentModel = m[1].trim();
     } catch { /* */ }
 
-    // 3. Scan session files for usage entries with timestamp > latestS3
-    const newEntries: { ts: string; input: number; output: number; cw: number; cr: number; model: string }[] = [];
+    // Scan session files — aggregate usage per TURN (user message → end_turn)
+    // A turn = user msg starts it, assistant with stop_reason=end_turn ends it.
+    // Sum all usage within the turn. t_start = user timestamp, t_end = end_turn timestamp.
+    interface TurnEntry { t_start: string; t_end: string; input: number; output: number; cw: number; cr: number; model: string; session_id: string; turn_id: string }
+    const completedTurns: TurnEntry[] = [];
     for (const group of fs.readdirSync(sessionsDir)) {
       const projDir = path.join(sessionsDir, group, '.claude', 'projects');
       if (!fs.existsSync(projDir)) continue;
@@ -3331,23 +3322,43 @@ async function flushNewTokenData(): Promise<void> {
           if (!f.endsWith('.jsonl')) continue;
           try {
             const lines = fs.readFileSync(path.join(pp, f), 'utf-8').split('\n');
-            // Read backwards — stop when we find data older than latestS3
-            for (let i = lines.length - 1; i >= 0; i--) {
-              if (!lines[i].trim()) continue;
+            // Parse turns: accumulate usage between user→end_turn boundaries
+            let turnStart = '';
+            let turnId = '';
+            let turnModel = currentModel;
+            let turnSessionId = '';
+            let accum = { input: 0, output: 0, cw: 0, cr: 0 };
+            for (const line of lines) {
+              if (!line.trim()) continue;
               try {
-                const d = JSON.parse(lines[i]);
+                const d = JSON.parse(line);
                 const ts = d.timestamp;
-                if (ts && new Date(ts).getTime() <= latestS3) break; // older data — stop
+                if (!ts) continue;
+                if (d.type === 'user' && !turnStart) {
+                  // Turn starts
+                  turnStart = ts;
+                  turnId = d.uuid || '';
+                  turnSessionId = d.sessionId || f.replace('.jsonl', '');
+                  accum = { input: 0, output: 0, cw: 0, cr: 0 };
+                }
                 const u = d.message?.usage;
                 if (u) {
-                  const model = d.message?.model || currentModel;
-                  newEntries.push({
-                    ts, model,
-                    input: u.input_tokens ?? 0,
-                    output: u.output_tokens ?? 0,
-                    cw: u.cache_creation_input_tokens ?? 0,
-                    cr: u.cache_read_input_tokens ?? 0,
-                  });
+                  accum.input += u.input_tokens ?? 0;
+                  accum.output += u.output_tokens ?? 0;
+                  accum.cw += u.cache_creation_input_tokens ?? 0;
+                  accum.cr += u.cache_read_input_tokens ?? 0;
+                  if (d.message?.model) turnModel = d.message.model;
+                }
+                if (d.message?.stop_reason === 'end_turn' && turnStart) {
+                  // Turn complete — emit if newer than last flushed
+                  if (new Date(ts).getTime() > latestFlushed && (accum.input + accum.output + accum.cw) > 0) {
+                    completedTurns.push({
+                      t_start: turnStart, t_end: ts,
+                      ...accum, model: turnModel,
+                      session_id: turnSessionId, turn_id: turnId,
+                    });
+                  }
+                  turnStart = '';
                 }
               } catch { /* skip */ }
             }
@@ -3356,19 +3367,41 @@ async function flushNewTokenData(): Promise<void> {
       }
     }
 
-    // 4. Batch-write new entries to S3 (sorted by timestamp, one S3 round-trip)
-    if (newEntries.length > 0) {
-      newEntries.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
-      const batch = newEntries.map(e => {
+    // POST to ingest endpoint (sorted by timestamp)
+    if (completedTurns.length > 0) {
+      completedTurns.sort((a, b) => new Date(a.t_end).getTime() - new Date(b.t_end).getTime());
+      let pricingMod: typeof import('./token-pricing.js') | null = null;
+      try { pricingMod = await import('./token-pricing.js'); } catch { /* */ }
+      const rows = completedTurns.map(e => {
         const provider = e.model.startsWith('qwen') || e.model.startsWith('parker-') ? 'ollama' : 'anthropic';
-        return { provider, model: e.model, bot, input_tokens: e.input, output_tokens: e.output, cache_write_tokens: e.cw, cache_read_tokens: e.cr, timestamp: e.ts, group: 'all' } as import('./token-log.js').TokenUsageEntry;
+        const pricing = pricingMod?.getPricing(`${provider}/${e.model}`) ?? { input: 0, output: 0, cache_write: 0, cache_read: 0 };
+        return {
+          provider, model: e.model, bot, session_id: e.session_id, turn_id: e.turn_id,
+          t_start: e.t_start, t_end: e.t_end,
+          input_tokens: e.input, output_tokens: e.output,
+          cache_write_tokens: e.cw, cache_read_tokens: e.cr,
+          input_price_per_token: pricing.input / 1_000_000,
+          output_price_per_token: pricing.output / 1_000_000,
+          cache_write_price_per_token: pricing.cache_write / 1_000_000,
+          cache_read_price_per_token: pricing.cache_read / 1_000_000,
+        };
       });
-      await appendTokenUsage(batch);
-      const lastTs = new Date(newEntries[newEntries.length - 1].ts).getTime();
-      if (lastTs > (_latestS3[bot] || 0)) _latestS3[bot] = lastTs;
-      log(`token-flush: ${bot} +${newEntries.length} entries (model=${currentModel})`);
+      try {
+        const resp = await fetch(INGEST_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rows) });
+        if (resp.ok) {
+          const lastTs = new Date(completedTurns[completedTurns.length - 1].t_end).getTime();
+          if (lastTs > (_latestFlushed[bot] || 0)) _latestFlushed[bot] = lastTs;
+          log(`token-flush: ${bot} +${completedTurns.length} turns (model=${currentModel})`);
+        } else {
+          log(`token-flush: ${bot} ingest failed: ${resp.status}`);
+        }
+      } catch (err) {
+        log(`token-flush: ${bot} ingest error: ${errStr(err)}`);
+      }
     }
   }
+  // Persist offsets
+  try { fs.mkdirSync(path.dirname(TOKEN_OFFSET_FILE), { recursive: true }); fs.writeFileSync(TOKEN_OFFSET_FILE, JSON.stringify(_latestFlushed)); } catch { /* */ }
 }
 
 

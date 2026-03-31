@@ -10,7 +10,7 @@ Use this procedure for any development task that requires planning before execut
 ## Gate Pipeline
 
 ```
-survey → estimate → artifacts → plan_approve → execute_30 → execute_60 → execute_90 → demo → done
+requirements → estimate → artifacts → plan_approve → execute_30 → execute_60 → execute_90 → demo → done
 ```
 
 ## Phase 1 — Planning (Gitea-first)
@@ -19,11 +19,11 @@ survey → estimate → artifacts → plan_approve → execute_30 → execute_60
 
 2. **Survey (BB)**: Spawn a planning BB:
    ```
-   {{branch GDS #{issue} survey: {title}}}
+   {{branch GDS #{issue} requirements: {title}}}
    ```
-   BB reads relevant code, checks existing implementations, posts findings via `gitea_comment`. Then calls `gds_submit_evidence(gate="survey")`.
+   BB reads relevant code, checks existing implementations, posts findings via `gitea_comment`. Then calls `gds_submit_evidence(gate="requirements")`.
 
-3. **Wait for gate approval**: Inspector reviews survey on Gitea, approves. Captain confirms.
+3. **Wait for gate approval**: Inspector reviews requirements on Gitea, approves. Captain confirms.
 
 4. **Estimate (BB)**: Same BB or new BB posts resource estimates via `gitea_comment`:
    - Estimated tokens
@@ -61,10 +61,19 @@ survey → estimate → artifacts → plan_approve → execute_30 → execute_60
 
 12. **Done**: Captain confirms merge to main.
 
+## Self-Review Before Submission
+
+Before tagging the inspector on any gate:
+1. **Post the review request** on the PR with verification steps — but do NOT tag the inspector yet.
+2. **Self-review** — follow your own verification steps exactly as the inspector would. Run every command. Check every output.
+3. **Fix** anything unexpected. Repeat steps 1-2 until clean.
+4. **Tag the inspector** (`@{inspector} 👍/👎`) only after your self-review passes.
+
 ## Rules
 
 - **95% of discussion on Gitea**. Matrix only for: branch signals, gate notifications, completion.
 - **Fresh BB for execution** — planning and execution BBs must be different instances.
 - **All evidence on Gitea** — every gate submission posts a structured comment.
+- **Self-review before tagging inspector** — verify your own submission first.
 - **Nothing merges without demo + Captain** — `git_push` to main is blocked by the relay.
 - **Track tokens and time** at every execution gate.

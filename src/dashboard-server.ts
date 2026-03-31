@@ -12,11 +12,33 @@ import path from 'path';
 import { getSystemStatus } from './status.js';
 import { resolveRoot } from './service.js';
 import { loadKpiConfig, computeBotKpi, kpiBadge } from './kpi.js';
+import { openTokenDb, insertTurnStart, completeTurn, insertCompletedTurns, queryUsage, queryAllUsage, queryInProgress, type UsageRow } from './token-store.js';
+import { loadPricing } from './token-pricing.js';
 
 const PORT = parseInt(process.env['FLEET_DASHBOARD_PORT'] || '3080', 10);
 const tokenDataCache = new Map<string, { ts: number; data: string }>();
 const REFRESH_MS = parseInt(process.env['FLEET_DASHBOARD_REFRESH_MS'] || '7000', 10);
+const TIMEZONE = process.env['FLEET_DASHBOARD_TIMEZONE'] || 'America/New_York';
+const MAX_STREAM_ROWS = parseInt(process.env['FLEET_DASHBOARD_MAX_STREAM_ROWS'] || '100', 10);
+const FORCE_RENDER_MS = parseInt(process.env['FLEET_DASHBOARD_FORCE_RENDER_MS'] || '60000', 10);
+const PLOT_GRANULARITY_S = parseInt(process.env['FLEET_DASHBOARD_GRANULARITY_S'] || '3', 10); // grn = uf/2, default 3s (uf=6s)
 const BASE = '/infiniclaw/fleet/ic01';
+
+// ── Token livestream (SSE) ──────────────────────────────────────────
+const sseClients = new Set<http.ServerResponse>();
+const sseHistory: UsageRow[] = [];
+const TOKEN_DB_DIR = path.join(process.cwd(), '_runtime', 'data');
+
+// Initialize SQLite on startup
+try { openTokenDb(TOKEN_DB_DIR); } catch { /* dashboard may start before runtime dir exists */ }
+
+function broadcastSSE(rows: UsageRow[]): void {
+  sseHistory.push(...rows);
+  const data = JSON.stringify(rows);
+  for (const client of sseClients) {
+    try { client.write(`data: ${data}\n\n`); } catch { sseClients.delete(client); }
+  }
+}
 const SIGNAL_DIR = path.join(resolveRoot(), 'bots/trader/parker/signal');
 
 // ── HTML helpers ───────────────────────────────────────────────────
@@ -530,6 +552,75 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── Token ingest endpoint — relays POST usage rows here ──
+  if (url === `${BASE}/tokens/ingest` && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const rows = JSON.parse(body) as UsageRow[];
+        if (!Array.isArray(rows) || rows.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end('{"error":"expected non-empty array"}');
+          return;
+        }
+        try { openTokenDb(TOKEN_DB_DIR); } catch { /* ensure open */ }
+        let count = 0;
+        const enriched: UsageRow[] = [];
+        for (const r of rows) {
+          // Skip zero-duration turns (tool calls within same second)
+          if (r.t_start && r.t_end && r.t_start === r.t_end) continue;
+          if (r.t_end) {
+            if (r.turn_id && completeTurn(r.turn_id, { t_end: r.t_end, input_tokens: r.input_tokens || 0, output_tokens: r.output_tokens || 0, cache_write_tokens: r.cache_write_tokens || 0, cache_read_tokens: r.cache_read_tokens || 0 })) {
+              count++;
+              // Query full row from DB for broadcast
+              const full = queryUsage(r.bot || '', undefined).find(row => row.turn_id === r.turn_id);
+              if (full) enriched.push(full);
+            } else {
+              count += insertCompletedTurns([r as UsageRow]);
+              enriched.push(r as UsageRow);
+            }
+          } else {
+            insertTurnStart(r as UsageRow);
+            count++;
+            enriched.push({ ...r, event: 'start' } as unknown as UsageRow);
+          }
+        }
+        broadcastSSE(enriched.length > 0 ? enriched : rows);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ inserted: count }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: String(err) }));
+      }
+    });
+    return;
+  }
+
+  // ── Token stream clear — resets SSE history ──
+  if (url === `${BASE}/tokens/stream/clear` && req.method === 'POST') {
+    sseHistory.length = 0;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end('{"cleared":true}');
+    return;
+  }
+
+  // ── Token SSE stream — browser connects for live updates ──
+  if (url === `${BASE}/tokens/stream`) {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.write(':ok\n\n');
+    // Send all events since server start
+    if (sseHistory.length > 0) res.write(`data: ${JSON.stringify(sseHistory)}\n\n`);
+    sseClients.add(res);
+    req.on('close', () => sseClients.delete(res));
+    return;
+  }
+
   // Token usage dashboard — served from HTML file with template substitution
   if (url === `${BASE}/tokens`) {
     const testMode = (req.url || '').includes('test=');
@@ -540,6 +631,10 @@ const server = http.createServer((req, res) => {
       html = html.replace(/__TEST_MODE__/g, String(testMode));
       html = html.replace(/__TITLE_SUFFIX__/g, testMode ? '(TEST)' : '');
       html = html.replace(/__REFRESH_MS__/g, String(REFRESH_MS));
+      html = html.replace(/__TIMEZONE__/g, TIMEZONE);
+      html = html.replace(/__MAX_STREAM_ROWS__/g, String(MAX_STREAM_ROWS));
+      html = html.replace(/__FORCE_RENDER_MS__/g, String(FORCE_RENDER_MS));
+      html = html.replace(/__GRANULARITY_S__/g, String(PLOT_GRANULARITY_S));
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
       res.end(html);
     } catch {
@@ -551,107 +646,53 @@ const server = http.createServer((req, res) => {
   }
 
   if (url === `${BASE}/tokens/data.json`) {
-    // Cache response for 10s to avoid hammering S3 on 7s auto-refresh
-    const cacheKey = req.url || '';
-    const cached = tokenDataCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < 10_000) {
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
-      res.end(cached.data);
-      return;
-    }
-    const isTest = (req.url || '').includes('test=1') || (req.url || '').includes('test=verify');
-    const isVerify = (req.url || '').includes('test=verify');
-    void (async () => {
-      try {
-        const { readTokenUsage, aggregateByModel } = await import('./token-log.js');
-        const { computeCost, MODEL_PRICING } = await import('./token-pricing.js');
-        const { loadFleet, loadShips } = await import('./ship-config.js');
-        const fleet = loadFleet();
-        const ships = loadShips();
-        // Map hostname → ship abbreviation (skip non-ship entries like testbeds)
-        const hostToShip: Record<string, string> = {};
-        for (const [abbr, info] of Object.entries(ships)) {
-          const s = info as { hostname?: string; type?: string; commissioned?: boolean };
-          // Only map commissioned ships or cruiser/destroyer types, not testbeds
-          if (s.hostname && s.type !== 'testbed') hostToShip[s.hostname] = abbr;
-        }
-        const bots = Object.keys(fleet);
-        const result: Record<string, unknown> = {};
-
-        if (isTest) {
-          // Generate synthetic data from actual fleet structure
-          const now = Date.now();
-          const models = ['claude-sonnet-4-6', 'qwen3:14b', 'claude-opus-4-6'];
-          const prices = [[3, 15], [0, 0], [15, 75]];
-          for (const bot of bots) {
-            const botInfo = fleet[bot] as { ship?: string; role?: string; status?: string };
-            const shipAbbr = hostToShip[botInfo?.ship || ''] || botInfo?.ship || 'Unknown';
-            if (isVerify) {
-              // Verify mode: constant rate for all bots
-              const entries = [];
-              for (let i = 0; i < 50; i++) {
-                const h = i * 0.96;
-                entries.push({ timestamp: new Date(now - h * 3600000).toISOString(), model: 'claude-sonnet-4-6', provider: 'anthropic',
-                  input_tokens: 600, output_tokens: 300, cache_tokens: 100, cost: 600 * 3 / 1e6 + 300 * 15 / 1e6, bot, ship: shipAbbr, role: botInfo?.role || 'unknown' });
-              }
-              const agg: Record<string, unknown> = { 'anthropic/claude-sonnet-4-6': { input: 30000, output: 15000, cache: 5000, total: 50000, cost: entries.reduce((s, e) => s + (e.cost || 0), 0) } };
-              result[bot] = { entries, aggregate: agg, ship: shipAbbr, role: botInfo?.role || 'unknown' };
-            } else {
-              // Random test data
-              const entries = [];
-              for (let i = 0; i < 60; i++) {
-                const h = i * 0.8;
-                const mi = h > 30 ? 2 : h > 15 ? 1 : 0;
-                const base = 200 + Math.random() * 1500;
-                const inp = Math.floor(base * 0.6), out = Math.floor(base * 0.3), cch = Math.floor(base * 0.1);
-                const cost = (inp * prices[mi][0] + out * prices[mi][1] + cch * 0.375) / 1e6;
-                entries.push({ timestamp: new Date(now - h * 3600000).toISOString(), model: models[mi], provider: mi === 1 ? 'ollama' : 'anthropic',
-                  input_tokens: inp, output_tokens: out, cache_tokens: cch, cost, bot, ship: shipAbbr, role: botInfo?.role || 'unknown' });
-              }
-              const agg: Record<string, unknown> = {};
-              for (const e of entries) {
-                const k = `${e.provider}/${e.model}`;
-                const a = (agg[k] || { input: 0, output: 0, cache: 0, total: 0, cost: 0 }) as { input: number; output: number; cache: number; total: number; cost: number };
-                a.input += e.input_tokens; a.output += e.output_tokens; a.cache += e.cache_tokens;
-                a.total += e.input_tokens + e.output_tokens + e.cache_tokens; a.cost += e.cost;
-                agg[k] = a;
-              }
-              result[bot] = { entries, aggregate: agg, ship: shipAbbr, role: botInfo?.role || 'unknown' };
-            }
-          }
-        } else {
-          // Real data from S3 — always include all bots so page structure renders
-          for (const bot of bots) {
-            const [entries, agg] = await Promise.all([
-              readTokenUsage(bot, 0), // 0 = all time — never discard data
-              aggregateByModel(bot, 7 * 86_400_000),
-            ]);
-            {
-              const entriesWithCost = entries.map((e) => ({
-                ...e,
-                cost: computeCost(`${e.provider}/${e.model}`, e.input_tokens, e.output_tokens, (e.cache_write_tokens ?? 0) + (e.cache_read_tokens ?? 0) + (e.cache_tokens ?? 0)),
-              }));
-              const aggWithCost: Record<string, unknown> = {};
-              for (const [k, v] of Object.entries(agg)) {
-                const a = v as { input: number; output: number; cache_write: number; cache_read: number; total: number };
-                aggWithCost[k] = { ...a, cost: computeCost(k, a.input, a.output, a.cache_write) };
-              }
-              const botInfo = fleet[bot] as { ship?: string; role?: string };
-              const shipAbbr = hostToShip[botInfo?.ship || ''] || botInfo?.ship || 'Unknown';
-              result[bot] = { entries: entriesWithCost, aggregate: aggWithCost, ship: shipAbbr, role: botInfo?.role || 'unknown' };
-            }
-          }
-        }
-        (result as Record<string, unknown>)._pricing = MODEL_PRICING;
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
-        const json = JSON.stringify(result);
-        tokenDataCache.set(cacheKey, { ts: Date.now(), data: json });
-        res.end(json);
-      } catch (err) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: String(err) }));
+    // Serve from local SQLite — fast, no S3 round-trips
+    void (async () => { try {
+      const { MODEL_PRICING } = await import('./token-pricing.js');
+      const { loadFleet, loadShips } = await import('./ship-config.js');
+      const fleet = loadFleet();
+      const ships = loadShips();
+      const hostToShip: Record<string, string> = {};
+      for (const [abbr, info] of Object.entries(ships)) {
+        const s = info as { hostname?: string; type?: string };
+        if (s.hostname && s.type !== 'testbed') hostToShip[s.hostname] = abbr;
       }
-    })();
+      try { openTokenDb(TOKEN_DB_DIR); } catch { /* */ }
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      const allRows = queryAllUsage(sevenDaysAgo);
+      const result: Record<string, unknown> = {};
+      // Group rows by bot
+      const byBot: Record<string, typeof allRows> = {};
+      for (const r of allRows) { if (!byBot[r.bot]) byBot[r.bot] = []; byBot[r.bot].push(r); }
+      // Include all fleet bots even if no data
+      for (const bot of Object.keys(fleet)) {
+        const botInfo = fleet[bot] as { ship?: string; role?: string };
+        const shipAbbr = hostToShip[botInfo?.ship || ''] || botInfo?.ship || 'Unknown';
+        const rows = byBot[bot] || [];
+        // cost = sum_k[ tokens_{bsxk} * C_{bsxk} ] where C_{bsxk} = price_per_token for model l(b,s,x), token type k
+        const entries = rows.map(r => ({
+          ...r,
+          cost: r.input_tokens * r.input_price_per_token + r.output_tokens * r.output_price_per_token + r.cache_write_tokens * r.cache_write_price_per_token + r.cache_read_tokens * r.cache_read_price_per_token,
+        }));
+        // Aggregate by model
+        const agg: Record<string, { input: number; output: number; cache_write: number; cache_read: number; total: number; cost: number }> = {};
+        for (const e of entries) {
+          const k = `${e.provider}/${e.model}`;
+          if (!agg[k]) agg[k] = { input: 0, output: 0, cache_write: 0, cache_read: 0, total: 0, cost: 0 };
+          agg[k].input += e.input_tokens; agg[k].output += e.output_tokens;
+          agg[k].cache_write += e.cache_write_tokens; agg[k].cache_read += e.cache_read_tokens;
+          agg[k].total += e.input_tokens + e.output_tokens + e.cache_write_tokens;
+          agg[k].cost += e.cost;
+        }
+        result[bot] = { entries, aggregate: agg, ship: shipAbbr, role: botInfo?.role || 'unknown' };
+      }
+      (result as Record<string, unknown>)._pricing = MODEL_PRICING;
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: String(err) }));
+    } })();
     return;
   }
 
@@ -868,6 +909,11 @@ load();
 </script>`;
   return page('Token Usage' + (testMode ? ' (TEST)' : ''), '<div id="content">Loading...</div>' + script);
 }
+
+// Load pricing from S3 (or local fallback) on startup, refresh every 5 min
+loadPricing().then(() => {
+  setInterval(() => { loadPricing(); }, 5 * 60_000);
+});
 
 server.listen(PORT, () => {
   console.log(`Fleet dashboard listening on :${PORT}`);

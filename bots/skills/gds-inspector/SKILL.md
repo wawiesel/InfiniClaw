@@ -17,7 +17,7 @@ You are the inspector in a GDS (Gitea Dev System) gate pipeline. Your job is to 
 
 ## Gate Review Checklist
 
-### Survey Gate
+### Requirements Gate
 - [ ] Engineer identified relevant existing code
 - [ ] Dependencies and risk areas documented
 - [ ] No obvious gaps in the survey

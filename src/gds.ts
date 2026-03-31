@@ -1,7 +1,7 @@
 /**
  * Gitea Dev System (GDS) — relay-enforced gate pipeline for structured development tasks.
  *
- * Pipeline: survey → estimate → artifacts → plan_approve → execute_30 → execute_60 → execute_90 → demo → done
+ * Pipeline: requirements → artifacts → milestones → estimate → plan_approve → execute_30 → execute_60 → execute_90 → demo → done
  *
  * State lives in S3 at `gds/gds-{issueNumber}.json`. Each gate requires inspector approval
  * followed by captain approval (double approval). The `demo` and `done` gates are captain-only.
@@ -21,7 +21,7 @@ async function getS3() {
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export const GATE_NAMES = [
-  'survey', 'artifacts', 'milestones', 'estimate', 'plan_approve',
+  'requirements', 'artifacts', 'milestones', 'estimate', 'plan_approve',
   'execute_30', 'execute_60', 'execute_90',
   'demo', 'done',
 ] as const;
@@ -122,7 +122,7 @@ export function createGdsState(opts: {
     engineer: opts.engineer,
     inspector: opts.inspector,
     wbs_id: opts.wbs_id,
-    current_gate: 'survey',
+    current_gate: 'requirements',
     gates,
     created_at: new Date().toISOString(),
   };
