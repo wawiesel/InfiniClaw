@@ -24,6 +24,7 @@ export interface UsageRow {
   output_price_per_token: number;
   cache_write_price_per_token: number;
   cache_read_price_per_token: number;
+  context_tokens: number;  // end-of-turn context window usage (from last API call, not summed)
 }
 
 let db: Database.Database | null = null;
@@ -50,10 +51,13 @@ export function openTokenDb(dbDir: string): Database.Database {
       output_price_per_token REAL NOT NULL DEFAULT 0,
       cache_write_price_per_token REAL NOT NULL DEFAULT 0,
       cache_read_price_per_token REAL NOT NULL DEFAULT 0,
+      context_tokens INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (turn_id)
     );
     CREATE INDEX IF NOT EXISTS idx_bot_time ON usage(bot, t_start);
   `);
+  // Migration: add context_tokens column if missing
+  try { db.exec('ALTER TABLE usage ADD COLUMN context_tokens INTEGER NOT NULL DEFAULT 0'); } catch { /* already exists */ }
   return db;
 }
 
@@ -70,13 +74,13 @@ export function insertTurnStart(row: Pick<UsageRow, 'bot' | 'session_id' | 'turn
 }
 
 /** UPDATE a turn end. Fill in actual tokens and t_end. Returns true if updated. */
-export function completeTurn(turn_id: string, data: { t_end: string; input_tokens: number; output_tokens: number; cache_write_tokens: number; cache_read_tokens: number }): boolean {
+export function completeTurn(turn_id: string, data: { t_end: string; input_tokens: number; output_tokens: number; cache_write_tokens: number; cache_read_tokens: number; context_tokens?: number }): boolean {
   if (!db) return false;
   const result = db.prepare(`
     UPDATE usage SET t_end = @t_end, input_tokens = @input_tokens, output_tokens = @output_tokens,
-      cache_write_tokens = @cache_write_tokens, cache_read_tokens = @cache_read_tokens
+      cache_write_tokens = @cache_write_tokens, cache_read_tokens = @cache_read_tokens, context_tokens = @context_tokens
     WHERE turn_id = @turn_id
-  `).run({ ...data, turn_id });
+  `).run({ ...data, context_tokens: data.context_tokens ?? 0, turn_id });
   return result.changes > 0;
 }
 
@@ -86,10 +90,12 @@ export function insertCompletedTurns(rows: UsageRow[]): number {
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO usage (bot, session_id, turn_id, model, provider, t_start, t_end,
       input_tokens, output_tokens, cache_write_tokens, cache_read_tokens,
-      input_price_per_token, output_price_per_token, cache_write_price_per_token, cache_read_price_per_token)
+      input_price_per_token, output_price_per_token, cache_write_price_per_token, cache_read_price_per_token,
+      context_tokens)
     VALUES (@bot, @session_id, @turn_id, @model, @provider, @t_start, @t_end,
       @input_tokens, @output_tokens, @cache_write_tokens, @cache_read_tokens,
-      @input_price_per_token, @output_price_per_token, @cache_write_price_per_token, @cache_read_price_per_token)
+      @input_price_per_token, @output_price_per_token, @cache_write_price_per_token, @cache_read_price_per_token,
+      @context_tokens)
   `);
   const tx = db.transaction((rows: UsageRow[]) => {
     let n = 0;
