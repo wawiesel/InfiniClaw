@@ -32,7 +32,7 @@ const sseHistory: UsageRow[] = [];
 const TOKEN_DB_DIR = path.join(process.cwd(), '_runtime', 'data');
 
 // Initialize SQLite on startup
-try { openTokenDb(TOKEN_DB_DIR); } catch { /* dashboard may start before runtime dir exists */ }
+try { openTokenDb(TOKEN_DB_DIR); } catch (err) { console.error(`token-db: failed to open ${TOKEN_DB_DIR}: ${err}`); }
 
 function broadcastSSE(rows: UsageRow[]): void {
   sseHistory.push(...rows);
@@ -566,7 +566,7 @@ const server = http.createServer((req, res) => {
           res.end('{"error":"expected non-empty array"}');
           return;
         }
-        try { openTokenDb(TOKEN_DB_DIR); } catch { /* ensure open */ }
+        try { openTokenDb(TOKEN_DB_DIR); } catch (err) { console.error(`token-db: ingest open failed: ${err}`); }
         let count = 0;
         const enriched: UsageRow[] = [];
         for (const r of rows) {
@@ -662,7 +662,7 @@ const server = http.createServer((req, res) => {
         const s = info as { hostname?: string; type?: string };
         if (s.hostname && s.type !== 'testbed') hostToShip[s.hostname] = abbr;
       }
-      try { openTokenDb(TOKEN_DB_DIR); } catch { /* */ }
+      try { openTokenDb(TOKEN_DB_DIR); } catch (err) { console.error(`token-db: data.json open failed: ${err}`); }
       const allRows = queryAllUsage();
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600_000).getTime();
       const result: Record<string, unknown> = {};
