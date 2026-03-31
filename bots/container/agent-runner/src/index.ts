@@ -74,13 +74,14 @@ async function runSlashCommand(
     fs.writeFileSync(envFile, envLines.join('\n'));
 
     // Build claude command — interactive mode (no --print), with resume
-    const claudeCmd = `source ${envFile} && cd ${cwd} && claude --resume ${sessionId} --dangerously-skip-permissions`;
+    // Wrap in bash -c to ensure source works (tmux default shell may be sh)
+    const innerCmd = `source ${envFile} && cd ${cwd} && claude --resume ${sessionId} --dangerously-skip-permissions`;
 
     // Kill any leftover session
     try { execSync(`tmux kill-session -t ${tmuxSession} 2>/dev/null`, { env: env as Record<string, string> }); } catch { /* */ }
 
-    // Start tmux with claude
-    execSync(`tmux new-session -d -s ${tmuxSession} '${claudeCmd}'`, {
+    // Start tmux with bash explicitly
+    execSync(`tmux new-session -d -s ${tmuxSession} "bash -c '${innerCmd}'"`, {
       env: env as Record<string, string>,
       timeout: 10_000,
     });
