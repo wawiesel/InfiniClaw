@@ -52,9 +52,6 @@ async function runSlashCommand(
   const tmuxSession = 'slash-cmd';
   const cwd = '/workspace/persona/temp';
 
-  // Build claude command — interactive mode (no --print), with resume
-  const claudeCmd = `cd ${cwd} && claude --resume ${sessionId} --dangerously-skip-permissions`;
-
   try {
     // Ensure theme is set so Claude Code doesn't show the theme picker in tmux
     const claudeDir = path.join(env.HOME || '/home/node', '.claude');
@@ -65,6 +62,19 @@ async function runSlashCommand(
         fs.writeFileSync(localSettings, JSON.stringify({ theme: 'dark' }));
       } catch { /* best effort */ }
     }
+
+    // Write env to a file so the tmux shell can source it (tmux doesn't inherit execSync env)
+    const envFile = '/tmp/slash-cmd-env.sh';
+    const envLines: string[] = [];
+    for (const [k, v] of Object.entries(env)) {
+      if (v !== undefined && k.match(/^[A-Z_][A-Z0-9_]*$/)) {
+        envLines.push(`export ${k}=${JSON.stringify(v)}`);
+      }
+    }
+    fs.writeFileSync(envFile, envLines.join('\n'));
+
+    // Build claude command — interactive mode (no --print), with resume
+    const claudeCmd = `source ${envFile} && cd ${cwd} && claude --resume ${sessionId} --dangerously-skip-permissions`;
 
     // Kill any leftover session
     try { execSync(`tmux kill-session -t ${tmuxSession} 2>/dev/null`, { env: env as Record<string, string> }); } catch { /* */ }
