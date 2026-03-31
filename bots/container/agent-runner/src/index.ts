@@ -674,12 +674,13 @@ async function main(): Promise<void> {
     }
   }
 
-  // Ensure theme is set in .claude.json — interactive mode (tmux slash commands)
-  // shows the theme picker on startup if this is missing.
+  // Mark onboarding complete — interactive mode (tmux slash commands) shows the
+  // theme picker if this is missing. --print mode skips onboarding but doesn't set the flag.
   try {
     const cj = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf-8'));
-    if (!cj.theme) {
-      cj.theme = 'dark';
+    if (!cj.hasCompletedOnboarding) {
+      cj.hasCompletedOnboarding = true;
+      cj.lastOnboardingVersion = '2.1.76';
       fs.writeFileSync(claudeJsonPath, JSON.stringify(cj));
     }
   } catch { /* best effort */ }
