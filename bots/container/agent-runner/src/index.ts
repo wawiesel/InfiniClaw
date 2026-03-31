@@ -78,7 +78,9 @@ async function runSlashCommand(
       timeout: 10_000,
     });
 
-    // Wait for interactive prompt (❯)
+    // Wait for interactive prompt. The real prompt is "❯ " on its own line (possibly
+    // with trailing spaces). Menu items show "❯ 1." or "❯ 2." — exclude those.
+    // Also detect and auto-accept onboarding prompts (trust dialog, bypass permissions).
     const waitForPrompt = async (timeoutMs: number): Promise<boolean> => {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
@@ -87,7 +89,15 @@ async function runSlashCommand(
             env: env as Record<string, string>,
             timeout: 5_000,
           }).toString();
-          if (pane.includes('❯')) return true;
+          // Real prompt: line starting with ❯ NOT followed by a digit (menu item)
+          if (/❯\s*$/m.test(pane)) return true;
+          // Auto-accept onboarding dialogs by navigating to "Yes" and pressing Enter
+          if (pane.includes('I accept') || pane.includes('I trust this folder')) {
+            // Move to "Yes" option (it's always option 2) and confirm
+            execSync(`tmux send-keys -t ${tmuxSession} Down Enter`, { env: env as Record<string, string>, timeout: 3_000 });
+            await new Promise(r => setTimeout(r, 3_000));
+            continue;
+          }
         } catch { /* tmux not ready */ }
         await new Promise(r => setTimeout(r, 500));
       }
