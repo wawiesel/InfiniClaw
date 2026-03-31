@@ -53,20 +53,8 @@ async function runSlashCommand(
   const cwd = '/workspace/persona/temp';
 
   try {
-    // Ensure credentials file exists so interactive Claude Code doesn't prompt for login
-    const claudeDir = path.join(env.HOME || '/home/node', '.claude');
-    const credFile = path.join(claudeDir, '.credentials.json');
-    const oauthToken = env.CLAUDE_CODE_OAUTH_TOKEN;
-    if (oauthToken && !fs.existsSync(credFile)) {
-      try {
-        fs.mkdirSync(claudeDir, { recursive: true });
-        fs.writeFileSync(credFile, JSON.stringify({
-          claudeAiOauth: { accessToken: oauthToken, refreshToken: '', expiresAt: Date.now() + 86400000, scopes: ['user:inference', 'user:profile', 'user:sessions:claude_code'] }
-        }));
-      } catch { /* best effort */ }
-    }
-
-    // Write env to a file so the tmux shell can source it (tmux doesn't inherit execSync env)
+    // Write env to a file so the tmux shell can source it (tmux can't inherit Node process env).
+    // All auth, config, and credentials are already set up by the main startup code.
     const envFile = '/tmp/slash-cmd-env.sh';
     const envLines: string[] = [];
     for (const [k, v] of Object.entries(env)) {
@@ -76,7 +64,7 @@ async function runSlashCommand(
     }
     fs.writeFileSync(envFile, envLines.join('\n'));
 
-    // Build a launch script for tmux — avoids quoting issues with inline commands
+    // Launch script: source env, then call claude the same way the main process does
     const launchScript = '/tmp/slash-cmd-launch.sh';
     fs.writeFileSync(launchScript, `#!/bin/bash\nsource ${envFile}\ncd ${cwd}\nexec claude --resume ${sessionId} --dangerously-skip-permissions\n`);
     fs.chmodSync(launchScript, 0o755);
@@ -697,6 +685,25 @@ async function main(): Promise<void> {
 
   // Write MCP config before first claude spawn
   writeMcpConfig(containerInput, env);
+
+  // Write credentials file so interactive claude sessions (e.g. tmux /compact) can auth.
+  // --print mode uses CLAUDE_CODE_OAUTH_TOKEN env var directly, but interactive mode
+  // reads ~/.claude/.credentials.json. Write it once here so both paths work.
+  const credFile = path.join(process.env.HOME || '/home/node', '.claude', '.credentials.json');
+  const oauthToken = env.CLAUDE_CODE_OAUTH_TOKEN;
+  if (oauthToken && !fs.existsSync(credFile)) {
+    try {
+      fs.writeFileSync(credFile, JSON.stringify({
+        claudeAiOauth: {
+          accessToken: oauthToken,
+          refreshToken: '',
+          expiresAt: Date.now() + 7 * 86400000,
+          scopes: ['user:inference', 'user:profile', 'user:sessions:claude_code', 'user:mcp_servers', 'user:file_upload'],
+        }
+      }));
+      log('Wrote .credentials.json from CLAUDE_CODE_OAUTH_TOKEN');
+    } catch { /* best effort */ }
+  }
 
   const model = getRequestedMainModel(env);
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
