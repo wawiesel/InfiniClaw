@@ -851,7 +851,7 @@ async function handleProgressOutput(ctx: OutputHandlerContext, text: string): Pr
 
 // ── Branch Brain signal spawn ─────────────────────────────────────────
 
-const MAX_BRANCH_BRAINS_PER_BOT = parseInt(process.env.MAX_BRANCH_BRAINS_PER_BOT || '3', 10);
+const MAX_BRANCH_BRAINS_PER_BOT = parseInt(process.env.MAX_BRANCH_BRAINS_PER_BOT || '0', 10);
 const activeBranchBrainCount = new Map<string, number>();
 
 /**

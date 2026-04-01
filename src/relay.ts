@@ -2084,7 +2084,7 @@ const RELAY_TASKS_POLL_INTERVAL = 2_000;
 // ── Branch Brain task registry ──────────────────────────────────────────
 
 const BRANCH_BRAIN_RESTART_DELAY = 30_000; // wait 30s after last TB exit before restarting bot
-const MAX_BRANCH_BRAINS_PER_BOT = envInt('MAX_BRANCH_BRAINS_PER_BOT', 3);
+const MAX_BRANCH_BRAINS_PER_BOT = envInt('MAX_BRANCH_BRAINS_PER_BOT', 0);
 const branchBrainRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const activeBranchBrainCount = new Map<string, number>(); // bot → active TB count
 
