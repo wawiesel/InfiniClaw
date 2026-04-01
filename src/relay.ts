@@ -44,7 +44,7 @@ import type { IntercomConfig, SyncResponse } from './matrix-api.js';
 import { loadShipConfig, loadFleet, loadFleetFromDisk, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, safeLoadShips, writeShips, isShipCommissioned, clearShipConfigCache, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole } from './ship-config.js';
 import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
-import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
+import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji, formatLifecycleMsg, formatCommandResult, formatProgressStep, formatStatusLine } from './formatting.js';
 import {
   initMetrics,
   recordOperatorMessage,
@@ -141,7 +141,7 @@ function statusLine(emoji: string, what: string, status: string, elapsedMs: numb
   const time = elapsedMs > 0
     ? `${formatTimestamp()} · ${formatDuration(elapsedMs)}`
     : formatTimestamp();
-  return `${emoji} ${what} ${status} (${time})`;
+  return formatStatusLine(emoji, what, status, time);
 }
 
 /** Stage result: `✅ <what><suffix>` or `⛔ <what><suffix>` or `⚠️ <what><suffix>` */
@@ -3086,9 +3086,8 @@ async function sendLifecycleMsg(
       conn = activeConns.find(c => c.name.toLowerCase() === roomName);
     }
     if (!conn) return;
-    const rankPart = rank !== undefined ? ` (rank ${rank})` : '';
     // Use reply() so Loudspeaker sends the announcement (not Intercom directly).
-    await reply(conn, `${botName} ${event}${rankPart}`);
+    await reply(conn, formatLifecycleMsg(botName, event, rank));
   } catch { /* non-fatal — lifecycle broadcast is best-effort */ }
 }
 
@@ -3180,16 +3179,16 @@ async function handleLifecycleCommand(
         reabsorbWbsItems(root, bot);
         restartBotForRoom(root, bot);
         writeCrewStatus(root, bot);
-        await tr(`✅ ${name} dismissed`);
+        await tr(formatCommandResult('✅', name, 'dismissed'));
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!dismiss ${name} failed: ${errStr(err)}`);
-        await tr(`⛔ ${name} dismiss failed — ${errStr(err)}`);
+        await tr(formatCommandResult('⛔', name, `dismiss failed — ${errStr(err)}`));
       }
     } else if (action === 'sleep') {
       // Sleep only allowed from quarters — bot must be in quarters status
       if (liveFleet[bot]?.status !== 'quarters') {
-        await tr(`⚠️ ${name} must be in quarters to sleep — use !dismiss first`);
+        await tr(formatCommandResult('⚠️', name, 'must be in quarters to sleep — use !dismiss first'));
         continue;
       }
       try {
@@ -3207,10 +3206,10 @@ async function handleLifecycleCommand(
         reabsorbWbsItems(root, bot);
         fleetUpdate(bot, { status: 'sleep' });
         persistFleet();
-        await tr(`✅ ${name} asleep`);
+        await tr(formatCommandResult('✅', name, 'asleep'));
         publishFleetReport().catch(() => {});
       } catch (err) {
-        await tr(`⛔ ${name} sleep failed — ${errStr(err)}`);
+        await tr(formatCommandResult('⛔', name, `sleep failed — ${errStr(err)}`));
       }
     } else if (action === 'wake') {
       // Wake sleeping/dreaming bot or restart already-awake bot (preserves current status)
@@ -3229,7 +3228,10 @@ async function handleLifecycleCommand(
       if (!threadRoot) continue;
       let stepN = 0;
       const totalSteps = 4;
-      const step = (text: string) => threadReply(progressConn, threadRoot, `[${++stepN}/${totalSteps} ${formatDuration(Date.now() - startedAt)}] ${text}`);
+      const step = (text: string) => {
+        const duration = formatDuration(Date.now() - startedAt);
+        return threadReply(progressConn, threadRoot, `[${++stepN}/${totalSteps} ${duration}] ${text}`);
+      };
       try {
         await setBotDisplayStatus(root, bot, 'building');
         await step('🔄 building');
@@ -3273,14 +3275,14 @@ async function handleLifecycleCommand(
         continue;
       }
       if (liveFleet[bot]?.status === 'onduty') {
-        await tr(`⚠️ ${name} already on duty`);
+        await tr(formatCommandResult('⚠️', name, 'already on duty'));
         continue;
       }
       // Normie enforcement (#118): bots whose role has rw:[] in fleet.json roles
       // have no duty-room access and must stay in quarters.
       const botRole = liveFleet[bot]?.role?.toLowerCase() ?? '';
       if (isQuartersOnlyRole(botRole)) {
-        await tr(`⚠️ ${name} has no duty room (quarters only)`);
+        await tr(formatCommandResult('⚠️', name, 'has no duty room (quarters only)'));
         continue;
       }
       try {
@@ -3291,7 +3293,7 @@ async function handleLifecycleCommand(
           await botJoinRoom(botToken, homeserver, dutyRoomId, conn, botUserId);
         } catch (roomErr) {
           log(`${name}: room move failed: ${errStr(roomErr)}`);
-          await tr(`⛔ ${name} report failed — ${errStr(roomErr)}`);
+          await tr(formatCommandResult('⛔', name, `report failed — ${errStr(roomErr)}`));
           continue;
         }
         fleetUpdate(bot, { status: 'onduty', ship: HOSTNAME, ondutyAt: Date.now() });
@@ -3307,12 +3309,12 @@ async function handleLifecycleCommand(
         restartBotForRoom(root, bot, dutyRoomId);
         writeCrewStatus(root, bot);
         injectWbsTasks(root, bot);
-        await tr(`✅ ${name} on duty`);
+        await tr(formatCommandResult('✅', name, 'on duty'));
         sendLifecycleMsg(bot, 'started', rank).catch(() => {});
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!report ${name} failed: ${errStr(err)}`);
-        await tr(`⛔ ${name} report failed — returned to quarters`);
+        await tr(formatCommandResult('⛔', name, 'report failed — returned to quarters'));
       }
     }
   }
@@ -3374,10 +3376,10 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
     try {
       const { token: botToken, homeserver, userId: botUserId } = await botMatrixLogin(root, bot);
       await botJoinRoom(botToken, homeserver, roomId, conn, botUserId);
-      await tr(`✅ ${name} → ${roomName}`);
+      await tr(formatCommandResult('✅', name, `→ ${roomName}`));
     } catch (err) {
       log(`!go ${roomName} ${name} failed: ${errStr(err)}`);
-      await tr(`⛔ go ${roomName} ${name} failed — ${errStr(err)}`);
+      await tr(formatCommandResult('⛔', `${roomName} ${name}`, `failed — ${errStr(err)}`));
     }
   }
 }

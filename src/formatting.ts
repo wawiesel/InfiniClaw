@@ -230,3 +230,34 @@ export function unifiedBotDisplay(p: UnifiedBotDisplayParams, verbosity: Verbosi
 
   return `${prefix} ${name} ${rolePart}·${rankPart}·${healthPart}${actPart}`;
 }
+
+// ── Message formatting helpers ────────────────────────────────────
+
+/** Format a lifecycle event message: bot started/stopped/reranked.
+ *  Returns: `${botName} ${event}${rankPart}`
+ *  Suitable for quarters-level notifications. Ship tag added by reply(). */
+export function formatLifecycleMsg(botName: string, event: 'stopped' | 'started' | 'reranked', rank?: number): string {
+  const rankPart = rank !== undefined ? ` (rank ${rank})` : '';
+  return `${botName} ${event}${rankPart}`;
+}
+
+/** Format a standard command result: emoji + bot name + action result.
+ *  Format: `${emoji} ${botName} ${action}`
+ *  Examples: `✅ Cid on duty`, `⛔ Norm report failed`, `⚠️ Tali already on duty` */
+export function formatCommandResult(emoji: string, botName: string, action: string): string {
+  return `${emoji} ${botName} ${action}`;
+}
+
+/** Format a progress step in a multi-step operation.
+ *  Format: `[${step}/${total} ${duration}] ${emoji} ${text}`
+ *  Used in wake/refit threads. */
+export function formatProgressStep(step: number, total: number, duration: string, emoji: string, text: string): string {
+  return `[${step}/${total} ${duration}] ${emoji} ${text}`;
+}
+
+/** Format an operational status line with timestamp and duration.
+ *  Format: `${emoji} ${what} ${status} (HH:MM · duration)`
+ *  Used for system status (sync down, health checks, etc). */
+export function formatStatusLine(emoji: string, what: string, status: string, timeStr: string): string {
+  return `${emoji} ${what} ${status} (${timeStr})`;
+}
