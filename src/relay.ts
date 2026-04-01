@@ -3142,11 +3142,13 @@ async function handleLifecycleCommand(
   }
 
   // Thread root for dismiss/sleep/report — one root per command invocation, results as thread replies.
+  // Action verbs in gerund form (-ing) for consistency with wake/restart announcements.
   let cmdThreadRoot: string | undefined;
   if (action === 'dismiss' || action === 'sleep' || action === 'report') {
     const labelEnv = target ? (() => { try { return loadProfileEnv(root, target); } catch { return null; } })() : null;
     const label = labelEnv?.ASSISTANT_NAME || (target ? capitalizeName(target) : `${bots.length} bot${bots.length !== 1 ? 's' : ''}`);
-    cmdThreadRoot = await reply(conn, `📡 ${action} ${label}`);
+    const actionGerund = action === 'dismiss' ? 'dismissing' : action === 'sleep' ? 'sleeping' : 'reporting';
+    cmdThreadRoot = await reply(conn, `📡 ${actionGerund} ${label}`);
   }
 
   for (const bot of bots) {
@@ -3366,7 +3368,7 @@ async function handleGoCommand(cmd: string, conn: RoomConn): Promise<void> {
   }
 
   const label = labelEnv?.ASSISTANT_NAME || (targetBot ? capitalizeName(targetBot) : `${bots.length} bot${bots.length !== 1 ? 's' : ''}`);
-  const goThreadRoot = await reply(conn, `📡 go ${roomName} ${label}`);
+  const goThreadRoot = await reply(conn, `📡 going ${roomName} ${label}`);
   const tr = (text: string) => goThreadRoot ? threadReply(conn, goThreadRoot, text) : reply(conn, text);
 
   for (const bot of bots) {
@@ -3563,7 +3565,7 @@ function registerRelayCommands(): void {
       const branch = 'main';
       const root = resolveRoot();
       const execOpts = gitOpts(root, 30_000);
-      const tr = await reply(conn, `📡 push`);
+      const tr = await reply(conn, `📡 pushing`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         execFileSync('git', ['push', 'origin', branch], execOpts);
@@ -3580,7 +3582,7 @@ function registerRelayCommands(): void {
     decommission: async (cmd, conn) => {
       const targetShip = cmd.slice('!decommission'.length).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
-      const tr = await reply(conn, `📡 decommission`);
+      const tr = await reply(conn, `📡 decommissioning`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         const ships = loadShips();
@@ -3603,7 +3605,7 @@ function registerRelayCommands(): void {
     commission: async (cmd, conn) => {
       const targetShip = cmd.slice('!commission'.length).trim() || null;
       if (targetShip && !isThisShip(targetShip)) return;
-      const tr = await reply(conn, `📡 commission`);
+      const tr = await reply(conn, `📡 commissioning`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         const ships = loadShips();
@@ -3627,7 +3629,7 @@ function registerRelayCommands(): void {
       if (targetShip && !isThisShip(targetShip)) return;
       const startedAt = Date.now();
 
-      const threadRoot = await reply(conn, `📡 pull`);
+      const threadRoot = await reply(conn, `📡 pulling`);
       if (!threadRoot) return;
       const elapsed = () => Date.now() - startedAt;
 
@@ -3780,7 +3782,7 @@ function registerRelayCommands(): void {
       if (liveFleet[bot].ship !== HOSTNAME) return;
       const botEnv = (() => { try { return loadProfileEnv(resolveRoot(), bot); } catch { return null; } })();
       const botDisplayName = botEnv?.ASSISTANT_NAME || capitalizeName(bot);
-      const tr = await reply(conn, `📡 transport ${botDisplayName} → ${targetName}`);
+      const tr = await reply(conn, `📡 transporting ${botDisplayName} → ${targetName}`);
       const send = (text: string) => tr ? threadReply(conn, tr, text) : reply(conn, text);
       try {
         stopBot(bot);
