@@ -355,7 +355,6 @@ async function handleSetBrainMode(data: CommandData, ctx: InfiniClawIpcContext):
 }
 
 async function handleRefreshBot(data: CommandData, ctx: InfiniClawIpcContext): Promise<void> {
-  if (requireMain(ctx, 'refresh_bot')) return;
   const bot = parseBot(data);
   const chatJid = parseChatJid(data);
 

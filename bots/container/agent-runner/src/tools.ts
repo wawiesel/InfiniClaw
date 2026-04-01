@@ -160,13 +160,6 @@ Use this after making code changes that require a process restart.`,
       ).describe('Persona name of the bot to restart (e.g. nora, cid, johnny5)'),
     },
     async (args) => {
-      if (!isMain) {
-        return {
-          content: [{ type: 'text' as const, text: 'Only MAIN can trigger restarts.' }],
-          isError: true,
-        };
-      }
-
       const data = {
         type: 'refresh_bot',
         bot: args.bot,
