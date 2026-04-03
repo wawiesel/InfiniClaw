@@ -14,7 +14,11 @@ import { parseEnvFile, parseEnvLine } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
 import { BRANCH_BRAIN_IMAGE } from './infini-config.js';
 import { loadShipConfig } from './ship-config.js';
-import { applyBrainEnv, resolveOAuthToken } from './service.js';
+import {
+  applyBrainEnv,
+  BASE_URL_AUTH_TOKEN_SENTINEL,
+  resolveOAuthToken,
+} from './service.js';
 import { envInt } from './utils.js';
 import {
   buildBotDirectory,
@@ -178,13 +182,23 @@ function buildVolumeMounts(
   // Env file mount
   const envDir = path.join(DATA_DIR, 'env');
   fs.mkdirSync(envDir, { recursive: true });
+  const envFileDir = path.join(envDir, group.folder);
+  fs.mkdirSync(envFileDir, { recursive: true });
   const filteredLines = Object.entries(normalizedSecrets)
     .filter(([key, value]) => ALLOWED_ENV_VARS.includes(key) && value.trim().length > 0)
     .map(([key, value]) => `${key}=${formatEnvFileValue(value)}`);
   if (filteredLines.length > 0) {
-    fs.writeFileSync(path.join(envDir, 'env'), filteredLines.join('\n') + '\n');
-    mounts.push({ hostPath: envDir, containerPath: '/workspace/env-dir', readonly: true });
+    fs.writeFileSync(path.join(envFileDir, 'env'), filteredLines.join('\n') + '\n');
+    mounts.push({ hostPath: envFileDir, containerPath: '/workspace/env-dir', readonly: true });
   }
+
+  // Legacy shared env rewrite disabled.
+  // Keep runtime state on the per-group env path so one bot/group cannot stomp another.
+  // if (group.folder === 'main' && filteredLines.length > 0) {
+  //   fs.writeFileSync(path.join(envDir, 'env'), filteredLines.join('\n') + '\n');
+  // }
+
+
 
   // InfiniClaw additional mounts (persona, memory, cache, ssh, home ro, allowlist)
   mounts.push(...buildInfiniClawMounts({
@@ -536,7 +550,9 @@ export async function runBranchBrainAgent(
     delete botEnv.ANTHROPIC_SMALL_FAST_MODEL;
     delete botEnv.ANTHROPIC_DEFAULT_SONNET_MODEL;
   }
-  if (!isOllama && !botEnv.BRAIN_API_KEY) delete botEnv.ANTHROPIC_AUTH_TOKEN;
+  if (isBaseUrlMode && !botEnv.ANTHROPIC_API_KEY && !botEnv.ANTHROPIC_AUTH_TOKEN) {
+    botEnv.ANTHROPIC_AUTH_TOKEN = isOllama ? 'ollama' : BASE_URL_AUTH_TOKEN_SENTINEL;
+  }
   if (isBaseUrlMode) {
     delete botEnv.CLAUDECODE;
     delete botEnv.CLAUDE_CODE_ENTRYPOINT;

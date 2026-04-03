@@ -34,6 +34,8 @@ claude --resume <session-id> --fork-session
 
 This env file only points Claude at the local router. It does not set `ANTHROPIC_API_KEY`, so you keep the normal Claude Code runtime.
 
+For bot containers, InfiniClaw also injects a placeholder `ANTHROPIC_AUTH_TOKEN=router` when a custom `ANTHROPIC_BASE_URL` is configured without explicit Anthropic auth. Claude CLI requires a non-empty Anthropic auth variable even though the router itself does not use the token value.
+
 Check or stop the shared router:
 
 ```bash

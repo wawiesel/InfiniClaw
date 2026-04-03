@@ -45,7 +45,7 @@ import {
   clearIntercomConfigCache,
 } from './matrix-api.js';
 import type { IntercomConfig, SyncResponse } from './matrix-api.js';
-import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME, loadSystemAliasesAsync, systemName } from './ship-config.js';
+import { loadShipConfig, loadFleet, writeFleet, loadFleetAsync, writeFleetAsync, loadShips, loadShipsAsync, safeLoadShips, writeShips, writeShipsAsync, isShipCommissioned, RUNNING_STATUSES, shipTag, findShipByHostname, thisShipName, ROLE_ROOMS, isQuartersOnlyRole, fleetId, isValidBotName, SAFE_BOT_NAME, loadSystemAliasesAsync, systemName, normalizeBotEntry } from './ship-config.js';
 import { extractSignals } from './signals.js';
 import type { BotStatus as BotStatusType } from './ship-config.js';
 import { capitalizeName, PIP_FOR_STATUS, ROLE_ICONS, findRoomChief, rankMedal, unifiedShipDisplay, unifiedBotDisplay, formatRerankShipMsg, formatRerankBotMsg, formatRerankNotification, formatDuration, fmtTok, activityEmoji } from './formatting.js';
@@ -75,6 +75,7 @@ import { removeBotMounts, grantMount, revokeMount } from './allow-list.js';
 import { registerHandlers, dispatch, buildHelpText } from './command-registry.js';
 import type { RoomConn } from './command-registry.js';
 import {
+  BASE_URL_AUTH_TOKEN_SENTINEL,
   resolveRoot,
   getActiveBots,
   bootstrapBot,
@@ -340,7 +341,7 @@ async function syncGiteaChiefPermissions(): Promise<void> {
 
 // ── In-memory fleet state (authoritative at runtime, persisted on shutdown) ──
 
-type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; title?: string; quartersRoom?: string; activeBrainModel?: string; ondutyAt?: number };
+type FleetEntry = { role: string; rank: number; ship: string | null; status: BotStatusType; triggerType?: 'always' | 'callout' | 'never'; title?: string; quartersRoom?: string; activeBrainModel?: string; ondutyAt?: number };
 let liveFleet: Record<string, FleetEntry> = {};
 /** Cached BehindTheCurtain room ID — set once on startup from operator-matrix.json. */
 let curtainRoomId: string | null = null;
@@ -440,6 +441,7 @@ const postedClosedNotices = new Set<string>();
 function fleetUpdate(bot: string, updates: Partial<FleetEntry>): void {
   if (!liveFleet[bot]) return;
   Object.assign(liveFleet[bot], updates);
+  normalizeBotEntry(liveFleet[bot]);
   fleetDirty = true;
 }
 
@@ -533,6 +535,15 @@ function wbsRoomForBot(bot: string): string {
   return botDutyRoom(bot) || bot;
 }
 
+function isWbsEnabled(root: string, bot: string): boolean {
+  try {
+    const raw = loadProfileEnv(root, bot).WBS_ENABLED?.trim().toLowerCase();
+    return !raw || !['0', 'false', 'no', 'off'].includes(raw);
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Inject a bot's WBS-assigned items into its instance data dir as wbs-initial.json.
  * Called after bootstrapBot so the bot can read its task list at startup.
@@ -540,15 +551,20 @@ function wbsRoomForBot(bot: string): string {
  */
 async function injectWbsTasks(root: string, bot: string): Promise<void> {
   try {
+    const instanceData = path.join(root, '_runtime', 'instances', bot, 'data');
+    const wbsInitialPath = path.join(instanceData, 'wbs-initial.json');
+    if (!isWbsEnabled(root, bot)) {
+      try { fs.rmSync(wbsInitialPath, { force: true }); } catch { /* ignore */ }
+      return;
+    }
     const dataDir = wbsDataDir(root);
     const room = wbsRoomForBot(bot);
     const wbs = await readWbs(dataDir, room);
     const items = itemsForBot(wbs, bot);
     if (items.length === 0) return; // nothing to inject
-    const instanceData = path.join(root, '_runtime', 'instances', bot, 'data');
     fs.mkdirSync(instanceData, { recursive: true });
     fs.writeFileSync(
-      path.join(instanceData, 'wbs-initial.json'),
+      wbsInitialPath,
       JSON.stringify({ items }, null, 2) + '\n',
     );
     log(`wbs: injected ${items.length} task(s) for ${bot} (room: ${room})`);
@@ -564,6 +580,7 @@ async function injectWbsTasks(root: string, bot: string): Promise<void> {
  */
 async function reabsorbWbsItems(root: string, bot: string): Promise<void> {
   try {
+    if (!isWbsEnabled(root, bot)) return;
     const dataDir = wbsDataDir(root);
     const room = wbsRoomForBot(bot);
     const wbs = await readWbs(dataDir, room);
@@ -585,6 +602,7 @@ async function reabsorbWbsItems(root: string, bot: string): Promise<void> {
  */
 async function autoAssignWbsItem(root: string, bot: string): Promise<string | undefined> {
   try {
+    if (!isWbsEnabled(root, bot)) return undefined;
     const dataDir = wbsDataDir(root);
     const room = wbsRoomForBot(bot);
     const wbs = await readWbs(dataDir, room);
@@ -2331,18 +2349,41 @@ export function mapBrainEnv(
   botEnv: Record<string, string> | null,
   baseEnv: Record<string, string> = { ...process.env as Record<string, string> },
 ): Record<string, string> {
-  if (botEnv) {
-    const oauthToken = botEnv['CLAUDE_CODE_OAUTH_TOKEN'] || botEnv['BRAIN_OAUTH_TOKEN'];
-    const apiKey = botEnv['ANTHROPIC_API_KEY'] || botEnv['BRAIN_API_KEY'];
-    const model = botEnv['ANTHROPIC_MODEL'] || botEnv['BRAIN_MODEL'];
-    if (oauthToken) baseEnv['CLAUDE_CODE_OAUTH_TOKEN'] = oauthToken;
-    if (apiKey) baseEnv['ANTHROPIC_API_KEY'] = apiKey;
-    if (model) baseEnv['ANTHROPIC_MODEL'] = model;
-    if (botEnv['ANTHROPIC_BASE_URL']) baseEnv['ANTHROPIC_BASE_URL'] = botEnv['ANTHROPIC_BASE_URL'];
-    if (botEnv['ANTHROPIC_AUTH_TOKEN']) baseEnv['ANTHROPIC_AUTH_TOKEN'] = botEnv['ANTHROPIC_AUTH_TOKEN'];
-    if (botEnv['NODE_EXTRA_CA_CERTS']) baseEnv['NODE_EXTRA_CA_CERTS'] = botEnv['NODE_EXTRA_CA_CERTS'];
+  const out = { ...baseEnv };
+  delete out['CLAUDECODE'];
+  delete out['CLAUDE_CODE_ENTRYPOINT'];
+  if (!botEnv) return out;
+
+  const baseUrl = botEnv['ANTHROPIC_BASE_URL'] || botEnv['BRAIN_BASE_URL'];
+  const apiKey = botEnv['ANTHROPIC_API_KEY'] || botEnv['BRAIN_API_KEY'];
+  const model = botEnv['ANTHROPIC_MODEL'] || botEnv['BRAIN_MODEL'];
+  const isBaseUrlMode = Boolean(baseUrl);
+  const rawAuthToken = botEnv['ANTHROPIC_AUTH_TOKEN'] || botEnv['BRAIN_AUTH_TOKEN'];
+  const isOllama = rawAuthToken === 'ollama';
+  const oauthToken = isBaseUrlMode ? '' : (botEnv['CLAUDE_CODE_OAUTH_TOKEN'] || botEnv['BRAIN_OAUTH_TOKEN']);
+  const authToken = rawAuthToken || (isBaseUrlMode && !apiKey
+    ? (isOllama ? 'ollama' : BASE_URL_AUTH_TOKEN_SENTINEL)
+    : '');
+
+  if (oauthToken) out['CLAUDE_CODE_OAUTH_TOKEN'] = oauthToken;
+  else delete out['CLAUDE_CODE_OAUTH_TOKEN'];
+  if (apiKey) out['ANTHROPIC_API_KEY'] = apiKey;
+  else delete out['ANTHROPIC_API_KEY'];
+  if (model) out['ANTHROPIC_MODEL'] = model;
+  else delete out['ANTHROPIC_MODEL'];
+  if (baseUrl) out['ANTHROPIC_BASE_URL'] = baseUrl;
+  else delete out['ANTHROPIC_BASE_URL'];
+  if (authToken) out['ANTHROPIC_AUTH_TOKEN'] = authToken;
+  else delete out['ANTHROPIC_AUTH_TOKEN'];
+  if (botEnv['NODE_EXTRA_CA_CERTS']) out['NODE_EXTRA_CA_CERTS'] = botEnv['NODE_EXTRA_CA_CERTS'];
+  if (isBaseUrlMode && model) {
+    out['ANTHROPIC_SMALL_FAST_MODEL'] = model;
+    out['ANTHROPIC_DEFAULT_SONNET_MODEL'] = model;
+  } else {
+    delete out['ANTHROPIC_SMALL_FAST_MODEL'];
+    delete out['ANTHROPIC_DEFAULT_SONNET_MODEL'];
   }
-  return baseEnv;
+  return out;
 }
 
 /**
@@ -3930,10 +3971,17 @@ async function handleLifecycleCommand(
         ? (activeConns.find(c => c.roomId === qRoom) ?? conn)
         : conn;
       const threadRoot = await reply(progressConn, `📡 ${verb} ${name}`);
-      if (!threadRoot) continue;
+      if (progressConn.roomId !== conn.roomId) {
+        await reply(conn, `📡 ${verb} ${name} — progress in this bot's quarters`);
+      }
       let stepN = 0;
       const totalSteps = 4;
-      const step = (text: string) => threadReply(progressConn, threadRoot, `[${++stepN}/${totalSteps} ${formatDuration(Date.now() - startedAt)}] ${text}`);
+      const step = (text: string) => {
+        const line = `[${++stepN}/${totalSteps} ${formatDuration(Date.now() - startedAt)}] ${text}`;
+        return threadRoot
+          ? threadReply(progressConn, threadRoot, line)
+          : reply(progressConn, line);
+      };
       try {
         await setBotDisplayStatus(root, bot, 'building');
         await step('🔄 building');
@@ -3978,7 +4026,7 @@ async function handleLifecycleCommand(
         const ver = botVersion(root, bot);
         await setBotDisplayStatus(root, bot, 'online');
         await step(`🟢 online · ${[roleIcon, medal].filter(Boolean).join(' ')} · ${model}${ver}`);
-        await reply(progressConn, `✅ ${name} ${doneVerb}`);
+        await reply(progressConn, `✅ ${name} ${doneVerb}`, threadRoot);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
@@ -3986,7 +4034,7 @@ async function handleLifecycleCommand(
         if (!isRestart) await setBotDisplayStatus(root, bot, 'sleep');
         const fail = `⛔ wake ${name} failed — ${errStr(err)}`;
         await step(fail);
-        await reply(progressConn, fail);
+        await reply(progressConn, fail, threadRoot);
         // Count build/deploy failures in infra metrics
         recordInfraFailure('wake-build');
       }

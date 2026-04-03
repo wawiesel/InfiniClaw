@@ -26,6 +26,7 @@ export interface InfiniClawMountOptions {
 
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9._-]+$/;
 const SAFE_GROUP_FOLDER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const CLAUDE_PROJECT_DIR_NAMES = ['-workspace-persona-temp', '-workspace-group'] as const;
 
 /** Build a directory of bots in this fleet: name → main room JID. */
 export function buildBotDirectory(): Record<string, string> {
@@ -116,6 +117,118 @@ function normalizePathSegment(value: string | undefined, envVar: string): string
   return v;
 }
 
+function listProjectDirs(claudeDir: string, includeCandidates: boolean): string[] {
+  const projectsDir = path.join(claudeDir, 'projects');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const seen = new Set<string>();
+  const dirs: string[] = [];
+
+  if (includeCandidates) {
+    for (const name of CLAUDE_PROJECT_DIR_NAMES) {
+      const projectDir = path.join(projectsDir, name);
+      fs.mkdirSync(projectDir, { recursive: true });
+      seen.add(projectDir);
+      dirs.push(projectDir);
+    }
+  }
+
+  for (const entry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const projectDir = path.join(projectsDir, entry.name);
+    if (seen.has(projectDir)) continue;
+    seen.add(projectDir);
+    dirs.push(projectDir);
+  }
+
+  return dirs;
+}
+
+function copyMissingRecursive(srcDir: string, dstDir: string): void {
+  if (!fs.existsSync(srcDir)) return;
+  fs.mkdirSync(dstDir, { recursive: true });
+  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = path.join(srcDir, entry.name);
+    const dstPath = path.join(dstDir, entry.name);
+    if (entry.isDirectory()) {
+      copyMissingRecursive(srcPath, dstPath);
+      continue;
+    }
+    if (entry.isSymbolicLink()) {
+      if (fs.existsSync(dstPath)) continue;
+      fs.symlinkSync(fs.readlinkSync(srcPath), dstPath);
+      continue;
+    }
+    if (!fs.existsSync(dstPath)) {
+      fs.copyFileSync(srcPath, dstPath);
+    }
+  }
+}
+
+function linkMemoryDir(memoryPath: string, persistentMemoryDir: string): void {
+  fs.mkdirSync(path.dirname(memoryPath), { recursive: true });
+  if (fs.existsSync(memoryPath)) {
+    const stat = fs.lstatSync(memoryPath);
+    if (stat.isSymbolicLink()) {
+      try {
+        if (fs.realpathSync(memoryPath) === fs.realpathSync(persistentMemoryDir)) return;
+      } catch { /* relink below */ }
+      try {
+        const resolved = path.resolve(path.dirname(memoryPath), fs.readlinkSync(memoryPath));
+        if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+          copyMissingRecursive(resolved, persistentMemoryDir);
+        }
+      } catch { /* best effort */ }
+      fs.unlinkSync(memoryPath);
+    } else if (stat.isDirectory()) {
+      copyMissingRecursive(memoryPath, persistentMemoryDir);
+      fs.rmSync(memoryPath, { recursive: true, force: true });
+    } else {
+      fs.rmSync(memoryPath, { force: true });
+    }
+  }
+  fs.symlinkSync(persistentMemoryDir, memoryPath, 'dir');
+}
+
+export function syncPersistentClaudeMemory(dataDir: string, groupSessionsDir: string, persistentMemoryDir: string): void {
+  fs.mkdirSync(persistentMemoryDir, { recursive: true });
+  const realPersistentMemoryDir = fs.realpathSync(persistentMemoryDir);
+  const orderedClaudeDirs = [groupSessionsDir];
+  const sessionsBase = path.join(dataDir, 'sessions');
+  if (fs.existsSync(sessionsBase)) {
+    for (const entry of fs.readdirSync(sessionsBase, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const claudeDir = path.join(sessionsBase, entry.name, '.claude');
+      if (path.resolve(claudeDir) === path.resolve(groupSessionsDir)) continue;
+      orderedClaudeDirs.push(claudeDir);
+    }
+  }
+
+  for (const claudeDir of orderedClaudeDirs) {
+    for (const projectDir of listProjectDirs(claudeDir, claudeDir === groupSessionsDir)) {
+      const memoryPath = path.join(projectDir, 'memory');
+      if (!fs.existsSync(memoryPath)) continue;
+      try {
+        if (fs.realpathSync(memoryPath) === realPersistentMemoryDir) continue;
+      } catch { /* merge below */ }
+      const stat = fs.lstatSync(memoryPath);
+      if (stat.isDirectory()) {
+        copyMissingRecursive(memoryPath, realPersistentMemoryDir);
+      } else if (stat.isSymbolicLink()) {
+        try {
+          const resolved = path.resolve(path.dirname(memoryPath), fs.readlinkSync(memoryPath));
+          if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+            copyMissingRecursive(resolved, realPersistentMemoryDir);
+          }
+        } catch { /* best effort */ }
+      }
+    }
+  }
+
+  for (const projectDir of listProjectDirs(groupSessionsDir, true)) {
+    linkMemoryDir(path.join(projectDir, 'memory'), realPersistentMemoryDir);
+  }
+}
+
 // ── Main mount builder ──────────────────────────────────────────────────
 
 /**
@@ -124,7 +237,6 @@ function normalizePathSegment(value: string | undefined, envVar: string): string
  */
 export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount[] {
   const { group, isMain, groupSessionsDir, groupsDir: _groupsDir, dataDir, projectRoot, secrets } = opts;
-  void isMain;
   void _groupsDir;
   const mounts: VolumeMount[] = [];
   const homeDir = os.homedir();
@@ -165,6 +277,9 @@ export function buildInfiniClawMounts(opts: InfiniClawMountOptions): VolumeMount
       const realMemoryDir = fs.realpathSync(memoryDir);
       if (!isWithinBase(secretsBase, realMemoryDir)) {
         throw new Error(`Memory path escapes secrets directory: ${realMemoryDir}`);
+      }
+      if (isMain) {
+        syncPersistentClaudeMemory(dataDir, groupSessionsDir, realMemoryDir);
       }
       mounts.push({
         hostPath: realMemoryDir,

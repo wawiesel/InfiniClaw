@@ -530,15 +530,27 @@ async function loadState(): Promise<void> {
     setMainLlm(configuredMainModel);
     setRouterState('main_model', mainLlm);
 
-    if (pinnedChanged && sessions[MAIN_GROUP_FOLDER]) {
+    const configuredBaseUrl = (process.env.ANTHROPIC_BASE_URL || process.env.BRAIN_BASE_URL || '').trim();
+    const storedBaseUrl = (getRouterState('main_base_url') || '').trim();
+    const configuredAuthMode = configuredBaseUrl ? 'base_url' : ((process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.BRAIN_OAUTH_TOKEN) ? 'oauth' : ((process.env.ANTHROPIC_API_KEY || process.env.BRAIN_API_KEY) ? 'api_key' : 'none'));
+    const storedAuthMode = getRouterState('main_auth_mode') || 'none';
+    const runtimeChanged = configuredBaseUrl !== storedBaseUrl || configuredAuthMode !== storedAuthMode;
+    setRouterState('main_base_url', configuredBaseUrl);
+    setRouterState('main_auth_mode', configuredAuthMode);
+
+    if ((pinnedChanged || runtimeChanged) && sessions[MAIN_GROUP_FOLDER]) {
       deleteSession(MAIN_GROUP_FOLDER);
       delete sessions[MAIN_GROUP_FOLDER];
       logger.info(
         {
           fromModel: storedMainModel,
           toModel: configuredMainModel,
+          fromBaseUrl: storedBaseUrl,
+          toBaseUrl: configuredBaseUrl,
+          fromAuthMode: storedAuthMode,
+          toAuthMode: configuredAuthMode,
         },
-        'Pinned MAIN model changed; cleared main session',
+        'Main runtime changed; cleared main session',
       );
     }
   } else if (storedMainModel) {

@@ -24,6 +24,8 @@ BRAIN_BASE_URL=http://127.0.0.1:43177
 ```
 Relay/containers will pass this through as `ANTHROPIC_BASE_URL` to the bot process and branch brains.
 
+Container note: Claude CLI still expects a non-empty Anthropic auth variable even in custom `ANTHROPIC_BASE_URL` mode. InfiniClaw injects a placeholder `ANTHROPIC_AUTH_TOKEN=router` automatically for bot containers when no explicit Anthropic auth is configured.
+
 Auth: expects Codex auth in `~/.codex/auth.json` or `OPENAI_ACCESS_TOKEN`. The router itself does not store secrets in repo; it reads from host paths/env.
 
 Port/host overrides: set `ROUTER_PORT` / `ROUTER_HOST` before running `router-ctl.sh` or the npm scripts.

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mapBrainEnv } from '../relay.js';
 import { extractSignals } from '../signals.js';
+import { BASE_URL_AUTH_TOKEN_SENTINEL, applyBrainEnv } from '../service.js';
 
 // ── mapBrainEnv ────────────────────────────────────────────────────
 
@@ -65,6 +66,21 @@ describe('mapBrainEnv', () => {
     expect(result['ANTHROPIC_AUTH_TOKEN']).toBe('bearer-token');
   });
 
+  it('maps BRAIN_BASE_URL to ANTHROPIC_BASE_URL and injects router auth in base-url mode', () => {
+    const result = mapBrainEnv({ BRAIN_BASE_URL: 'http://proxy.example.com' }, {});
+    expect(result['ANTHROPIC_BASE_URL']).toBe('http://proxy.example.com');
+    expect(result['ANTHROPIC_AUTH_TOKEN']).toBe(BASE_URL_AUTH_TOKEN_SENTINEL);
+    expect(result['CLAUDE_CODE_OAUTH_TOKEN']).toBeUndefined();
+  });
+
+  it('preserves explicit BRAIN_AUTH_TOKEN in base-url mode', () => {
+    const result = mapBrainEnv(
+      { BRAIN_BASE_URL: 'http://proxy.example.com', BRAIN_AUTH_TOKEN: 'real-token' },
+      {},
+    );
+    expect(result['ANTHROPIC_AUTH_TOKEN']).toBe('real-token');
+  });
+
   it('forwards NODE_EXTRA_CA_CERTS as-is', () => {
     const result = mapBrainEnv({ NODE_EXTRA_CA_CERTS: '/etc/ssl/certs/ca.pem' }, {});
     expect(result['NODE_EXTRA_CA_CERTS']).toBe('/etc/ssl/certs/ca.pem');
@@ -91,6 +107,23 @@ describe('mapBrainEnv', () => {
     const result = mapBrainEnv({ BRAIN_API_KEY: 'key' }, { PATH: '/usr/bin', HOME: '/root' });
     expect(result['PATH']).toBe('/usr/bin');
     expect(result['HOME']).toBe('/root');
+  });
+});
+
+describe('applyBrainEnv', () => {
+  it('injects a router auth sentinel for custom base-url mode without auth', () => {
+    const result = applyBrainEnv({ BRAIN_BASE_URL: 'http://proxy.example.com', BRAIN_MODEL: 'gpt-5.4' });
+    expect(result['ANTHROPIC_BASE_URL']).toBe('http://proxy.example.com');
+    expect(result['ANTHROPIC_AUTH_TOKEN']).toBe(BASE_URL_AUTH_TOKEN_SENTINEL);
+    expect(result['CLAUDE_CODE_OAUTH_TOKEN']).toBeUndefined();
+  });
+
+  it('keeps explicit BRAIN_AUTH_TOKEN when provided', () => {
+    const result = applyBrainEnv({
+      BRAIN_BASE_URL: 'http://proxy.example.com',
+      BRAIN_AUTH_TOKEN: 'bearer-token',
+    });
+    expect(result['ANTHROPIC_AUTH_TOKEN']).toBe('bearer-token');
   });
 });
 

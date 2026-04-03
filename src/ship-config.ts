@@ -22,11 +22,13 @@ export interface S3Config {
 }
 
 export type BotStatus = 'onduty' | 'quarters' | 'sleep' | 'transit' | 'retrospective' | 'dream' | 'ready';
+export type TriggerType = 'always' | 'callout' | 'never';
 export interface BotEntry {
   role: string;
   rank: number;
   ship: string | null;
   status: BotStatus;
+  triggerType?: TriggerType;
   title?: string;
   quartersRoom?: string;
   activeBrainModel?: string;
@@ -56,6 +58,48 @@ function migrateStatus(s: string): string {
   if (s === 'lounge') return 'quarters';
   if (s === 'sleeping') return 'sleep';
   return s;
+}
+
+export function normalizeBotStatus(status: unknown): BotStatus {
+  const migrated = typeof status === 'string' ? migrateStatus(status) : '';
+  switch (migrated) {
+    case 'onduty':
+    case 'quarters':
+    case 'sleep':
+    case 'transit':
+    case 'retrospective':
+    case 'dream':
+    case 'ready':
+      return migrated;
+    default:
+      return 'sleep';
+  }
+}
+
+export function triggerTypeForStatus(status: BotStatus): TriggerType {
+  switch (status) {
+    case 'onduty':
+      return 'callout';
+    case 'sleep':
+    case 'dream':
+    case 'transit':
+      return 'never';
+    case 'quarters':
+    case 'retrospective':
+    case 'ready':
+      return 'always';
+  }
+}
+
+export function normalizeBotEntry(entry: BotEntry): BotEntry {
+  entry.status = normalizeBotStatus(entry.status);
+  entry.triggerType = triggerTypeForStatus(entry.status);
+  return entry;
+}
+
+function normalizeFleetEntries(fleet: Record<string, BotEntry>): Record<string, BotEntry> {
+  for (const entry of Object.values(fleet)) normalizeBotEntry(entry);
+  return fleet;
 }
 
 let cached: ShipConfig | null = null;
@@ -177,7 +221,7 @@ export function loadShipConfig(): ShipConfig {
       throw new Error(`fleet.json: invalid bot name "${name}"`);
     }
     // Normalize legacy status names before checking
-    const status = migrateStatus(entry.status as string);
+    const status = normalizeBotStatus(entry.status);
     if (entry.ship === hostname && (RUNNING_STATUSES as readonly string[]).includes(status)) {
       bots.push(name);
     }
@@ -245,7 +289,7 @@ export function loadFleetFromDisk(): Record<string, BotEntry> {
       entry.status = (entry as any).active ? 'onduty' : 'quarters';
       delete (entry as any).active;
     }
-    entry.status = migrateStatus(entry.status as string) as BotStatus;
+    normalizeBotEntry(entry);
   }
   return bots;
 }
@@ -253,8 +297,9 @@ export function loadFleetFromDisk(): Record<string, BotEntry> {
 /** Write updated fleet config back to disk. */
 export function writeFleet(fleet: Record<string, BotEntry>): void {
   const raw = readJson<Record<string, unknown>>(FLEET_PATH);
-  raw.bots = fleet;
+  raw.bots = normalizeFleetEntries(fleet);
   writeJson(FLEET_PATH, raw);
+  cached = null;
 }
 
 /**
@@ -309,8 +354,10 @@ export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
         }
       }
     }
+    // Keep the disk cache visibly aligned with the S3-authoritative merged state.
+    writeFleet(fleet);
   } catch { /* S3 unavailable — disk-only fallback */ }
-  s3FleetCache = fleet;
+  s3FleetCache = normalizeFleetEntries(fleet);
   return fleet;
 }
 
@@ -325,7 +372,7 @@ export async function loadFleetAsync(): Promise<Record<string, BotEntry>> {
  */
 export async function writeFleetAsync(fleet: Record<string, BotEntry>): Promise<void> {
   // Update in-memory cache immediately — loadFleet() callers see the new state at once
-  s3FleetCache = fleet;
+  s3FleetCache = normalizeFleetEntries(fleet);
   // S3 first — authoritative source for all fleet state
   const hostname = os.hostname();
   const shipName = findShipByHostname(hostname)?.[0] ?? hostname;

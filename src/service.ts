@@ -134,6 +134,12 @@ async function seedMainRoomRegistration(instanceBase: string, mainJid: string, m
   await uploadJson(key, { ts: Date.now(), groups });
 }
 
+export function resolveMainGroupFolder(profileEnv: Record<string, string>): string {
+  return profileEnv.MAIN_GROUP_FOLDER?.trim() || 'main';
+}
+
+export const BASE_URL_AUTH_TOKEN_SENTINEL = 'router';
+
 // ── Env loading ────────────────────────────────────────────────────────
 
 export function loadProfileEnv(root: string, bot: string): Record<string, string> {
@@ -194,8 +200,11 @@ export function applyBrainEnv(env: Record<string, string>): Record<string, strin
     delete out.CLAUDE_CODE_ENTRYPOINT;
   }
 
-  if (!isOllama && !out.BRAIN_API_KEY) {
-    delete out.ANTHROPIC_AUTH_TOKEN;
+  // Claude CLI still requires a non-empty Anthropic credential variable even
+  // when requests are routed through a custom Anthropic-compatible base URL.
+  // The shared Codex router ignores the token value, so a sentinel is enough.
+  if (isBaseUrlMode && !out.ANTHROPIC_API_KEY && !out.ANTHROPIC_AUTH_TOKEN) {
+    out.ANTHROPIC_AUTH_TOKEN = isOllama ? 'ollama' : BASE_URL_AUTH_TOKEN_SENTINEL;
   }
 
   if (isOllama) {
@@ -414,7 +423,7 @@ export async function deployBot(root: string, bot: string): Promise<void> {
     // Bot is in quarters — seed quarters room as main
     const quartersJid = `matrix:${quartersRoom}`;
     const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
-    await seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
+    await seedMainRoomRegistration(instance, quartersJid, quartersName, resolveMainGroupFolder(profileEnv), false);
     console.log(`${bot}: pre-registered quarters (${quartersName})`);
   } else {
     // Bot is on duty or other — derive duty room from ROLE_ROOMS + intercom.json
@@ -442,7 +451,7 @@ export async function deployBot(root: string, bot: string): Promise<void> {
       // No duty room for this role — use env MAIN_GROUP_NAME as fallback
       const mainJid = profileEnv.LOCAL_MIRROR_MATRIX_JID;
       const mainGroupName = profileEnv.MAIN_GROUP_NAME;
-      const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+      const mainGroupFolder = resolveMainGroupFolder(profileEnv);
       if (mainJid && mainGroupName) {
         await seedMainRoomRegistration(instance, mainJid, mainGroupName, mainGroupFolder, true);
         console.log(`${bot}: pre-registered ${mainGroupName} (${mainGroupFolder})`);
@@ -683,6 +692,9 @@ export ANTHROPIC_API_KEY="\${BRAIN_API_KEY:-}"
 export CLAUDE_CODE_OAUTH_TOKEN="\${BRAIN_OAUTH_TOKEN:-}"
 export OPENAI_API_KEY="\${BRAIN_API_KEY:-}"
 export OPENAI_BASE_URL="\${BRAIN_BASE_URL:-}"
+if [ -n "\${BRAIN_BASE_URL:-}" ] && [ -z "\${ANTHROPIC_API_KEY:-}" ] && [ -z "\${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+  export ANTHROPIC_AUTH_TOKEN="${BASE_URL_AUTH_TOKEN_SENTINEL}"
+fi
 if [ -n "\${BRAIN_CA_CERT_FILE:-}" ]; then
   export NODE_EXTRA_CA_CERTS="\${BRAIN_CA_CERT_FILE}"
 fi
@@ -835,7 +847,7 @@ export async function restartBotForRoom(root: string, bot: string, knownDutyRoom
   if (botStatus === 'quarters' && quartersRoom) {
     const quartersJid = `matrix:${quartersRoom}`;
     const quartersName = `${profileEnv.ASSISTANT_NAME || capitalizeName(bot)}'s Quarters`;
-    await seedMainRoomRegistration(instance, quartersJid, quartersName, 'main', false);
+    await seedMainRoomRegistration(instance, quartersJid, quartersName, resolveMainGroupFolder(profileEnv), false);
   } else if (botStatus === 'onduty' && knownDutyRoomId) {
     // Relay provided the exact room ID — seed it directly (#193).
     // Use the duty room name as BOTH group name AND folder name so the IPC
@@ -848,7 +860,7 @@ export async function restartBotForRoom(root: string, bot: string, knownDutyRoom
     // Bot is onduty — derive duty room from ROLE_ROOMS + intercom.json
     const role = (fleet[bot]?.role ?? '').toLowerCase();
     const dutyRoom = ROLE_ROOMS[role];
-    const mainGroupFolder = profileEnv.MAIN_GROUP_FOLDER || 'main';
+    const mainGroupFolder = resolveMainGroupFolder(profileEnv);
     if (dutyRoom) {
       // Look up the duty room's Matrix room ID from intercom.json
       let dutyRoomJid = '';

@@ -12,6 +12,9 @@ import {
   SAFE_BOT_NAME,
   loadFleet,
   getFleetRoles,
+  normalizeBotEntry,
+  normalizeBotStatus,
+  triggerTypeForStatus,
 } from '../ship-config.js';
 
 beforeEach(() => {
@@ -158,6 +161,37 @@ describe('loadFleet — S3-only runtime', () => {
 describe('getFleetRoles — returns null before loadFleetAsync', () => {
   it('returns null when roles cache is empty', () => {
     expect(getFleetRoles()).toBeNull();
+  });
+});
+
+describe('fleet status normalization', () => {
+  it('maps known statuses to the expected trigger type', () => {
+    expect(triggerTypeForStatus('quarters')).toBe('always');
+    expect(triggerTypeForStatus('onduty')).toBe('callout');
+    expect(triggerTypeForStatus('sleep')).toBe('never');
+    expect(triggerTypeForStatus('retrospective')).toBe('always');
+    expect(triggerTypeForStatus('dream')).toBe('never');
+    expect(triggerTypeForStatus('ready')).toBe('always');
+    expect(triggerTypeForStatus('transit')).toBe('never');
+  });
+
+  it('normalizes legacy and invalid statuses safely', () => {
+    expect(normalizeBotStatus('active')).toBe('onduty');
+    expect(normalizeBotStatus('dismissed')).toBe('quarters');
+    expect(normalizeBotStatus('sleeping')).toBe('sleep');
+    expect(normalizeBotStatus('nonsense')).toBe('sleep');
+  });
+
+  it('derives triggerType from status instead of persisted data', () => {
+    const entry = normalizeBotEntry({
+      role: 'engineer',
+      rank: 1,
+      ship: 'mac139160',
+      status: 'quarters',
+      triggerType: 'callout',
+    });
+    expect(entry.status).toBe('quarters');
+    expect(entry.triggerType).toBe('always');
   });
 });
 
