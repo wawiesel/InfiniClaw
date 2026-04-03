@@ -1768,12 +1768,13 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   pruneOldSessions();
 
-  // Start credential proxy so BB containers can reach the Anthropic API.
+  // Start credential proxy so bot/BB containers can reach the configured brain provider.
   // The proxy reads credentials from .env file — write one from process.env
   // (which applyBrainEnv already populated from the bot's env file).
   const proxyEnvLines = [
     'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
+    'OPENAI_API_KEY', 'OPENAI_BASE_URL',
   ].filter(k => process.env[k]).map(k => `${k}=${process.env[k]}`);
   const { writeFileSync } = await import('fs');
   writeFileSync(path.join(process.cwd(), '.env'), proxyEnvLines.join('\n') + '\n');

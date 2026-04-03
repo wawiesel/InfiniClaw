@@ -34,7 +34,7 @@ const OPENAI_BASE_URL =
 const OPENAI_RESPONSES_URL = `${OPENAI_BASE_URL.replace(/\/$/, "")}/responses`;
 const OPENAI_ORIGIN = process.env.OPENAI_ORIGIN || "https://chatgpt.com";
 const OPENAI_REFERER = process.env.OPENAI_REFERER || "https://chatgpt.com/codex";
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.1-codex-max";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.4";
 const OPENAI_INSTRUCTIONS =
   process.env.OPENAI_INSTRUCTIONS ||
   "You are a coding assistant running behind an Anthropic-compatible router.";

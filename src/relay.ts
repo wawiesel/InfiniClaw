@@ -2342,7 +2342,6 @@ export function mapBrainEnv(
     if (botEnv['ANTHROPIC_AUTH_TOKEN']) baseEnv['ANTHROPIC_AUTH_TOKEN'] = botEnv['ANTHROPIC_AUTH_TOKEN'];
     if (botEnv['NODE_EXTRA_CA_CERTS']) baseEnv['NODE_EXTRA_CA_CERTS'] = botEnv['NODE_EXTRA_CA_CERTS'];
   }
-  delete baseEnv['CLAUDECODE'];
   return baseEnv;
 }
 

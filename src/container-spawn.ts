@@ -14,6 +14,7 @@ import { parseEnvFile, parseEnvLine } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
 import { BRANCH_BRAIN_IMAGE } from './infini-config.js';
 import { loadShipConfig } from './ship-config.js';
+import { applyBrainEnv, resolveOAuthToken } from './service.js';
 import { envInt } from './utils.js';
 import {
   buildBotDirectory,
@@ -65,9 +66,11 @@ const DISALLOWED_TOOLS = [
 const ALLOWED_ENV_VARS = [
   'ASSISTANT_NAME', 'ASSISTANT_ROLE', 'IsChief',
   'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+  'BRAIN_BASE_URL', 'BRAIN_MODEL', 'BRAIN_AUTH_TOKEN', 'BRAIN_API_KEY', 'BRAIN_OAUTH_TOKEN', 'BRAIN_CA_CERT_FILE',
   'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL', 'NANOCLAW_SKIP_TOKEN_COUNTING',
   'NANOCLAW_CONTEXT_WINDOW', 'NANOCLAW_DB_PATH', 'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+  'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT',
   'OLLAMA_HOST', 'OPENAI_API_KEY', 'OPENAI_BASE_URL',
   'INFINICLAW_ROOT', 'PERSONA_NAME',
   'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
@@ -80,12 +83,12 @@ const ALLOWED_ENV_VARS = [
 // ── Secret collection ───────────────────────────────────────────────
 
 function collectContainerSecrets(projectRoot: string): Record<string, string> {
-  const secrets: Record<string, string> = {};
+  const rawSecrets: Record<string, string> = {};
 
   for (const key of ALLOWED_ENV_VARS) {
     const value = process.env[key];
     if (value && value.trim().length > 0) {
-      secrets[key] = value;
+      rawSecrets[key] = value;
     }
   }
 
@@ -95,11 +98,13 @@ function collectContainerSecrets(projectRoot: string): Record<string, string> {
       const parsed = parseEnvLine(line);
       if (!parsed) continue;
       const [key, value] = parsed;
-      if (ALLOWED_ENV_VARS.includes(key) && !secrets[key] && value.trim().length > 0) {
-        secrets[key] = value;
+      if (ALLOWED_ENV_VARS.includes(key) && !rawSecrets[key] && value.trim().length > 0) {
+        rawSecrets[key] = value;
       }
     }
   }
+
+  const secrets = applyBrainEnv(rawSecrets);
 
   // Auto-inject git identity so commits are attributed to the bot
   const name = secrets['ASSISTANT_NAME'];
@@ -123,8 +128,8 @@ function redactSecrets(secrets: Record<string, string> | undefined): Record<stri
 
 // ── Volume mounts ───────────────────────────────────────────────────
 
-function quoteEnvValue(value: string): string {
-  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+function formatEnvFileValue(value: string): string {
+  return value.replace(/\r/g, '').replace(/\n/g, '\\n');
 }
 
 function buildVolumeMounts(
@@ -175,7 +180,7 @@ function buildVolumeMounts(
   fs.mkdirSync(envDir, { recursive: true });
   const filteredLines = Object.entries(normalizedSecrets)
     .filter(([key, value]) => ALLOWED_ENV_VARS.includes(key) && value.trim().length > 0)
-    .map(([key, value]) => `${key}=${quoteEnvValue(value)}`);
+    .map(([key, value]) => `${key}=${formatEnvFileValue(value)}`);
   if (filteredLines.length > 0) {
     fs.writeFileSync(path.join(envDir, 'env'), filteredLines.join('\n') + '\n');
     mounts.push({ hostPath: envDir, containerPath: '/workspace/env-dir', readonly: true });
@@ -198,6 +203,7 @@ function buildContainerArgs(
   portPublish: string[] = [],
   memoryMb?: number,
   imageOverride?: string,
+  envFilePath?: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--network', 'host', '--name', containerName, '--pull=never'];
 
@@ -219,6 +225,7 @@ function buildContainerArgs(
   for (const mount of mounts) {
     args.push('-v', `${mount.hostPath}:${mount.containerPath}${mount.readonly ? ':ro' : ''}`);
   }
+  if (envFilePath) args.push('--env-file', envFilePath);
   for (const p of portPublish) args.push('-p', p);
 
   // Inject CONTAINER_ENV_* as container environment variables (prefix stripped)
@@ -349,7 +356,7 @@ export async function runContainerAgent(
   const envDir = path.join(DATA_DIR, 'env');
   const remappedLines = Object.entries(mappedSecrets)
     .filter(([key, value]) => ALLOWED_ENV_VARS.includes(key) && value.trim().length > 0)
-    .map(([key, value]) => `${key}=${quoteEnvValue(value)}`);
+    .map(([key, value]) => `${key}=${formatEnvFileValue(value)}`);
   if (remappedLines.length > 0) {
     fs.writeFileSync(path.join(envDir, 'env'), remappedLines.join('\n') + '\n');
   }
@@ -394,7 +401,8 @@ export async function runContainerAgent(
   // Build container args
   const personaConfig = getPersonaContainerConfig(secrets);
   const portPublish = safeContainerNameTag ? [] : personaConfig.portPublish;
-  const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaConfig.memoryMb, imageOverride);
+  const envFilePath = remappedLines.length > 0 ? path.join(envDir, 'env') : undefined;
+  const containerArgs = buildContainerArgs(mounts, containerName, portPublish, personaConfig.memoryMb, imageOverride, envFilePath);
   const configTimeout = input.timeoutOverrideMs || group.containerConfig?.timeout || CONTAINER_TIMEOUT;
 
   logger.debug({
@@ -492,11 +500,47 @@ export async function runBranchBrainAgent(
   const botEnvFile = path.join(config.secretsPath, 'bots', input.bot, 'env');
   const botEnv = parseEnvFile(botEnvFile);
 
-  // Apply the same BRAIN_* → CLAUDE/ANTHROPIC mappings as service.ts
-  if (botEnv.BRAIN_OAUTH_TOKEN) botEnv.CLAUDE_CODE_OAUTH_TOKEN = botEnv.BRAIN_OAUTH_TOKEN;
+  // Apply the same brain env mappings as service.ts.
+  const isBaseUrlMode = Boolean(botEnv.BRAIN_BASE_URL);
+  const isOllama = botEnv.BRAIN_AUTH_TOKEN === 'ollama';
+  if (botEnv.BRAIN_OAUTH_TOKEN && !isBaseUrlMode) botEnv.CLAUDE_CODE_OAUTH_TOKEN = botEnv.BRAIN_OAUTH_TOKEN;
   if (botEnv.BRAIN_API_KEY) botEnv.ANTHROPIC_API_KEY = botEnv.BRAIN_API_KEY;
   if (botEnv.BRAIN_BASE_URL) botEnv.ANTHROPIC_BASE_URL = botEnv.BRAIN_BASE_URL;
   if (botEnv.BRAIN_CA_CERT_FILE) botEnv.NODE_EXTRA_CA_CERTS = botEnv.BRAIN_CA_CERT_FILE;
+  if (botEnv.BRAIN_MODEL) botEnv.ANTHROPIC_MODEL = botEnv.BRAIN_MODEL;
+  if (isBaseUrlMode && botEnv.BRAIN_MODEL) {
+    botEnv.ANTHROPIC_SMALL_FAST_MODEL = botEnv.BRAIN_MODEL;
+    botEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = botEnv.BRAIN_MODEL;
+  }
+  if (isBaseUrlMode && !isOllama && botEnv.BRAIN_API_KEY) {
+    botEnv.OPENAI_API_KEY = botEnv.BRAIN_API_KEY;
+    botEnv.OPENAI_BASE_URL = botEnv.BRAIN_BASE_URL;
+    delete botEnv.CLAUDE_CODE_OAUTH_TOKEN;
+    delete botEnv.CLAUDECODE;
+    delete botEnv.CLAUDE_CODE_ENTRYPOINT;
+  }
+  if (isOllama) {
+    delete botEnv.OPENAI_API_KEY;
+    delete botEnv.OPENAI_BASE_URL;
+  }
+  if (botEnv.BRAIN_OAUTH_TOKEN) {
+    delete botEnv.OPENAI_API_KEY;
+    delete botEnv.OPENAI_BASE_URL;
+  }
+  if (!botEnv.CLAUDE_CODE_OAUTH_TOKEN) delete botEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  if (!botEnv.ANTHROPIC_API_KEY) delete botEnv.ANTHROPIC_API_KEY;
+  if (!botEnv.OPENAI_API_KEY) delete botEnv.OPENAI_API_KEY;
+  if (!botEnv.OPENAI_BASE_URL) delete botEnv.OPENAI_BASE_URL;
+  if (!botEnv.ANTHROPIC_BASE_URL) delete botEnv.ANTHROPIC_BASE_URL;
+  if (!botEnv.ANTHROPIC_SMALL_FAST_MODEL) {
+    delete botEnv.ANTHROPIC_SMALL_FAST_MODEL;
+    delete botEnv.ANTHROPIC_DEFAULT_SONNET_MODEL;
+  }
+  if (!isOllama && !botEnv.BRAIN_API_KEY) delete botEnv.ANTHROPIC_AUTH_TOKEN;
+  if (isBaseUrlMode) {
+    delete botEnv.CLAUDECODE;
+    delete botEnv.CLAUDE_CODE_ENTRYPOINT;
+  }
 
   // Build secrets without mutating process.env to avoid a race condition when
   // two BBs spawn concurrently. Start from the relay's base secrets, then

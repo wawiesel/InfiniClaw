@@ -167,25 +167,69 @@ export function collectBotMatrixUserIds(): Set<string> {
 export function applyBrainEnv(env: Record<string, string>): Record<string, string> {
   const out = { ...env };
 
-  // For Anthropic mode (no custom base URL): only override the main model.
-  // Let the SDK use its own defaults for small/fast and sonnet.
-  // For Ollama mode (custom base URL set): override all three model vars so the
-  // SDK doesn't fall back to Anthropic defaults.
-  const isOllama = Boolean(out.BRAIN_BASE_URL);
+  // Brain env is the source of truth for provider selection.
+  // - Claude/Anthropic: BRAIN_OAUTH_TOKEN and optional BRAIN_MODEL
+  // - OpenAI/Codex-compatible: BRAIN_BASE_URL + BRAIN_API_KEY + BRAIN_MODEL
+  // - Ollama-compatible: BRAIN_BASE_URL to Ollama and BRAIN_AUTH_TOKEN=ollama
+  const isBaseUrlMode = Boolean(out.BRAIN_BASE_URL);
+  const isOllama = out.BRAIN_AUTH_TOKEN === 'ollama';
   out.ANTHROPIC_MODEL = out.BRAIN_MODEL || '';
-  if (isOllama) {
+  if (isBaseUrlMode) {
     out.ANTHROPIC_SMALL_FAST_MODEL = out.BRAIN_MODEL || '';
     out.ANTHROPIC_DEFAULT_SONNET_MODEL = out.BRAIN_MODEL || '';
   }
   out.ANTHROPIC_BASE_URL = out.BRAIN_BASE_URL || '';
   out.ANTHROPIC_AUTH_TOKEN = out.BRAIN_AUTH_TOKEN || '';
   out.ANTHROPIC_API_KEY = out.BRAIN_API_KEY || '';
-  out.CLAUDE_CODE_OAUTH_TOKEN = out.BRAIN_OAUTH_TOKEN || '';
+  out.CLAUDE_CODE_OAUTH_TOKEN = isBaseUrlMode ? '' : (out.BRAIN_OAUTH_TOKEN || '');
   if (out.BRAIN_CA_CERT_FILE) out.NODE_EXTRA_CA_CERTS = out.BRAIN_CA_CERT_FILE;
 
-  // Local fallback: if no explicit profile OAuth token, pull from macOS keychain
+  if (isBaseUrlMode && !isOllama && out.BRAIN_API_KEY) {
+    out.OPENAI_API_KEY = out.BRAIN_API_KEY;
+    out.OPENAI_BASE_URL = out.BRAIN_BASE_URL || '';
+  }
+
+  if (isBaseUrlMode) {
+    delete out.CLAUDECODE;
+    delete out.CLAUDE_CODE_ENTRYPOINT;
+  }
+
+  if (!isOllama && !out.BRAIN_API_KEY) {
+    delete out.ANTHROPIC_AUTH_TOKEN;
+  }
+
+  if (isOllama) {
+    delete out.OPENAI_API_KEY;
+    delete out.OPENAI_BASE_URL;
+  }
+
+  if (out.BRAIN_OAUTH_TOKEN) {
+    delete out.OPENAI_API_KEY;
+    delete out.OPENAI_BASE_URL;
+  }
+
+  if (isBaseUrlMode && !out.BRAIN_API_KEY && !isOllama) {
+    delete out.ANTHROPIC_API_KEY;
+  }
+
   if (!out.CLAUDE_CODE_OAUTH_TOKEN) {
-    out.CLAUDE_CODE_OAUTH_TOKEN = resolveOAuthToken();
+    delete out.CLAUDE_CODE_OAUTH_TOKEN;
+  }
+  if (!out.ANTHROPIC_API_KEY) {
+    delete out.ANTHROPIC_API_KEY;
+  }
+  if (!out.ANTHROPIC_BASE_URL) {
+    delete out.ANTHROPIC_BASE_URL;
+  }
+  if (!out.OPENAI_API_KEY) {
+    delete out.OPENAI_API_KEY;
+  }
+  if (!out.OPENAI_BASE_URL) {
+    delete out.OPENAI_BASE_URL;
+  }
+  if (!out.ANTHROPIC_SMALL_FAST_MODEL) {
+    delete out.ANTHROPIC_SMALL_FAST_MODEL;
+    delete out.ANTHROPIC_DEFAULT_SONNET_MODEL;
   }
 
   return out;
@@ -195,7 +239,7 @@ export function applyBrainEnv(env: Record<string, string>): Record<string, strin
 const TOKEN_EXPIRY_WARN_DAYS = 7;
 const TOKEN_EXPIRY_CRIT_DAYS = 1;
 
-function resolveOAuthToken(): string {
+export function resolveOAuthToken(): string {
   try {
     const credJson = execSync(
       'security find-generic-password -s "Claude Code-credentials" -w',
@@ -627,7 +671,7 @@ if [ -f "\$CAPTAIN_FILE" ]; then
   export OPERATOR_USER_ID
 fi
 
-# Brain env → Anthropic/Claude SDK env (mirrors applyBrainEnv)
+# Brain env → runtime provider env (mirrors applyBrainEnv)
 export ANTHROPIC_MODEL="\${BRAIN_MODEL:-}"
 if [ -n "\${BRAIN_BASE_URL:-}" ]; then
   export ANTHROPIC_SMALL_FAST_MODEL="\${BRAIN_MODEL:-}"
@@ -637,8 +681,35 @@ export ANTHROPIC_BASE_URL="\${BRAIN_BASE_URL:-}"
 export ANTHROPIC_AUTH_TOKEN="\${BRAIN_AUTH_TOKEN:-}"
 export ANTHROPIC_API_KEY="\${BRAIN_API_KEY:-}"
 export CLAUDE_CODE_OAUTH_TOKEN="\${BRAIN_OAUTH_TOKEN:-}"
+export OPENAI_API_KEY="\${BRAIN_API_KEY:-}"
+export OPENAI_BASE_URL="\${BRAIN_BASE_URL:-}"
 if [ -n "\${BRAIN_CA_CERT_FILE:-}" ]; then
   export NODE_EXTRA_CA_CERTS="\${BRAIN_CA_CERT_FILE}"
+fi
+if [ -n "\${BRAIN_BASE_URL:-}" ]; then
+  unset CLAUDECODE
+  unset CLAUDE_CODE_ENTRYPOINT
+  unset CLAUDE_CODE_OAUTH_TOKEN
+fi
+if [ -z "\${OPENAI_API_KEY:-}" ]; then
+  unset OPENAI_API_KEY
+fi
+if [ -z "\${OPENAI_BASE_URL:-}" ]; then
+  unset OPENAI_BASE_URL
+fi
+if [ -z "\${ANTHROPIC_API_KEY:-}" ]; then
+  unset ANTHROPIC_API_KEY
+fi
+if [ -z "\${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+  unset ANTHROPIC_AUTH_TOKEN
+fi
+if [ -z "\${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  unset CLAUDE_CODE_OAUTH_TOKEN
+fi
+if [ -z "\${ANTHROPIC_BASE_URL:-}" ]; then
+  unset ANTHROPIC_BASE_URL
+  unset ANTHROPIC_SMALL_FAST_MODEL
+  unset ANTHROPIC_DEFAULT_SONNET_MODEL
 fi
 
 exec ${shellQuote(nodeBin)} ${shellQuote(path.join(instance, 'dist', 'main.js'))}
