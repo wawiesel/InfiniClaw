@@ -6,6 +6,7 @@ import {
   needsElementSlashRedirect,
   normalizeElementBase,
   rewriteElementLocation,
+  shouldForwardElementResponseHeader,
 } from '../dashboard-element.js';
 
 describe('dashboard element helpers', () => {
@@ -23,7 +24,7 @@ describe('dashboard element helpers', () => {
 
   it('builds a fleet-scoped config.json for the local homeserver', () => {
     const config = buildElementConfig('fleet.a-gis.org', 'https');
-    expect(config['default_server_name']).toBe('a-gis.org');
+    expect(config['default_server_name']).toBeUndefined();
     expect(config['permalink_prefix']).toBe('https://fleet.a-gis.org/ogic/matrix');
     expect((config['default_server_config'] as { 'm.homeserver': { base_url: string } })['m.homeserver'].base_url).toBe('https://matrix.a-gis.org');
   });
@@ -32,5 +33,11 @@ describe('dashboard element helpers', () => {
     expect(rewriteElementLocation('/bundles/app.js')).toBe('/ogic/matrix/bundles/app.js');
     expect(rewriteElementLocation('https://app.element.io/icons/warning.svg')).toBe('/ogic/matrix/icons/warning.svg');
     expect(rewriteElementLocation('https://example.com/elsewhere')).toBe('https://example.com/elsewhere');
+  });
+
+  it('strips stale content-encoding headers from proxied element responses', () => {
+    expect(shouldForwardElementResponseHeader('cache-control')).toBe(true);
+    expect(shouldForwardElementResponseHeader('content-encoding')).toBe(false);
+    expect(shouldForwardElementResponseHeader('Content-Length')).toBe(false);
   });
 });

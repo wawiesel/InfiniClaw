@@ -17,6 +17,7 @@ import {
   isElementRoute,
   needsElementSlashRedirect,
   rewriteElementLocation,
+  shouldForwardElementResponseHeader,
 } from './dashboard-element.js';
 import { getSystemStatus } from './status.js';
 import { resolveRoot } from './service.js';
@@ -165,6 +166,7 @@ async function serveElement(req: http.IncomingMessage, res: http.ServerResponse,
     if (!value || hopByHopHeaders.has(key.toLowerCase())) continue;
     headers.set(key, Array.isArray(value) ? value.join(', ') : value);
   }
+  headers.set('accept-encoding', 'identity');
   headers.set('host', upstreamUrl.host);
   headers.set('user-agent', 'Mozilla/5.0 (compatible; InfiniClaw Element proxy)');
 
@@ -175,7 +177,7 @@ async function serveElement(req: http.IncomingMessage, res: http.ServerResponse,
   });
   const responseHeaders: Record<string, string> = {};
   upstream.headers.forEach((value, key) => {
-    if (hopByHopHeaders.has(key.toLowerCase())) return;
+    if (hopByHopHeaders.has(key.toLowerCase()) || !shouldForwardElementResponseHeader(key)) return;
     responseHeaders[key] = key.toLowerCase() === 'location'
       ? rewriteElementLocation(value, ELEMENT_BASE, ELEMENT_UPSTREAM)
       : value;

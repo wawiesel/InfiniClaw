@@ -1,5 +1,9 @@
 export const DEFAULT_ELEMENT_BASE = '/ogic/matrix';
 export const DEFAULT_ELEMENT_UPSTREAM = 'https://app.element.io';
+const ELEMENT_PROXY_STRIPPED_RESPONSE_HEADERS = new Set([
+  'content-encoding',
+  'content-length',
+]);
 
 export function normalizeElementBase(base: string): string {
   const withSlash = base.startsWith('/') ? base : `/${base}`;
@@ -32,10 +36,8 @@ export function getElementUpstreamPath(pathname: string, base = getElementBase()
 }
 
 export function buildElementConfig(host?: string, proto = 'https', base = getElementBase()): Record<string, unknown> {
-  const serverName = process.env['ELEMENT_WEB_SERVER_NAME'] || 'a-gis.org';
   const homeserverBaseUrl = process.env['ELEMENT_WEB_HOMESERVER'] || 'https://matrix.a-gis.org';
   const config: Record<string, unknown> = {
-    default_server_name: serverName,
     default_server_config: {
       'm.homeserver': {
         base_url: homeserverBaseUrl,
@@ -61,4 +63,8 @@ export function rewriteElementLocation(location: string, base = getElementBase()
     return location;
   }
   return location;
+}
+
+export function shouldForwardElementResponseHeader(key: string): boolean {
+  return !ELEMENT_PROXY_STRIPPED_RESPONSE_HEADERS.has(key.toLowerCase());
 }
