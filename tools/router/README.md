@@ -65,3 +65,20 @@ Configure a bot to use it (secrets repo):
 BRAIN_BASE_URL=http://host.containers.internal:43177
 ```
 This sets `ANTHROPIC_BASE_URL` inside the bot container and branch brains via existing env mapping.
+
+The router also understands per-request Codex options encoded in the requested
+model string. Use `+fast` for the Codex fast tier and `+low|medium|high|xhigh`
+for reasoning effort. Example:
+
+```bash
+BRAIN_MODEL=gpt-5.4+fast+xhigh
+```
+
+This resolves upstream to:
+- `model: "gpt-5.4"`
+- `service_tier: "priority"`
+- `reasoning: { effort: "xhigh" }`
+- `text: { verbosity: "low" }`
+
+`+fast` is a Codex-side alias, not a raw upstream `service_tier` value. The
+router translates it into the supported Responses API fields above.

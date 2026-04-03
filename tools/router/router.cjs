@@ -35,6 +35,14 @@ const OPENAI_RESPONSES_URL = `${OPENAI_BASE_URL.replace(/\/$/, "")}/responses`;
 const OPENAI_ORIGIN = process.env.OPENAI_ORIGIN || "https://chatgpt.com";
 const OPENAI_REFERER = process.env.OPENAI_REFERER || "https://chatgpt.com/codex";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.4";
+const DEFAULT_SERVICE_PROFILE = resolveServiceProfile(process.env.OPENAI_SERVICE_TIER);
+const OPENAI_REASONING_EFFORT = normalizeReasoningEffort(
+  process.env.OPENAI_REASONING_EFFORT,
+);
+const OPENAI_SERVICE_TIER = DEFAULT_SERVICE_PROFILE.serviceTier;
+const OPENAI_TEXT_VERBOSITY =
+  normalizeTextVerbosity(process.env.OPENAI_TEXT_VERBOSITY) ||
+  DEFAULT_SERVICE_PROFILE.textVerbosity;
 const OPENAI_INSTRUCTIONS =
   process.env.OPENAI_INSTRUCTIONS ||
   "You are a coding assistant running behind an Anthropic-compatible router.";
@@ -62,6 +70,55 @@ function readBoolEnv(name, defaultValue) {
   const value = process.env[name];
   if (value == null || value === "") return defaultValue;
   return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+}
+
+function normalizeReasoningEffort(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (["none", "low", "medium", "high", "xhigh"].includes(normalized)) {
+    return normalized;
+  }
+  return null;
+}
+
+function normalizeServiceTier(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (["auto", "default", "flex", "priority"].includes(normalized)) {
+    return normalized;
+  }
+  return null;
+}
+
+function normalizeTextVerbosity(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (["low", "medium", "high"].includes(normalized)) {
+    return normalized;
+  }
+  return null;
+}
+
+function resolveServiceProfile(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return {
+      serviceTier: null,
+      textVerbosity: null,
+    };
+  }
+
+  if (normalized === "fast") {
+    return {
+      serviceTier: "priority",
+      textVerbosity: "low",
+    };
+  }
+
+  return {
+    serviceTier: normalizeServiceTier(normalized),
+    textVerbosity: null,
+  };
 }
 
 function nowMs() {
@@ -318,9 +375,118 @@ function chooseModel(requestedModel) {
   return OPENAI_MODEL;
 }
 
-function buildUpstreamPayload(body) {
+function parseRequestedModelSpec(requestedModel) {
+  const raw = typeof requestedModel === "string" ? requestedModel.trim() : "";
+  if (!raw) {
+    return {
+      raw: "",
+      baseModel: null,
+      reasoningEffort: null,
+      serviceTier: null,
+      textVerbosity: null,
+      hasInlineOptions: false,
+    };
+  }
+
+  const parts = raw
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    return {
+      raw,
+      baseModel: null,
+      reasoningEffort: null,
+      serviceTier: null,
+      textVerbosity: null,
+      hasInlineOptions: false,
+    };
+  }
+
+  const baseModel = parts[0];
+  let reasoningEffort = null;
+  let serviceTier = null;
+  let textVerbosity = null;
+
+  for (const rawToken of parts.slice(1)) {
+    const token = rawToken.toLowerCase();
+
+    const effortValue = (() => {
+      if (normalizeReasoningEffort(token)) return token;
+      for (const prefix of ["effort:", "reasoning:", "reasoning_effort:", "reasoning-effort:"]) {
+        if (token.startsWith(prefix)) {
+          return token.slice(prefix.length);
+        }
+      }
+      return null;
+    })();
+    const normalizedEffort = normalizeReasoningEffort(effortValue);
+    if (normalizedEffort) {
+      reasoningEffort = normalizedEffort;
+      continue;
+    }
+
+    const serviceProfile = (() => {
+      if (token === "fast") {
+        return resolveServiceProfile(token);
+      }
+      const directTier = normalizeServiceTier(token);
+      if (directTier) {
+        return resolveServiceProfile(directTier);
+      }
+      return null;
+    })();
+    if (serviceProfile) {
+      if (serviceProfile.serviceTier) serviceTier = serviceProfile.serviceTier;
+      if (serviceProfile.textVerbosity) textVerbosity = serviceProfile.textVerbosity;
+      continue;
+    }
+
+    for (const prefix of ["tier:", "service:", "service_tier:", "service-tier:"]) {
+      if (token.startsWith(prefix)) {
+        const prefixedProfile = resolveServiceProfile(token.slice(prefix.length));
+        if (prefixedProfile.serviceTier) serviceTier = prefixedProfile.serviceTier;
+        if (prefixedProfile.textVerbosity) textVerbosity = prefixedProfile.textVerbosity;
+      }
+    }
+
+    for (const prefix of ["verbosity:", "text:", "text_verbosity:", "text-verbosity:"]) {
+      if (token.startsWith(prefix)) {
+        const normalizedVerbosity = normalizeTextVerbosity(token.slice(prefix.length));
+        if (normalizedVerbosity) textVerbosity = normalizedVerbosity;
+      }
+    }
+  }
+
   return {
-    model: chooseModel(body.model),
+    raw,
+    baseModel: baseModel || null,
+    reasoningEffort,
+    serviceTier,
+    textVerbosity,
+    hasInlineOptions: parts.length > 1,
+  };
+}
+
+function resolveRequestOptions(requestedModel) {
+  const parsed = parseRequestedModelSpec(requestedModel);
+  const model =
+    parsed.baseModel && (RESPECT_REQUEST_MODEL || parsed.hasInlineOptions)
+      ? parsed.baseModel
+      : chooseModel(parsed.baseModel || requestedModel);
+  return {
+    model,
+    reasoningEffort: parsed.reasoningEffort || OPENAI_REASONING_EFFORT,
+    serviceTier: parsed.serviceTier || OPENAI_SERVICE_TIER,
+    textVerbosity: parsed.textVerbosity || OPENAI_TEXT_VERBOSITY,
+  };
+}
+
+function buildUpstreamPayload(body) {
+  const resolved = resolveRequestOptions(body.model);
+  const payload = {
+    model: resolved.model,
     instructions: extractInstructions(body.system),
     input: anthropicMessagesToOpenAIInput(body.messages),
     tools: anthropicToolsToOpenAITools(body.tools),
@@ -329,6 +495,16 @@ function buildUpstreamPayload(body) {
     store: false,
     stream: true,
   };
+  if (resolved.reasoningEffort) {
+    payload.reasoning = { effort: resolved.reasoningEffort };
+  }
+  if (resolved.serviceTier) {
+    payload.service_tier = resolved.serviceTier;
+  }
+  if (resolved.textVerbosity) {
+    payload.text = { verbosity: resolved.textVerbosity };
+  }
+  return payload;
 }
 
 function decodeJwtPayload(token) {
@@ -989,6 +1165,10 @@ function handleRoot(res) {
     upstream: OPENAI_RESPONSES_URL,
     auth_source: DIRECT_ACCESS_TOKEN ? "env" : AUTH_JSON_PATH,
     model: OPENAI_MODEL,
+    default_reasoning_effort: OPENAI_REASONING_EFFORT,
+    default_service_tier: OPENAI_SERVICE_TIER,
+    default_text_verbosity: OPENAI_TEXT_VERBOSITY,
+    respect_request_model: RESPECT_REQUEST_MODEL,
   });
 }
 
@@ -1042,4 +1222,8 @@ server.listen(PORT, HOST, () => {
   console.log(`upstream: ${OPENAI_RESPONSES_URL}`);
   console.log(`auth: ${DIRECT_ACCESS_TOKEN ? "env token" : AUTH_JSON_PATH}`);
   console.log(`model: ${OPENAI_MODEL}`);
+  console.log(`default reasoning effort: ${OPENAI_REASONING_EFFORT || "none"}`);
+  console.log(`default service tier: ${OPENAI_SERVICE_TIER || "default"}`);
+  console.log(`default text verbosity: ${OPENAI_TEXT_VERBOSITY || "default"}`);
+  console.log(`respect request model: ${RESPECT_REQUEST_MODEL}`);
 });
