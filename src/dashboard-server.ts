@@ -9,6 +9,15 @@ import fs from 'fs';
 import http from 'http';
 import path from 'path';
 
+import {
+  buildElementConfig,
+  getElementBase,
+  getElementUpstream,
+  getElementUpstreamPath,
+  isElementRoute,
+  needsElementSlashRedirect,
+  rewriteElementLocation,
+} from './dashboard-element.js';
 import { getSystemStatus } from './status.js';
 import { resolveRoot } from './service.js';
 import { loadKpiConfig, computeBotKpi, kpiBadge } from './kpi.js';
@@ -25,6 +34,8 @@ const PLOT_GRANULARITY_S = parseInt(process.env['FLEET_DASHBOARD_GRANULARITY_S']
 const BACKUP_INTERVAL_MS = parseInt(process.env['FLEET_DASHBOARD_BACKUP_INTERVAL_MS'] || String(24 * 3600_000), 10); // daily
 const BACKUP_RETAIN = parseInt(process.env['FLEET_DASHBOARD_BACKUP_RETAIN'] || '30', 10);
 const BASE = '/infiniclaw/fleet/ic01';
+const ELEMENT_BASE = getElementBase();
+const ELEMENT_UPSTREAM = getElementUpstream();
 
 // ── Token livestream (SSE) ──────────────────────────────────────────
 const sseClients = new Set<http.ServerResponse>();
@@ -105,6 +116,76 @@ function relTime(iso: string | undefined): string {
   if (ms < 60000) return `${Math.floor(ms / 1000)}s ago`;
   if (ms < 3600000) return `${Math.floor(ms / 60000)}m ago`;
   return `${Math.floor(ms / 3600000)}h ago`;
+}
+
+async function serveElement(req: http.IncomingMessage, res: http.ServerResponse, requestUrl: URL): Promise<void> {
+  const pathname = requestUrl.pathname;
+
+  if (needsElementSlashRedirect(pathname, ELEMENT_BASE)) {
+    res.writeHead(302, { Location: `${ELEMENT_BASE}/${requestUrl.search}` });
+    res.end();
+    return;
+  }
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD' });
+    res.end('method not allowed');
+    return;
+  }
+
+  if (pathname === `${ELEMENT_BASE}/config.json`) {
+    const host = req.headers.host || undefined;
+    const proto = (req.headers['x-forwarded-proto'] as string | undefined) || 'https';
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-cache',
+    });
+    res.end(JSON.stringify(buildElementConfig(host, proto, ELEMENT_BASE), null, 2));
+    return;
+  }
+
+  const upstreamPath = getElementUpstreamPath(pathname, ELEMENT_BASE);
+  const upstreamUrl = new URL(`${upstreamPath}${requestUrl.search}`, `${ELEMENT_UPSTREAM}/`);
+  const headers = new Headers();
+  const hopByHopHeaders = new Set([
+    'accept-encoding',
+    'connection',
+    'content-length',
+    'host',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+  ]);
+
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (!value || hopByHopHeaders.has(key.toLowerCase())) continue;
+    headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+  }
+  headers.set('host', upstreamUrl.host);
+  headers.set('user-agent', 'Mozilla/5.0 (compatible; InfiniClaw Element proxy)');
+
+  const upstream = await fetch(upstreamUrl, {
+    method: req.method,
+    headers,
+    redirect: 'manual',
+  });
+  const responseHeaders: Record<string, string> = {};
+  upstream.headers.forEach((value, key) => {
+    if (hopByHopHeaders.has(key.toLowerCase())) return;
+    responseHeaders[key] = key.toLowerCase() === 'location'
+      ? rewriteElementLocation(value, ELEMENT_BASE, ELEMENT_UPSTREAM)
+      : value;
+  });
+  res.writeHead(upstream.status, responseHeaders);
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+  res.end(Buffer.from(await upstream.arrayBuffer()));
 }
 
 // ── Pages ──────────────────────────────────────────────────────────
@@ -507,7 +588,19 @@ document.getElementById('tradeList').innerHTML = [...trades].reverse().map(t => 
 // ── Request handler ────────────────────────────────────────────────
 
 const server = http.createServer((req, res) => {
-  const url = req.url?.split('?')[0] || '';
+  const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
+  const url = requestUrl.pathname;
+
+  if (isElementRoute(url, ELEMENT_BASE)) {
+    void serveElement(req, res, requestUrl).catch((err) => {
+      console.error(`element proxy failed: ${err}`);
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+      }
+      res.end('element proxy failed');
+    });
+    return;
+  }
 
   if (url === BASE || url === BASE + '/') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -964,4 +1057,5 @@ server.listen(PORT, () => {
   console.log(`  ${BASE}`);
   console.log(`  ${BASE}/bazaar`);
   console.log(`  ${BASE}/tokens`);
+  console.log(`  ${ELEMENT_BASE}/`);
 });
