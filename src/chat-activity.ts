@@ -3,7 +3,7 @@
  * Tracks objectives, progress, completions, errors per group.
  * Persists state to the router_state DB table.
  */
-import { TRIGGER_PATTERN } from 'nanoclaw/config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from 'nanoclaw/config.js';
 import { getRouterState, setRouterState } from 'nanoclaw/db.js';
 import type { NewMessage } from 'nanoclaw/types.js';
 
@@ -97,10 +97,20 @@ function recordUserContext(activity: ChatActivity, text: string): void {
   activity.recentUserContext = [...existing.filter((v) => v !== compact), compact].slice(-6);
 }
 
+function isObjectiveCandidate(message: NewMessage | undefined): boolean {
+  if (!message) return false;
+  if (message.sender === 'system') return false;
+  if (message.sender_name?.toLowerCase() === 'relay') return false;
+  if (message.is_bot_message) return false;
+  if (message.sender === ASSISTANT_NAME || message.sender_name === ASSISTANT_NAME) return false;
+  return typeof message.content === 'string' && message.content.trim().length > 0;
+}
+
 export function setObjectiveFromMessages(chatJid: string, messages: NewMessage[]): void {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const rawContent = messages[i]?.content;
-    if (typeof rawContent !== 'string') continue;
+    const message = messages[i];
+    if (!isObjectiveCandidate(message)) continue;
+    const rawContent = message.content;
     const content = rawContent.trim();
     if (!content) continue;
     const compactObj = compactMessage(content, 180);
@@ -158,6 +168,9 @@ export function buildMainMissionContext(chatJid: string): string | undefined {
 
   if (activity.currentObjective) {
     lines.push(`Current objective: ${activity.currentObjective}`);
+  }
+  if (activity.lastProgress) {
+    lines.push(`Last progress: ${activity.lastProgress}`);
   }
   if (activity.recentUserContext && activity.recentUserContext.length > 0) {
     lines.push('Recent user context:');

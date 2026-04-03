@@ -106,7 +106,7 @@ Where InfiniClaw needs functionality that upstream doesn't provide:
 - **`!todo`**: Reads most-recently-modified `.claude/todos/*.json` from `_runtime/instances/{bot}/data/sessions/main/` to show actual todo items (since `ca16ce9`).
 - **Heartbeat nudge**: `heartbeatLoop()` nudges idle onduty bots to check Gitea issues for autonomous work every 15 minutes (default). Message includes `{{m Name}}` markers so it matches the callout trigger pattern. See [04-ship](../docs/design/04-ship.md).
 - **Auto-sleep**: Bots idle longer than `AUTO_SLEEP_IDLE_MS` (default 30 min; 0 = disabled) are automatically slept by the heartbeat loop instead of nudged. Uses heartbeat file mtime to measure inactivity.
-- **Resume context size**: `injectResumeMessage()` uses last 5 messages (reduced from 10 — fixes #21 restart-loop on large resume context).
+- **Resume context size**: `injectResumeMessage()` uses the last 12 messages and the persisted mission context so restart recovery carries forward both recent history and the latest objective/progress state.
 - **`operator-commands.ts` removed**: X-commands (`!allow`, `!deny`, `!todo`, `!roster`, etc.) were folded into `relay.ts`. `command-registry.ts` is now the single source of truth for all x-command names.
 - **`command-registry.ts` security hardening**: `dispatch()` rejects cmd strings longer than 512 chars (DoS guard); `registerHandler()` sanitizes the `name` parameter in error messages (log injection); `dispatch()` emits a console.warn when a matched command has no registered handler (silent no-op guard).
 - **`machine-config.ts` removed**: Split into `infini-config.ts` (env-based config) and `ship-config.ts` (fleet.json loader).

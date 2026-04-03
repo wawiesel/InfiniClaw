@@ -22,7 +22,7 @@ const os = require("os");
 const path = require("path");
 const { randomUUID } = require("crypto");
 
-const HOST = process.env.ROUTER_HOST || "127.0.0.1";
+const HOST = process.env.ROUTER_HOST || "0.0.0.0";
 const PORT = Number(process.env.ROUTER_PORT || process.env.PORT || 43177);
 
 const AUTH_JSON_PATH =

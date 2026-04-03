@@ -4,8 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 ROUTER_PORT="${ROUTER_PORT:-${PORT:-43177}}"
-ROUTER_HOST="${ROUTER_HOST:-127.0.0.1}"
-BASE_URL="http://${ROUTER_HOST}:${ROUTER_PORT}"
+ROUTER_BIND_HOST="${ROUTER_BIND_HOST:-${ROUTER_HOST:-0.0.0.0}}"
+ROUTER_CONNECT_HOST="${ROUTER_CONNECT_HOST:-127.0.0.1}"
+BASE_URL="http://${ROUTER_CONNECT_HOST}:${ROUTER_PORT}"
 STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/2026-router"
 PID_FILE="${STATE_DIR}/router.pid"
 LOG_FILE="${STATE_DIR}/router.log"
@@ -67,7 +68,7 @@ kill_listeners() {
     return 0
   fi
 
-  echo "killing existing listener(s) on ${ROUTER_HOST}:${ROUTER_PORT}: $pids"
+  echo "killing existing listener(s) on port ${ROUTER_PORT}: $pids"
   kill $pids >/dev/null 2>&1 || true
   sleep 0.5
 
@@ -98,13 +99,31 @@ start_router() {
   kill_listeners
   : >"$LOG_FILE"
 
-  env ROUTER_HOST="$ROUTER_HOST" ROUTER_PORT="$ROUTER_PORT" node router.cjs >>"$LOG_FILE" 2>&1 &
-  pid="$!"
-  printf '%s\n' "$pid" >"$PID_FILE"
+  node - "$LOG_FILE" "$PID_FILE" "$ROUTER_BIND_HOST" "$ROUTER_PORT" <<'NODE'
+const fs = require("fs");
+const { spawn } = require("child_process");
+
+const [logFile, pidFile, host, port] = process.argv.slice(2);
+const outFd = fs.openSync(logFile, "a");
+const child = spawn(process.execPath, ["router.cjs"], {
+  cwd: process.cwd(),
+  env: {
+    ...process.env,
+    ROUTER_HOST: host,
+    ROUTER_PORT: port,
+  },
+  detached: true,
+  stdio: ["ignore", outFd, outFd],
+});
+
+fs.writeFileSync(pidFile, `${child.pid}\n`);
+child.unref();
+NODE
+  pid="$(read_pid_file)"
 
   for _ in $(seq 1 40); do
     if healthcheck; then
-      echo "router running at ${BASE_URL}"
+      echo "router running at ${BASE_URL} (bind ${ROUTER_BIND_HOST})"
       echo "pid: ${pid}"
       echo "log: ${LOG_FILE}"
       return 0
@@ -145,7 +164,7 @@ status_router() {
     return 0
   fi
 
-  echo "router not running at ${BASE_URL}" >&2
+  echo "router not running at ${BASE_URL} (bind ${ROUTER_BIND_HOST})" >&2
   return 1
 }
 

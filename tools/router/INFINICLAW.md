@@ -2,7 +2,7 @@
 
 Copied from https://gitea.a-gis.org/wawiesel/ClaudeCodeRouterLite (main) on 2026-03-25.
 
-Purpose: Anthropic-compatible router that fronts the ChatGPT/Codex subscription backend. InfiniClaw bots can opt in by setting `BRAIN_BASE_URL=http://127.0.0.1:43177` in their secrets env.
+Purpose: Anthropic-compatible router that fronts the ChatGPT/Codex subscription backend. InfiniClaw bots can opt in by setting `BRAIN_BASE_URL=http://host.containers.internal:43177` in their secrets env.
 
 Files here:
 - `router.js` — HTTP server shim (Anthropic Messages → Codex backend)
@@ -12,7 +12,7 @@ Files here:
 
 Run manually on host:
 ```bash
-npm run router:start      # start on 127.0.0.1:43177
+npm run router:start      # bind 0.0.0.0:43177, probe via 127.0.0.1:43177
 npm run router:status
 npm run router:logs
 npm run router:stop
@@ -20,7 +20,7 @@ npm run router:stop
 
 Configure a bot to use it (secrets repo):
 ```
-BRAIN_BASE_URL=http://127.0.0.1:43177
+BRAIN_BASE_URL=http://host.containers.internal:43177
 ```
 Relay/containers will pass this through as `ANTHROPIC_BASE_URL` to the bot process and branch brains.
 
@@ -28,7 +28,7 @@ Container note: Claude CLI still expects a non-empty Anthropic auth variable eve
 
 Auth: expects Codex auth in `~/.codex/auth.json` or `OPENAI_ACCESS_TOKEN`. The router itself does not store secrets in repo; it reads from host paths/env.
 
-Port/host overrides: set `ROUTER_PORT` / `ROUTER_HOST` before running `router-ctl.sh` or the npm scripts.
+Port/host overrides: set `ROUTER_PORT`, `ROUTER_BIND_HOST`, or `ROUTER_CONNECT_HOST` before running `router-ctl.sh` or the npm scripts.
 
 Health: `curl http://127.0.0.1:43177/health` returns `{ ok: true }` when running.
 

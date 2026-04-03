@@ -123,6 +123,7 @@ import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
 import { capitalizeName, unifiedBotDisplay } from './formatting.js';
 import { loadFleet, loadFleetFromDisk, findShipByHostname, ROLE_ROOMS } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
+import { buildResumeSystemMessage } from './resume-message.js';
 import { truncateJsonl } from './session-utils.js';
 
 // ── Display name helper ────────────────────────────────────────────────
@@ -1641,18 +1642,9 @@ async function injectResumeMessage(): Promise<void> {
       taskBlock = `\n\nActive tasks:\n${taskLines.join('\n')}`;
     }
 
-    const recent = getRecentMessages(chatJid, ASSISTANT_NAME, 5).reverse();
-    let contextBlock = '';
-    if (recent.length > 0) {
-      // Strip trigger mentions from context so the resume message doesn't
-      // falsely match the trigger pattern and start the container.
-      const lines = recent.map((m) => {
-        const sanitized = m.content.slice(0, 300).replace(TRIGGER_PATTERN, '[callout]');
-        return `[${m.sender_name}]: ${sanitized}`;
-      });
-      contextBlock = `\n\nHere are the last ${recent.length} messages before restart:\n${lines.join('\n')}`;
-    }
+    const missionContext = buildMainMissionContext(chatJid);
 
+    const recent = getRecentMessages(chatJid, ASSISTANT_NAME, 12).reverse();
     // Inject pending Branch Brain results (#123): relay writes bb-pending-*.md on BB completion.
     // Read, include in context, then rename to bb-delivered-* to prevent re-injection.
     let bbBlock = '';
@@ -1666,14 +1658,18 @@ async function injectResumeMessage(): Promise<void> {
         } catch { /* skip unreadable files */ }
       }
     } catch { /* DATA_DIR may not exist on first boot */ }
-    if (bbBlock) contextBlock += `\n\nPending Branch Brain results:${bbBlock}`;
 
     storeMessage({
       id: `resume-${Date.now()}-${group.folder}`,
       chat_jid: chatJid,
       sender: 'system',
       sender_name: 'System',
-      content: `You were restarted. Review the conversation and your active tasks below, then resume any in-progress work. If nothing was in progress, say so briefly and wait.${taskBlock}${contextBlock}`,
+      content: buildResumeSystemMessage({
+        taskBlock,
+        missionContext,
+        recentMessages: recent,
+        pendingBranchBrainResults: bbBlock,
+      }),
       timestamp: new Date().toISOString(),
     });
     queue.enqueueMessageCheck(chatJid);
