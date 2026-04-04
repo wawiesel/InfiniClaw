@@ -35,11 +35,41 @@ const RSYNC_EXCLUDES = [
 ];
 
 const ROLE_PATTERN = /^[A-Za-z0-9._-]*$/;
-
 function assertValidBotName(bot: string): void {
   if (!isValidBotName(bot)) {
     throw new Error(`Invalid bot name: ${bot}`);
   }
+}
+
+export function nestedNpmEnv(cwd: string, baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...baseEnv, INIT_CWD: cwd };
+  for (const key of Object.keys(env)) {
+    if (key === 'INIT_CWD') continue;
+    if (/^npm_/i.test(key)) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
+export function resolveNestedNpmInvocation(baseEnv: NodeJS.ProcessEnv = process.env): { command: string; args: string[] } {
+  const npmCli = baseEnv['npm_execpath']?.trim();
+  if (npmCli) {
+    const npmNode = baseEnv['npm_node_execpath']?.trim() || process.execPath;
+    return { command: npmNode, args: [npmCli] };
+  }
+  return { command: 'npm', args: [] };
+}
+
+function runNestedNpm(cwd: string, args: string[], timeout: number): void {
+  const env = nestedNpmEnv(cwd);
+  const invocation = resolveNestedNpmInvocation(process.env);
+  execFileSync(invocation.command, [...invocation.args, ...args], {
+    cwd,
+    stdio: 'inherit',
+    timeout,
+    env,
+  });
 }
 
 // ── Path helpers ───────────────────────────────────────────────────────
@@ -396,15 +426,15 @@ export async function deployBot(root: string, bot: string): Promise<void> {
   const lockDst = path.join(instance, 'node_modules', '.package-lock.json');
   if (!fs.existsSync(path.join(instance, 'node_modules')) || !filesEqual(lockSrc, lockDst)) {
     console.log(`${bot}: installing dependencies...`);
-    execSync('npm ci', { cwd: instance, stdio: 'inherit', timeout: 600_000 });
+    runNestedNpm(instance, ['ci'], 600_000);
     // Rebuild native modules for the running Node version — npm ci downloads
     // prebuilt binaries that may target a different Node ABI (e.g. Node 22 vs 24).
-    execSync('npm rebuild better-sqlite3', { cwd: instance, stdio: 'inherit', timeout: 120_000 });
+    runNestedNpm(instance, ['rebuild', 'better-sqlite3'], 120_000);
   }
 
   // Build TypeScript
   console.log(`${bot}: building...`);
-  execSync('npm run build', { cwd: instance, stdio: 'inherit', timeout: 120_000 });
+  runNestedNpm(instance, ['run', 'build'], 120_000);
   // Write sentinel AFTER build — npm install --ignore-scripts in the build script overwrites
   // node_modules/.package-lock.json, so writing it before the build causes npm ci to re-run
   // on every restart (#83).
