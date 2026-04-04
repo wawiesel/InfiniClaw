@@ -121,6 +121,7 @@ import { startIpcWatcher } from './ipc-watcher.js';
 import { readBrainMode } from './ipc-commands.js';
 import { getActiveBots, loadProfileEnv, resolveRoot } from './service.js';
 import { capitalizeName, unifiedBotDisplay } from './formatting.js';
+import { botShouldWriteStartupDisplayName } from './display-name-policy.js';
 import { loadFleet, loadFleetFromDisk, findShipByHostname, ROLE_ROOMS } from './ship-config.js';
 import { buildTodoMessage, readTodoItems } from './todo.js';
 import { buildResumeSystemMessage } from './resume-message.js';
@@ -1341,7 +1342,16 @@ async function runAgent(
   const sessionId = sessions[group.folder];
 
   writeAgentSnapshots(group.folder, isMain, registeredGroups, getAvailableGroups);
-  const wrappedOnOutput = wrapOnOutputForSession(sessions, group.folder, onOutput);
+  const wrappedOnOutput = wrapOnOutputForSession(
+    sessions,
+    group.folder,
+    async (output) => {
+      if (isMain && output.isSessionError) {
+        try { fs.unlinkSync(path.join(DATA_DIR, 'current-session-id')); } catch { /* best-effort */ }
+      }
+      await onOutput?.(output);
+    },
+  );
 
   // Main-brain turn timeout: kill the process if it runs too long without dispatching.
   let turnKillTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1885,7 +1895,7 @@ async function main(): Promise<void> {
     (MATRIX_ACCESS_TOKEN || (MATRIX_USERNAME && MATRIX_PASSWORD))
   ) {
     matrix = new MatrixChannel({
-      displayName: botDisplayName('🔄', 'building'),
+      displayName: botShouldWriteStartupDisplayName() ? botDisplayName('🔄', 'building') : undefined,
       onMessage: (_chatJid, msg) => {
         const safeMsg = normalizeInboundMessage(msg);
         if (!safeMsg) {
@@ -1917,7 +1927,9 @@ async function main(): Promise<void> {
   if (matrix) {
     try {
       await matrix.connect();
-      matrixRef?.setDisplayName(botDisplayName('🚀', 'starting')).catch(() => {});
+      if (botShouldWriteStartupDisplayName()) {
+        matrixRef?.setDisplayName(botDisplayName('🚀', 'starting')).catch(() => {});
+      }
     } catch (err) {
       logger.error({ err }, 'Initial Matrix connection failed; continuing in degraded mode');
     }
@@ -2309,11 +2321,15 @@ async function main(): Promise<void> {
     enqueueCheck: (chatJid) => queue.enqueueMessageCheck(chatJid),
   });
   // Start message loop (blocks on resumeGate until resume finishes)
-  matrixRef?.setDisplayName(botDisplayName('🟡', 'waiting')).catch(() => {});
+  if (botShouldWriteStartupDisplayName()) {
+    matrixRef?.setDisplayName(botDisplayName('🟡', 'waiting')).catch(() => {});
+  }
   startMessageLoop();
   // Resume flow: inject messages, run resume container, wait delay, then open gate
   await injectResumeMessage();
-  matrixRef?.setDisplayName(botDisplayName(initialBadge)).catch(() => {});
+  if (botShouldWriteStartupDisplayName()) {
+    matrixRef?.setDisplayName(botDisplayName(initialBadge)).catch(() => {});
+  }
 
   // Periodic memory-save reminder (only when bot is actively working, not idle)
   const MEMORY_SAVE_INTERVAL_MS = 10 * 60 * 1000;

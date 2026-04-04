@@ -4,6 +4,7 @@
  * These extract shared logic so InfiniClaw can extend them.
  */
 import {
+  deleteSession,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
@@ -126,6 +127,10 @@ export function wrapOnOutputForSession(
 ): ((output: ContainerOutput) => Promise<void>) | undefined {
   if (!onOutput) return undefined;
   return async (output: ContainerOutput) => {
+    if (output.isSessionError) {
+      delete sessions[groupFolder];
+      deleteSession(groupFolder);
+    }
     if (output.newSessionId) {
       sessions[groupFolder] = output.newSessionId;
       setSession(groupFolder, output.newSessionId);

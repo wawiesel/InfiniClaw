@@ -1,6 +1,6 @@
 {
   "name": "infiniclaw",
-  "version": "1.16.8",
+  "version": "1.16.9",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -23,7 +23,8 @@
     "@aws-sdk/s3-request-presigner": "^3.1004.0",
     "better-sqlite3": "^12.8.0",
     "marked": "^17.0.3",
-    "matrix-bot-sdk": "^0.8.0"
+    "matrix-bot-sdk": "^0.8.0",
+    "playwright-core": "^1.56.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

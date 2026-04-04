@@ -24,6 +24,7 @@ import { fileURLToPath } from 'url';
 
 import { formatToolCallWithOutput, GENERAL_PROGRESS_DEDUPE_MS } from './progress.js';
 import { getRequestedMainModel } from './model-selection.js';
+import { shouldRetryWithoutResume } from './resume-recovery.js';
 
 const ALLOWED_SLASH_COMMANDS = new Set(['/compact', '/clear', '/status']);
 
@@ -783,9 +784,17 @@ async function main(): Promise<void> {
         containerInput.disallowedTools, containerInput.forkSession, env, emitProgress,
       );
 
-      // If claude failed with a session ID (stale session), retry without resume
-      if (runResult.exitCode !== 0 && !runResult.result && !runResult.interrupted && sessionId) {
-        log('Claude failed with session ID, retrying without --resume (stale session)');
+      // If Claude fails while resuming an existing session, the persisted session
+      // can be poisoned even when Claude still prints a result string. Clear it
+      // and retry once without --resume so the bot recovers automatically.
+      if (shouldRetryWithoutResume({
+        hadSession: Boolean(sessionId),
+        exitCode: runResult.exitCode,
+        interrupted: runResult.interrupted,
+        closedDuringRun: runResult.closedDuringRun,
+        result: runResult.result,
+      })) {
+        log('Claude failed while resuming, retrying without --resume (stale/poisoned session)');
         sessionId = undefined;
         writeOutput({ status: 'success', result: null, newSessionId: undefined, isSessionError: true });
         runResult = await runClaude(

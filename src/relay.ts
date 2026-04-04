@@ -93,6 +93,7 @@ import {
   readRoomStateStamp,
   startNextRelay,
 } from './service.js';
+import { relayShouldWriteWakeDisplayName } from './display-name-policy.js';
 import { getLatestSemverTag, getStampedSemverTag, getLatestSemverTagOnRef, commitsAheadOfTag } from './version.js';
 import { sleep, shellQuote, errStr, envInt, escapeRegex } from './utils.js';
 import { BRANCH_BRAIN_TIMEOUT_MS, BRANCH_BRAIN_FINALIZE_MS, DUTY_CYCLE_MS, RETROSPECTIVE_TIMEOUT_MS } from './infini-config.js';
@@ -455,6 +456,28 @@ function persistFleet(): void {
   log('fleet: persisted (S3 + disk)');
   // Sync Gitea chief engineer permissions on any fleet state change
   syncGiteaChiefPermissions().catch((err) => log(`gitea: chief sync failed: ${errStr(err)}`));
+}
+
+function localRunningBotNames(root: string): Set<string> {
+  const running = new Set<string>();
+  try {
+    const pm2List = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', gitOpts(root, 5_000))) as Array<{ name: string; pm2_env?: { status?: string } }>;
+    const pfx = process.env['INFINICLAW_PM2_PREFIX'] || 'infiniclaw';
+    const relayName = process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw-relay';
+    for (const p of pm2List) {
+      if (p.pm2_env?.status === 'online' && p.name.startsWith(`${pfx}-`) && p.name !== relayName) {
+        running.add(p.name.replace(`${pfx}-`, ''));
+      }
+    }
+  } catch { /* pm2 not available or no processes */ }
+  try {
+    const podmanLines = execSync('podman ps --format "{{.Names}}"', gitOpts(root, 5_000)).trim().split('\n');
+    for (const line of podmanLines) {
+      const match = line.match(/^nanoclaw-([^-]+)-/);
+      if (match) running.add(match[1]);
+    }
+  } catch { /* podman unavailable or no containers */ }
+  return running;
 }
 
 /** Blocking persist: S3 + disk — use before process exit. */
@@ -1219,11 +1242,25 @@ async function setBotDisplayStatus(root: string, bot: string, displayStatus: str
   }
 }
 
+/** Persist authoritative bot status before writing the shared Matrix display name. */
+async function transitionBotStatus(
+  root: string,
+  bot: string,
+  status: BotStatusType,
+  updates: Omit<Partial<FleetEntry>, 'status'> = {},
+): Promise<void> {
+  fleetUpdate(bot, { ...updates, status });
+  persistFleet();
+  await setBotDisplayStatus(root, bot, status);
+}
+
 /** Sync display names for ALL bots on this ship (including sleeping ones). */
 async function syncBotDisplayNames(): Promise<void> {
   const root = resolveRoot();
+  const running = localRunningBotNames(root);
   for (const [bot, entry] of Object.entries(liveFleet)) {
     if (entry.ship !== HOSTNAME) continue;
+    if (running.has(bot) && (RUNNING_STATUSES as readonly string[]).includes(entry.status)) continue;
     const displayName = unifiedBotDisplay(buildBotDisplayParams(bot), 'short');
     try {
       const { token, homeserver, userId } = await botMatrixLogin(root, bot);
@@ -1389,22 +1426,7 @@ async function publishFleetReport(): Promise<FleetReport> {
   const execOpts = { encoding: 'utf-8' as const, timeout: 5_000, stdio: 'pipe' as const };
 
   // Gather local process status
-  const localRunning = new Set<string>();
-  try {
-    for (const line of execSync('podman ps --format "{{.Names}}"', execOpts).trim().split('\n')) {
-      const match = line.match(/^nanoclaw-([^-]+)-/);
-      if (match) localRunning.add(match[1]);
-    }
-  } catch { /* empty */ }
-  try {
-    const pm2 = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', { ...execOpts, cwd: root })) as Array<{ name: string; pm2_env?: { status?: string } }>;
-    for (const p of pm2) {
-      if (p.pm2_env?.status === 'online') {
-        const match = p.name.match(/^infiniclaw-(.+)$/);
-        if (match) localRunning.add(match[1]);
-      }
-    }
-  } catch { /* empty */ }
+  const localRunning = localRunningBotNames(root);
 
   const relayVer = relayVersion(root);
   const metrics = computeMetrics();
@@ -3523,10 +3545,8 @@ async function heartbeatLoop(conns: RoomConn[]): Promise<void> {
               log(`auto-sleep: ${name} idle ${Math.round(hbAge / 60_000)}m — sleeping`);
               stopBot(bot);
               killStaleContainers(bot);
-              await setBotDisplayStatus(root, bot, 'sleep');
+              await transitionBotStatus(root, bot, 'sleep');
               void reabsorbWbsItems(root, bot);
-              fleetUpdate(bot, { status: 'sleep' });
-              persistFleet();
               publishFleetReport().catch(() => {});
               continue;
             }
@@ -3683,12 +3703,10 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
       if (loungeId) await botLeaveRoom(botToken, homeserver, loungeId);
     } catch { /* non-fatal */ }
     // status=retrospective: container keeps running, bot reflects in quarters
-    fleetUpdate(bot, { status: 'retrospective', ondutyAt: undefined });
-    persistFleet();
+    await transitionBotStatus(root, bot, 'retrospective', { ondutyAt: undefined });
     void reabsorbWbsItems(root, bot);
     await restartBotForRoom(root, bot);
     writeCrewStatus(root, bot);
-    await setBotDisplayStatus(root, bot, 'retrospective');
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} dismissed → retrospective`);
   } catch (err) {
@@ -3727,11 +3745,8 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
   try {
     stopBot(bot);
     killStaleContainers(bot);
-    await setBotDisplayStatus(root, bot, 'sleep');
+    await transitionBotStatus(root, bot, 'dream');
     void reabsorbWbsItems(root, bot);
-    // status=dream: container stopped, deferred git changes can now apply
-    fleetUpdate(bot, { status: 'dream' });
-    persistFleet();
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} asleep — Dream phase`);
   } catch (err) {
@@ -3749,12 +3764,10 @@ async function runRetrospectiveSequence(bot: string, conns: RoomConn[]): Promise
     stopBot(bot);
     killStaleContainers(bot);
     // status=ready: like quarters but signals the bot just completed a duty cycle
-    fleetUpdate(bot, { status: 'ready' });
-    persistFleet();
+    await transitionBotStatus(root, bot, 'ready');
     bootstrapBot(root, bot);
     writeCrewStatus(root, bot);
     void injectWbsTasks(root, bot);
-    await setBotDisplayStatus(root, bot, 'ready');
     sendLifecycleMsg(bot, 'started', entry.rank).catch(() => {});
     publishFleetReport().catch(() => {});
     log(`duty cycle: ${bot} ready — new cycle`);
@@ -3939,7 +3952,7 @@ async function handleLifecycleCommand(
       try {
         stopBot(bot);
         killStaleContainers(bot);
-        await setBotDisplayStatus(root, bot, 'sleep');
+        await transitionBotStatus(root, bot, 'sleep');
         // Leave non-quarters rooms
         const qid = liveFleet[bot]?.quartersRoom;
         try {
@@ -3983,7 +3996,6 @@ async function handleLifecycleCommand(
           : reply(progressConn, line);
       };
       try {
-        await setBotDisplayStatus(root, bot, 'building');
         await step('🔄 building');
         if (!isRestart) {
           fleetUpdate(bot, { status: 'quarters' });
@@ -4003,7 +4015,7 @@ async function handleLifecycleCommand(
               const msg = `⛔ alignment failed: ${failures}`;
               await step(msg);
               await reply(progressConn, `⛔ ${name} alignment blocked — ${failures}. Use --no-align to skip.`);
-              if (!isRestart) await setBotDisplayStatus(root, bot, 'sleep');
+              if (!isRestart) await transitionBotStatus(root, bot, 'sleep');
               continue;
             }
             await step('✅ alignment passed');
@@ -4013,25 +4025,25 @@ async function handleLifecycleCommand(
           }
         }
 
-        await setBotDisplayStatus(root, bot, 'starting');
         await step('🚀 starting');
         startBot(root, bot);
         writeCrewStatus(root, bot);
         void injectWbsTasks(root, bot);
-        await setBotDisplayStatus(root, bot, 'waiting');
         await step('🟡 waiting for first output');
         const model = env?.BRAIN_MODEL || '?';
         const roleIcon = ROLE_ICONS[role.toLowerCase()] ?? '';
         const medal = rankMedal(rank, false);
         const ver = botVersion(root, bot);
-        await setBotDisplayStatus(root, bot, 'online');
+        if (relayShouldWriteWakeDisplayName('online')) {
+          await setBotDisplayStatus(root, bot, 'online');
+        }
         await step(`🟢 online · ${[roleIcon, medal].filter(Boolean).join(' ')} · ${model}${ver}`);
         await reply(progressConn, `✅ ${name} ${doneVerb}`, threadRoot);
         publishFleetReport().catch(() => {});
       } catch (err) {
         log(`!wake ${name} failed: ${errStr(err)}`);
         recordInfraFailure(`wake-${bot}`);
-        if (!isRestart) await setBotDisplayStatus(root, bot, 'sleep');
+        if (!isRestart) await transitionBotStatus(root, bot, 'sleep');
         const fail = `⛔ wake ${name} failed — ${errStr(err)}`;
         await step(fail);
         await reply(progressConn, fail, threadRoot);
@@ -4422,8 +4434,7 @@ function registerRelayCommands(): void {
         for (const bot of getActiveBots()) {
           stopBot(bot);
           killStaleContainers(bot);
-          fleetUpdate(bot, { status: 'sleep' });
-          await setBotDisplayStatus(root, bot, 'sleep');
+          await transitionBotStatus(root, bot, 'sleep');
         }
         me[1].commissioned = false;
         await writeShipsAsync(ships);
@@ -4620,10 +4631,7 @@ function registerRelayCommands(): void {
         stopBot(bot);
         killStaleContainers(bot);
         removeBotMounts(bot);
-        fleetUpdate(bot, { status: 'transit', ship: targetShip });
-        fleetDirty = true;
-        persistFleet();
-        await setBotDisplayStatus(resolveRoot(), bot, 'transit');
+        await transitionBotStatus(resolveRoot(), bot, 'transit', { ship: targetShip });
         await send(`✅ ${botDisplayName} dematerialized — awaiting materialization on ${targetName}`);
       } catch (err) {
         await send(`⛔ transport failed — ${errStr(err)}`);
@@ -6084,17 +6092,7 @@ async function main(): Promise<void> {
       const root = resolveRoot();
       removeStaleProcesses();
       // Check which bots already have running pm2 processes
-      const alreadyRunning = new Set<string>();
-      try {
-        const pm2List = JSON.parse(execSync('npx pm2 jlist 2>/dev/null', gitOpts(root, 5_000))) as Array<{ name: string; pm2_env?: { status?: string } }>;
-        for (const p of pm2List) {
-          const pfx = process.env['INFINICLAW_PM2_PREFIX'] || 'infiniclaw';
-          const relayName = process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw-relay';
-          if (p.pm2_env?.status === 'online' && p.name.startsWith(`${pfx}-`) && p.name !== relayName) {
-            alreadyRunning.add(p.name.replace(`${pfx}-`, ''));
-          }
-        }
-      } catch { /* pm2 not available or no processes */ }
+      const alreadyRunning = localRunningBotNames(root);
 
       if (alreadyRunning.size > 0) {
         log(`bootstrap: ${alreadyRunning.size} bot(s) already running — preserving: ${[...alreadyRunning].join(', ')}`);
