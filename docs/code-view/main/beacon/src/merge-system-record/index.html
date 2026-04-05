@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>beacon/src/merge-system-record · Code View</title>
+  <link rel="stylesheet" href="../../../assets/code-view.css">
+</head>
+<body>
+  <div class="docs-shell">
+    <aside class="sidebar">
+      <a class="brand" href="../../../index.html">
+        <span class="brand-mark">IC</span>
+        <span>
+          <span class="brand-title">InfiniClaw Code View</span>
+          <span class="brand-subtitle">version main</span>
+        </span>
+      </a>
+      <nav class="sidebar-nav"><section class="nav-group"><h2>beacon/src</h2><ul><li><a class="" href="../bootstrap-system/index.html">bootstrap-system</a></li>
+<li><a class="" href="../build-relay-start-command/index.html">build-relay-start-command</a></li>
+<li><a class="" href="../default-bootstrap-input/index.html">default-bootstrap-input</a></li>
+<li><a class="active" href="index.html">merge-system-record</a></li>
+<li><a class="" href="../parse-args/index.html">parse-args</a></li>
+<li><a class="" href="../read-json-file/index.html">read-json-file</a></li>
+<li><a class="" href="../upsert-system-record/index.html">upsert-system-record</a></li>
+<li><a class="" href="../validate-input/index.html">validate-input</a></li>
+<li><a class="" href="../write-beacon-state/index.html">write-beacon-state</a></li>
+<li><a class="" href="../write-json-file/index.html">write-json-file</a></li></ul></section></nav>
+    </aside>
+    <main class="content">
+      
+    <header class="page-header">
+      <p class="eyebrow">Code Piece</p>
+      <h1>merge-system-record</h1>
+      <p class="lede">beacon/src/merge-system-record</p>
+      <div class="stats">
+        <span>LOC 15</span>
+        <span>CCN 2</span>
+        <span>comments 1</span>
+        <span>test LOC 27</span>
+        <span>test CCN 1</span>
+      </div>
+    </header>
+
+    <section class="split-view">
+      <article class="panel">
+        <header class="panel-header">
+          <div>
+            <h2>Code</h2>
+            <p>beacon/src/merge-system-record/merge-system-record.ts</p>
+          </div>
+        </header>
+        <div class="panel-body code-block"><div class="code-line"><span class="line-no">   1</span><span class="line-src">import type { BootstrapInput, SystemRecord } from '../types.js';</span></div>
+<div class="code-line"><span class="line-no">   2</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   3</span><span class="line-src">/**</span></div>
+<div class="code-line"><span class="line-no">   4</span><span class="line-src"> * Purpose: merge new system bootstrap data with an existing fleet record.</span></div>
+<div class="code-line"><span class="line-no">   5</span><span class="line-src"> * Requirement: system identity updates must preserve a previously known Matrix space id.</span></div>
+<div class="code-line"><span class="line-no">   6</span><span class="line-src"> */</span></div>
+<div class="code-line"><span class="line-no">   7</span><span class="line-src">export function mergeSystemRecord(existing: SystemRecord | undefined, input: BootstrapInput): SystemRecord {</span></div>
+<div class="code-line"><span class="line-no">   8</span><span class="line-src">  return {</span></div>
+<div class="code-line"><span class="line-no">   9</span><span class="line-src">    name: input.name,</span></div>
+<div class="code-line"><span class="line-no">  10</span><span class="line-src">    emoji: input.emoji,</span></div>
+<div class="code-line"><span class="line-no">  11</span><span class="line-src">    hostname: input.hostname,</span></div>
+<div class="code-line"><span class="line-no">  12</span><span class="line-src">    spaceId: input.spaceId ?? existing?.spaceId,</span></div>
+<div class="code-line"><span class="line-no">  13</span><span class="line-src">  };</span></div>
+<div class="code-line"><span class="line-no">  14</span><span class="line-src">}</span></div>
+<div class="code-line"><span class="line-no">  15</span><span class="line-src"></span></div></div>
+      </article>
+
+      <article class="panel">
+        <header class="panel-header panel-header-tabs">
+          <div>
+            <h2>Details</h2>
+            <p id="right-pane-label">beacon/src/merge-system-record/merge-system-record.ts</p>
+          </div>
+          <div class="tab-row" role="tablist" aria-label="Right pane view">
+            <button class="tab-button active" data-target="commentary" type="button">Commentary</button>
+            <button class="tab-button" data-target="test" type="button">Test File</button>
+          </div>
+        </header>
+        <div class="panel-body">
+          <section class="tab-panel active" data-panel="commentary">
+            <article class="comment-card"><div class="comment-line">line 3</div><div class="comment-text">Purpose: merge new system bootstrap data with an existing fleet record.
+Requirement: system identity updates must preserve a previously known Matrix space id.
+/</div></article>
+          </section>
+          <section class="tab-panel tab-panel-code" data-panel="test">
+            <div class="code-block"><div class="code-line"><span class="line-no">   1</span><span class="line-src">import { describe, expect, it } from 'vitest';</span></div>
+<div class="code-line"><span class="line-no">   2</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   3</span><span class="line-src">import { defaultBootstrapInput } from '../default-bootstrap-input/default-bootstrap-input.js';</span></div>
+<div class="code-line"><span class="line-no">   4</span><span class="line-src">import { mergeSystemRecord } from './merge-system-record.js';</span></div>
+<div class="code-line"><span class="line-no">   5</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   6</span><span class="line-src">describe('mergeSystemRecord', () =&gt; {</span></div>
+<div class="code-line"><span class="line-no">   7</span><span class="line-src">  it('preserves an existing spaceId when none is supplied', () =&gt; {</span></div>
+<div class="code-line"><span class="line-no">   8</span><span class="line-src">    const input = defaultBootstrapInput({</span></div>
+<div class="code-line"><span class="line-no">   9</span><span class="line-src">      name: 'Poseidon',</span></div>
+<div class="code-line"><span class="line-no">  10</span><span class="line-src">      emoji: '🌊',</span></div>
+<div class="code-line"><span class="line-no">  11</span><span class="line-src">      hostname: 'mac139160',</span></div>
+<div class="code-line"><span class="line-no">  12</span><span class="line-src">      apply: false,</span></div>
+<div class="code-line"><span class="line-no">  13</span><span class="line-src">    });</span></div>
+<div class="code-line"><span class="line-no">  14</span><span class="line-src">    expect(mergeSystemRecord({</span></div>
+<div class="code-line"><span class="line-no">  15</span><span class="line-src">      name: 'Poseidon',</span></div>
+<div class="code-line"><span class="line-no">  16</span><span class="line-src">      emoji: '🌊',</span></div>
+<div class="code-line"><span class="line-no">  17</span><span class="line-src">      hostname: 'old-host',</span></div>
+<div class="code-line"><span class="line-no">  18</span><span class="line-src">      spaceId: '!existing:a-gis.org',</span></div>
+<div class="code-line"><span class="line-no">  19</span><span class="line-src">    }, input)).toEqual({</span></div>
+<div class="code-line"><span class="line-no">  20</span><span class="line-src">      name: 'Poseidon',</span></div>
+<div class="code-line"><span class="line-no">  21</span><span class="line-src">      emoji: '🌊',</span></div>
+<div class="code-line"><span class="line-no">  22</span><span class="line-src">      hostname: 'mac139160',</span></div>
+<div class="code-line"><span class="line-no">  23</span><span class="line-src">      spaceId: '!existing:a-gis.org',</span></div>
+<div class="code-line"><span class="line-no">  24</span><span class="line-src">    });</span></div>
+<div class="code-line"><span class="line-no">  25</span><span class="line-src">  });</span></div>
+<div class="code-line"><span class="line-no">  26</span><span class="line-src">});</span></div>
+<div class="code-line"><span class="line-no">  27</span><span class="line-src"></span></div></div>
+          </section>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel readme-panel">
+      <header class="panel-header">
+        <div>
+          <h2>README.md</h2>
+          <p>beacon/src/merge-system-record/README.md</p>
+        </div>
+      </header>
+      <div class="panel-body prose">
+        <h1><code>mergeSystemRecord</code></h1>
+<p>Builds the declared system record that beacon bootstrap should persist.</p>
+<p>This preserves stable <code>spaceId</code> values unless bootstrap is explicitly given a newer one.</p>
+
+      </div>
+    </section>
+
+    <script type="application/json" id="page-metadata">{"commentaryLabel":"beacon/src/merge-system-record/merge-system-record.ts","testLabel":"beacon/src/merge-system-record/merge-system-record.test.ts"}</script>
+  
+    </main>
+  </div>
+  <script src="../../../assets/code-view.js"></script>
+</body>
+</html>

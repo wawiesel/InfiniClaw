@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-import { bootstrapSystem, defaultBootstrapInput } from './bootstrap.js';
+import { bootstrapSystem } from './bootstrap-system/bootstrap-system.js';
+import { defaultBootstrapInput } from './default-bootstrap-input/default-bootstrap-input.js';
+import { parseArgs } from './parse-args/parse-args.js';
 
-function usage(): never {
+const [command] = process.argv.slice(2);
+if (command !== 'bootstrap') {
   console.error(
     'Usage: beacon bootstrap ' +
     '--fleet <name> --system-id <id> --name <name> --emoji <emoji> ' +
@@ -10,26 +13,6 @@ function usage(): never {
   );
   process.exit(1);
 }
-
-function parseArgs(argv: string[]): Record<string, string | boolean> {
-  const out: Record<string, string | boolean> = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (!arg.startsWith('--')) continue;
-    const key = arg.slice(2);
-    const next = argv[i + 1];
-    if (!next || next.startsWith('--')) {
-      out[key] = true;
-      continue;
-    }
-    out[key] = next;
-    i += 1;
-  }
-  return out;
-}
-
-const [command] = process.argv.slice(2);
-if (command !== 'bootstrap') usage();
 
 const args = parseArgs(process.argv.slice(3));
 const input = defaultBootstrapInput({
