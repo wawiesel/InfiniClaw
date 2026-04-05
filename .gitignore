@@ -8,4 +8,5 @@
 /dist/
 /beacon/dist/
 /node_modules/
+**/node_modules/
 /prototype/
