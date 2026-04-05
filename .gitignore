@@ -6,4 +6,6 @@
 !.claude/hooks/
 # Build output
 /dist/
+/beacon/dist/
 /node_modules/
+/prototype/

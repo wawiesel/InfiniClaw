@@ -1,0 +1,10 @@
+{
+  "name": "infiniclaw-beacon",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "bootstrap": "node dist/cli.js bootstrap",
+    "test": "vitest run --config vitest.config.ts"
+  }
+}
