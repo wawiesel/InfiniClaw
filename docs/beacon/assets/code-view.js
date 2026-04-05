@@ -23,4 +23,53 @@ document.querySelectorAll('.panel-header-tabs').forEach((header) => {
     button.addEventListener('click', () => show(button.dataset.target));
   });
 });
+
+const syncGroups = new Map();
+
+document.querySelectorAll('.sync-scroll').forEach((element) => {
+  const group = element.dataset.syncGroup;
+  if (!group) {
+    return;
+  }
+  const list = syncGroups.get(group) ?? [];
+  list.push(element);
+  syncGroups.set(group, list);
+});
+
+for (const elements of syncGroups.values()) {
+  let syncing = false;
+
+  function visibleElements() {
+    return elements.filter((element) => element.offsetParent !== null);
+  }
+
+  function syncFrom(source) {
+    if (syncing) {
+      return;
+    }
+    const active = visibleElements();
+    if (active.length < 2) {
+      return;
+    }
+    const maxScrollTop = Math.max(source.scrollHeight - source.clientHeight, 0);
+    const ratio = maxScrollTop === 0 ? 0 : source.scrollTop / maxScrollTop;
+
+    syncing = true;
+    try {
+      for (const target of active) {
+        if (target === source) {
+          continue;
+        }
+        const targetMax = Math.max(target.scrollHeight - target.clientHeight, 0);
+        target.scrollTop = targetMax * ratio;
+      }
+    } finally {
+      syncing = false;
+    }
+  }
+
+  for (const element of elements) {
+    element.addEventListener('scroll', () => syncFrom(element));
+  }
+}
   

@@ -16,16 +16,16 @@
           <span class="brand-subtitle">version codex/beacon-code-view</span>
         </span>
       </a>
-      <nav class="sidebar-nav"><section class="nav-group"><h2>src</h2><ul><li><a class="" href="../bootstrap-system/index.html">bootstrap-system</a></li>
-<li><a class="" href="../build-relay-start-command/index.html">build-relay-start-command</a></li>
-<li><a class="" href="../default-bootstrap-input/index.html">default-bootstrap-input</a></li>
-<li><a class="" href="../merge-system-record/index.html">merge-system-record</a></li>
-<li><a class="active" href="index.html">parse-args</a></li>
-<li><a class="" href="../read-json-file/index.html">read-json-file</a></li>
-<li><a class="" href="../upsert-system-record/index.html">upsert-system-record</a></li>
-<li><a class="" href="../validate-input/index.html">validate-input</a></li>
-<li><a class="" href="../write-beacon-state/index.html">write-beacon-state</a></li>
-<li><a class="" href="../write-json-file/index.html">write-json-file</a></li></ul></section></nav>
+      <nav class="sidebar-nav"><ul class="tree-root"><li class="tree-node tree-folder"><div class="tree-folder-label"><span class="tree-name">src</span></div><ul class="tree-children"><li class="tree-node tree-leaf"><a class="tree-link " href="../bootstrap-system/index.html"><span class="tree-name">bootstrap-system</span></a></li>
+<li class="tree-node tree-leaf"><a class="tree-link " href="../build-relay-start-command/index.html"><span class="tree-name">build-relay-start-command</span></a></li>
+<li class="tree-node tree-leaf"><a class="tree-link " href="../default-bootstrap-input/index.html"><span class="tree-name">default-bootstrap-input</span></a></li>
+<li class="tree-node tree-leaf"><a class="tree-link " href="../merge-system-record/index.html"><span class="tree-name">merge-system-record</span></a></li>
+<li class="tree-node tree-leaf"><a class="tree-link active" href="index.html"><span class="tree-name">parse-args</span></a></li>
+<li class="tree-node tree-leaf"><a class="tree-link " href="../read-json-file/index.html"><span class="tree-name">read-json-file</span></a></li>
+<li class="tree-node tree-leaf"><a class="tree-link " href="../upsert-system-record/index.html"><span class="tree-name">upsert-system-record</span></a></li>
+<li class="tree-node tree-leaf"><a class="tree-link " href="../validate-input/index.html"><span class="tree-name">validate-input</span></a></li>
+<li class="tree-node tree-leaf"><a class="tree-link " href="../write-beacon-state/index.html"><span class="tree-name">write-beacon-state</span></a></li>
+<li class="tree-node tree-leaf"><a class="tree-link " href="../write-json-file/index.html"><span class="tree-name">write-json-file</span></a></li></ul></li></ul></nav>
     </aside>
     <main class="content">
       
@@ -50,10 +50,11 @@
             <p>beacon/src/parse-args/parse-args.ts</p>
           </div>
         </header>
-        <div class="panel-body code-block"><div class="code-line"><span class="line-no">   1</span><span class="line-src">/**</span></div>
-<div class="code-line"><span class="line-no">   2</span><span class="line-src"> * Purpose: parse the small beacon CLI flag surface into keyed values.</span></div>
-<div class="code-line"><span class="line-no">   3</span><span class="line-src"> * Requirement: bootstrap must accept a simple explicit command-line contract.</span></div>
-<div class="code-line"><span class="line-no">   4</span><span class="line-src"> */</span></div>
+        <div class="panel-body scroll-panel">
+          <div class="code-block sync-scroll" data-sync-group="piece"><div class="code-line"><span class="line-no">   1</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   2</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   3</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   4</span><span class="line-src"></span></div>
 <div class="code-line"><span class="line-no">   5</span><span class="line-src">export function parseArgs(argv: string[]): Record&lt;string, string | boolean&gt; {</span></div>
 <div class="code-line"><span class="line-no">   6</span><span class="line-src">  const out: Record&lt;string, string | boolean&gt; = {};</span></div>
 <div class="code-line"><span class="line-no">   7</span><span class="line-src">  for (let i = 0; i &lt; argv.length; i += 1) {</span></div>
@@ -71,6 +72,7 @@
 <div class="code-line"><span class="line-no">  19</span><span class="line-src">  return out;</span></div>
 <div class="code-line"><span class="line-no">  20</span><span class="line-src">}</span></div>
 <div class="code-line"><span class="line-no">  21</span><span class="line-src"></span></div></div>
+        </div>
       </article>
 
       <article class="panel">
@@ -85,12 +87,11 @@
           </div>
         </header>
         <div class="panel-body">
-          <section class="tab-panel active" data-panel="commentary">
+          <section class="tab-panel active scroll-panel sync-scroll" data-panel="commentary" data-sync-group="piece">
             <article class="comment-card"><div class="comment-line">line 1</div><div class="comment-text">Purpose: parse the small beacon CLI flag surface into keyed values.
-Requirement: bootstrap must accept a simple explicit command-line contract.
-/</div></article>
+Requirement: bootstrap must accept a simple explicit command-line contract.</div></article>
           </section>
-          <section class="tab-panel tab-panel-code" data-panel="test">
+          <section class="tab-panel tab-panel-code scroll-panel sync-scroll" data-panel="test" data-sync-group="piece">
             <div class="code-block"><div class="code-line"><span class="line-no">   1</span><span class="line-src">import { describe, expect, it } from 'vitest';</span></div>
 <div class="code-line"><span class="line-no">   2</span><span class="line-src"></span></div>
 <div class="code-line"><span class="line-no">   3</span><span class="line-src">import { parseArgs } from './parse-args.js';</span></div>

@@ -103,39 +103,64 @@ pre {
   font-size: 13px;
 }
 
-.sidebar-nav {
-  display: grid;
-  gap: 18px;
-}
-
-.nav-group h2 {
-  margin: 0 0 10px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.nav-group ul {
+.sidebar-nav,
+.tree-root,
+.tree-children {
   margin: 0;
   padding: 0;
   list-style: none;
-  display: grid;
-  gap: 4px;
 }
 
-.nav-group a {
+.tree-root {
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.tree-node {
+  margin: 0;
+}
+
+.tree-folder-label,
+.tree-link {
   display: block;
   border-radius: 10px;
   color: var(--text);
-  padding: 8px 10px;
+  padding: 6px 8px;
+  position: relative;
 }
 
-.nav-group a.active,
-.nav-group a:hover {
+.tree-folder-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.tree-folder-label::before {
+  content: "▾";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+}
+
+.tree-children {
+  border-left: 1px solid var(--line);
+  margin-left: 11px;
+  padding-left: 10px;
+}
+
+.tree-link::before {
+  content: "•";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+}
+
+.tree-link.active,
+.tree-link:hover {
   background: var(--accent-soft);
   text-decoration: none;
+}
+
+.tree-name {
+  min-width: 0;
 }
 
 .content {
@@ -225,11 +250,15 @@ pre {
   padding: 18px;
 }
 
+.scroll-panel {
+  height: min(72vh, 920px);
+  overflow: auto;
+}
+
 .code-block {
   background: var(--code-bg);
   color: var(--code-text);
   border-radius: 14px;
-  overflow: auto;
   padding: 14px 0;
   font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -312,6 +341,7 @@ pre {
 
 .empty-state {
   color: var(--muted);
+  padding: 4px 0;
 }
 
 .readme-panel {

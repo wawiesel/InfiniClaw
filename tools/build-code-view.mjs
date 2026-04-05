@@ -130,10 +130,10 @@ function extractComments(source) {
     const no = index + 1;
     const trimmed = line.trim();
 
-    if (!inBlock && trimmed.startsWith('/**')) {
+    if (!inBlock && (trimmed.startsWith('/**') || trimmed.startsWith('/*'))) {
       inBlock = true;
       startLine = no;
-      buffer = [trimmed.replace('/**', '').replace(/\*\/$/, '').trim()];
+      buffer = [trimmed.replace(/^\/\*\*?/, '').replace(/\*\/$/, '').trim()];
       if (trimmed.endsWith('*/')) {
         inBlock = false;
         comments.push({ line: startLine, text: buffer.join('\n').trim() });
@@ -143,7 +143,7 @@ function extractComments(source) {
     }
 
     if (inBlock) {
-      buffer.push(trimmed.replace(/^\*\s?/, '').replace(/\*\/$/, '').trim());
+      buffer.push(trimmed.replace(/\*\/$/, '').replace(/^\*\s?/, '').trim());
       if (trimmed.endsWith('*/')) {
         inBlock = false;
         comments.push({ line: startLine, text: buffer.join('\n').trim() });
@@ -158,6 +158,40 @@ function extractComments(source) {
   });
 
   return comments.filter((entry) => entry.text.length > 0);
+}
+
+function stripCommentsForCodeView(source) {
+  const lines = source.split('\n');
+  const output = [];
+  let inBlock = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (inBlock) {
+      output.push('');
+      if (trimmed.endsWith('*/')) {
+        inBlock = false;
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith('/**') || trimmed.startsWith('/*')) {
+      output.push('');
+      if (!trimmed.endsWith('*/')) {
+        inBlock = true;
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith('//')) {
+      output.push('');
+      continue;
+    }
+
+    output.push(line);
+  }
+
+  return output.join('\n');
 }
 
 function renderCode(source) {
@@ -179,29 +213,48 @@ function renderComments(comments) {
   )).join('\n');
 }
 
-function buildSidebar(entries, currentDirectory, versionRoot, pageDir) {
-  const byGroup = new Map();
+function buildPathTree(entries) {
+  const root = { children: new Map(), entry: null };
+
   for (const entry of entries) {
-    const groupEntries = byGroup.get(entry.group) ?? [];
-    groupEntries.push(entry);
-    byGroup.set(entry.group, groupEntries);
+    const parts = entry.directory.split('/').filter(Boolean);
+    let node = root;
+    for (const part of parts) {
+      if (!node.children.has(part)) {
+        node.children.set(part, { name: part, children: new Map(), entry: null });
+      }
+      node = node.children.get(part);
+    }
+    node.entry = entry;
   }
 
-  const groups = Array.from(byGroup.entries()).sort(([left], [right]) => left.localeCompare(right));
-  const sections = groups.map(([group, groupEntries]) => {
-    const items = groupEntries
-      .sort((left, right) => left.displayName.localeCompare(right.displayName))
-      .map((entry) => {
-        const target = path.join(versionRoot, entry.directory, 'index.html');
-        const href = normalizePath(path.relative(pageDir, target));
-        const active = entry.directory === currentDirectory ? 'active' : '';
-        return `<li><a class="${active}" href="${href}">${entry.displayName}</a></li>`;
-      })
-      .join('\n');
-    return `<section class="nav-group"><h2>${escapeHtml(group)}</h2><ul>${items}</ul></section>`;
-  }).join('\n');
+  return root;
+}
 
-  return `<nav class="sidebar-nav">${sections}</nav>`;
+function renderTreeNode(node, currentDirectory, versionRoot, pageDir) {
+  const children = Array.from(node.children.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, child]) => renderTreeNode(child, currentDirectory, versionRoot, pageDir))
+    .join('\n');
+
+  if (node.entry) {
+    const target = path.join(versionRoot, node.entry.directory, 'index.html');
+    const href = normalizePath(path.relative(pageDir, target));
+    const active = node.entry.directory === currentDirectory ? 'active' : '';
+    return `<li class="tree-node tree-leaf"><a class="tree-link ${active}" href="${href}"><span class="tree-name">${escapeHtml(node.name)}</span></a></li>`;
+  }
+
+  return `<li class="tree-node tree-folder"><div class="tree-folder-label"><span class="tree-name">${escapeHtml(node.name)}</span></div><ul class="tree-children">${children}</ul></li>`;
+}
+
+function buildSidebar(entries, currentDirectory, versionRoot, pageDir) {
+  const root = buildPathTree(entries);
+  const sections = Array.from(root.children.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, child]) => renderTreeNode(child, currentDirectory, versionRoot, pageDir))
+    .join('\n');
+
+  return `<nav class="sidebar-nav"><ul class="tree-root">${sections}</ul></nav>`;
 }
 
 function relativeAssetPath(pageDir, versionRoot, assetFile) {
@@ -244,11 +297,12 @@ function renderEntryPage(entry, entries, version, versionRoot) {
   const test = readText(entry.testFile);
   const readmeHtml = marked.parse(readText(entry.readmeFile));
   const sourceComments = extractComments(source);
+  const sourceDisplay = stripCommentsForCodeView(source);
   const sidebar = buildSidebar(entries, entry.directory, versionRoot, pageDir);
   const stylesheetHref = relativeAssetPath(pageDir, versionRoot, 'code-view.css');
   const scriptHref = relativeAssetPath(pageDir, versionRoot, 'code-view.js');
   const brandHref = normalizePath(path.relative(pageDir, path.join(versionRoot, 'index.html')));
-  const sourceCode = renderCode(source);
+  const sourceCode = renderCode(sourceDisplay);
   const testCode = renderCode(test);
   const pageTitle = `${entry.directory} · Code View`;
   const sourcePath = relativeFromRoot(entry.sourceFile);
@@ -276,7 +330,9 @@ function renderEntryPage(entry, entries, version, versionRoot) {
             <p>${escapeHtml(sourcePath)}</p>
           </div>
         </header>
-        <div class="panel-body code-block">${sourceCode}</div>
+        <div class="panel-body scroll-panel">
+          <div class="code-block sync-scroll" data-sync-group="piece">${sourceCode}</div>
+        </div>
       </article>
 
       <article class="panel">
@@ -291,10 +347,10 @@ function renderEntryPage(entry, entries, version, versionRoot) {
           </div>
         </header>
         <div class="panel-body">
-          <section class="tab-panel active" data-panel="commentary">
+          <section class="tab-panel active scroll-panel sync-scroll" data-panel="commentary" data-sync-group="piece">
             ${renderComments(sourceComments)}
           </section>
-          <section class="tab-panel tab-panel-code" data-panel="test">
+          <section class="tab-panel tab-panel-code scroll-panel sync-scroll" data-panel="test" data-sync-group="piece">
             <div class="code-block">${testCode}</div>
           </section>
         </div>
@@ -488,39 +544,64 @@ pre {
   font-size: 13px;
 }
 
-.sidebar-nav {
-  display: grid;
-  gap: 18px;
-}
-
-.nav-group h2 {
-  margin: 0 0 10px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.nav-group ul {
+.sidebar-nav,
+.tree-root,
+.tree-children {
   margin: 0;
   padding: 0;
   list-style: none;
-  display: grid;
-  gap: 4px;
 }
 
-.nav-group a {
+.tree-root {
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.tree-node {
+  margin: 0;
+}
+
+.tree-folder-label,
+.tree-link {
   display: block;
   border-radius: 10px;
   color: var(--text);
-  padding: 8px 10px;
+  padding: 6px 8px;
+  position: relative;
 }
 
-.nav-group a.active,
-.nav-group a:hover {
+.tree-folder-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.tree-folder-label::before {
+  content: "▾";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+}
+
+.tree-children {
+  border-left: 1px solid var(--line);
+  margin-left: 11px;
+  padding-left: 10px;
+}
+
+.tree-link::before {
+  content: "•";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+}
+
+.tree-link.active,
+.tree-link:hover {
   background: var(--accent-soft);
   text-decoration: none;
+}
+
+.tree-name {
+  min-width: 0;
 }
 
 .content {
@@ -610,11 +691,15 @@ pre {
   padding: 18px;
 }
 
+.scroll-panel {
+  height: min(72vh, 920px);
+  overflow: auto;
+}
+
 .code-block {
   background: var(--code-bg);
   color: var(--code-text);
   border-radius: 14px;
-  overflow: auto;
   padding: 14px 0;
   font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -697,6 +782,7 @@ pre {
 
 .empty-state {
   color: var(--muted);
+  padding: 4px 0;
 }
 
 .readme-panel {
@@ -786,6 +872,55 @@ document.querySelectorAll('.panel-header-tabs').forEach((header) => {
     button.addEventListener('click', () => show(button.dataset.target));
   });
 });
+
+const syncGroups = new Map();
+
+document.querySelectorAll('.sync-scroll').forEach((element) => {
+  const group = element.dataset.syncGroup;
+  if (!group) {
+    return;
+  }
+  const list = syncGroups.get(group) ?? [];
+  list.push(element);
+  syncGroups.set(group, list);
+});
+
+for (const elements of syncGroups.values()) {
+  let syncing = false;
+
+  function visibleElements() {
+    return elements.filter((element) => element.offsetParent !== null);
+  }
+
+  function syncFrom(source) {
+    if (syncing) {
+      return;
+    }
+    const active = visibleElements();
+    if (active.length < 2) {
+      return;
+    }
+    const maxScrollTop = Math.max(source.scrollHeight - source.clientHeight, 0);
+    const ratio = maxScrollTop === 0 ? 0 : source.scrollTop / maxScrollTop;
+
+    syncing = true;
+    try {
+      for (const target of active) {
+        if (target === source) {
+          continue;
+        }
+        const targetMax = Math.max(target.scrollHeight - target.clientHeight, 0);
+        target.scrollTop = targetMax * ratio;
+      }
+    } finally {
+      syncing = false;
+    }
+  }
+
+  for (const element of elements) {
+    element.addEventListener('scroll', () => syncFrom(element));
+  }
+}
   `.trimStart();
 }
 
