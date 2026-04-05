@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>beacon/src/write-json-file · Code View</title>
+  <link rel="stylesheet" href="../../../assets/code-view.css">
+</head>
+<body>
+  <div class="docs-shell">
+    <aside class="sidebar">
+      <a class="brand" href="../../../index.html">
+        <span class="brand-mark">IC</span>
+        <span>
+          <span class="brand-title">InfiniClaw Code View</span>
+          <span class="brand-subtitle">version main</span>
+        </span>
+      </a>
+      <nav class="sidebar-nav"><section class="nav-group"><h2>beacon/src</h2><ul><li><a class="" href="../bootstrap-system/index.html">bootstrap-system</a></li>
+<li><a class="" href="../build-relay-start-command/index.html">build-relay-start-command</a></li>
+<li><a class="" href="../default-bootstrap-input/index.html">default-bootstrap-input</a></li>
+<li><a class="" href="../merge-system-record/index.html">merge-system-record</a></li>
+<li><a class="" href="../parse-args/index.html">parse-args</a></li>
+<li><a class="" href="../read-json-file/index.html">read-json-file</a></li>
+<li><a class="" href="../upsert-system-record/index.html">upsert-system-record</a></li>
+<li><a class="" href="../validate-input/index.html">validate-input</a></li>
+<li><a class="" href="../write-beacon-state/index.html">write-beacon-state</a></li>
+<li><a class="active" href="index.html">write-json-file</a></li></ul></section></nav>
+    </aside>
+    <main class="content">
+      
+    <header class="page-header">
+      <p class="eyebrow">Code Piece</p>
+      <h1>write-json-file</h1>
+      <p class="lede">beacon/src/write-json-file</p>
+      <div class="stats">
+        <span>LOC 12</span>
+        <span>CCN 2</span>
+        <span>comments 1</span>
+        <span>test LOC 29</span>
+        <span>test CCN 2</span>
+      </div>
+    </header>
+
+    <section class="split-view">
+      <article class="panel">
+        <header class="panel-header">
+          <div>
+            <h2>Code</h2>
+            <p>beacon/src/write-json-file/write-json-file.ts</p>
+          </div>
+        </header>
+        <div class="panel-body code-block"><div class="code-line"><span class="line-no">   1</span><span class="line-src">import fs from 'fs';</span></div>
+<div class="code-line"><span class="line-no">   2</span><span class="line-src">import path from 'path';</span></div>
+<div class="code-line"><span class="line-no">   3</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   4</span><span class="line-src">/**</span></div>
+<div class="code-line"><span class="line-no">   5</span><span class="line-src"> * Purpose: write formatted JSON while creating any missing parent directories.</span></div>
+<div class="code-line"><span class="line-no">   6</span><span class="line-src"> * Requirement: beacon state writers must be able to materialize new local files safely.</span></div>
+<div class="code-line"><span class="line-no">   7</span><span class="line-src"> */</span></div>
+<div class="code-line"><span class="line-no">   8</span><span class="line-src">export function writeJsonFile(file: string, value: unknown): void {</span></div>
+<div class="code-line"><span class="line-no">   9</span><span class="line-src">  fs.mkdirSync(path.dirname(file), { recursive: true });</span></div>
+<div class="code-line"><span class="line-no">  10</span><span class="line-src">  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);</span></div>
+<div class="code-line"><span class="line-no">  11</span><span class="line-src">}</span></div>
+<div class="code-line"><span class="line-no">  12</span><span class="line-src"></span></div></div>
+      </article>
+
+      <article class="panel">
+        <header class="panel-header panel-header-tabs">
+          <div>
+            <h2>Details</h2>
+            <p id="right-pane-label">beacon/src/write-json-file/write-json-file.ts</p>
+          </div>
+          <div class="tab-row" role="tablist" aria-label="Right pane view">
+            <button class="tab-button active" data-target="commentary" type="button">Commentary</button>
+            <button class="tab-button" data-target="test" type="button">Test File</button>
+          </div>
+        </header>
+        <div class="panel-body">
+          <section class="tab-panel active" data-panel="commentary">
+            <article class="comment-card"><div class="comment-line">line 4</div><div class="comment-text">Purpose: write formatted JSON while creating any missing parent directories.
+Requirement: beacon state writers must be able to materialize new local files safely.
+/</div></article>
+          </section>
+          <section class="tab-panel tab-panel-code" data-panel="test">
+            <div class="code-block"><div class="code-line"><span class="line-no">   1</span><span class="line-src">import fs from 'fs';</span></div>
+<div class="code-line"><span class="line-no">   2</span><span class="line-src">import os from 'os';</span></div>
+<div class="code-line"><span class="line-no">   3</span><span class="line-src">import path from 'path';</span></div>
+<div class="code-line"><span class="line-no">   4</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   5</span><span class="line-src">import { afterEach, describe, expect, it } from 'vitest';</span></div>
+<div class="code-line"><span class="line-no">   6</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   7</span><span class="line-src">import { writeJsonFile } from './write-json-file.js';</span></div>
+<div class="code-line"><span class="line-no">   8</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   9</span><span class="line-src">const dirs: string[] = [];</span></div>
+<div class="code-line"><span class="line-no">  10</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">  11</span><span class="line-src">function tmpDir(): string {</span></div>
+<div class="code-line"><span class="line-no">  12</span><span class="line-src">  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'beacon-write-json-'));</span></div>
+<div class="code-line"><span class="line-no">  13</span><span class="line-src">  dirs.push(dir);</span></div>
+<div class="code-line"><span class="line-no">  14</span><span class="line-src">  return dir;</span></div>
+<div class="code-line"><span class="line-no">  15</span><span class="line-src">}</span></div>
+<div class="code-line"><span class="line-no">  16</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">  17</span><span class="line-src">afterEach(() =&gt; {</span></div>
+<div class="code-line"><span class="line-no">  18</span><span class="line-src">  while (dirs.length &gt; 0) fs.rmSync(dirs.pop()!, { recursive: true, force: true });</span></div>
+<div class="code-line"><span class="line-no">  19</span><span class="line-src">});</span></div>
+<div class="code-line"><span class="line-no">  20</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">  21</span><span class="line-src">describe('writeJsonFile', () =&gt; {</span></div>
+<div class="code-line"><span class="line-no">  22</span><span class="line-src">  it('creates parent directories and writes formatted JSON', () =&gt; {</span></div>
+<div class="code-line"><span class="line-no">  23</span><span class="line-src">    const dir = tmpDir();</span></div>
+<div class="code-line"><span class="line-no">  24</span><span class="line-src">    const file = path.join(dir, 'nested', 'state.json');</span></div>
+<div class="code-line"><span class="line-no">  25</span><span class="line-src">    writeJsonFile(file, { ok: true });</span></div>
+<div class="code-line"><span class="line-no">  26</span><span class="line-src">    expect(JSON.parse(fs.readFileSync(file, 'utf-8'))).toEqual({ ok: true });</span></div>
+<div class="code-line"><span class="line-no">  27</span><span class="line-src">  });</span></div>
+<div class="code-line"><span class="line-no">  28</span><span class="line-src">});</span></div>
+<div class="code-line"><span class="line-no">  29</span><span class="line-src"></span></div></div>
+          </section>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel readme-panel">
+      <header class="panel-header">
+        <div>
+          <h2>README.md</h2>
+          <p>beacon/src/write-json-file/README.md</p>
+        </div>
+      </header>
+      <div class="panel-body prose">
+        <h1><code>writeJsonFile</code></h1>
+<p>Writes JSON with stable formatting and creates parent directories as needed.</p>
+<p>This supports beacon bootstrap creating local state and fleet records deterministically.</p>
+
+      </div>
+    </section>
+
+    <script type="application/json" id="page-metadata">{"commentaryLabel":"beacon/src/write-json-file/write-json-file.ts","testLabel":"beacon/src/write-json-file/write-json-file.test.ts"}</script>
+  
+    </main>
+  </div>
+  <script src="../../../assets/code-view.js"></script>
+</body>
+</html>

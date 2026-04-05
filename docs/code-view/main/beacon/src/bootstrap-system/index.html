@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>beacon/src/bootstrap-system · Code View</title>
+  <link rel="stylesheet" href="../../../assets/code-view.css">
+</head>
+<body>
+  <div class="docs-shell">
+    <aside class="sidebar">
+      <a class="brand" href="../../../index.html">
+        <span class="brand-mark">IC</span>
+        <span>
+          <span class="brand-title">InfiniClaw Code View</span>
+          <span class="brand-subtitle">version main</span>
+        </span>
+      </a>
+      <nav class="sidebar-nav"><section class="nav-group"><h2>beacon/src</h2><ul><li><a class="active" href="index.html">bootstrap-system</a></li>
+<li><a class="" href="../build-relay-start-command/index.html">build-relay-start-command</a></li>
+<li><a class="" href="../default-bootstrap-input/index.html">default-bootstrap-input</a></li>
+<li><a class="" href="../merge-system-record/index.html">merge-system-record</a></li>
+<li><a class="" href="../parse-args/index.html">parse-args</a></li>
+<li><a class="" href="../read-json-file/index.html">read-json-file</a></li>
+<li><a class="" href="../upsert-system-record/index.html">upsert-system-record</a></li>
+<li><a class="" href="../validate-input/index.html">validate-input</a></li>
+<li><a class="" href="../write-beacon-state/index.html">write-beacon-state</a></li>
+<li><a class="" href="../write-json-file/index.html">write-json-file</a></li></ul></section></nav>
+    </aside>
+    <main class="content">
+      
+    <header class="page-header">
+      <p class="eyebrow">Code Piece</p>
+      <h1>bootstrap-system</h1>
+      <p class="lede">beacon/src/bootstrap-system</p>
+      <div class="stats">
+        <span>LOC 34</span>
+        <span>CCN 3</span>
+        <span>comments 1</span>
+        <span>test LOC 79</span>
+        <span>test CCN 2</span>
+      </div>
+    </header>
+
+    <section class="split-view">
+      <article class="panel">
+        <header class="panel-header">
+          <div>
+            <h2>Code</h2>
+            <p>beacon/src/bootstrap-system/bootstrap-system.ts</p>
+          </div>
+        </header>
+        <div class="panel-body code-block"><div class="code-line"><span class="line-no">   1</span><span class="line-src">import fs from 'fs';</span></div>
+<div class="code-line"><span class="line-no">   2</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   3</span><span class="line-src">import { buildRelayStartCommand } from '../build-relay-start-command/build-relay-start-command.js';</span></div>
+<div class="code-line"><span class="line-no">   4</span><span class="line-src">import { upsertSystemRecord } from '../upsert-system-record/upsert-system-record.js';</span></div>
+<div class="code-line"><span class="line-no">   5</span><span class="line-src">import type { BootstrapInput, BootstrapResult } from '../types.js';</span></div>
+<div class="code-line"><span class="line-no">   6</span><span class="line-src">import { validateInput } from '../validate-input/validate-input.js';</span></div>
+<div class="code-line"><span class="line-no">   7</span><span class="line-src">import { writeBeaconState } from '../write-beacon-state/write-beacon-state.js';</span></div>
+<div class="code-line"><span class="line-no">   8</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   9</span><span class="line-src">/**</span></div>
+<div class="code-line"><span class="line-no">  10</span><span class="line-src"> * Purpose: execute the phase-1 beacon bootstrap flow for one system.</span></div>
+<div class="code-line"><span class="line-no">  11</span><span class="line-src"> * Requirement: beacon bootstrap must validate input, register the system,</span></div>
+<div class="code-line"><span class="line-no">  12</span><span class="line-src"> * write local beacon state, and prepare the first relay start command.</span></div>
+<div class="code-line"><span class="line-no">  13</span><span class="line-src"> */</span></div>
+<div class="code-line"><span class="line-no">  14</span><span class="line-src">export function bootstrapSystem(input: BootstrapInput): BootstrapResult {</span></div>
+<div class="code-line"><span class="line-no">  15</span><span class="line-src">  validateInput(input);</span></div>
+<div class="code-line"><span class="line-no">  16</span><span class="line-src">  if (input.apply) fs.mkdirSync(input.stateDir, { recursive: true });</span></div>
+<div class="code-line"><span class="line-no">  17</span><span class="line-src">  const { systemsPath, systemRecord } = upsertSystemRecord(input, input.apply);</span></div>
+<div class="code-line"><span class="line-no">  18</span><span class="line-src">  const beaconStatePath = writeBeaconState(input, input.apply);</span></div>
+<div class="code-line"><span class="line-no">  19</span><span class="line-src">  return {</span></div>
+<div class="code-line"><span class="line-no">  20</span><span class="line-src">    steps: [</span></div>
+<div class="code-line"><span class="line-no">  21</span><span class="line-src">      { id: 'verify-input', description: 'verify bootstrap inputs' },</span></div>
+<div class="code-line"><span class="line-no">  22</span><span class="line-src">      { id: 'verify-public', description: `verify ${input.publicDir} is a usable fleet public working copy` },</span></div>
+<div class="code-line"><span class="line-no">  23</span><span class="line-src">      { id: 'verify-secrets', description: `verify ${input.secretsDir} is a usable fleet secrets working copy` },</span></div>
+<div class="code-line"><span class="line-no">  24</span><span class="line-src">      { id: 'register-system', description: `register or update system ${input.systemId} in systems.json` },</span></div>
+<div class="code-line"><span class="line-no">  25</span><span class="line-src">      { id: 'write-state', description: 'write local beacon state' },</span></div>
+<div class="code-line"><span class="line-no">  26</span><span class="line-src">      { id: 'start-relay', description: 'emit the first relay start command' },</span></div>
+<div class="code-line"><span class="line-no">  27</span><span class="line-src">    ],</span></div>
+<div class="code-line"><span class="line-no">  28</span><span class="line-src">    systemRecord,</span></div>
+<div class="code-line"><span class="line-no">  29</span><span class="line-src">    systemsPath,</span></div>
+<div class="code-line"><span class="line-no">  30</span><span class="line-src">    beaconStatePath,</span></div>
+<div class="code-line"><span class="line-no">  31</span><span class="line-src">    relayStartCommand: buildRelayStartCommand(input),</span></div>
+<div class="code-line"><span class="line-no">  32</span><span class="line-src">  };</span></div>
+<div class="code-line"><span class="line-no">  33</span><span class="line-src">}</span></div>
+<div class="code-line"><span class="line-no">  34</span><span class="line-src"></span></div></div>
+      </article>
+
+      <article class="panel">
+        <header class="panel-header panel-header-tabs">
+          <div>
+            <h2>Details</h2>
+            <p id="right-pane-label">beacon/src/bootstrap-system/bootstrap-system.ts</p>
+          </div>
+          <div class="tab-row" role="tablist" aria-label="Right pane view">
+            <button class="tab-button active" data-target="commentary" type="button">Commentary</button>
+            <button class="tab-button" data-target="test" type="button">Test File</button>
+          </div>
+        </header>
+        <div class="panel-body">
+          <section class="tab-panel active" data-panel="commentary">
+            <article class="comment-card"><div class="comment-line">line 9</div><div class="comment-text">Purpose: execute the phase-1 beacon bootstrap flow for one system.
+Requirement: beacon bootstrap must validate input, register the system,
+write local beacon state, and prepare the first relay start command.
+/</div></article>
+          </section>
+          <section class="tab-panel tab-panel-code" data-panel="test">
+            <div class="code-block"><div class="code-line"><span class="line-no">   1</span><span class="line-src">import fs from 'fs';</span></div>
+<div class="code-line"><span class="line-no">   2</span><span class="line-src">import os from 'os';</span></div>
+<div class="code-line"><span class="line-no">   3</span><span class="line-src">import path from 'path';</span></div>
+<div class="code-line"><span class="line-no">   4</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   5</span><span class="line-src">import { afterEach, describe, expect, it } from 'vitest';</span></div>
+<div class="code-line"><span class="line-no">   6</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">   7</span><span class="line-src">import { defaultBootstrapInput } from '../default-bootstrap-input/default-bootstrap-input.js';</span></div>
+<div class="code-line"><span class="line-no">   8</span><span class="line-src">import { bootstrapSystem } from './bootstrap-system.js';</span></div>
+<div class="code-line"><span class="line-no">   9</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">  10</span><span class="line-src">const dirs: string[] = [];</span></div>
+<div class="code-line"><span class="line-no">  11</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">  12</span><span class="line-src">function tmpDir(): string {</span></div>
+<div class="code-line"><span class="line-no">  13</span><span class="line-src">  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'beacon-bootstrap-system-'));</span></div>
+<div class="code-line"><span class="line-no">  14</span><span class="line-src">  dirs.push(dir);</span></div>
+<div class="code-line"><span class="line-no">  15</span><span class="line-src">  return dir;</span></div>
+<div class="code-line"><span class="line-no">  16</span><span class="line-src">}</span></div>
+<div class="code-line"><span class="line-no">  17</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">  18</span><span class="line-src">afterEach(() =&gt; {</span></div>
+<div class="code-line"><span class="line-no">  19</span><span class="line-src">  while (dirs.length &gt; 0) fs.rmSync(dirs.pop()!, { recursive: true, force: true });</span></div>
+<div class="code-line"><span class="line-no">  20</span><span class="line-src">});</span></div>
+<div class="code-line"><span class="line-no">  21</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">  22</span><span class="line-src">describe('bootstrapSystem', () =&gt; {</span></div>
+<div class="code-line"><span class="line-no">  23</span><span class="line-src">  it('returns a dry-run result without writing files', () =&gt; {</span></div>
+<div class="code-line"><span class="line-no">  24</span><span class="line-src">    const publicDir = tmpDir();</span></div>
+<div class="code-line"><span class="line-no">  25</span><span class="line-src">    const secretsDir = tmpDir();</span></div>
+<div class="code-line"><span class="line-no">  26</span><span class="line-src">    const stateDir = path.join(tmpDir(), 'state');</span></div>
+<div class="code-line"><span class="line-no">  27</span><span class="line-src">    const input = defaultBootstrapInput({</span></div>
+<div class="code-line"><span class="line-no">  28</span><span class="line-src">      fleetName: 'OGIC',</span></div>
+<div class="code-line"><span class="line-no">  29</span><span class="line-src">      systemId: 'poseidon',</span></div>
+<div class="code-line"><span class="line-no">  30</span><span class="line-src">      name: 'Poseidon',</span></div>
+<div class="code-line"><span class="line-no">  31</span><span class="line-src">      emoji: '🌊',</span></div>
+<div class="code-line"><span class="line-no">  32</span><span class="line-src">      hostname: 'mac139160',</span></div>
+<div class="code-line"><span class="line-no">  33</span><span class="line-src">      publicDir,</span></div>
+<div class="code-line"><span class="line-no">  34</span><span class="line-src">      secretsDir,</span></div>
+<div class="code-line"><span class="line-no">  35</span><span class="line-src">      stateDir,</span></div>
+<div class="code-line"><span class="line-no">  36</span><span class="line-src">      relayVersion: 'v2.0.0',</span></div>
+<div class="code-line"><span class="line-no">  37</span><span class="line-src">      relayRepo: '/tmp/infiniclaw-relay',</span></div>
+<div class="code-line"><span class="line-no">  38</span><span class="line-src">      apply: false,</span></div>
+<div class="code-line"><span class="line-no">  39</span><span class="line-src">    });</span></div>
+<div class="code-line"><span class="line-no">  40</span><span class="line-src">    const result = bootstrapSystem(input);</span></div>
+<div class="code-line"><span class="line-no">  41</span><span class="line-src">    expect(result.systemRecord).toEqual({</span></div>
+<div class="code-line"><span class="line-no">  42</span><span class="line-src">      name: 'Poseidon',</span></div>
+<div class="code-line"><span class="line-no">  43</span><span class="line-src">      emoji: '🌊',</span></div>
+<div class="code-line"><span class="line-no">  44</span><span class="line-src">      hostname: 'mac139160',</span></div>
+<div class="code-line"><span class="line-no">  45</span><span class="line-src">    });</span></div>
+<div class="code-line"><span class="line-no">  46</span><span class="line-src">    expect(fs.existsSync(result.systemsPath)).toBe(false);</span></div>
+<div class="code-line"><span class="line-no">  47</span><span class="line-src">    expect(fs.existsSync(result.beaconStatePath)).toBe(false);</span></div>
+<div class="code-line"><span class="line-no">  48</span><span class="line-src">  });</span></div>
+<div class="code-line"><span class="line-no">  49</span><span class="line-src"></span></div>
+<div class="code-line"><span class="line-no">  50</span><span class="line-src">  it('writes state on apply', () =&gt; {</span></div>
+<div class="code-line"><span class="line-no">  51</span><span class="line-src">    const publicDir = tmpDir();</span></div>
+<div class="code-line"><span class="line-no">  52</span><span class="line-src">    const secretsDir = tmpDir();</span></div>
+<div class="code-line"><span class="line-no">  53</span><span class="line-src">    const stateDir = tmpDir();</span></div>
+<div class="code-line"><span class="line-no">  54</span><span class="line-src">    const input = defaultBootstrapInput({</span></div>
+<div class="code-line"><span class="line-no">  55</span><span class="line-src">      systemId: 'poseidon',</span></div>
+<div class="code-line"><span class="line-no">  56</span><span class="line-src">      name: 'Poseidon',</span></div>
+<div class="code-line"><span class="line-no">  57</span><span class="line-src">      emoji: '🌊',</span></div>
+<div class="code-line"><span class="line-no">  58</span><span class="line-src">      hostname: 'mac139160',</span></div>
+<div class="code-line"><span class="line-no">  59</span><span class="line-src">      publicDir,</span></div>
+<div class="code-line"><span class="line-no">  60</span><span class="line-src">      secretsDir,</span></div>
+<div class="code-line"><span class="line-no">  61</span><span class="line-src">      stateDir,</span></div>
+<div class="code-line"><span class="line-no">  62</span><span class="line-src">      relayVersion: 'v2.0.0',</span></div>
+<div class="code-line"><span class="line-no">  63</span><span class="line-src">      relayRepo: '/tmp/infiniclaw-relay',</span></div>
+<div class="code-line"><span class="line-no">  64</span><span class="line-src">      spaceId: '!poseidon:a-gis.org',</span></div>
+<div class="code-line"><span class="line-no">  65</span><span class="line-src">      apply: true,</span></div>
+<div class="code-line"><span class="line-no">  66</span><span class="line-src">    });</span></div>
+<div class="code-line"><span class="line-no">  67</span><span class="line-src">    const result = bootstrapSystem(input);</span></div>
+<div class="code-line"><span class="line-no">  68</span><span class="line-src">    expect(JSON.parse(fs.readFileSync(result.systemsPath, 'utf-8'))).toEqual({</span></div>
+<div class="code-line"><span class="line-no">  69</span><span class="line-src">      poseidon: {</span></div>
+<div class="code-line"><span class="line-no">  70</span><span class="line-src">        name: 'Poseidon',</span></div>
+<div class="code-line"><span class="line-no">  71</span><span class="line-src">        emoji: '🌊',</span></div>
+<div class="code-line"><span class="line-no">  72</span><span class="line-src">        hostname: 'mac139160',</span></div>
+<div class="code-line"><span class="line-no">  73</span><span class="line-src">        spaceId: '!poseidon:a-gis.org',</span></div>
+<div class="code-line"><span class="line-no">  74</span><span class="line-src">      },</span></div>
+<div class="code-line"><span class="line-no">  75</span><span class="line-src">    });</span></div>
+<div class="code-line"><span class="line-no">  76</span><span class="line-src">    expect(JSON.parse(fs.readFileSync(result.beaconStatePath, 'utf-8')).systemId);</span></div>
+<div class="code-line"><span class="line-no">  77</span><span class="line-src">  });</span></div>
+<div class="code-line"><span class="line-no">  78</span><span class="line-src">});</span></div>
+<div class="code-line"><span class="line-no">  79</span><span class="line-src"></span></div></div>
+          </section>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel readme-panel">
+      <header class="panel-header">
+        <div>
+          <h2>README.md</h2>
+          <p>beacon/src/bootstrap-system/README.md</p>
+        </div>
+      </header>
+      <div class="panel-body prose">
+        <h1><code>bootstrapSystem</code></h1>
+<p>Coordinates the beacon bootstrap flow:</p>
+<ul>
+<li>validate input</li>
+<li>update <code>systems.json</code></li>
+<li>write local beacon state</li>
+<li>emit the relay start command</li>
+</ul>
+<p>This is the core phase-1 beacon capability.</p>
+
+      </div>
+    </section>
+
+    <script type="application/json" id="page-metadata">{"commentaryLabel":"beacon/src/bootstrap-system/bootstrap-system.ts","testLabel":"beacon/src/bootstrap-system/bootstrap-system.test.ts"}</script>
+  
+    </main>
+  </div>
+  <script src="../../../assets/code-view.js"></script>
+</body>
+</html>

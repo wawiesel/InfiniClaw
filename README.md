@@ -84,6 +84,82 @@ See [`VALUES.md`](VALUES.md) for the Captain's guiding principles — simplicity
 
 See [`docs/design/README.md`](docs/design/README.md) for the architecture document index.
 
+## Beacon Bootstrap
+
+The in-repo beacon package is in [`beacon/`](beacon/README.md).
+
+Build and test it with:
+
+```bash
+npm run beacon:build
+npm run beacon:test
+```
+
+Bootstrap usage:
+
+```bash
+node beacon/dist/cli.js bootstrap \
+  --fleet OGIC \
+  --system-id poseidon \
+  --name Poseidon \
+  --emoji 🌊 \
+  --hostname mac139160 \
+  --public-dir /path/to/OGIC-public \
+  --secrets-dir /path/to/OGIC-secrets \
+  --state-dir /path/to/local-beacon-state \
+  --relay-version v2.0.0 \
+  --relay-repo /path/to/infiniclaw-relay \
+  [--space-id '!poseidon:a-gis.org'] \
+  [--apply]
+```
+
+Bootstrap options:
+
+| Option | Required | Purpose |
+|---|---|---|
+| `--fleet` | yes | Fleet name |
+| `--system-id` | yes | Stable id written to `systems.json` |
+| `--name` | yes | Human-facing system name |
+| `--emoji` | yes | Leading system emoji |
+| `--hostname` | yes | Physical machine hostname |
+| `--public-dir` | yes | Local working copy of fleet public state |
+| `--secrets-dir` | yes | Local working copy of fleet secrets |
+| `--state-dir` | yes | Local beacon state directory |
+| `--relay-version` | yes | Relay version beacon intends to start |
+| `--relay-repo` | yes | Local relay repo path used to build the start command |
+| `--space-id` | no | Existing Matrix system space id to preserve or record |
+| `--apply` | no | Write files instead of dry-run only |
+
+## Code View
+
+Build the static code-view pages with:
+
+```bash
+npm run codeview:build
+```
+
+The generator scans the repo for code pieces that follow the required layout:
+
+```text
+<area>/<piece>/README.md
+<area>/<piece>/<piece>.ts
+<area>/<piece>/<piece>.test.ts
+```
+
+The generated site is branch-versioned. The stable entrypoint is:
+
+- [`docs/code-view/index.html`](docs/code-view/index.html)
+
+The current branch build is emitted under:
+
+- `docs/code-view/<branch>/index.html`
+
+Each code piece page has:
+
+- source code on the left
+- a right-pane toggle between extracted commentary and the raw test file
+- rendered `README.md` below
+
 ## Testing
 
 ```bash

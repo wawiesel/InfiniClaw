@@ -7,7 +7,7 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root,
   test: {
-    include: ['src/__tests__/**/*.test.ts'],
+    include: ['src/**/*.test.ts'],
     testTimeout: 10_000,
   },
 });

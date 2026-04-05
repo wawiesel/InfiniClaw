@@ -10,6 +10,7 @@
     "build": "npm install --ignore-scripts 2>/dev/null; npm run build -w nanoclaw; npx tsc",
     "beacon:build": "npx tsc -p beacon/tsconfig.json",
     "beacon:test": "vitest run --config beacon/vitest.config.ts",
+    "codeview:build": "node tools/build-code-view.mjs",
     "dev": "npm run build -w nanoclaw && tsc --watch",
     "cli": "node dist/cli.js",
     "test": "vitest run --root .",

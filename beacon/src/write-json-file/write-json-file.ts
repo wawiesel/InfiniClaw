@@ -1,11 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 
-export function readJsonFile<T>(file: string): T | null {
-  if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf-8')) as T;
-}
-
+/**
+ * Purpose: write formatted JSON while creating any missing parent directories.
+ * Requirement: beacon state writers must be able to materialize new local files safely.
+ */
 export function writeJsonFile(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
