@@ -130,7 +130,7 @@ Bootstrap options:
 | `--space-id` | no | Existing Matrix system space id to preserve or record |
 | `--apply` | no | Write files instead of dry-run only |
 
-## Code View
+## Beacon Docs
 
 Build the static code-view pages with:
 
@@ -146,13 +146,13 @@ The generator scans the repo for code pieces that follow the required layout:
 <area>/<piece>/<piece>.test.ts
 ```
 
-The generated site is branch-versioned. The stable entrypoint is:
+The generated beacon docs live under `docs/beacon/`. The entrypoint is:
 
-- [`docs/code-view/index.html`](docs/code-view/index.html)
+- [`docs/beacon/index.html`](docs/beacon/index.html)
 
-The current branch build is emitted under:
+Piece pages follow the source tree rooted at `BEACON_ROOT/src/`. For example:
 
-- `docs/code-view/<branch>/index.html`
+- `docs/beacon/src/bootstrap-system/index.html`
 
 Each code piece page has:
 

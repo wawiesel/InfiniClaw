@@ -35,7 +35,7 @@ while IFS= read -r file; do
   # docs/ — fixed file list
   if [[ "$file" == docs/* ]]; then
     case "$file" in
-      docs/LESSONS_LEARNED.md|docs/SETUP.md|docs/assets/*|docs/faq/*|docs/design/*|docs/code-view/*) ;;
+      docs/LESSONS_LEARNED.md|docs/SETUP.md|docs/assets/*|docs/faq/*|docs/design/*|docs/beacon/*) ;;
       *) docs_errors+=("$file") ;;
     esac
   fi
@@ -62,7 +62,7 @@ fi
 if [[ ${#docs_errors[@]} -gt 0 ]]; then
   echo "ERROR: New files added to docs/ outside the fixed set:"
   echo ""
-  echo "  Allowed: LESSONS_LEARNED.md, SETUP.md, assets/*, faq/*, design/*, code-view/*"
+  echo "  Allowed: LESSONS_LEARNED.md, SETUP.md, assets/*, faq/*, design/*, beacon/*"
   echo ""
   echo "  Rejected:"
   for f in "${docs_errors[@]}"; do

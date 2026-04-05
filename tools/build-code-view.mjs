@@ -6,7 +6,9 @@ import path from 'path';
 import { marked } from 'marked';
 
 const ROOT = process.cwd();
-const CODE_VIEW_ROOT = path.join(ROOT, 'docs', 'code-view');
+const SITE_NAME = process.env.CODEVIEW_SITE_NAME ?? 'beacon';
+const SITE_SOURCE_ROOT = path.join(ROOT, process.env.CODEVIEW_SOURCE_ROOT ?? 'beacon');
+const CODE_VIEW_ROOT = path.join(ROOT, 'docs', SITE_NAME);
 const SKIP_DIRS = new Set([
   '.git',
   '.tmp',
@@ -64,6 +66,10 @@ function relativeFromRoot(file) {
   return normalizePath(path.relative(ROOT, file));
 }
 
+function relativeFromSiteRoot(file) {
+  return normalizePath(path.relative(SITE_SOURCE_ROOT, file));
+}
+
 function getMatchingSourceFile(dir, piece) {
   for (const extension of SOURCE_EXTENSIONS) {
     const sourceFile = path.join(dir, `${piece}${extension}`);
@@ -88,7 +94,7 @@ function collectEntries(dir, entries) {
     const readmeFile = path.join(fullDir, 'README.md');
     const sourceMatch = getMatchingSourceFile(fullDir, entry.name);
     if (fs.existsSync(readmeFile) && sourceMatch) {
-      const relativeDir = relativeFromRoot(fullDir);
+      const relativeDir = relativeFromSiteRoot(fullDir);
       entries.push({
         directory: relativeDir,
         displayName: entry.name,
@@ -356,7 +362,8 @@ function renderVersionIndex(entries, version, versionRoot) {
       <h1>InfiniClaw implementation pages</h1>
       <p class="lede">This site renders every code piece that follows the one-piece-per-directory rule: \`piece/README.md\`, \`piece.ts\`, and \`piece.test.ts\`.</p>
       <div class="stats">
-        <span>version ${escapeHtml(version)}</span>
+        <span>site ${escapeHtml(SITE_NAME)}</span>
+        <span>branch ${escapeHtml(version)}</span>
         <span>pieces ${entries.length}</span>
       </div>
     </header>
@@ -372,45 +379,6 @@ function renderVersionIndex(entries, version, versionRoot) {
     scriptHref,
     brandHref,
   });
-}
-
-function renderRootIndex(version, versionDir) {
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>InfiniClaw Code View</title>
-  <meta http-equiv="refresh" content="0; url=./${escapeHtml(versionDir)}/index.html">
-  <style>
-    body {
-      margin: 0;
-      font: 16px/1.5 ui-sans-serif, system-ui, sans-serif;
-      background: #f7f7f5;
-      color: #22323f;
-      display: grid;
-      place-items: center;
-      min-height: 100vh;
-    }
-    .card {
-      background: white;
-      border: 1px solid #d8dfdf;
-      border-radius: 16px;
-      padding: 24px 28px;
-      width: min(560px, calc(100vw - 32px));
-      box-shadow: 0 12px 30px rgba(18, 33, 42, 0.08);
-    }
-    a { color: #0b5d7a; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>InfiniClaw Code View</h1>
-    <p>Redirecting to the generated branch version for <strong>${escapeHtml(version)}</strong>.</p>
-    <p><a href="./${escapeHtml(versionDir)}/index.html">Open the code view site</a></p>
-  </div>
-</body>
-</html>`;
 }
 
 function renderStylesheet() {
@@ -823,11 +791,10 @@ document.querySelectorAll('.panel-header-tabs').forEach((header) => {
 
 function main() {
   const version = getBranchName();
-  const versionDir = sanitizeVersion(version);
-  const versionRoot = path.join(CODE_VIEW_ROOT, versionDir);
+  const versionRoot = CODE_VIEW_ROOT;
   const entries = [];
 
-  collectEntries(ROOT, entries);
+  collectEntries(SITE_SOURCE_ROOT, entries);
   entries.sort((left, right) => left.directory.localeCompare(right.directory));
 
   fs.rmSync(CODE_VIEW_ROOT, { recursive: true, force: true });
@@ -842,7 +809,6 @@ function main() {
   }
 
   writeText(path.join(versionRoot, 'index.html'), renderVersionIndex(entries, version, versionRoot));
-  writeText(path.join(CODE_VIEW_ROOT, 'index.html'), renderRootIndex(version, versionDir));
 
   console.log(`Built code view → ${normalizePath(path.relative(ROOT, versionRoot))}`);
 }
