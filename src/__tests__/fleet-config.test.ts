@@ -8,6 +8,7 @@ import {
   fleetId,
   SHIPS_S3_KEY,
   clearShipConfigCache,
+  hasFleetDashboardHost,
   isValidBotName,
   SAFE_BOT_NAME,
   loadFleet,
@@ -58,6 +59,22 @@ describe('fleetConfigKey', () => {
 describe('SHIPS_S3_KEY', () => {
   it('is the expected constant path', () => {
     expect(SHIPS_S3_KEY).toBe('fleet-config/ships.json');
+  });
+});
+
+describe('hasFleetDashboardHost', () => {
+  it('returns true when any entry on the hostname is marked as dashboard host', () => {
+    expect(hasFleetDashboardHost({
+      Posi: { hostname: 'Poseidon', ip: null, os: 'Linux', user: 'wawiesel', commissioned: true, rank: 2, hostsFleetDashboard: true },
+      IC01: { hostname: 'Poseidon', ip: null, os: 'Linux', user: 'wawiesel', commissioned: false, rank: 99 },
+    }, 'Poseidon')).toBe(true);
+  });
+
+  it('returns false when the hostname has no flagged entries', () => {
+    expect(hasFleetDashboardHost({
+      Herm: { hostname: 'mac139160', ip: null, os: 'macOS', user: 'ww5', commissioned: true, rank: 4 },
+      Posi: { hostname: 'Poseidon', ip: null, os: 'Linux', user: 'wawiesel', commissioned: true, rank: 2 },
+    }, 'mac139160')).toBe(false);
   });
 });
 

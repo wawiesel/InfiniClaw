@@ -14,7 +14,7 @@ import { parseEnvFile } from './env-utils.js';
 import { capitalizeName } from './formatting.js';
 import { recoverPodman, stopContainersByPrefix, getPodmanContainerNames, stopContainer } from './podman-utils.js';
 
-import { loadShipConfig, loadFleet, isValidBotName, ROLE_ROOMS } from './ship-config.js';
+import { loadShipConfig, loadFleet, isValidBotName, ROLE_ROOMS, hostsFleetDashboard } from './ship-config.js';
 import { shellQuote, errStr } from './utils.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -598,12 +598,94 @@ export function rebuildImageIfChanged(root: string, bot: string): void {
 // ── pm2 helpers ─────────────────────────────────────────────────────
 
 const PM2_PREFIX = process.env['INFINICLAW_PM2_PREFIX'] || 'infiniclaw';
+const DASHBOARD_PM2_NAME = `${PM2_PREFIX}-dashboard`;
 function pm2Name(bot: string): string {
   return `${PM2_PREFIX}-${bot}`;
 }
 
 function pm2Stop(name: string): void {
   try { execFileSync(PM2_BIN, ['delete', name], { stdio: 'pipe' }); } catch { /* ok — not running */ }
+}
+
+function pm2ListNames(): Set<string> {
+  try {
+    const out = execFileSync(PM2_BIN, ['jlist'], { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' });
+    return new Set((JSON.parse(out) as Array<{ name: string }>).map((proc) => proc.name));
+  } catch {
+    return new Set();
+  }
+}
+
+function pm2Has(name: string): boolean {
+  return pm2ListNames().has(name);
+}
+
+export type DashboardProcessMode = 'startup' | 'code-change';
+export type DashboardProcessAction = 'disabled' | 'already-running' | 'started' | 'restarted' | 'stopped';
+
+export function decideDashboardProcessAction(isHost: boolean, running: boolean, mode: DashboardProcessMode): DashboardProcessAction {
+  if (!isHost) return running ? 'stopped' : 'disabled';
+  if (!running) return 'started';
+  return mode === 'code-change' ? 'restarted' : 'already-running';
+}
+
+export function startDashboard(): void {
+  const root = resolveRoot();
+  const logs = logDir(root);
+  fs.mkdirSync(logs, { recursive: true });
+  pm2Stop(DASHBOARD_PM2_NAME);
+
+  const distFile = path.join(root, 'dist', 'dashboard-server.js');
+  if (!fs.existsSync(distFile)) {
+    throw new Error('dist/dashboard-server.js not found — run `npm run build` first');
+  }
+
+  const outLog = path.join(logs, 'dashboard.log');
+  const errLog = path.join(logs, 'dashboard.error.log');
+
+  execFileSync(
+    PM2_BIN,
+    [
+      'start',
+      process.execPath,
+      '--name', DASHBOARD_PM2_NAME,
+      '--cwd', root,
+      '--output', outLog,
+      '--error', errLog,
+      '--restart-delay', '5000',
+      '--max-restarts', '50',
+      '--',
+      distFile,
+    ],
+    {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        INFINICLAW_ROOT: root,
+        HOME: os.homedir(),
+        PATH: `${path.dirname(process.execPath)}:${os.homedir()}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin`,
+      },
+    },
+  );
+}
+
+export function syncDashboardProcess(mode: DashboardProcessMode = 'startup'): DashboardProcessAction {
+  const action = decideDashboardProcessAction(hostsFleetDashboard(), pm2Has(DASHBOARD_PM2_NAME), mode);
+  switch (action) {
+    case 'started':
+      startDashboard();
+      break;
+    case 'restarted':
+      execFileSync(PM2_BIN, ['restart', DASHBOARD_PM2_NAME], { stdio: 'inherit' });
+      break;
+    case 'stopped':
+      pm2Stop(DASHBOARD_PM2_NAME);
+      break;
+    case 'already-running':
+    case 'disabled':
+      break;
+  }
+  return action;
 }
 
 /** Stamp git version info into instance so running code knows its deploy commit. */
@@ -790,11 +872,9 @@ function pm2StartBot(bot: string, nodeBin: string, instance: string, logs: strin
 export function removeStaleProcesses(): void {
   const validNames = new Set(getActiveBots().map(pm2Name));
   validNames.add(RELAY_PM2_NAME);
-  validNames.add(`${PM2_PREFIX}-dashboard`);
+  if (hostsFleetDashboard()) validNames.add(DASHBOARD_PM2_NAME);
   try {
-    const out = execFileSync(PM2_BIN, ['jlist'], { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' });
-    const list = JSON.parse(out) as Array<{ name: string }>;
-    for (const proc of list) {
+    for (const proc of Array.from(pm2ListNames(), (name) => ({ name }))) {
       if (proc.name.startsWith(`${PM2_PREFIX}-`) && !validNames.has(proc.name)) {
         pm2Stop(proc.name);
         console.log(`Removed stale process: ${proc.name}`);
@@ -1022,6 +1102,9 @@ export function startRelay(): void {
       },
     },
   );
+  const dashAction = syncDashboardProcess('startup');
+  if (dashAction === 'started') console.log('dashboard: started');
+  if (dashAction === 'stopped') console.log('dashboard: stopped on non-host system');
   console.log('relay: started');
 }
 
@@ -1093,6 +1176,7 @@ export function stopAll(): void {
   killStaleContainers();
   removeStaleProcesses();
   pm2Stop(RELAY_PM2_NAME);
+  pm2Stop(DASHBOARD_PM2_NAME);
   stopRouter();
   console.log('relay: stopped');
 }
