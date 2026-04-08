@@ -92,6 +92,7 @@ import {
   collectBotMatrixUserMap,
   readRoomStateStamp,
   startNextRelay,
+  syncDashboardProcess,
 } from './service.js';
 import { relayShouldWriteWakeDisplayName } from './display-name-policy.js';
 import { getLatestSemverTag, getStampedSemverTag, getLatestSemverTagOnRef, commitsAheadOfTag } from './version.js';
@@ -2096,10 +2097,11 @@ async function gitSyncLoop(conns: RoomConn[]): Promise<void> {
             // Auto-restart dashboard pm2 if dashboard-server.ts or status.ts changed
             if (hasDashboardChanges(resolveRoot(), result.newCommits)) {
               try {
-                const dashName = `${process.env['INFINICLAW_PM2_NAME'] || 'infiniclaw'}-dashboard`;
-                log('git sync: dashboard files changed — restarting dashboard');
-                execSync(`npx pm2 restart ${dashName}`, gitOpts(resolveRoot(), 10_000));
-                if (engConn && threadRoot) await threadReply(engConn, threadRoot, `📊 dashboard restarted`);
+                const action = syncDashboardProcess('code-change');
+                log(`git sync: dashboard files changed — ${action}`);
+                if (engConn && threadRoot && (action === 'started' || action === 'restarted')) {
+                  await threadReply(engConn, threadRoot, `📊 dashboard ${action}`);
+                }
               } catch (err) {
                 log(`git sync: dashboard restart failed: ${errStr(err)}`);
               }
@@ -3059,6 +3061,13 @@ async function secretsSyncLoop(conns: RoomConn[]): Promise<void> {
       } else if (result.newCommits > 0) {
         await reportRecovery('secrets sync', conns);
         log(`secrets sync: pulled ${result.newCommits} new commit(s)`);
+        try {
+          await loadShipsAsync();
+          const dashAction = syncDashboardProcess('startup');
+          log(`secrets sync: dashboard host state ${dashAction}`);
+        } catch (err) {
+          log(`secrets sync: dashboard host refresh failed: ${errStr(err)}`);
+        }
 
         // Check inbox for pending items targeting this ship
         try {
@@ -6000,6 +6009,8 @@ async function main(): Promise<void> {
   try {
     await loadShipsAsync();
     log('ships: loaded from S3 (disk cache updated)');
+    const dashAction = syncDashboardProcess('startup');
+    log(`dashboard: ${dashAction}`);
   } catch (err) {
     log(`ships: S3 load failed, using disk: ${errStr(err)}`);
   }

@@ -408,6 +408,7 @@ export interface ShipEntry {
   loungeId?: string;
   quartersSpaceId?: string;
   operatorRelay?: boolean; // whether @ messages are forwarded to this ship's operator tmux
+  hostsFleetDashboard?: boolean; // whether this system should host fleet.a-gis.org services
 }
 
 /**
@@ -477,14 +478,20 @@ export function safeLoadShips(): Record<string, ShipEntry> {
   try { return loadShips(); } catch { return {}; }
 }
 
+/** Pure helper: does any ship entry on this hostname host the fleet dashboard? */
+export function hasFleetDashboardHost(ships: Record<string, ShipEntry>, hostname: string): boolean {
+  return Object.values(ships).some((entry) => entry.hostname === hostname && entry.hostsFleetDashboard === true);
+}
+
+/** Find all ship entries for a hostname. */
+export function findShipsByHostname(hostname?: string): Array<[string, ShipEntry]> {
+  const h = hostname ?? os.hostname();
+  return Object.entries(safeLoadShips()).filter(([, entry]) => entry.hostname === h);
+}
+
 /** Find ship entry by hostname. Returns [name, entry] or undefined. */
 export function findShipByHostname(hostname?: string): [string, ShipEntry] | undefined {
-  const h = hostname ?? os.hostname();
-  const ships = safeLoadShips();
-  for (const [name, entry] of Object.entries(ships)) {
-    if (entry.hostname === h) return [name, entry];
-  }
-  return undefined;
+  return findShipsByHostname(hostname)[0];
 }
 
 /** Get this ship's entry, looking up by hostname. */
@@ -500,6 +507,11 @@ export function thisShipName(): string {
 /** Check if this ship is commissioned. */
 export function isShipCommissioned(): boolean {
   return thisShip()?.commissioned !== false;
+}
+
+/** Check whether this hostname is the designated long-lived fleet dashboard host. */
+export function hostsFleetDashboard(hostname?: string): boolean {
+  return hasFleetDashboardHost(safeLoadShips(), hostname ?? os.hostname());
 }
 
 /** Role definitions: duty room and icon. Single source of truth for role→room→icon. */
