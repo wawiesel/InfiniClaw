@@ -315,23 +315,16 @@ function resolveReplyThread(
   chatJid: string,
   messages: NewMessage[],
 ): string | undefined {
-  // Only route to a thread if a human/operator (not an intercom relay account) explicitly
-  // calls out the bot in that thread. Relay notifications (⛔ !refresh, etc.) that mention
-  // the bot's name must not contaminate thread routing.
   const isRoutableHuman = (sender: string) =>
     !botMatrixUserIds.has(sender) && !sender.includes('-intercom');
+
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.thread_id && isRoutableHuman(m.sender) && TRIGGER_PATTERN.test(m.content.trim())) {
-      return m.thread_id;
+    if (!isRoutableHuman(m.sender)) {
+      continue;
     }
+    return m.thread_id;
   }
-  // No trigger in a thread — check the last message for CO/participating-thread replies.
-  const lastMsg = messages[messages.length - 1];
-  if (lastMsg?.thread_id && isRoutableHuman(lastMsg.sender)) return lastMsg.thread_id;
-  // Main timeline message → reply on main timeline (no auto-threading)
-  // workThreadIds is NOT checked here — it controls outbound IPC routing only,
-  // not where we reply to incoming messages.
   return undefined;
 }
 

@@ -172,6 +172,22 @@ describe('resolveReplyThread — BUG-21 isRoutableHuman', () => {
     expect(_resolveReplyThread('room:test', msgs)).toBe('thread-new');
   });
 
+  it('replies on main timeline when the newest human message is on main timeline', () => {
+    const msgs = [
+      makeMsg({ sender: '@human:server', content: TRIGGER, thread_id: 'thread-old' }),
+      makeMsg({ sender: '@human:server', content: 'follow-up on main' }),
+    ];
+    expect(_resolveReplyThread('room:test', msgs)).toBeUndefined();
+  });
+
+  it('replies in thread when the newest human message is in thread even without explicit trigger', () => {
+    const msgs = [
+      makeMsg({ sender: '@human:server', content: 'question on main' }),
+      makeMsg({ sender: '@human:server', content: 'follow-up in thread', thread_id: 'thread-new' }),
+    ];
+    expect(_resolveReplyThread('room:test', msgs)).toBe('thread-new');
+  });
+
   it('skips intercom trigger and falls back to earlier human trigger', () => {
     const msgs = [
       makeMsg({ sender: '@human:server', content: TRIGGER, thread_id: 'thread-human' }),
