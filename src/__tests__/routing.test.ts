@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { _initTestDatabase, getAllChats, storeChatMetadata } from 'nanoclaw/db.js';
 import { TRIGGER_PATTERN, ASSISTANT_NAME } from 'nanoclaw/config.js';
 import { NewMessage } from 'nanoclaw/types.js';
-import { getAvailableGroups, _setRegisteredGroups, _resolveReplyThread, _setBotMatrixUserIds } from '../main.js';
+import { getAvailableGroups, _setRegisteredGroups, _resolveReplyThread, _setBotMatrixUserIds, _shouldPreemptActiveTurn } from '../main.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -195,5 +195,24 @@ describe('resolveReplyThread — BUG-21 isRoutableHuman', () => {
     ];
     // Intercom is last — should be ignored; human trigger earlier should win
     expect(_resolveReplyThread('room:test', msgs)).toBe('thread-human');
+  });
+});
+
+describe('shouldPreemptActiveTurn', () => {
+  it('preempts when a new human thread replaces the active thread', () => {
+    expect(_shouldPreemptActiveTurn('thread-old', 'thread-new')).toBe(true);
+  });
+
+  it('preempts when the newest human message moves from thread to main timeline', () => {
+    expect(_shouldPreemptActiveTurn('thread-old', undefined)).toBe(true);
+  });
+
+  it('preempts when the newest human message moves from main timeline to thread', () => {
+    expect(_shouldPreemptActiveTurn(undefined, 'thread-new')).toBe(true);
+  });
+
+  it('does not preempt when the reply target is unchanged', () => {
+    expect(_shouldPreemptActiveTurn('thread-same', 'thread-same')).toBe(false);
+    expect(_shouldPreemptActiveTurn(undefined, undefined)).toBe(false);
   });
 });

@@ -164,6 +164,7 @@ const lastProgressChatAt: Record<string, number> = {};
 const workThreadIds: Record<string, string> = {};
 const activeReplyThreadIds: Record<string, string | undefined> = {};
 const activeReplyThreadSetAt: Record<string, number> = {};
+const activeTurnRunIds: Record<string, number> = {};
 const BRANCH_THREAD_TTL_MS = parseInt(process.env.BRANCH_THREAD_TTL_MS || '1200000', 10); // default 20min
 // Per-turn thread for tool call S3 breadcrumbs when on main timeline
 const progressToolCallThreadIds: Record<string, string | undefined> = {};
@@ -326,6 +327,31 @@ function resolveReplyThread(
     return m.thread_id;
   }
   return undefined;
+}
+
+function shouldPreemptActiveTurn(
+  currentReplyThreadId: string | undefined,
+  nextReplyThreadId: string | undefined,
+): boolean {
+  return currentReplyThreadId !== nextReplyThreadId;
+}
+
+function beginTurnRun(chatJid: string): number {
+  const nextRunId = (activeTurnRunIds[chatJid] ?? 0) + 1;
+  activeTurnRunIds[chatJid] = nextRunId;
+  return nextRunId;
+}
+
+function isCurrentTurnRun(chatJid: string, runId: number): boolean {
+  return activeTurnRunIds[chatJid] === runId;
+}
+
+function invalidateActiveTurn(chatJid: string): void {
+  activeTurnRunIds[chatJid] = (activeTurnRunIds[chatJid] ?? 0) + 1;
+  delete activeReplyThreadIds[chatJid];
+  delete activeReplyThreadSetAt[chatJid];
+  delete workThreadIds[chatJid];
+  delete progressToolCallThreadIds[chatJid];
 }
 
 // Exit-137 (SIGKILL) backoff — prevents tight respawn loops when containers are killed externally.
@@ -624,12 +650,21 @@ export function _resolveReplyThread(
   return resolveReplyThread(chatJid, messages);
 }
 
+export function _shouldPreemptActiveTurn(
+  currentReplyThreadId: string | undefined,
+  nextReplyThreadId: string | undefined,
+): boolean {
+  return shouldPreemptActiveTurn(currentReplyThreadId, nextReplyThreadId);
+}
+
 // ── Output handler context ──────────────────────────────────────────────
 
 interface OutputHandlerContext {
   chatJid: string;
   group: RegisteredGroup;
   inboundMessageIds: string[];
+  runId: number;
+  replyThreadId?: string;
   onAcknowledge: () => void;
   onOutputSent: (text: string) => void;
   onError: () => void;
@@ -641,43 +676,61 @@ function createOutputHandler(ctx: OutputHandlerContext): (result: ContainerOutpu
   let acknowledged = false;
   let lastSentResultText = '';
   let consecutiveDupSent = 0;
+  let supersededNoticeSent = false;
 
   return async (result: ContainerOutput) => {
+    const isCurrentRun = isCurrentTurnRun(ctx.chatJid, ctx.runId);
     if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      if (text) {
-        // Acknowledge inbound messages on first output
-        if (!acknowledged && ctx.inboundMessageIds.length > 0) {
-          acknowledged = true;
-          ctx.onAcknowledge();
+      if (!isCurrentRun) {
+        if (!supersededNoticeSent && !result.isProgress) {
+          supersededNoticeSent = true;
+          const ch = findChannel(channels, ctx.chatJid);
+          if (ch) {
+            await ch.sendMessage(
+              ctx.chatJid,
+              '⚠️ Previous turn superseded by a newer human message. Restarting on the latest context.',
+              ctx.replyThreadId,
+            ).catch((err) => {
+              logger.warn({ chatJid: ctx.chatJid, err }, 'Failed to send superseded-turn notice');
+            });
+          }
         }
-        ctx.onProgress(text);
+      } else {
+        const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        if (text) {
+          // Acknowledge inbound messages on first output
+          if (!acknowledged && ctx.inboundMessageIds.length > 0) {
+            acknowledged = true;
+            ctx.onAcknowledge();
+          }
+          ctx.onProgress(text);
 
-        if (result.isProgress) {
-          void handleProgressOutput(ctx, text);
-        } else {
-          const dedupKey = text.replace(/\s+/g, ' ').trim();
-          if (dedupKey === lastSentResultText) {
-            consecutiveDupSent++;
+          if (result.isProgress) {
+            void handleProgressOutput(ctx, text);
           } else {
-            consecutiveDupSent = 0;
-            lastSentResultText = dedupKey;
+            const dedupKey = text.replace(/\s+/g, ' ').trim();
+            if (dedupKey === lastSentResultText) {
+              consecutiveDupSent++;
+            } else {
+              consecutiveDupSent = 0;
+              lastSentResultText = dedupKey;
+            }
+            if (consecutiveDupSent >= 2) {
+              logger.warn({ group: ctx.group.name, dupCount: consecutiveDupSent }, 'Suppressed duplicate result to chat');
+            } else {
+              await handleResultOutput(ctx, text);
+            }
           }
-          if (consecutiveDupSent >= 2) {
-            logger.warn({ group: ctx.group.name, dupCount: consecutiveDupSent }, 'Suppressed duplicate result to chat');
-          } else {
-            await handleResultOutput(ctx, text);
-          }
+          ctx.resetIdleTimer();
         }
       }
-      ctx.resetIdleTimer();
     }
 
     if (result.status === 'success') {
       queue.notifyIdle(ctx.chatJid);
     }
-    if (result.status === 'error') {
+    if (result.status === 'error' && isCurrentRun) {
       ctx.onError();
     }
   };
@@ -1201,12 +1254,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Reset per-turn dispatch counters
   turnToolCallCount[chatJid] = 0;
   turnDispatchCalled[chatJid] = false;
+  const turnRunId = beginTurnRun(chatJid);
 
 
   const outputHandler = createOutputHandler({
     chatJid,
     group,
     inboundMessageIds,
+    runId: turnRunId,
+    replyThreadId: activeReplyThreadIds[chatJid],
     onAcknowledge: () => { },
     onOutputSent: (text) => {
       outputSentToUser = true;
@@ -1219,6 +1275,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   });
 
   const runResult = await runAgent(group, prompt, chatJid, outputHandler);
+
+  if (!isCurrentTurnRun(chatJid, turnRunId)) {
+    logger.info({ chatJid, runId: turnRunId }, 'Turn completed after being superseded by newer human context');
+    return true;
+  }
 
   // Clear work thread after each response — thread context is per-turn, derived from
   // the incoming message's thread_id. set_thread() only overrides for a single response.
@@ -1489,6 +1550,7 @@ async function handleGroupMessagesInLoop(
     return true;
   });
   const messagesToSend = allPending.length > 0 ? allPending : filtered;
+  const nextReplyThreadId = resolveReplyThread(chatJid, messagesToSend);
 
   // Acknowledge only messages that actually enter the context window.
   sendTriggerAck(chatJid, messagesToSend);
@@ -1497,16 +1559,8 @@ async function handleGroupMessagesInLoop(
   const threadCtx = buildThreadContextBlock(chatJid, messagesToSend);
   const rawFormatted = formatMessages(messagesToSend, TIMEZONE);
 
-  activeReplyThreadIds[chatJid] = resolveReplyThread(chatJid, messagesToSend);
-  if (activeReplyThreadIds[chatJid]) activeReplyThreadSetAt[chatJid] = Date.now();
-  // BUG-16: auto-set work thread when piped message is in a thread.
-  if (activeReplyThreadIds[chatJid]) {
-    workThreadIds[chatJid] = activeReplyThreadIds[chatJid]!;
-    threadMapLastSeen[`w:${chatJid}`] = Date.now();
-  }
-  const pipedActiveThread = activeReplyThreadIds[chatJid];
-  const pipedThreadNote = pipedActiveThread
-    ? `The incoming message is in Matrix thread \`${pipedActiveThread}\`. Your response will be sent there automatically.`
+  const pipedThreadNote = nextReplyThreadId
+    ? `The incoming message is in Matrix thread \`${nextReplyThreadId}\`. Your response will be sent there automatically.`
     : undefined;
   const formattedParts = [pipedThreadNote, threadCtx, rawFormatted].filter(Boolean);
   const formatted = formattedParts.join('\n\n');
@@ -1524,6 +1578,16 @@ async function handleGroupMessagesInLoop(
     });
 
     if (shouldPrioritizeToActiveContainer) {
+      if (shouldPreemptActiveTurn(activeReplyThreadIds[chatJid], nextReplyThreadId)) {
+        logger.info(
+          { chatJid, currentReplyThreadId: activeReplyThreadIds[chatJid], nextReplyThreadId },
+          'Preempting active turn because newest human reply target changed',
+        );
+        invalidateActiveTurn(chatJid);
+        try { queue.closeStdin(chatJid); } catch { /* best effort */ }
+        handleQueuedForProcessing(chatJid);
+        return;
+      }
       handlePipedToActiveContainer(chatJid, group, messagesToSend, formatted);
     } else {
       handleQueuedForProcessing(chatJid);
